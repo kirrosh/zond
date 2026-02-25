@@ -2,6 +2,7 @@
 
 import { runCommand } from "./commands/run.ts";
 import { validateCommand } from "./commands/validate.ts";
+import { generateCommand } from "./commands/generate.ts";
 import { printError } from "./output.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
 
@@ -58,6 +59,7 @@ function printUsage(): void {
 Usage:
   apitool run <path>       Run API tests
   apitool validate <path>  Validate test files without running
+  apitool generate --from <spec>  Generate skeleton tests from OpenAPI spec
 
 Options for 'run':
   --env <name>         Use environment file (.env.<name>.yaml)
@@ -137,6 +139,16 @@ async function main(): Promise<number> {
       }
 
       return validateCommand({ path });
+    }
+
+    case "generate": {
+      const from = flags["from"];
+      if (typeof from !== "string") {
+        printError("Missing --from <spec> argument. Usage: apitool generate --from <spec>");
+        return 2;
+      }
+      const output = typeof flags["output"] === "string" ? flags["output"] : "./generated/";
+      return generateCommand({ from, output });
     }
 
     default: {
