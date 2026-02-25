@@ -7,6 +7,8 @@ import type { ReporterName } from "../../core/reporter/types.ts";
 import type { TestSuite } from "../../core/parser/types.ts";
 import type { TestRunResult } from "../../core/runner/types.ts";
 import { printError, printWarning } from "../output.ts";
+import { getDb } from "../../db/schema.ts";
+import { createRun, finalizeRun, saveResults } from "../../db/queries.ts";
 
 export interface RunOptions {
   path: string;
@@ -14,6 +16,8 @@ export interface RunOptions {
   report: ReporterName;
   timeout?: number;
   bail: boolean;
+  noDb?: boolean;
+  dbPath?: string;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -74,7 +78,22 @@ export async function runCommand(options: RunOptions): Promise<number> {
   const reporter = getReporter(options.report);
   reporter.report(results);
 
-  // 6. Exit code
+  // 6. Save to DB
+  if (!options.noDb) {
+    try {
+      getDb(options.dbPath);
+      const runId = createRun({
+        started_at: results[0]?.started_at ?? new Date().toISOString(),
+        environment: options.env,
+      });
+      finalizeRun(runId, results);
+      saveResults(runId, results);
+    } catch (err) {
+      printWarning(`Failed to save results to DB: ${(err as Error).message}`);
+    }
+  }
+
+  // 7. Exit code
   const hasFailures = results.some((r) => r.failed > 0 || r.steps.some((s) => s.status === "error"));
   return hasFailures ? 1 : 0;
 }

@@ -61,16 +61,18 @@ Usage:
 
 Options for 'run':
   --env <name>         Use environment file (.env.<name>.yaml)
-  --report <format>    Output format: console, json (default: console)
+  --report <format>    Output format: console, json, junit (default: console)
   --timeout <ms>       Override request timeout
   --bail               Stop on first suite failure
+  --no-db              Do not save results to apitool.db
+  --db <path>          Path to SQLite database file (default: apitool.db)
 
 General:
   --help, -h           Show this help
   --version, -v        Show version`);
 }
 
-const VALID_REPORTERS = new Set<string>(["console", "json"]);
+const VALID_REPORTERS = new Set<string>(["console", "json", "junit"]);
 
 async function main(): Promise<number> {
   const { command, positional, flags } = parseArgs(process.argv);
@@ -102,7 +104,7 @@ async function main(): Promise<number> {
 
       const report = (flags["report"] as string) ?? "console";
       if (!VALID_REPORTERS.has(report)) {
-        printError(`Unknown reporter: ${report}. Available: console, json`);
+        printError(`Unknown reporter: ${report}. Available: console, json, junit`);
         return 2;
       }
 
@@ -122,6 +124,8 @@ async function main(): Promise<number> {
         report: report as ReporterName,
         timeout,
         bail: flags["bail"] === true,
+        noDb: flags["no-db"] === true,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
       });
     }
 

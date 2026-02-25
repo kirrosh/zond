@@ -1,6 +1,16 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { existsSync, unlinkSync } from "node:fs";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { validateCommand } from "../../src/cli/commands/validate.ts";
+import { closeDb } from "../../src/db/schema.ts";
+
+function tryUnlink(path: string): void {
+  for (const suffix of ["", "-wal", "-shm"]) {
+    try { unlinkSync(path + suffix); } catch { /* ignore on Windows */ }
+  }
+}
 
 const FIXTURES = `${import.meta.dir}/../fixtures`;
 
@@ -28,11 +38,16 @@ function suppressOutput() {
   };
 }
 
+function tmpDb(): string {
+  return join(tmpdir(), `apitool-cmd-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+}
+
 describe("runCommand", () => {
   let restore: () => void;
 
   afterEach(() => {
     restore?.();
+    closeDb();
   });
 
   test("returns 0 when all tests pass", async () => {
@@ -43,6 +58,7 @@ describe("runCommand", () => {
       path: `${FIXTURES}/simple.yaml`,
       report: "console",
       bail: false,
+      noDb: true,
     });
     expect(code).toBe(0);
   });
@@ -56,6 +72,7 @@ describe("runCommand", () => {
       path: `${FIXTURES}/simple.yaml`,
       report: "console",
       bail: false,
+      noDb: true,
     });
     expect(code).toBe(1);
   });
@@ -67,6 +84,7 @@ describe("runCommand", () => {
       path: `${FIXTURES}/nonexistent.yaml`,
       report: "console",
       bail: false,
+      noDb: true,
     });
     expect(code).toBe(2);
   });
@@ -75,12 +93,12 @@ describe("runCommand", () => {
     mockFetchResponses([{ status: 200, body: {} }]);
     restore = suppressOutput();
 
-    // We can verify the timeout was applied by checking it doesn't crash
     const code = await runCommand({
       path: `${FIXTURES}/simple.yaml`,
       report: "json",
       timeout: 1000,
       bail: false,
+      noDb: true,
     });
     expect(code).toBe(0);
   });
@@ -104,12 +122,41 @@ describe("runCommand", () => {
       path: `${FIXTURES}/simple.yaml`,
       report: "json",
       bail: false,
+      noDb: true,
     });
 
     expect(code).toBe(0);
     const parsed = JSON.parse(output.trim());
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed[0].suite_name).toBe("Health Check");
+  });
+
+  test("works with junit reporter", async () => {
+    mockFetchResponses([{ status: 200, body: {} }]);
+
+    let output = "";
+    const origLog = console.log;
+    const origErr = process.stderr.write;
+    console.log = mock((...args: unknown[]) => {
+      output += args.map(String).join(" ") + "\n";
+    });
+    process.stderr.write = mock(() => true) as typeof process.stderr.write;
+    restore = () => {
+      console.log = origLog;
+      process.stderr.write = origErr;
+    };
+
+    const code = await runCommand({
+      path: `${FIXTURES}/simple.yaml`,
+      report: "junit",
+      bail: false,
+      noDb: true,
+    });
+
+    expect(code).toBe(0);
+    expect(output).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+    expect(output).toContain("<testsuites");
+    expect(output).toContain("Health Check");
   });
 
   test("bail stops after first failed suite", async () => {
@@ -130,11 +177,54 @@ describe("runCommand", () => {
       path: `${FIXTURES}/bail`,
       report: "console",
       bail: true,
+      noDb: true,
     });
 
     expect(code).toBe(1);
     // With bail, only the first suite should have run
     expect(fetchCallCount).toBe(1);
+  });
+
+  test("saves results to DB when noDb is false", async () => {
+    mockFetchResponses([{ status: 200, body: {} }]);
+    const db = tmpDb();
+    restore = suppressOutput();
+
+    try {
+      const code = await runCommand({
+        path: `${FIXTURES}/simple.yaml`,
+        report: "console",
+        bail: false,
+        noDb: false,
+        dbPath: db,
+      });
+      expect(code).toBe(0);
+      expect(existsSync(db)).toBe(true);
+
+      const { getDb } = await import("../../src/db/schema.ts");
+      const runs = getDb(db).query("SELECT * FROM runs").all();
+      expect(runs).toHaveLength(1);
+    } finally {
+      closeDb();
+      tryUnlink(db);
+    }
+  });
+
+  test("--no-db skips DB creation", async () => {
+    mockFetchResponses([{ status: 200, body: {} }]);
+    const db = tmpDb();
+    restore = suppressOutput();
+
+    const code = await runCommand({
+      path: `${FIXTURES}/simple.yaml`,
+      report: "console",
+      bail: false,
+      noDb: true,
+      dbPath: db,
+    });
+
+    expect(code).toBe(0);
+    expect(existsSync(db)).toBe(false);
   });
 });
 

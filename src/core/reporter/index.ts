@@ -1,14 +1,17 @@
 export type { Reporter, ReporterOptions, ReporterName } from "./types.ts";
 export { consoleReporter, formatDuration, formatStep, formatFailures, formatSuiteResult, formatGrandTotal } from "./console.ts";
 export { jsonReporter } from "./json.ts";
+export { junitReporter } from "./junit.ts";
 
 import type { Reporter, ReporterName } from "./types.ts";
 import { consoleReporter } from "./console.ts";
 import { jsonReporter } from "./json.ts";
+import { junitReporter } from "./junit.ts";
 
 const reporters: Record<ReporterName, Reporter> = {
   console: consoleReporter,
   json: jsonReporter,
+  junit: junitReporter,
 };
 
 export function getReporter(name: ReporterName): Reporter {

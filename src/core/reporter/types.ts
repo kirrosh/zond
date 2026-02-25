@@ -5,7 +5,7 @@ export interface ReporterOptions {
   color?: boolean;
 }
 
-export type ReporterName = "console" | "json";
+export type ReporterName = "console" | "json" | "junit";
 
 export interface Reporter {
   report(results: TestRunResult[], options?: ReporterOptions): void;
