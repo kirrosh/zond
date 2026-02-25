@@ -1,0 +1,6 @@
+name: Suite A
+tests:
+  - name: "Test A"
+    GET: /a
+    expect:
+      status: 200

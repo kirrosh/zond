@@ -1,8 +1,15 @@
 {
   "name": "apitool",
+  "version": "0.1.0",
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "bin": {
+    "apitool": "src/cli/index.ts"
+  },
+  "scripts": {
+    "apitool": "bun run src/cli/index.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

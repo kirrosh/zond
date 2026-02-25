@@ -42,16 +42,12 @@ export async function parseDirectory(dirPath: string): Promise<TestSuite[]> {
 
 export async function parse(path: string): Promise<TestSuite[]> {
   const file = Bun.file(path);
-  // Check if path is a file by trying to get its size
-  try {
-    const stat = await file.exists();
-    if (stat) {
-      return [await parseFile(path)];
-    }
-  } catch {
-    // Not a file, try as directory
+  const exists = await file.exists();
+
+  if (exists) {
+    return [await parseFile(path)];
   }
 
-  // Try as directory
+  // Not a file, try as directory
   return parseDirectory(path);
 }
