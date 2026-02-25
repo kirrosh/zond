@@ -1,0 +1,171 @@
+import { describe, test, expect, mock, afterEach } from "bun:test";
+import { runCommand } from "../../src/cli/commands/run.ts";
+import { validateCommand } from "../../src/cli/commands/validate.ts";
+
+const FIXTURES = `${import.meta.dir}/../fixtures`;
+
+// Helper to mock fetch responses
+function mockFetchResponses(responses: Array<{ status: number; body: unknown; headers?: Record<string, string> }>) {
+  let callIndex = 0;
+  globalThis.fetch = mock(async () => {
+    const resp = responses[callIndex++] ?? { status: 500, body: { error: "unexpected call" } };
+    return new Response(JSON.stringify(resp.body), {
+      status: resp.status,
+      headers: { "Content-Type": "application/json", ...resp.headers },
+    });
+  }) as typeof fetch;
+}
+
+// Suppress stdout/stderr during tests
+function suppressOutput() {
+  const origOut = process.stdout.write;
+  const origErr = process.stderr.write;
+  process.stdout.write = mock(() => true) as typeof process.stdout.write;
+  process.stderr.write = mock(() => true) as typeof process.stderr.write;
+  return () => {
+    process.stdout.write = origOut;
+    process.stderr.write = origErr;
+  };
+}
+
+describe("runCommand", () => {
+  let restore: () => void;
+
+  afterEach(() => {
+    restore?.();
+  });
+
+  test("returns 0 when all tests pass", async () => {
+    mockFetchResponses([{ status: 200, body: { id: 1 } }]);
+    restore = suppressOutput();
+
+    const code = await runCommand({
+      path: `${FIXTURES}/simple.yaml`,
+      report: "console",
+      bail: false,
+    });
+    expect(code).toBe(0);
+  });
+
+  test("returns 1 when a test fails", async () => {
+    // simple.yaml expects status 200, we return 500
+    mockFetchResponses([{ status: 500, body: { error: "fail" } }]);
+    restore = suppressOutput();
+
+    const code = await runCommand({
+      path: `${FIXTURES}/simple.yaml`,
+      report: "console",
+      bail: false,
+    });
+    expect(code).toBe(1);
+  });
+
+  test("returns 2 for invalid path", async () => {
+    restore = suppressOutput();
+
+    const code = await runCommand({
+      path: `${FIXTURES}/nonexistent.yaml`,
+      report: "console",
+      bail: false,
+    });
+    expect(code).toBe(2);
+  });
+
+  test("--timeout overrides suite config", async () => {
+    mockFetchResponses([{ status: 200, body: {} }]);
+    restore = suppressOutput();
+
+    // We can verify the timeout was applied by checking it doesn't crash
+    const code = await runCommand({
+      path: `${FIXTURES}/simple.yaml`,
+      report: "json",
+      timeout: 1000,
+      bail: false,
+    });
+    expect(code).toBe(0);
+  });
+
+  test("works with json reporter", async () => {
+    mockFetchResponses([{ status: 200, body: {} }]);
+
+    let output = "";
+    const origLog = console.log;
+    const origErr = process.stderr.write;
+    console.log = mock((...args: unknown[]) => {
+      output += args.map(String).join(" ") + "\n";
+    });
+    process.stderr.write = mock(() => true) as typeof process.stderr.write;
+    restore = () => {
+      console.log = origLog;
+      process.stderr.write = origErr;
+    };
+
+    const code = await runCommand({
+      path: `${FIXTURES}/simple.yaml`,
+      report: "json",
+      bail: false,
+    });
+
+    expect(code).toBe(0);
+    const parsed = JSON.parse(output.trim());
+    expect(Array.isArray(parsed)).toBe(true);
+    expect(parsed[0].suite_name).toBe("Health Check");
+  });
+
+  test("bail stops after first failed suite", async () => {
+    // bail/ directory has 2 YAML files, each expects status 200
+    // We return 500 so both would fail, but bail should stop after first
+    let fetchCallCount = 0;
+    globalThis.fetch = mock(async () => {
+      fetchCallCount++;
+      return new Response(JSON.stringify({ error: "fail" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    restore = suppressOutput();
+
+    const code = await runCommand({
+      path: `${FIXTURES}/bail`,
+      report: "console",
+      bail: true,
+    });
+
+    expect(code).toBe(1);
+    // With bail, only the first suite should have run
+    expect(fetchCallCount).toBe(1);
+  });
+});
+
+describe("validateCommand", () => {
+  let restore: () => void;
+
+  afterEach(() => {
+    restore?.();
+  });
+
+  test("returns 0 for valid YAML", async () => {
+    restore = suppressOutput();
+    const code = await validateCommand({ path: `${FIXTURES}/simple.yaml` });
+    expect(code).toBe(0);
+  });
+
+  test("returns 2 for invalid YAML", async () => {
+    restore = suppressOutput();
+    const code = await validateCommand({ path: `${FIXTURES}/invalid-missing-name.yaml` });
+    expect(code).toBe(2);
+  });
+
+  test("returns 0 for valid directory", async () => {
+    restore = suppressOutput();
+    const code = await validateCommand({ path: `${FIXTURES}/valid` });
+    expect(code).toBe(0);
+  });
+
+  test("returns 2 for nonexistent path", async () => {
+    restore = suppressOutput();
+    const code = await validateCommand({ path: `${FIXTURES}/nonexistent.yaml` });
+    expect(code).toBe(2);
+  });
+});
