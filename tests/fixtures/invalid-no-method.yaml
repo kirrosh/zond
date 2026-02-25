@@ -1,0 +1,6 @@
+name: Bad Suite
+tests:
+  - name: "No method"
+    path: /health
+    expect:
+      status: 200

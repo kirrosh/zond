@@ -1,0 +1,5 @@
+name: B
+tests:
+  - name: B
+    POST: /b
+    expect: {}
