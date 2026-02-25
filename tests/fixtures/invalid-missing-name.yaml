@@ -1,0 +1,5 @@
+tests:
+  - name: "Test"
+    GET: /health
+    expect:
+      status: 200

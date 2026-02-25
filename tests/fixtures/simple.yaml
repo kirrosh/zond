@@ -1,0 +1,6 @@
+name: Health Check
+tests:
+  - name: "API is alive"
+    GET: /health
+    expect:
+      status: 200
