@@ -1,3 +1,5 @@
+> **Исторический snapshot** на момент реализации M5+JUnit. Актуальная документация — [APITOOL.md](../../APITOOL.md)
+
 # M5: Storage (SQLite) + JUnit Reporter
 
 Автоматическое сохранение истории прогонов в SQLite и JUnit XML для CI-систем.

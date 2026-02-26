@@ -1,135 +1,127 @@
-# BACKLOG — Отложенные модули и задачи
+# BACKLOG — Приоритеты и милестоуны
 
-Функциональность, запланированная в APITOOL.md, но не реализованная в текущих итерациях.
-
----
-
-## M3: Generator — незавершённые уровни
-
-### Уровень 2: CRUD-цепочки (`src/core/generator/crud.ts`) — DONE
-
-- **Что:** Автоматическое распознавание CRUD-паттернов (POST + GET + PUT + DELETE на одном ресурсе)
-- **Зачем:** Генерация связанных тестов с captures (POST создаёт → GET проверяет → DELETE удаляет)
-- **Реализовано:**
-  - `detectCrudGroups()` — группировка эндпоинтов по ресурсу, определение idParam
-  - `generateCrudChain()` — POST→GET→PUT→DELETE цепочка с captures
-  - `generateSuites()` — оркестратор: CRUD-цепочки + skeleton для остальных
-  - Captures persistence в БД (колонка `results.captures`)
-  - UI: capture badges, chain connector, flow visualization на странице коллекции и run detail
-  - Кнопка Run на dashboard и collection page
-  - Explorer автоматически подхватывает OpenAPI spec из коллекции в БД
-  - Integration тест: полная цепочка login→create→get→update→delete→verify против live сервера
-
-### Уровень 3: Текстовые тест-кейсы (`src/core/generator/testcases.ts`)
-
-- **Что:** Генерация Markdown тест-кейсов из OpenAPI (TC-001, TC-002...) с приоритетами
-- **Зачем:** Документация для QA-команды, покрытие негативных сценариев
-- **Статус:** Не начат. CLI-команда `apitool describe` запланирована, но не реализована.
+Следующие шаги развития APITOOL после M1-M11.
 
 ---
 
-## M7: CLI — недостающие команды
+## Tier 1 — Публичный релиз
 
-### `apitool describe`
+### 1. README.md
 
-- **Что:** Генерация Markdown тест-кейсов из OpenAPI спеки
-- **Флаги:** `--from <spec>`, `--output <file>`
-- **Зависит от:** Generator Level 3
+- Installation instructions (бинарник, Bun dev mode)
+- Quick start: generate → run → serve
+- Примеры YAML-тестов, скриншоты WebUI
+- Бейджи (CI, license, version)
 
-### `apitool init`
+### 2. CI pipeline (GitHub Actions)
 
-- **Что:** Создание структуры проекта (каталоги, пример YAML, .env.yaml шаблон)
-- **Зачем:** Быстрый старт для новых пользователей
+- Lint + typecheck (`bun run check`)
+- Тесты (`bun test`)
+- Multi-platform build: `linux-x64`, `darwin-arm64`, `win-x64`
 
-### `apitool serve --tests <dir>`
+### 3. GitHub Release
 
-- **Что:** Флаг `--tests` для указания пути к YAML-тестам, запуск через WebUI кнопку "Run"
-- **Статус:** Флаг принимается CLI, но не передаётся в WebUI. POST /api/run принимает path в body.
-
----
-
-## M6: WebUI — улучшения
-
-### Pass Rate Trend график — DONE
-
-- **Что:** SVG line chart с area fill, grid lines, tooltips на dashboard между метриками и коллекциями
-- **Реализовано:** shared `renderTrendChart()` в `src/web/views/trend-chart.ts`, используется на dashboard и collection page. CSS variables для dark mode
-
-### Фильтрация и поиск — DONE
-
-- **Что:** Filter bar на `/runs` со статусом, environment, датами, поиском по имени теста
-- **Реализовано:**
-  - `RunFilters` interface, `buildRunFilterSQL()`, обновлённые `listRuns()`/`countRuns()` с optional filters
-  - `getDistinctEnvironments()` для dropdown
-  - HTMX form с `hx-push-url`, пагинация сохраняет фильтры в URL
-
-### Export результатов — DONE
-
-- **Что:** Скачивание JUnit XML / JSON отчёта из WebUI
-- **Реализовано:**
-  - `generateJunitXml()` извлечён из `junitReporter.report()` (zero behavior change для CLI)
-  - `reconstructResults()` helper для пересборки `TestRunResult[]` из БД
-  - `GET /api/export/:runId/junit` и `GET /api/export/:runId/json` routes
-  - Кнопки "Export JUnit XML" / "Export JSON" на `/runs/:id`
-
-### WebSocket live updates
-
-- **Что:** Прогресс выполнения тестов в реальном времени при POST /api/run
-- **Сейчас:** Redirect на результат после завершения
-
-### Explorer: oauth2 / openIdConnect авторизация
-
-- **Что:** Поддержка OAuth2 и OpenID Connect в Authorize Panel
-- **Сейчас:** Показывается "Not yet supported"
-- **Сложность:** Требует redirect flow, popup окно, PKCE
-
-### Explorer: query-based API Key
-
-- **Что:** API Key в query parameters (сейчас поддерживается в credential store, но нет UI для query-параметров в try-it форме)
-- **Сейчас:** Header-based API Key работает полностью. Query-based сохраняется в credentials и инжектится через HTMX-хук.
+- Tag → build → publish бинарники для 3 платформ
+- Changelog из коммитов
 
 ---
 
-## M8: Сборка и публикация
+## Tier 2 — Ценные фичи
 
-### `bun build --compile` — DONE
+### 4. Environment management в WebUI
 
-- **Что:** Компиляция в standalone бинарник через `bun run build`
-- **Реализовано:**
-  - CSS embedded через `import ... with { type: "file" }` (работает в `$bunfs`)
-  - Runtime detection (standalone vs bun) в `--version` и server log
-  - isMain fix через `import.meta.main` для compiled context
-- **Оставшиеся задачи:**
-  - Тестировать на Linux/macOS (Windows проверен)
-  - CI pipeline (GitHub Actions) для multi-platform builds
+- CRUD routes: `GET /environments`, `POST /api/environments`, `PUT`, `DELETE`
+- Key-value editor для переменных
+- Selector окружения при запуске тестов в WebUI
+- Таблица `environments` уже в БД — нужны только routes + UI
 
-### README.md
+### 5. `apitool init` — scaffolding проекта
 
-- **Что:** Публичная документация с примерами, GIF-демо, installation instructions
-- **Зачем:** Для GitHub релиза
+- Создание `tests/`, `generated/`, `.env.yaml`, example test
+- Быстрый старт для новых пользователей
 
-### GitHub Release
+### 6. WebSocket live updates
 
-- **Что:** Автоматическая сборка бинарников для 3 платформ, публикация release
-- **Зависит от:** CI pipeline
+- Прогресс выполнения тестов в реальном времени при POST /api/run
+- Bun native WebSocket + Hono upgrade
+- Runner events: `{ suite, step, status, duration }`
+- Прогресс-бар в WebUI
+
+---
+
+## Tier 3 — Улучшения
+
+### 7. Generator Level 3 + `apitool describe`
+
+- Генерация Markdown тест-кейсов из OpenAPI (TC-001, TC-002...)
+- CLI-команда `apitool describe --from <spec> --output <file>`
+- Приоритеты, негативные сценарии
+
+### 8. `serve --tests` flag
+
+- Флаг `--tests` для указания пути к YAML-тестам, используется WebUI кнопкой "Run"
+- Флаг не реализован — отсутствует и в CLI, и в WebUI
+
+### 9. OAuth2/OIDC в Explorer
+
+- Поддержка OAuth2 и OpenID Connect в Authorize Panel
+- Redirect flow, popup окно, PKCE
+
+### 10. Run comparison / diff между прогонами
+
+- Сравнение двух прогонов: изменения статусов, duration delta
+- Расширенная flaky-детекция с историей
+- Trend длительности по отдельным тестам
 
 ---
 
 ## Технический долг
 
-| Задача                                                          | Файл(ы)              | Приоритет |
-| --------------------------------------------------------------- | -------------------- | --------- |
-| Integration тесты для JSONPlaceholder нестабильны (внешний API) | `tests/integration/` | Medium    |
-| Explorer: response body schema не показывает вложенные объекты  | `explorer.ts`        | Low       |
+| Задача | Файл(ы) | Приоритет |
+|--------|---------|-----------|
+| Integration тесты для JSONPlaceholder нестабильны (внешний API) | `tests/integration/` | Medium |
+| Explorer: response body schema не показывает вложенные объекты | `explorer.ts` | Low |
+| `describe.ts`, `init.ts`, `testcases.ts` — упоминались в ранних версиях документации, не реализованы | — | Info |
 
 ---
 
-## Порядок приоритетов
+## Милестоуны
 
-1. ~~**M8: Сборка** — `bun compile`, проверить бинарник~~ DONE
-2. ~~**M9: Collections** — группировка тестов по API, dashboard redesign~~ DONE
-3. ~~**Generator Level 2 (CRUD)** — самая ценная фича генератора~~ DONE
-4. ~~**WebUI improvements** — график, фильтры, export~~ DONE
-5. **Generator Level 3 + describe** — тест-кейсы в Markdown
-6. **CLI init** — удобство для новых пользователей
-7. **OAuth2/OIDC** — авторизация в Explorer
+### M12: Public Release Package
+
+- README.md с бейджами, фичами, quick start, примерами, скриншотами
+- GitHub Actions CI: typecheck + test + compile (linux-x64, darwin-arm64, win-x64)
+- Release workflow: tag → build → publish
+- **Приоритет:** без дистрибуции инструмент невидим
+
+### M13: Environment Management в WebUI
+
+- CRUD routes для `environments`
+- Selector окружения при запуске тестов
+- Key-value editor для переменных
+- **Приоритет:** таблица уже в БД, нужны только routes + UI
+
+### M14: Developer Experience
+
+- `apitool init` — создание `tests/`, `generated/`, `.env.yaml`, example test
+- `serve --tests` — передача пути к тестам в WebUI
+- **Приоритет:** снижает порог входа для новых пользователей
+
+### M15: WebSocket Live Updates
+
+- Bun native WebSocket + Hono upgrade
+- Runner events: `{ suite, step, status, duration }`
+- Прогресс-бар в WebUI при запуске тестов
+- **Приоритет:** UX — сейчас при долгих тестах UI "висит"
+
+### M16: Test Analytics
+
+- Diff между двумя прогонами (изменения статусов, duration delta)
+- Расширенная flaky-детекция с историей
+- Trend длительности по отдельным тестам
+
+### Порядок
+
+```
+M12 (Release) → M13 (Environments) → M14 (DX) → M15 (WebSocket) → M16 (Analytics)
+```
