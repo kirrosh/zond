@@ -206,6 +206,7 @@ apitool run <path> [options]
   --env <name>         Файл окружения .env.<name>.yaml
   --timeout <ms>       Таймаут запроса
   --bail               Остановиться после первого упавшего suite
+  --auth-token <token> Auth-токен, доступен как {{auth_token}} переменная
 ```
 
 ### Примеры
@@ -225,6 +226,9 @@ apitool run tests/ --env staging --db runs/staging.db
 
 # Только JUnit, без записи в БД
 apitool run tests/ --report junit --no-db > results.xml
+
+# CI с внешним токеном
+apitool run tests/ --auth-token "$CI_AUTH_TOKEN" --report junit > results.xml
 ```
 
 ---
@@ -236,6 +240,7 @@ apitool run tests/ --report junit --no-db > results.xml
 ```
 parse(path)
   → loadEnvironment(env, dir)
+  → [if --auth-token] env.auth_token = token
   → --timeout override
   → runSuites() / runSuites() + bail
   → reporter.report(results)           # console | json | junit
@@ -278,7 +283,7 @@ reporter.report(results);
 bun test tests/reporter/junit.test.ts  # JUnit reporter (22 tests)
 bun test tests/db/schema.test.ts       # SQLite schema (10 tests)
 bun test tests/db/queries.test.ts      # DB queries (20 tests)
-bun test tests/cli/commands.test.ts    # CLI commands (11 tests)
+bun test tests/cli/commands.test.ts    # CLI commands (16 tests)
 
 bun test tests/                        # все unit-тесты
 ```
@@ -290,4 +295,4 @@ bun test tests/                        # все unit-тесты
 | `reporter/junit.ts` | XML-структура, time-форматирование, XML-экранирование, все 4 статуса |
 | `db/schema.ts` | Создание файла, синглтон, таблицы, индексы, WAL, FK, версия, идемпотентность |
 | `db/queries.ts` | createRun, finalizeRun, saveResults, getResultsBy RunId, listRuns, deleteRun, environments |
-| `cli/commands/run.ts` | `--no-db` пропускает БД, `--db` использует указанный путь, junit reporter в pipeline |
+| `cli/commands/run.ts` | `--no-db` пропускает БД, `--db` использует указанный путь, junit reporter в pipeline, `--auth-token` парсинг и инъекция |

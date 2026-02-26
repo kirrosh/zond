@@ -10,7 +10,7 @@
 
 - **Что:** Автоматическое распознавание CRUD-паттернов (POST + GET + PUT + DELETE на одном ресурсе)
 - **Зачем:** Генерация связанных тестов с captures (POST создаёт → GET проверяет → DELETE удаляет)
-- **Статус:** Файл `crud.ts` указан в APITOOL.md, но не реализован. Skeleton-уровень (Level 1) работает.
+- **Статус:** Файл `crud.ts` указан в APITOOL.md, но не реализован. Skeleton-уровень (Level 1) работает, включая auth-aware генерацию (bearer login, API Key, Basic Auth).
 
 ### Уровень 3: Текстовые тест-кейсы (`src/core/generator/testcases.ts`)
 
@@ -21,8 +21,6 @@
 ---
 
 ## M7: CLI — недостающие команды
-
-Ye
 
 ### `apitool describe`
 
@@ -64,6 +62,17 @@ Ye
 - **Что:** Прогресс выполнения тестов в реальном времени при POST /api/run
 - **Сейчас:** Redirect на результат после завершения
 
+### Explorer: oauth2 / openIdConnect авторизация
+
+- **Что:** Поддержка OAuth2 и OpenID Connect в Authorize Panel
+- **Сейчас:** Показывается "Not yet supported"
+- **Сложность:** Требует redirect flow, popup окно, PKCE
+
+### Explorer: query-based API Key
+
+- **Что:** API Key в query parameters (сейчас поддерживается в credential store, но нет UI для query-параметров в try-it форме)
+- **Сейчас:** Header-based API Key работает полностью. Query-based сохраняется в credentials и инжектится через HTMX-хук.
+
 ---
 
 ## M8: Сборка и публикация
@@ -92,8 +101,6 @@ Ye
 
 | Задача                                                          | Файл(ы)              | Приоритет |
 | --------------------------------------------------------------- | -------------------- | --------- |
-| `.gitignore` для `*.db`, `*.db-wal`, `*.db-shm`                 | `.gitignore`         | High      |
-| Удалить `seed-demo.ts` или перенести в `scripts/`               | `seed-demo.ts`       | Low       |
 | Integration тесты для JSONPlaceholder нестабильны (внешний API) | `tests/integration/` | Medium    |
 | Explorer: response body schema не показывает вложенные объекты  | `explorer.ts`        | Low       |
 | Dashboard: отсутствует визуальный graph для trend               | `dashboard.ts`       | Medium    |
@@ -104,7 +111,7 @@ Ye
 
 1. **M8: Сборка** — `bun compile`, проверить бинарник
 2. **Generator Level 2 (CRUD)** — самая ценная фича генератора
-3. **.gitignore + cleanup** — технический долг
-4. **WebUI improvements** — график, фильтры, export
-5. **Generator Level 3 + describe** — тест-кейсы в Markdown
-6. **CLI init** — удобство для новых пользователей
+3. **WebUI improvements** — график, фильтры, export
+4. **Generator Level 3 + describe** — тест-кейсы в Markdown
+5. **CLI init** — удобство для новых пользователей
+6. **OAuth2/OIDC** — авторизация в Explorer

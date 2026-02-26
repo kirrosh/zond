@@ -70,6 +70,7 @@ Options for 'run':
   --bail               Stop on first suite failure
   --no-db              Do not save results to apitool.db
   --db <path>          Path to SQLite database file (default: apitool.db)
+  --auth-token <token> Auth token injected as {{auth_token}} variable
 
 Options for 'serve':
   --port <port>        Server port (default: 8080)
@@ -136,6 +137,7 @@ async function main(): Promise<number> {
         bail: flags["bail"] === true,
         noDb: flags["no-db"] === true,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+        authToken: typeof flags["auth-token"] === "string" ? flags["auth-token"] : undefined,
       });
     }
 

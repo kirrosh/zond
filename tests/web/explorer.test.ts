@@ -71,6 +71,8 @@ describe("Explorer routes", () => {
   let appWithoutSpec: ReturnType<typeof createApp>;
 
   let appNoAuth: ReturnType<typeof createApp>;
+  let appMultiScheme: ReturnType<typeof createApp>;
+  let appBearerNoLogin: ReturnType<typeof createApp>;
 
   beforeAll(() => {
     try { unlinkSync(TEST_DB); } catch {}
@@ -88,6 +90,25 @@ describe("Explorer routes", () => {
       specPath: "petstore.json",
       servers: [{ url: "http://localhost:3000" }],
       securitySchemes: [],
+      loginPath: null,
+    });
+    appMultiScheme = createApp({
+      endpoints: mockEndpoints,
+      specPath: "petstore-multi.json",
+      servers: [{ url: "http://localhost:3000" }],
+      securitySchemes: [
+        { name: "bearerAuth", type: "http", scheme: "bearer" },
+        { name: "apiKeyAuth", type: "apiKey", in: "header", apiKeyName: "X-API-Key" },
+        { name: "basicAuth", type: "http", scheme: "basic" },
+        { name: "oauthScheme", type: "oauth2" },
+      ],
+      loginPath: "/auth/login",
+    });
+    appBearerNoLogin = createApp({
+      endpoints: mockEndpoints,
+      specPath: "petstore-bearer.json",
+      servers: [{ url: "http://localhost:3000" }],
+      securitySchemes: [{ name: "bearerAuth", type: "http", scheme: "bearer" }],
       loginPath: null,
     });
   });
@@ -160,15 +181,61 @@ describe("Explorer routes", () => {
     const html = await res.text();
     expect(html).toContain("authorize-panel");
     expect(html).toContain("Authorize");
-    expect(html).toContain("auth-user");
-    expect(html).toContain("auth-pass");
+    expect(html).toContain("auth-user-bearerAuth");
+    expect(html).toContain("auth-pass-bearerAuth");
     expect(html).toContain("/auth/login");
+    expect(html).toContain("auth-token-bearerAuth");
+    expect(html).toContain("Apply token");
   });
 
   it("authorize panel not rendered when no security schemes", async () => {
     const res = await appNoAuth.request("/explorer");
     const html = await res.text();
     expect(html).not.toContain("authorize-panel");
-    expect(html).not.toContain("auth-user");
+    expect(html).not.toContain("auth-scheme-section");
+  });
+
+  it("API Key scheme renders with apiKeyName and location badge", async () => {
+    const res = await appMultiScheme.request("/explorer");
+    const html = await res.text();
+    expect(html).toContain('data-scheme="apiKeyAuth"');
+    expect(html).toContain("X-API-Key");
+    expect(html).toContain("in header as X-API-Key");
+    expect(html).toContain("auth-apikey-apiKeyAuth");
+  });
+
+  it("Basic scheme renders with username and password fields", async () => {
+    const res = await appMultiScheme.request("/explorer");
+    const html = await res.text();
+    expect(html).toContain('data-scheme="basicAuth"');
+    expect(html).toContain("auth-basic-user-basicAuth");
+    expect(html).toContain("auth-basic-pass-basicAuth");
+  });
+
+  it("multi-scheme renders all sections", async () => {
+    const res = await appMultiScheme.request("/explorer");
+    const html = await res.text();
+    expect(html).toContain('data-scheme="bearerAuth"');
+    expect(html).toContain('data-scheme="apiKeyAuth"');
+    expect(html).toContain('data-scheme="basicAuth"');
+    expect(html).toContain('data-scheme="oauthScheme"');
+  });
+
+  it("oauth2 scheme shows not yet supported", async () => {
+    const res = await appMultiScheme.request("/explorer");
+    const html = await res.text();
+    expect(html).toContain('data-scheme="oauthScheme"');
+    expect(html).toContain("Not yet supported");
+  });
+
+  it("bearer without loginPath shows only direct token input", async () => {
+    const res = await appBearerNoLogin.request("/explorer");
+    const html = await res.text();
+    expect(html).toContain("auth-token-bearerAuth");
+    expect(html).toContain("Apply token");
+    expect(html).not.toContain("auth-user-bearerAuth");
+    expect(html).not.toContain("auth-pass-bearerAuth");
+    // No login button rendered (doLoginProxy function exists in script but no button calls it)
+    expect(html).not.toContain(">Login<");
   });
 });

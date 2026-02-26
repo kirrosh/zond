@@ -18,6 +18,7 @@ export interface RunOptions {
   bail: boolean;
   noDb?: boolean;
   dbPath?: string;
+  authToken?: string;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -43,6 +44,11 @@ export async function runCommand(options: RunOptions): Promise<number> {
   } catch (err) {
     printError(`Failed to load environment: ${(err as Error).message}`);
     return 2;
+  }
+
+  // Inject CLI auth token — overrides env file value
+  if (options.authToken) {
+    env.auth_token = options.authToken;
   }
 
   // Warn if --env was explicitly set but file was not found (empty env)
