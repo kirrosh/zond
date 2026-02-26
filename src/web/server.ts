@@ -5,8 +5,6 @@ import runs from "./routes/runs.ts";
 import api from "./routes/api.ts";
 import { createExplorerRoute, type ExplorerDeps, type ServerInfo } from "./routes/explorer.ts";
 import type { EndpointInfo } from "../core/generator/types.ts";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
 
 export interface ServerOptions {
   port?: number;
@@ -15,7 +13,7 @@ export interface ServerOptions {
   openapiSpec?: string;
 }
 
-const STATIC_DIR = resolve(import.meta.dirname ?? ".", "static");
+const STATIC_DIR = `${import.meta.dirname ?? "."}/static`;
 
 export function createApp(explorerDeps: ExplorerDeps) {
   const app = new Hono();
@@ -25,15 +23,12 @@ export function createApp(explorerDeps: ExplorerDeps) {
     const file = c.req.param("file");
     // Only serve known files, prevent path traversal
     if (file !== "style.css") return c.notFound();
-    const filePath = resolve(STATIC_DIR, file);
-    try {
-      const content = await readFile(filePath, "utf-8");
-      c.header("Content-Type", "text/css; charset=utf-8");
-      c.header("Cache-Control", "public, max-age=3600");
-      return c.body(content);
-    } catch {
-      return c.notFound();
-    }
+    const bunFile = Bun.file(`${STATIC_DIR}/${file}`);
+    if (!(await bunFile.exists())) return c.notFound();
+    const content = await bunFile.text();
+    c.header("Content-Type", "text/css; charset=utf-8");
+    c.header("Cache-Control", "public, max-age=3600");
+    return c.body(content);
   });
 
   // Mount routes

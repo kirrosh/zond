@@ -1,7 +1,7 @@
 import { describe, test, expect, afterEach } from "bun:test";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { existsSync, unlinkSync } from "fs";
 import { getDb, closeDb } from "../../src/db/schema.ts";
 
 function tmpDb(): string {

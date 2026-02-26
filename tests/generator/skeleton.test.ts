@@ -2,9 +2,9 @@ import { describe, test, expect, afterAll } from "bun:test";
 import { readOpenApiSpec, extractEndpoints } from "../../src/core/generator/openapi-reader.ts";
 import { generateSkeleton, writeSuites } from "../../src/core/generator/skeleton.ts";
 import { validateSuite } from "../../src/core/parser/schema.ts";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { rm } from "node:fs/promises";
+import { tmpdir } from "os";
+import { join } from "path";
+import { rm } from "fs/promises";
 
 const FIXTURE = "tests/fixtures/petstore.yaml";
 

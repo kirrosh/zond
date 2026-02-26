@@ -3,9 +3,11 @@ import { createApp } from "../../src/web/server.ts";
 import { getDb, closeDb } from "../../src/db/schema.ts";
 import { createRun, finalizeRun, saveResults } from "../../src/db/queries.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
-import { unlinkSync } from "node:fs";
+import { unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
-const TEST_DB = "test-web-routes.db";
+const TEST_DB = join(tmpdir(), `apitool-web-routes-${Date.now()}.db`);
 
 function seedData() {
   const results: TestRunResult[] = [

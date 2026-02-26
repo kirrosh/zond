@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { resolve } from "node:path";
+import { resolve } from "path";
 
 let _db: Database | null = null;
 

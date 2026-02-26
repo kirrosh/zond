@@ -2,9 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { createApp } from "../../src/web/server.ts";
 import { getDb, closeDb } from "../../src/db/schema.ts";
 import type { EndpointInfo } from "../../src/core/generator/types.ts";
-import { unlinkSync } from "node:fs";
+import { unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
-const TEST_DB = "test-web-explorer.db";
+const TEST_DB = join(tmpdir(), `apitool-web-explorer-${Date.now()}.db`);
 
 const mockEndpoints: EndpointInfo[] = [
   {
