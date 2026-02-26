@@ -263,11 +263,13 @@ src/web/
 ├── server.ts          # Hono app, static serving, startServer()
 ├── routes/
 │   ├── dashboard.ts   # GET /, GET /metrics
-│   ├── runs.ts        # GET /runs, GET /runs/:id
+│   ├── collections.ts # GET /collections/:id, POST/DELETE /api/collections
+│   ├── runs.ts        # GET /runs (с фильтрами), GET /runs/:id
 │   ├── explorer.ts    # GET /explorer
-│   └── api.ts         # POST /api/run, POST /api/try
+│   └── api.ts         # POST /api/run, POST /api/try, GET /api/export
 ├── views/
-│   └── layout.ts      # HTML layout, escapeHtml()
+│   ├── layout.ts      # HTML layout, escapeHtml()
+│   └── trend-chart.ts # Shared SVG trend chart component
 └── static/
     └── style.css      # CSS (dark/light, responsive)
 ```

@@ -53,7 +53,7 @@
 ### Pass Rate Trend график — DONE
 
 - **Что:** SVG line chart с area fill, grid lines, tooltips на dashboard между метриками и коллекциями
-- **Реализовано:** `renderTrendChart()` в `dashboard.ts`, вызывает `getPassRateTrend(30)`, CSS variables для dark mode
+- **Реализовано:** shared `renderTrendChart()` в `src/web/views/trend-chart.ts`, используется на dashboard и collection page. CSS variables для dark mode
 
 ### Фильтрация и поиск — DONE
 
@@ -121,7 +121,6 @@
 | --------------------------------------------------------------- | -------------------- | --------- |
 | Integration тесты для JSONPlaceholder нестабильны (внешний API) | `tests/integration/` | Medium    |
 | Explorer: response body schema не показывает вложенные объекты  | `explorer.ts`        | Low       |
-| ~~Dashboard: отсутствует визуальный graph для trend~~            | `dashboard.ts`       | ~~DONE~~  |
 
 ---
 
