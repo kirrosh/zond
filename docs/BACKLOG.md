@@ -50,20 +50,27 @@
 
 ## M6: WebUI — улучшения
 
-### Pass Rate Trend график
+### Pass Rate Trend график — DONE
 
-- **Что:** Визуальный график pass rate по прогонам (SVG или Canvas)
-- **Статус:** SQL-запрос `getPassRateTrend()` готов, данные есть. Нет визуализации.
+- **Что:** SVG line chart с area fill, grid lines, tooltips на dashboard между метриками и коллекциями
+- **Реализовано:** `renderTrendChart()` в `dashboard.ts`, вызывает `getPassRateTrend(30)`, CSS variables для dark mode
 
-### Фильтрация и поиск
+### Фильтрация и поиск — DONE
 
-- **Что:** Фильтр прогонов по environment, дате, статусу; поиск по имени теста
-- **Где:** GET /runs с query-параметрами
+- **Что:** Filter bar на `/runs` со статусом, environment, датами, поиском по имени теста
+- **Реализовано:**
+  - `RunFilters` interface, `buildRunFilterSQL()`, обновлённые `listRuns()`/`countRuns()` с optional filters
+  - `getDistinctEnvironments()` для dropdown
+  - HTMX form с `hx-push-url`, пагинация сохраняет фильтры в URL
 
-### Export результатов
+### Export результатов — DONE
 
 - **Что:** Скачивание JUnit XML / JSON отчёта из WebUI
-- **Где:** Кнопка на странице `/runs/:id`
+- **Реализовано:**
+  - `generateJunitXml()` извлечён из `junitReporter.report()` (zero behavior change для CLI)
+  - `reconstructResults()` helper для пересборки `TestRunResult[]` из БД
+  - `GET /api/export/:runId/junit` и `GET /api/export/:runId/json` routes
+  - Кнопки "Export JUnit XML" / "Export JSON" на `/runs/:id`
 
 ### WebSocket live updates
 
@@ -114,7 +121,7 @@
 | --------------------------------------------------------------- | -------------------- | --------- |
 | Integration тесты для JSONPlaceholder нестабильны (внешний API) | `tests/integration/` | Medium    |
 | Explorer: response body schema не показывает вложенные объекты  | `explorer.ts`        | Low       |
-| Dashboard: отсутствует визуальный graph для trend               | `dashboard.ts`       | Medium    |
+| ~~Dashboard: отсутствует визуальный graph для trend~~            | `dashboard.ts`       | ~~DONE~~  |
 
 ---
 
@@ -123,7 +130,7 @@
 1. ~~**M8: Сборка** — `bun compile`, проверить бинарник~~ DONE
 2. ~~**M9: Collections** — группировка тестов по API, dashboard redesign~~ DONE
 3. ~~**Generator Level 2 (CRUD)** — самая ценная фича генератора~~ DONE
-4. **WebUI improvements** — график, фильтры, export
+4. ~~**WebUI improvements** — график, фильтры, export~~ DONE
 5. **Generator Level 3 + describe** — тест-кейсы в Markdown
 6. **CLI init** — удобство для новых пользователей
 7. **OAuth2/OIDC** — авторизация в Explorer

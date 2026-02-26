@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { layout, escapeHtml } from "../views/layout.ts";
-import { listRuns, getRunById, getResultsByRunId, countRuns } from "../../db/queries.ts";
+import { listRuns, getRunById, getResultsByRunId, countRuns, getDistinctEnvironments } from "../../db/queries.ts";
+import type { RunFilters } from "../../db/queries.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
 
 const runs = new Hono();
@@ -28,12 +29,73 @@ function stepStatusBadge(status: string): string {
   }
 }
 
+function buildQueryString(filters: RunFilters, page: number): string {
+  const params = new URLSearchParams();
+  if (page > 1) params.set("page", String(page));
+  if (filters.status) params.set("status", filters.status);
+  if (filters.environment) params.set("environment", filters.environment);
+  if (filters.date_from) params.set("date_from", filters.date_from);
+  if (filters.date_to) params.set("date_to", filters.date_to);
+  if (filters.test_name) params.set("test_name", filters.test_name);
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
+}
+
+function filterBarHtml(filters: RunFilters, environments: string[]): string {
+  const envOptions = environments.map(
+    (e) => `<option value="${escapeHtml(e)}"${filters.environment === e ? " selected" : ""}>${escapeHtml(e)}</option>`,
+  ).join("");
+
+  return `
+    <form class="filter-bar" hx-get="/runs" hx-target="main" hx-push-url="true">
+      <div class="filter-group">
+        <label>Status</label>
+        <select name="status">
+          <option value="">All</option>
+          <option value="has_failures"${filters.status === "has_failures" ? " selected" : ""}>Has Failures</option>
+          <option value="all_passed"${filters.status === "all_passed" ? " selected" : ""}>All Passed</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Environment</label>
+        <select name="environment">
+          <option value="">All</option>
+          ${envOptions}
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>From</label>
+        <input type="date" name="date_from" value="${filters.date_from ?? ""}">
+      </div>
+      <div class="filter-group">
+        <label>To</label>
+        <input type="date" name="date_to" value="${filters.date_to ?? ""}">
+      </div>
+      <div class="filter-group">
+        <label>Test Name</label>
+        <input type="text" name="test_name" placeholder="Search..." value="${escapeHtml(filters.test_name ?? "")}">
+      </div>
+      <div class="filter-group" style="flex-direction:row;gap:0.5rem;">
+        <button type="submit" class="btn btn-sm">Filter</button>
+        <a href="/runs" class="btn btn-sm btn-outline" hx-get="/runs" hx-target="main" hx-push-url="true">Clear</a>
+      </div>
+    </form>`;
+}
+
 runs.get("/runs", (c) => {
   const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10) || 1);
+  const filters: RunFilters = {
+    status: c.req.query("status") || undefined,
+    environment: c.req.query("environment") || undefined,
+    date_from: c.req.query("date_from") || undefined,
+    date_to: c.req.query("date_to") || undefined,
+    test_name: c.req.query("test_name") || undefined,
+  };
   const offset = (page - 1) * PAGE_SIZE;
-  const items = listRuns(PAGE_SIZE, offset);
-  const total = countRuns();
+  const items = listRuns(PAGE_SIZE, offset, filters);
+  const total = countRuns(filters);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const environments = getDistinctEnvironments();
 
   const rows = items
     .map(
@@ -50,18 +112,20 @@ runs.get("/runs", (c) => {
     )
     .join("");
 
+  const qs = (p: number) => buildQueryString(filters, p);
   let pagination = `<div class="pagination">`;
   if (page > 1) {
-    pagination += `<a class="btn btn-sm btn-outline" hx-get="/runs?page=${page - 1}" hx-target="main" hx-push-url="true">← Prev</a>`;
+    pagination += `<a class="btn btn-sm btn-outline" hx-get="/runs${qs(page - 1)}" hx-target="main" hx-push-url="true">\u2190 Prev</a>`;
   }
   pagination += `<span>Page ${page} of ${totalPages}</span>`;
   if (page < totalPages) {
-    pagination += `<a class="btn btn-sm btn-outline" hx-get="/runs?page=${page + 1}" hx-target="main" hx-push-url="true">Next →</a>`;
+    pagination += `<a class="btn btn-sm btn-outline" hx-get="/runs${qs(page + 1)}" hx-target="main" hx-push-url="true">Next \u2192</a>`;
   }
   pagination += `</div>`;
 
   const content = `
     <h1>Test Runs</h1>
+    ${filterBarHtml(filters, environments)}
     <table>
       <thead><tr>
         <th>ID</th><th>Date</th><th>Total</th><th>Pass</th><th>Fail</th><th>Skip</th><th>Duration</th><th>Status</th>
@@ -111,6 +175,10 @@ runs.get("/runs/:id", (c) => {
         <div class="card-label">Results</div>
         <div class="card-value" style="font-size:1rem">${run.passed} ✓ ${run.failed} ✗ ${run.skipped} ○</div>
       </div>
+    </div>
+    <div style="margin:0.5rem 0 1rem;">
+      <a href="/api/export/${run.id}/junit" download class="btn btn-sm btn-outline">Export JUnit XML</a>
+      <a href="/api/export/${run.id}/json" download class="btn btn-sm btn-outline" style="margin-left:0.5rem;">Export JSON</a>
     </div>`;
 
   // Build a map of which variables are captured by which step (for flow visualization)

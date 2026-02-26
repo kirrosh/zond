@@ -55,22 +55,24 @@ function renderTestsuite(result: TestRunResult): string {
   return `  <testsuite name="${name}" tests="${tests}" failures="${failures}" errors="${errors}" skipped="${skipped}" time="${time}">\n${testcases}\n  </testsuite>`;
 }
 
+export function generateJunitXml(results: TestRunResult[]): string {
+  const totalTests = results.reduce((s, r) => s + r.total, 0);
+  const totalFailures = results.reduce((s, r) => s + r.failed, 0);
+  const totalErrors = results.reduce((s, r) => s + r.steps.filter((s) => s.status === "error").length, 0);
+  const totalTime = formatTime(results.reduce((s, r) => s + r.steps.reduce((ss, step) => ss + step.duration_ms, 0), 0));
+
+  const suites = results.map(renderTestsuite).join("\n");
+
+  return [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<testsuites tests="${totalTests}" failures="${totalFailures}" errors="${totalErrors}" time="${totalTime}">`,
+    suites,
+    `</testsuites>`,
+  ].join("\n");
+}
+
 export const junitReporter: Reporter = {
   report(results: TestRunResult[], _options?: ReporterOptions): void {
-    const totalTests = results.reduce((s, r) => s + r.total, 0);
-    const totalFailures = results.reduce((s, r) => s + r.failed, 0);
-    const totalErrors = results.reduce((s, r) => s + r.steps.filter((s) => s.status === "error").length, 0);
-    const totalTime = formatTime(results.reduce((s, r) => s + r.steps.reduce((ss, step) => ss + step.duration_ms, 0), 0));
-
-    const suites = results.map(renderTestsuite).join("\n");
-
-    const xml = [
-      `<?xml version="1.0" encoding="UTF-8"?>`,
-      `<testsuites tests="${totalTests}" failures="${totalFailures}" errors="${totalErrors}" time="${totalTime}">`,
-      suites,
-      `</testsuites>`,
-    ].join("\n");
-
-    console.log(xml);
+    console.log(generateJunitXml(results));
   },
 };

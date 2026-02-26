@@ -1,5 +1,8 @@
 import { Hono } from "hono";
 import { escapeHtml } from "../views/layout.ts";
+import { getRunById, getResultsByRunId } from "../../db/queries.ts";
+import { generateJunitXml } from "../../core/reporter/junit.ts";
+import type { TestRunResult, StepResult } from "../../core/runner/types.ts";
 
 const api = new Hono();
 
@@ -177,6 +180,86 @@ api.post("/api/authorize", async (c) => {
   } catch (err) {
     return c.json({ error: (err as Error).message }, 500);
   }
+});
+
+// ──────────────────────────────────────────────
+// Export helpers
+// ──────────────────────────────────────────────
+
+function reconstructResults(runId: number): TestRunResult[] | null {
+  const run = getRunById(runId);
+  if (!run) return null;
+
+  const rows = getResultsByRunId(runId);
+  const suiteMap = new Map<string, StepResult[]>();
+
+  for (const row of rows) {
+    const steps = suiteMap.get(row.suite_name) ?? [];
+    steps.push({
+      name: row.test_name,
+      status: row.status as StepResult["status"],
+      duration_ms: row.duration_ms,
+      request: {
+        method: row.request_method ?? "GET",
+        url: row.request_url ?? "",
+        headers: {},
+      },
+      response: row.response_status != null
+        ? { status: row.response_status, headers: {}, body: "", duration_ms: row.duration_ms }
+        : undefined,
+      assertions: row.assertions,
+      captures: row.captures as Record<string, unknown>,
+      error: row.error_message ?? undefined,
+    });
+    suiteMap.set(row.suite_name, steps);
+  }
+
+  const results: TestRunResult[] = [];
+  for (const [suiteName, steps] of suiteMap) {
+    const total = steps.length;
+    const passed = steps.filter((s) => s.status === "pass").length;
+    const failed = steps.filter((s) => s.status === "fail").length;
+    const skipped = steps.filter((s) => s.status === "skip").length;
+    results.push({
+      suite_name: suiteName,
+      started_at: run.started_at,
+      finished_at: run.finished_at ?? run.started_at,
+      total,
+      passed,
+      failed,
+      skipped,
+      steps,
+    });
+  }
+  return results;
+}
+
+// GET /api/export/:runId/junit
+api.get("/api/export/:runId/junit", (c) => {
+  const runId = parseInt(c.req.param("runId"), 10);
+  if (isNaN(runId)) return c.text("Invalid run ID", 400);
+
+  const results = reconstructResults(runId);
+  if (!results) return c.text("Run not found", 404);
+
+  const xml = generateJunitXml(results);
+  c.header("Content-Disposition", `attachment; filename="run-${runId}-junit.xml"`);
+  c.header("Content-Type", "application/xml");
+  return c.body(xml);
+});
+
+// GET /api/export/:runId/json
+api.get("/api/export/:runId/json", (c) => {
+  const runId = parseInt(c.req.param("runId"), 10);
+  if (isNaN(runId)) return c.text("Invalid run ID", 400);
+
+  const results = reconstructResults(runId);
+  if (!results) return c.text("Run not found", 404);
+
+  const json = JSON.stringify(results, null, 2);
+  c.header("Content-Disposition", `attachment; filename="run-${runId}-results.json"`);
+  c.header("Content-Type", "application/json");
+  return c.body(json);
 });
 
 export default api;

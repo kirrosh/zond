@@ -312,6 +312,41 @@ h2 { font-size: 1.25rem; margin: 1.5rem 0 0.5rem; }
   font-size: 0.8rem;
 }
 
+/* Trend chart */
+.trend-chart { width: 100%; margin: 1.5rem 0; }
+
+/* Filter bar */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.filter-group label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.filter-group select,
+.filter-group input {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
 /* Htmx indicator */
 .htmx-indicator { display: none; }
 .htmx-request .htmx-indicator { display: inline; }
