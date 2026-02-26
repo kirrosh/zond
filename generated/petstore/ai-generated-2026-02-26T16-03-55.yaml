@@ -1,0 +1,62 @@
+name: Pet API Test Suite
+base_url: "{{base_url}}"
+headers:
+  Authorization: "Bearer {{auth_token}}"
+tests:
+  - name: Authenticate
+    POST: /auth/login
+    json:
+      username: "{{auth_username}}"
+      password: "{{auth_password}}"
+    expect:
+      status: 200
+      body:
+        token:
+          capture: auth_token
+          type: string
+  - name: Create Pet with Valid Data
+    POST: /pets
+    json:
+      name: "{{$randomString}}"
+      tag: "{{$randomString}}"
+      status: available
+    expect:
+      status: 201
+      body:
+        id:
+          type: number
+          capture: pet_id
+  - name: Verify Created Pet
+    GET: /pets/{{pet_id}}
+    expect:
+      status: 200
+      body:
+        id:
+          equals: "{{pet_id}}"
+        name:
+          type: string
+        tag:
+          type: string
+  - name: Create Another Pet with Valid Data
+    POST: /pets
+    json:
+      name: "{{$randomString}}"
+      tag: "{{$randomString}}"
+      status: available
+    expect:
+      status: 201
+      body:
+        id:
+          type: number
+          capture: another_pet_id
+  - name: Verify Created Another Pet
+    GET: /pets/{{another_pet_id}}
+    expect:
+      status: 200
+      body:
+        id:
+          equals: "{{another_pet_id}}"
+        name:
+          type: string
+        tag:
+          type: string

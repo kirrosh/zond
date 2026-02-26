@@ -98,6 +98,8 @@ apitool/
 
 При парсинге директории невалидные файлы пропускаются (один сломанный файл не блокирует остальные). Каждый распарсенный suite получает `_source` — путь к исходному файлу (используется для AI badge в WebUI).
 
+Функция `parseDirectorySafe(dirPath)` возвращает `{ suites: TestSuite[], errors: { file: string, error: string }[] }` — собирает ошибки парсинга вместо их игнорирования. Используется в WebUI для показа broken-файлов. Функции `parse()` / `parseDirectory()` не изменены (обратная совместимость).
+
 Ключевые типы:
 
 ```typescript
@@ -424,7 +426,7 @@ Hono-сервер рендерит HTML, интерактивность чере
 | Route | Описание |
 |-------|----------|
 | `GET /` | Dashboard: глобальные метрики, grid коллекций, форма добавления, recent runs, slowest/flaky |
-| `GET /collections/:id` | Детали коллекции: метрики, trend chart, test suites, таблица прогонов с пагинацией |
+| `GET /collections/:id` | Детали коллекции: метрики, trend chart, test suites (кликабельные — YAML, source, AI prompt/model), broken-файлы с Delete, per-suite Run, таблица прогонов |
 | `GET /runs` | Список прогонов с фильтрацией (статус, environment, дата, поиск по имени теста) и пагинацией |
 | `GET /runs/:id` | Детали прогона: каждый тест → запрос/ответ/ассерты + кнопки Export (JUnit XML, JSON) |
 | `GET /explorer` | Дерево API из OpenAPI, параметры, описания, multi-auth panel |
@@ -437,6 +439,7 @@ Hono-сервер рендерит HTML, интерактивность чере
 | `GET /api/export/:runId/json` | Скачать JSON отчёт для прогона |
 | `POST /api/ai-generate` | Генерация тестов через AI (Ollama/OpenAI/Anthropic) |
 | `POST /api/ai-generate/save` | Сохранить YAML в файл, записать `output_path` в БД, показать подтверждение |
+| `POST /api/ai-generate/delete-file` | Удалить broken/ненужный файл из коллекции (с проверкой что файл внутри test_path) |
 | `GET /api/ai-generation/:id` | Просмотр деталей генерации (YAML, метаданные, путь файла) — HTMX fragment |
 
 Dashboard-метрики (SQL-запросы):
@@ -600,6 +603,7 @@ tests:
 | M8 (Standalone binary) | DONE | `6bd2401` | `bun run build` → `apitool.exe`, CSS embedded, runtime detection |
 | M9 (Collections) | DONE | — | Сущность Collection, группировка runs, CLI `collections`, dashboard redesign |
 | M10 (AI Generate) | DONE | — | AI-генерация тестов, история генераций с View/Reuse, AI badge на сьютах, сохранение с output_path |
+| M11 (Suite Details) | DONE | — | Кликабельные сьюты (YAML, source file, AI prompt/model), показ broken-файлов с Delete, per-suite Run, улучшенный AI-промпт |
 
 ---
 

@@ -10,11 +10,25 @@ OUTPUT FORMAT — return a JSON object with a single key "suites" containing an 
     {
       "name": "Suite Name",
       "base_url": "{{base_url}}",
+      "headers": {
+        "Authorization": "Bearer {{auth_token}}"
+      },
       "tests": [
         {
-          "name": "Step name",
-          "POST": "/path",
-          "json": { "field": "value" },
+          "name": "Authenticate",
+          "POST": "/auth/login",
+          "json": { "username": "{{auth_username}}", "password": "{{auth_password}}" },
+          "expect": {
+            "status": 200,
+            "body": {
+              "token": { "type": "string", "capture": "auth_token" }
+            }
+          }
+        },
+        {
+          "name": "Create item",
+          "POST": "/items",
+          "json": { "name": "{{$randomString}}" },
           "expect": {
             "status": 201,
             "body": {
@@ -24,7 +38,7 @@ OUTPUT FORMAT — return a JSON object with a single key "suites" containing an 
         },
         {
           "name": "Verify created",
-          "GET": "/path/{{created_id}}",
+          "GET": "/items/{{created_id}}",
           "expect": {
             "status": 200,
             "body": {
@@ -48,14 +62,21 @@ RULES:
    - "matches": regex pattern
    - "gt": greater than (numbers)
    - "lt": less than (numbers)
-   - "exists": true/false
-   - "capture": variable name to capture this value for later steps
+   - "exists": true (must be boolean true, NEVER a string)
+   - "capture": variable name — SAVES the response value into a variable for later steps
 5. Use {{variable}} syntax to reference captured values in paths, bodies, and assertions.
-6. Built-in generators: {{$randomInt}}, {{$uuid}}, {{$timestamp}}, {{$randomEmail}}, {{$randomString}}.
-7. Use {{base_url}} for the base URL if not hardcoded.
+6. ONLY these built-in generators exist: {{$randomInt}}, {{$uuid}}, {{$timestamp}}, {{$randomEmail}}, {{$randomString}}, {{$randomName}}. Do NOT invent others like $randomString(N) or $randomWord — they do not exist.
+7. Use {{base_url}} for the base URL — never hardcode it.
 8. Steps execute sequentially — a capture in step 1 is available in step 2+.
 9. Generate realistic test data. Use generators for uniqueness where needed.
-10. Output ONLY the JSON object, no markdown fences or extra text.`;
+10. Output ONLY the JSON object, no markdown fences or extra text.
+
+CRITICAL — common mistakes to avoid:
+- NEVER use "equals" to save a value. "equals" COMPARES, "capture" SAVES. To extract a token: {"capture": "auth_token"} NOT {"equals": "{{auth_token}}"}.
+- NEVER prefix double braces with a dollar sign. Correct: {{my_var}}. Wrong: $` + `{{my_var}}. Generators also use plain braces: {{$randomString}} not $` + `{{$randomString}}.
+- If the API has authentication (JWT, Bearer token), ALWAYS add a login step FIRST that captures the token, then set suite-level "headers": {"Authorization": "Bearer {{auth_token}}"}.
+- For login credentials, use environment variables {{auth_username}} and {{auth_password}}, NOT generators like {{$randomEmail}}.
+- "exists" value MUST be boolean true or false, NEVER the string "true".`;
 
 export function buildMessages(
   endpoints: EndpointInfo[],

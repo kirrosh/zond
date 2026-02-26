@@ -174,6 +174,43 @@ aiGenerate.post("/api/ai-generate/save", async (c) => {
   }
 });
 
+// POST /api/ai-generate/delete-file — delete a broken/unwanted file
+aiGenerate.post("/api/ai-generate/delete-file", async (c) => {
+  const body = await c.req.parseBody();
+  const filePath = (body["file_path"] as string ?? "").trim();
+  const collectionIdStr = (body["collection_id"] as string ?? "");
+  const collectionId = collectionIdStr ? parseInt(collectionIdStr, 10) : undefined;
+
+  if (!filePath || !collectionId) {
+    return c.html(fragment(`<div class="ai-error">Missing file path or collection.</div>`), 400);
+  }
+
+  const collection = getCollectionById(collectionId);
+  if (!collection) {
+    return c.html(fragment(`<div class="ai-error">Collection not found.</div>`), 404);
+  }
+
+  // Security: resolve the file path relative to the collection's test_path
+  const { resolve } = await import("node:path");
+  const { unlink } = await import("node:fs/promises");
+  const resolvedFile = resolve(collection.test_path, filePath);
+  const resolvedTestDir = resolve(collection.test_path);
+
+  if (!resolvedFile.startsWith(resolvedTestDir)) {
+    return c.html(fragment(`<div class="ai-error">File is outside the collection test path.</div>`), 403);
+  }
+
+  try {
+    await unlink(resolvedFile);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return c.html(fragment(`<div class="ai-error">Delete failed: ${escapeHtml(msg)}</div>`), 500);
+  }
+
+  // Return empty string so hx-swap="outerHTML" removes the row
+  return c.html("");
+});
+
 // GET /api/ai-generation/:id — view generation details (HTMX fragment)
 aiGenerate.get("/api/ai-generation/:id", (c) => {
   const id = parseInt(c.req.param("id"), 10);

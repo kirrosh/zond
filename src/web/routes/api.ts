@@ -40,11 +40,17 @@ api.post("/api/run", async (c) => {
       return c.json({ error: "No test files found" }, 404);
     }
 
-    const env = await loadEnvironment(envName, dirname(testPath));
+    // Determine env search dir: for a file use its dirname, for a directory use the dir itself
+    const stat = await import("node:fs/promises").then(m => m.stat(testPath).catch(() => null));
+    const envDir = stat?.isDirectory() ? testPath : dirname(testPath);
+    const env = await loadEnvironment(envName, envDir);
     const results = await Promise.all(suites.map((s) => runSuite(s, env)));
 
     getDb();
-    const collection = findCollectionByTestPath(resolve(testPath));
+    // For single file, try to find collection by parent dir path too
+    const resolvedPath = resolve(testPath);
+    const collection = findCollectionByTestPath(resolvedPath)
+      ?? (stat?.isFile() ? findCollectionByTestPath(resolve(dirname(testPath))) : null);
     const runId = createRun({
       started_at: results[0]?.started_at ?? new Date().toISOString(),
       environment: envName,
