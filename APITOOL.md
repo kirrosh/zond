@@ -238,6 +238,11 @@ config:
 
 Один тест на каждый `path + method`. Генерирует тело запроса из `requestBody.content.application/json.schema`, ассерты из `responses`.
 
+Auth-aware генерация: при наличии security schemes автоматически добавляет:
+- **Bearer** — login-шаг с capture `auth_token` + suite-level `Authorization: Bearer {{auth_token}}`
+- **API Key** — suite-level header `X-API-Key: {{apikeyauth}}` (env-переменная из имени схемы)
+- **Basic** — suite-level header `Authorization: Basic {{basic_credentials}}`
+
 ```yaml
 # Сгенерировано из: POST /users
 name: "POST /users — 201"
@@ -384,9 +389,10 @@ Hono-сервер рендерит HTML, интерактивность чере
 | `GET /` | Dashboard: pass rate, тренды, последний прогон, top-5 медленных, top-5 flaky |
 | `GET /runs` | Список прогонов (таблица с пагинацией) |
 | `GET /runs/:id` | Детали прогона: каждый тест → запрос/ответ/ассерты |
-| `GET /explorer` | Дерево API из OpenAPI, параметры, описания |
+| `GET /explorer` | Дерево API из OpenAPI, параметры, описания, multi-auth panel |
 | `POST /api/run` | Запустить прогон из WebUI (HTMX) |
-| `POST /api/try` | Отправить единичный запрос из Explorer (HTMX) |
+| `POST /api/try` | Отправить единичный запрос из Explorer (HTMX, с auth injection) |
+| `POST /api/authorize` | Proxy login для Bearer auth (username/password → token) |
 
 Dashboard-метрики (SQL-запросы):
 
@@ -403,7 +409,7 @@ Dashboard-метрики (SQL-запросы):
 
 | Команда | Описание | Основные флаги |
 |---------|----------|----------------|
-| `run <path>` | Запуск тестов | `--env`, `--report json\|junit\|console`, `--parallel`, `--timeout`, `--bail` |
+| `run <path>` | Запуск тестов | `--env`, `--report json\|junit\|console`, `--parallel`, `--timeout`, `--bail`, `--auth-token` |
 | `generate` | Генерация тестов из OpenAPI | `--from <spec>`, `--output <dir>`, `--level skeleton\|crud\|all` |
 | `describe` | Генерация Markdown тест-кейсов | `--from <spec>`, `--output <file>` |
 | `serve` | Запуск WebUI | `--port`, `--host`, `--tests <dir>`, `--openapi <spec>` |
@@ -533,8 +539,8 @@ tests:
 | M3 (Generator) | DONE | `e3d94d8` | `apitool generate --from api.yaml` — skeleton тесты |
 | M4 (Reporter) + M7 (CLI basic) | DONE | `e179180` | console/json/junit отчёты, CLI команды |
 | M5 (Storage/SQLite) | DONE | `2245e79` | История прогонов в apitool.db |
-| M6 (WebUI) | DONE | `94a58e4` | `apitool serve --port 8080 --openapi <spec>` |
-| M7 (CLI polish) | PARTIAL | — | Базовые команды готовы, см. BACKLOG |
+| M6 (WebUI) | DONE | `94a58e4` | `apitool serve --port 8080 --openapi <spec>`, multi-auth panel |
+| M7 (CLI polish) | PARTIAL | — | Базовые команды + `--auth-token`, см. BACKLOG |
 | M8 (Сборка + публикация) | TODO | — | `bun compile`, GitHub Release, README |
 
 ---

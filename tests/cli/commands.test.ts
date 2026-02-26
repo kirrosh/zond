@@ -4,6 +4,7 @@ import { join } from "path";
 import { existsSync, unlinkSync } from "fs";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { validateCommand } from "../../src/cli/commands/validate.ts";
+import { parseArgs } from "../../src/cli/index.ts";
 import { closeDb } from "../../src/db/schema.ts";
 
 function tryUnlink(path: string): void {
@@ -263,5 +264,53 @@ describe("validateCommand", () => {
     restore = suppressOutput();
     const code = await validateCommand({ path: `${FIXTURES}/nonexistent.yaml` });
     expect(code).toBe(2);
+  });
+});
+
+describe("parseArgs", () => {
+  test("parses --auth-token flag", () => {
+    const result = parseArgs(["bun", "script.ts", "run", "tests/", "--auth-token", "my-secret-token"]);
+    expect(result.command).toBe("run");
+    expect(result.positional).toEqual(["tests/"]);
+    expect(result.flags["auth-token"]).toBe("my-secret-token");
+  });
+
+  test("parses --auth-token with = syntax", () => {
+    const result = parseArgs(["bun", "script.ts", "run", "tests/", "--auth-token=my-token"]);
+    expect(result.flags["auth-token"]).toBe("my-token");
+  });
+});
+
+describe("runCommand with --auth-token", () => {
+  let restore: () => void;
+
+  afterEach(() => {
+    restore?.();
+    restoreFetch();
+    closeDb();
+  });
+
+  test("auth token is injected into requests via env", async () => {
+    let capturedHeaders: Record<string, string> = {};
+    globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedHeaders = Object.fromEntries(Object.entries(init?.headers ?? {}));
+      return new Response(JSON.stringify({ status: "ok" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    restore = suppressOutput();
+
+    const code = await runCommand({
+      path: `${FIXTURES}/auth-token-test.yaml`,
+      report: "console",
+      bail: false,
+      noDb: true,
+      authToken: "test-jwt-token-123",
+    });
+
+    // The test file should use {{auth_token}} in Authorization header
+    expect(capturedHeaders["Authorization"]).toBe("Bearer test-jwt-token-123");
+    expect(code).toBe(0);
   });
 });

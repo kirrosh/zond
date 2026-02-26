@@ -46,6 +46,11 @@ export function generateSkeleton(
   // Detect API key schemes
   const apiKeySchemes = securitySchemes?.filter((s) => s.type === "apiKey") ?? [];
 
+  // Detect basic auth scheme
+  const basicScheme = securitySchemes?.find(
+    (s) => s.type === "http" && s.scheme === "basic",
+  );
+
   // Detect login endpoint for bearer auth
   const loginEndpoint = bearerScheme ? findLoginEndpoint(endpoints) : undefined;
 
@@ -84,6 +89,12 @@ export function generateSkeleton(
           const envVar = apiKey.name.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
           suite.headers[apiKey.apiKeyName] = `{{${envVar}}}`;
         }
+      }
+
+      // Add Basic auth header
+      if (basicScheme) {
+        if (!suite.headers) suite.headers = {};
+        suite.headers.Authorization = suite.headers.Authorization ?? "Basic {{basic_credentials}}";
       }
     }
 

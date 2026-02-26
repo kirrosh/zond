@@ -28,14 +28,19 @@ bun src/cli/index.ts --help
 bun src/cli/index.ts run tests/api.yaml
 bun src/cli/index.ts run tests/              # все YAML в директории
 bun src/cli/index.ts run tests/ --env staging --report json --timeout 5000 --bail
+
+# Auth-токен из внешнего источника (Keycloak, CI/CD)
+TOKEN=$(curl -s -X POST https://keycloak/token -d 'grant_type=...' | jq -r .access_token)
+bun src/cli/index.ts run tests/ --auth-token "$TOKEN"
 ```
 
 | Флаг | Описание | По умолчанию |
 |------|----------|-------------|
 | `--env <name>` | Файл окружения `.env.<name>.yaml` | `.env.yaml` |
-| `--report <format>` | Формат вывода: `console`, `json` | `console` |
+| `--report <format>` | Формат вывода: `console`, `json`, `junit` | `console` |
 | `--timeout <ms>` | Таймаут запроса (мс) | `30000` |
 | `--bail` | Остановиться после первого упавшего suite | `false` |
+| `--auth-token <token>` | Auth-токен, доступен как `{{auth_token}}` | — |
 
 Exit codes:
 - `0` — все тесты прошли
@@ -146,10 +151,11 @@ process.argv → parseArgs() → command routing → run/validate → process.ex
 
 1. `parse(path)` — файл или директория → `TestSuite[]`
 2. `loadEnvironment(env, dir)` — загрузка `.env.yaml`
-3. `--timeout` override → мутация `suite.config.timeout`
-4. `runSuites()` или sequential с `--bail`
-5. `reporter.report(results)`
-6. Exit code по результатам
+3. `--auth-token` → инъекция `auth_token` в env (перезаписывает значение из файла)
+4. `--timeout` override → мутация `suite.config.timeout`
+5. `runSuites()` или sequential с `--bail`
+6. `reporter.report(results)`
+7. Exit code по результатам
 
 ### Bail mode
 
@@ -167,5 +173,5 @@ process.argv → parseArgs() → command routing → run/validate → process.ex
 ```bash
 bun test tests/reporter/    # reporter (25 tests)
 bun test tests/cli/         # CLI (18 tests)
-bun test                    # все тесты (137 unit + 2 integration)
+bun test                    # все unit-тесты
 ```

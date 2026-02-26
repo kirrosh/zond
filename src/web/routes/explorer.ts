@@ -103,69 +103,202 @@ function tryItForm(endpoint: EndpointInfo, index: number, servers: ServerInfo[])
     </div>`;
 }
 
-function authorizePanel(deps: ExplorerDeps): string {
-  const hasBearerScheme = deps.securitySchemes.some(
-    (s) => s.type === "http" && s.scheme === "bearer",
-  );
-  if (!hasBearerScheme) return "";
-
+function renderBearerScheme(scheme: SecuritySchemeInfo, deps: ExplorerDeps): string {
+  const name = escapeHtml(scheme.name);
   const loginPathAttr = deps.loginPath ? escapeHtml(deps.loginPath) : "";
 
-  return `
-    <details class="authorize-panel" open>
-      <summary>Authorize <span id="auth-status" class="auth-status auth-none">Not authorized</span></summary>
-      <div style="margin-top:0.75rem">
-        <label style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:0.25rem">Username</label>
-        <input id="auth-user" type="text" placeholder="username" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:monospace;font-size:0.85rem;margin-bottom:0.5rem">
-        <label style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:0.25rem">Password</label>
-        <input id="auth-pass" type="password" placeholder="password" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:monospace;font-size:0.85rem;margin-bottom:0.75rem">
-        <button class="btn" type="button" onclick="doAuthorize()">Authorize</button>
+  let loginSection = "";
+  if (deps.loginPath) {
+    loginSection = `
+      <div class="auth-input-group">
+        <label>Username</label>
+        <input id="auth-user-${name}" type="text" placeholder="username">
       </div>
-    </details>
+      <div class="auth-input-group">
+        <label>Password</label>
+        <input id="auth-pass-${name}" type="password" placeholder="password">
+      </div>
+      <button class="btn btn-sm" type="button" onclick="doLoginProxy('${name}', '${loginPathAttr}')">Login</button>`;
+  }
+
+  return `
+    <div class="auth-scheme-section" data-scheme="${name}">
+      <div class="auth-scheme-header">
+        ${name} <span class="auth-scheme-badge">bearer</span>
+        <span class="auth-scheme-status" id="scheme-status-${name}"></span>
+      </div>
+      <div class="auth-input-group">
+        <label>Token</label>
+        <input id="auth-token-${name}" type="text" placeholder="Bearer token">
+      </div>
+      <button class="btn btn-sm" type="button" onclick="applyBearerDirect('${name}')" style="margin-bottom:0.5rem">Apply token</button>
+      ${loginSection}
+    </div>`;
+}
+
+function renderBasicScheme(scheme: SecuritySchemeInfo): string {
+  const name = escapeHtml(scheme.name);
+  return `
+    <div class="auth-scheme-section" data-scheme="${name}">
+      <div class="auth-scheme-header">
+        ${name} <span class="auth-scheme-badge">basic</span>
+        <span class="auth-scheme-status" id="scheme-status-${name}"></span>
+      </div>
+      <div class="auth-input-group">
+        <label>Username</label>
+        <input id="auth-basic-user-${name}" type="text" placeholder="username">
+      </div>
+      <div class="auth-input-group">
+        <label>Password</label>
+        <input id="auth-basic-pass-${name}" type="password" placeholder="password">
+      </div>
+      <button class="btn btn-sm" type="button" onclick="applyBasic('${name}')">Authorize</button>
+    </div>`;
+}
+
+function renderApiKeyScheme(scheme: SecuritySchemeInfo): string {
+  const name = escapeHtml(scheme.name);
+  const keyName = escapeHtml(scheme.apiKeyName ?? "");
+  const location = escapeHtml(scheme.in ?? "header");
+  return `
+    <div class="auth-scheme-section" data-scheme="${name}">
+      <div class="auth-scheme-header">
+        ${name} <span class="auth-scheme-badge">apiKey</span>
+        <span class="auth-location-badge">in ${location} as ${keyName}</span>
+        <span class="auth-scheme-status" id="scheme-status-${name}"></span>
+      </div>
+      <div class="auth-input-group">
+        <label>${keyName}</label>
+        <input id="auth-apikey-${name}" type="text" placeholder="API key value">
+      </div>
+      <button class="btn btn-sm" type="button" onclick="applyApiKey('${name}', '${location}', '${keyName}')">Apply</button>
+    </div>`;
+}
+
+function renderUnsupportedScheme(scheme: SecuritySchemeInfo): string {
+  const name = escapeHtml(scheme.name);
+  const typeLabel = escapeHtml(scheme.type);
+  return `
+    <div class="auth-scheme-section" data-scheme="${name}">
+      <div class="auth-scheme-header">
+        ${name} <span class="auth-scheme-badge">${typeLabel}</span>
+      </div>
+      <div class="auth-unsupported">Not yet supported</div>
+    </div>`;
+}
+
+function authScript(deps: ExplorerDeps): string {
+  return `
     <script>
-    window.__authToken = null;
-    function applyAuthToken(token) {
-      window.__authToken = token;
-      document.querySelectorAll('.try-form form').forEach(function(form) {
-        var inp = form.querySelector('input[name="header_Authorization"]');
-        if (!inp) {
-          inp = document.createElement('input');
-          inp.type = 'hidden'; inp.name = 'header_Authorization';
-          form.appendChild(inp);
-        }
-        inp.value = 'Bearer ' + token;
-      });
-      document.getElementById('auth-status').textContent = 'Authorized';
-      document.getElementById('auth-status').className = 'auth-status auth-ok';
-    }
-    // HTMX hook: inject token into every /api/try request
-    document.addEventListener('htmx:configRequest', function(evt) {
-      if (window.__authToken && evt.detail.path === '/api/try') {
-        evt.detail.parameters['header_Authorization'] = 'Bearer ' + window.__authToken;
+    window.__authCredentials = {};
+
+    function setSchemeStatus(name, ok) {
+      var el = document.getElementById('scheme-status-' + name);
+      if (el) {
+        el.textContent = ok ? 'Active' : '';
+        el.className = 'auth-scheme-status' + (ok ? ' auth-scheme-badge active' : '');
       }
-    });
-    async function doAuthorize() {
+    }
+
+    function updateGlobalStatus() {
+      var count = Object.keys(window.__authCredentials).length;
+      var el = document.getElementById('auth-status');
+      if (!el) return;
+      if (count > 0) {
+        el.textContent = count + ' scheme' + (count > 1 ? 's' : '') + ' active';
+        el.className = 'auth-status auth-ok';
+      } else {
+        el.textContent = 'Not authorized';
+        el.className = 'auth-status auth-none';
+      }
+    }
+
+    function applyBearerDirect(name) {
+      var token = document.getElementById('auth-token-' + name).value;
+      if (!token) return;
+      window.__authCredentials[name] = { type: 'bearer', headers: { 'Authorization': 'Bearer ' + token }, queryParams: {} };
+      setSchemeStatus(name, true);
+      updateGlobalStatus();
+    }
+
+    function doLoginProxy(name, loginPath) {
       var base = document.querySelector('[name="base_url"]');
       base = base ? (base.value || '') : '';
-      var resp = await fetch('/api/authorize', {
+      fetch('/api/authorize', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
           base_url: base,
-          path: '${loginPathAttr}',
-          username: document.getElementById('auth-user').value,
-          password: document.getElementById('auth-pass').value
+          path: loginPath,
+          username: document.getElementById('auth-user-' + name).value,
+          password: document.getElementById('auth-pass-' + name).value
         })
+      }).then(function(resp) { return resp.json(); }).then(function(data) {
+        if (data.token) {
+          window.__authCredentials[name] = { type: 'bearer', headers: { 'Authorization': 'Bearer ' + data.token }, queryParams: {} };
+          setSchemeStatus(name, true);
+          updateGlobalStatus();
+        } else {
+          var el = document.getElementById('auth-status');
+          if (el) { el.textContent = 'Error: ' + (data.error || 'Login failed'); el.className = 'auth-status auth-none'; }
+        }
       });
-      var data = await resp.json();
-      if (data.token) applyAuthToken(data.token);
-      else {
-        var st = document.getElementById('auth-status');
-        st.textContent = 'Error: ' + (data.error || 'Login failed');
-        st.className = 'auth-status auth-none';
-      }
     }
+
+    function applyApiKey(name, location, keyName) {
+      var val = document.getElementById('auth-apikey-' + name).value;
+      if (!val) return;
+      var cred = { type: 'apiKey', headers: {}, queryParams: {} };
+      if (location === 'header') { cred.headers[keyName] = val; }
+      else if (location === 'query') { cred.queryParams[keyName] = val; }
+      window.__authCredentials[name] = cred;
+      setSchemeStatus(name, true);
+      updateGlobalStatus();
+    }
+
+    function applyBasic(name) {
+      var user = document.getElementById('auth-basic-user-' + name).value;
+      var pass = document.getElementById('auth-basic-pass-' + name).value;
+      if (!user) return;
+      var encoded = btoa(user + ':' + pass);
+      window.__authCredentials[name] = { type: 'basic', headers: { 'Authorization': 'Basic ' + encoded }, queryParams: {} };
+      setSchemeStatus(name, true);
+      updateGlobalStatus();
+    }
+
+    // HTMX hook: inject all active credentials into /api/try requests
+    document.addEventListener('htmx:configRequest', function(evt) {
+      if (evt.detail.path !== '/api/try') return;
+      var creds = window.__authCredentials;
+      for (var schemeName in creds) {
+        var cred = creds[schemeName];
+        for (var h in cred.headers) {
+          evt.detail.parameters['header_' + h] = cred.headers[h];
+        }
+        for (var q in cred.queryParams) {
+          evt.detail.parameters['query_' + q] = cred.queryParams[q];
+        }
+      }
+    });
     </script>`;
+}
+
+function authorizePanel(deps: ExplorerDeps): string {
+  if (deps.securitySchemes.length === 0) return "";
+
+  const sections = deps.securitySchemes.map((scheme) => {
+    if (scheme.type === "http" && scheme.scheme === "bearer") return renderBearerScheme(scheme, deps);
+    if (scheme.type === "http" && scheme.scheme === "basic") return renderBasicScheme(scheme);
+    if (scheme.type === "apiKey") return renderApiKeyScheme(scheme);
+    return renderUnsupportedScheme(scheme);
+  }).join("");
+
+  return `
+    <details class="authorize-panel" open>
+      <summary>Authorize <span id="auth-status" class="auth-status auth-none">Not authorized</span></summary>
+      <div class="auth-schemes">${sections}</div>
+    </details>
+    ${authScript(deps)}`;
 }
 
 export function createExplorerRoute(deps: ExplorerDeps) {

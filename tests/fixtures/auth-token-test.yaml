@@ -1,0 +1,8 @@
+name: Auth Token Test
+headers:
+  Authorization: "Bearer {{auth_token}}"
+tests:
+  - name: "Authenticated request"
+    GET: /protected
+    expect:
+      status: 200

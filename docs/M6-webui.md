@@ -43,10 +43,11 @@ apitool serve [options]
 | `GET /metrics` | HTML-фрагмент метрик (для HTMX auto-refresh) |
 | `GET /runs` | Список прогонов с пагинацией (20 на страницу) |
 | `GET /runs/:id` | Детали прогона: шаги по suite, expand failed шагов |
-| `GET /explorer` | Дерево API из OpenAPI спеки, "Try it" формы |
+| `GET /explorer` | Дерево API из OpenAPI спеки, multi-auth panel, "Try it" формы |
 | `GET /static/style.css` | CSS стили |
 | `POST /api/run` | Запуск тестов из WebUI |
-| `POST /api/try` | Единичный HTTP-запрос из Explorer |
+| `POST /api/try` | Единичный HTTP-запрос из Explorer (с auth injection) |
+| `POST /api/authorize` | Proxy login для Bearer auth |
 
 ---
 
@@ -121,6 +122,48 @@ Auto-refresh: `hx-trigger="every 10s"` на блоке метрик.
 - Несколько серверов → dropdown для выбора
 - Нет серверов → пустое поле
 
+### Authorize Panel (multi-scheme)
+
+При наличии `securitySchemes` в OpenAPI спеке отображается панель авторизации с поддержкой нескольких схем одновременно.
+
+**Credential Store** — глобальный объект `window.__authCredentials`, хранящий активные авторизации по имени схемы. HTMX-хук `htmx:configRequest` автоматически инжектит все активные credentials в каждый `/api/try` запрос.
+
+**Поддерживаемые типы:**
+
+| Тип | UI | Поведение |
+|-----|-----|-----------|
+| `http/bearer` | Поле для прямого токена + login-proxy (если `loginPath`) | `Authorization: Bearer <token>` |
+| `http/basic` | Username + password | Клиентский `btoa(user:pass)` → `Authorization: Basic <encoded>` |
+| `apiKey` | Поле для значения, badge с расположением | Header или query param по спеке |
+| `oauth2`, `openIdConnect` | Имя + "Not yet supported" | — |
+
+**Per-scheme статус:** каждая схема показывает badge "Active" после применения. Глобальный счётчик показывает количество активных схем.
+
+**Функции:**
+- `applyBearerDirect(name)` — прямой токен
+- `doLoginProxy(name, loginPath)` — proxy через `/api/authorize`
+- `applyApiKey(name, location, keyName)` — header или query
+- `applyBasic(name)` — `btoa(user:pass)`
+
+### POST /api/authorize
+
+Proxy для Bearer auth через login endpoint.
+
+**Body (JSON):**
+```json
+{
+  "base_url": "http://localhost:3000",
+  "path": "/auth/login",
+  "username": "admin",
+  "password": "secret"
+}
+```
+
+**Поведение:**
+1. Отправляет POST `base_url + path` с `{username, password}`
+2. Ищет `token` или `access_token` в JSON-ответе
+3. Возвращает `{token}` или `{error}`
+
 ### Try it (`POST /api/try`)
 
 Форма собирает:
@@ -128,6 +171,7 @@ Auto-refresh: `hx-trigger="every 10s"` на блоке метрик.
 - Path parameters → подставляются в URL `{param}`
 - Query parameters → добавляются к URL
 - Header parameters → отправляются как заголовки
+- Auth credentials → инжектятся через HTMX-хук из credential store
 - Body (JSON) → отправляется как request body
 
 Ответ вставляется через HTMX: статус (цветной), заголовки (collapsible), тело (pretty JSON).
@@ -208,7 +252,7 @@ import { createApp } from "./src/web/server.ts";
 import { startServer } from "./src/web/server.ts";
 
 // Для тестов — без поднятия сервера
-const app = createApp({ endpoints: [], specPath: null, servers: [] });
+const app = createApp({ endpoints: [], specPath: null, servers: [], securitySchemes: [], loginPath: null });
 const response = await app.request("/");
 
 // Запуск сервера
@@ -221,10 +265,10 @@ await startServer({ port: 8080, openapiSpec: "api.yaml" });
 
 ```bash
 bun test tests/web/routes.test.ts      # 11 тестов роутов
-bun test tests/web/explorer.test.ts    # 7 тестов Explorer
-bun test tests/db/queries.test.ts      # dashboard-метрики (8 новых тестов)
+bun test tests/web/explorer.test.ts    # 14 тестов Explorer
+bun test tests/db/queries.test.ts      # dashboard-метрики (8 тестов)
 
-bun test tests/web/ tests/db/          # все web + db тесты (63)
+bun test tests/web/ tests/db/          # все web + db тесты
 ```
 
 ### Покрытие
@@ -232,7 +276,7 @@ bun test tests/web/ tests/db/          # все web + db тесты (63)
 | Файл | Тесты |
 |------|-------|
 | `web/routes.test.ts` | Dashboard 200, metrics fragment, runs list, run details, 404/400, static CSS, HTMX fragments, pagination |
-| `web/explorer.test.ts` | No-spec message, endpoint tree, tag grouping, parameters, request body, pre-filled server URL, HTMX fragment |
+| `web/explorer.test.ts` | No-spec message, endpoint tree, tag grouping, parameters, request body, pre-filled server URL, HTMX fragment, bearer auth panel, API Key rendering, Basic auth rendering, multi-scheme, oauth2 unsupported, bearer without loginPath |
 | `db/queries.test.ts` | getDashboardStats (zeros, aggregates), getPassRateTrend, getSlowestTests, getFlakyTests, countRuns |
 
 Hono позволяет тестировать без поднятия HTTP-сервера: `app.request(path)` возвращает стандартный `Response`.

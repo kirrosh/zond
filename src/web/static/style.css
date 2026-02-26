@@ -219,6 +219,18 @@ h2 { font-size: 1.25rem; margin: 1.5rem 0 0.5rem; }
 .auth-ok { background: var(--pass); color: #fff; }
 .auth-none { background: var(--muted, var(--bg-secondary)); color: var(--text-dim); }
 
+/* Auth scheme sections */
+.auth-schemes { margin-top: 0.75rem; }
+.auth-scheme-section { border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem; }
+.auth-scheme-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; font-weight: 600; font-size: 0.9rem; }
+.auth-scheme-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.75rem; font-weight: 600; background: var(--bg-secondary); color: var(--text-dim); }
+.auth-scheme-badge.active { background: var(--pass); color: #fff; }
+.auth-input-group { margin-bottom: 0.5rem; }
+.auth-input-group label { display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.25rem; }
+.auth-input-group input { width: 100%; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); font-family: monospace; font-size: 0.85rem; }
+.auth-location-badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.75rem; background: var(--accent); color: #fff; margin-left: 0.5rem; }
+.auth-unsupported { color: var(--text-dim); font-style: italic; font-size: 0.85rem; }
+
 /* Htmx indicator */
 .htmx-indicator { display: none; }
 .htmx-request .htmx-indicator { display: inline; }

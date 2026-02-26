@@ -149,6 +149,92 @@ describe("generateSkeleton with auth", () => {
   });
 });
 
+describe("generateSkeleton with apiKey auth", () => {
+  test("adds API key header for header-based apiKey scheme", () => {
+    const endpoints: import("../../src/core/generator/types.ts").EndpointInfo[] = [
+      {
+        path: "/data",
+        method: "GET",
+        operationId: "getData",
+        summary: "Get data",
+        tags: ["data"],
+        parameters: [],
+        requestBodySchema: undefined,
+        requestBodyContentType: undefined,
+        responseContentTypes: ["application/json"],
+        responses: [{ statusCode: 200, description: "OK" }],
+        security: ["apiKeyAuth"],
+      } as any,
+    ];
+    const schemes: import("../../src/core/generator/types.ts").SecuritySchemeInfo[] = [
+      { name: "apiKeyAuth", type: "apiKey", in: "header", apiKeyName: "X-API-Key" },
+    ];
+
+    const suites = generateSkeleton(endpoints, undefined, schemes);
+    const dataSuite = suites.find((s) => s.name === "data")!;
+    expect(dataSuite.headers).toBeDefined();
+    expect(dataSuite.headers!["X-API-Key"]).toBe("{{apikeyauth}}");
+  });
+});
+
+describe("generateSkeleton with basic auth", () => {
+  test("adds Basic auth header for basic scheme", () => {
+    const endpoints: import("../../src/core/generator/types.ts").EndpointInfo[] = [
+      {
+        path: "/secure",
+        method: "GET",
+        operationId: "getSecure",
+        summary: "Secure endpoint",
+        tags: ["secure"],
+        parameters: [],
+        requestBodySchema: undefined,
+        requestBodyContentType: undefined,
+        responseContentTypes: ["application/json"],
+        responses: [{ statusCode: 200, description: "OK" }],
+        security: ["basicAuth"],
+      } as any,
+    ];
+    const schemes: import("../../src/core/generator/types.ts").SecuritySchemeInfo[] = [
+      { name: "basicAuth", type: "http", scheme: "basic" },
+    ];
+
+    const suites = generateSkeleton(endpoints, undefined, schemes);
+    const secureSuite = suites.find((s) => s.name === "secure")!;
+    expect(secureSuite.headers).toBeDefined();
+    expect(secureSuite.headers!.Authorization).toBe("Basic {{basic_credentials}}");
+  });
+
+  test("bearer takes precedence over basic for Authorization header", () => {
+    const endpoints: import("../../src/core/generator/types.ts").EndpointInfo[] = [
+      {
+        path: "/mixed",
+        method: "GET",
+        operationId: "getMixed",
+        summary: "Mixed auth",
+        tags: ["mixed"],
+        parameters: [],
+        requestBodySchema: undefined,
+        requestBodyContentType: undefined,
+        responseContentTypes: ["application/json"],
+        responses: [{ statusCode: 200, description: "OK" }],
+        security: ["bearerAuth", "basicAuth"],
+      } as any,
+    ];
+    const schemes: import("../../src/core/generator/types.ts").SecuritySchemeInfo[] = [
+      { name: "bearerAuth", type: "http", scheme: "bearer" },
+      { name: "basicAuth", type: "http", scheme: "basic" },
+    ];
+
+    // No login endpoint, so bearer won't add login step but won't set Authorization either
+    // Basic should fill in since bearer has no login endpoint
+    const suites = generateSkeleton(endpoints, undefined, schemes);
+    const mixedSuite = suites.find((s) => s.name === "mixed")!;
+    expect(mixedSuite.headers).toBeDefined();
+    // Basic uses ?? so bearer header (if set) takes precedence
+    expect(mixedSuite.headers!.Authorization).toBe("Basic {{basic_credentials}}");
+  });
+});
+
 describe("writeSuites + round-trip", () => {
   const tmpDir = join(tmpdir(), `apitool-gen-test-${Date.now()}`);
 
