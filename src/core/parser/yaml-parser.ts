@@ -18,7 +18,9 @@ export async function parseFile(filePath: string): Promise<TestSuite> {
   }
 
   try {
-    return validateSuite(raw);
+    const suite = validateSuite(raw);
+    (suite as any)._source = filePath;
+    return suite;
   } catch (err) {
     throw new Error(`Validation error in ${filePath}: ${(err as Error).message}`);
   }
@@ -34,7 +36,12 @@ export async function parseDirectory(dirPath: string): Promise<TestSuite[]> {
       continue;
     }
     const fullPath = `${dirPath}/${file}`;
-    suites.push(await parseFile(fullPath));
+    try {
+      suites.push(await parseFile(fullPath));
+    } catch {
+      // Skip files that fail to parse (e.g. invalid AI-generated YAML)
+      // so one bad file doesn't block the entire directory
+    }
   }
 
   return suites;

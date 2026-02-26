@@ -2,7 +2,7 @@ import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
 import { generateFromSchema } from "./data-factory.ts";
 import { detectCrudGroups, generateCrudChain, getCrudEndpoints } from "./crud.ts";
 
-interface RawStep {
+export interface RawStep {
   name: string;
   [methodKey: string]: unknown;
   expect: {
@@ -11,7 +11,7 @@ interface RawStep {
   };
 }
 
-interface RawSuite {
+export interface RawSuite {
   name: string;
   base_url?: string;
   headers?: Record<string, string>;
@@ -383,7 +383,7 @@ function sanitizeFileName(name: string): string {
  * We build it manually to ensure the method-as-key shorthand format
  * (e.g., `POST: /users`) that our parser expects.
  */
-function serializeSuite(suite: RawSuite): string {
+export function serializeSuite(suite: RawSuite): string {
   const lines: string[] = [];
   lines.push(`name: ${yamlScalar(suite.name)}`);
   if (suite.base_url) {

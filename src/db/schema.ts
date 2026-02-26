@@ -30,9 +30,9 @@ export function closeDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
-const SCHEMA_SQL = `
+const SCHEMA_V1 = `
   CREATE TABLE IF NOT EXISTS runs (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at    TEXT NOT NULL,
@@ -88,13 +88,37 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_collections_name   ON collections(name);
 `;
 
+const SCHEMA_V2 = `
+  CREATE TABLE IF NOT EXISTS ai_generations (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_id     INTEGER REFERENCES collections(id),
+    prompt            TEXT NOT NULL,
+    model             TEXT NOT NULL,
+    provider          TEXT NOT NULL,
+    generated_yaml    TEXT,
+    output_path       TEXT,
+    status            TEXT NOT NULL DEFAULT 'pending',
+    error_message     TEXT,
+    prompt_tokens     INTEGER,
+    completion_tokens INTEGER,
+    duration_ms       INTEGER,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_gen_collection ON ai_generations(collection_id);
+`;
+
 function runMigrations(db: Database): void {
   const currentVersion = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 
   if (currentVersion >= SCHEMA_VERSION) return;
 
   db.transaction(() => {
-    db.exec(SCHEMA_SQL);
+    if (currentVersion < 1) {
+      db.exec(SCHEMA_V1);
+    }
+    if (currentVersion < 2) {
+      db.exec(SCHEMA_V2);
+    }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();
 }

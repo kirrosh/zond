@@ -43,7 +43,8 @@ apitool/
 │   │   │   ├── skeleton.ts         # Уровень 1: один запрос на эндпоинт
 │   │   │   ├── crud.ts             # Уровень 2: CRUD-цепочки
 │   │   │   ├── testcases.ts        # Уровень 3: Markdown тест-кейсы
-│   │   │   └── data-factory.ts     # Генерация тестовых данных по схеме
+│   │   │   ├── data-factory.ts     # Генерация тестовых данных по схеме
+│   │   │   └── ai/                 # AI-генерация тестов (Ollama/OpenAI/Anthropic)
 │   │   └── reporter/
 │   │       ├── json.ts             # JSON-отчёт
 │   │       ├── junit.ts            # JUnit XML
@@ -56,6 +57,7 @@ apitool/
 │   │   ├── routes/
 │   │   │   ├── dashboard.ts        # GET / — главная с trend chart, коллекциями
 │   │   │   ├── collections.ts      # GET /collections/:id, POST/DELETE /api/collections
+│   │   │   ├── ai-generate.ts     # POST /api/ai-generate, save, GET /api/ai-generation/:id
 │   │   │   ├── runs.ts             # GET /runs (с фильтрами), GET /runs/:id
 │   │   │   ├── explorer.ts         # GET /explorer — дерево API
 │   │   │   └── api.ts              # POST /api/run, POST /api/try, GET /api/export
@@ -93,6 +95,8 @@ apitool/
 
 **Вход:** путь к `.yaml` файлу или директории.
 **Выход:** `TestSuite[]`
+
+При парсинге директории невалидные файлы пропускаются (один сломанный файл не блокирует остальные). Каждый распарсенный suite получает `_source` — путь к исходному файлу (используется для AI badge в WebUI).
 
 Ключевые типы:
 
@@ -380,6 +384,22 @@ CREATE TABLE environments (
   variables     TEXT NOT NULL           -- JSON
 );
 
+CREATE TABLE ai_generations (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  collection_id     INTEGER REFERENCES collections(id),
+  prompt            TEXT NOT NULL,
+  model             TEXT NOT NULL,
+  provider          TEXT NOT NULL,          -- ollama | openai | anthropic | custom
+  generated_yaml    TEXT,                   -- результат генерации (YAML)
+  output_path       TEXT,                   -- путь к сохранённому файлу
+  status            TEXT NOT NULL,          -- success | error
+  error_message     TEXT,
+  prompt_tokens     INTEGER,
+  completion_tokens INTEGER,
+  duration_ms       INTEGER,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Индексы для дашборда
 CREATE INDEX idx_runs_started ON runs(started_at DESC);
 CREATE INDEX idx_runs_collection ON runs(collection_id);
@@ -389,7 +409,7 @@ CREATE INDEX idx_results_name ON results(suite_name, test_name);
 CREATE INDEX idx_collections_name ON collections(name);
 ```
 
-Миграции: массив SQL-строк с номером версии. При старте проверяется `PRAGMA user_version`, применяются недостающие миграции. Текущая версия: **2** (добавлены коллекции).
+Миграции: массив SQL-строк с номером версии. При старте проверяется `PRAGMA user_version`, применяются недостающие миграции. Текущая версия: **3** (добавлена таблица `ai_generations`).
 
 ---
 
@@ -415,6 +435,9 @@ Hono-сервер рендерит HTML, интерактивность чере
 | `POST /api/authorize` | Proxy login для Bearer auth (username/password → token) |
 | `GET /api/export/:runId/junit` | Скачать JUnit XML отчёт для прогона |
 | `GET /api/export/:runId/json` | Скачать JSON отчёт для прогона |
+| `POST /api/ai-generate` | Генерация тестов через AI (Ollama/OpenAI/Anthropic) |
+| `POST /api/ai-generate/save` | Сохранить YAML в файл, записать `output_path` в БД, показать подтверждение |
+| `GET /api/ai-generation/:id` | Просмотр деталей генерации (YAML, метаданные, путь файла) — HTMX fragment |
 
 Dashboard-метрики (SQL-запросы):
 
@@ -576,6 +599,7 @@ tests:
 | M7 (CLI polish) | PARTIAL | — | Базовые команды + `--auth-token`, см. BACKLOG |
 | M8 (Standalone binary) | DONE | `6bd2401` | `bun run build` → `apitool.exe`, CSS embedded, runtime detection |
 | M9 (Collections) | DONE | — | Сущность Collection, группировка runs, CLI `collections`, dashboard redesign |
+| M10 (AI Generate) | DONE | — | AI-генерация тестов, история генераций с View/Reuse, AI badge на сьютах, сохранение с output_path |
 
 ---
 

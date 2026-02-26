@@ -533,3 +533,89 @@ export function linkRunToCollection(runId: number, collectionId: number): void {
   const db = getDb();
   db.prepare("UPDATE runs SET collection_id = ? WHERE id = ?").run(collectionId, runId);
 }
+
+// ──────────────────────────────────────────────
+// AI Generations
+// ──────────────────────────────────────────────
+
+export interface AIGenerationRecord {
+  id: number;
+  collection_id: number | null;
+  prompt: string;
+  model: string;
+  provider: string;
+  generated_yaml: string | null;
+  output_path: string | null;
+  status: string;
+  error_message: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface SaveAIGenerationOpts {
+  collection_id?: number;
+  prompt: string;
+  model: string;
+  provider: string;
+  generated_yaml?: string;
+  output_path?: string;
+  status: string;
+  error_message?: string;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  duration_ms?: number;
+}
+
+export function saveAIGeneration(opts: SaveAIGenerationOpts): number {
+  const db = getDb();
+  const result = db.prepare(`
+    INSERT INTO ai_generations
+      (collection_id, prompt, model, provider, generated_yaml, output_path,
+       status, error_message, prompt_tokens, completion_tokens, duration_ms)
+    VALUES ($collection_id, $prompt, $model, $provider, $generated_yaml, $output_path,
+            $status, $error_message, $prompt_tokens, $completion_tokens, $duration_ms)
+  `).run({
+    $collection_id: opts.collection_id ?? null,
+    $prompt: opts.prompt,
+    $model: opts.model,
+    $provider: opts.provider,
+    $generated_yaml: opts.generated_yaml ?? null,
+    $output_path: opts.output_path ?? null,
+    $status: opts.status,
+    $error_message: opts.error_message ?? null,
+    $prompt_tokens: opts.prompt_tokens ?? null,
+    $completion_tokens: opts.completion_tokens ?? null,
+    $duration_ms: opts.duration_ms ?? null,
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export function listAIGenerations(collectionId: number, limit = 10): AIGenerationRecord[] {
+  const db = getDb();
+  return db.query(`
+    SELECT * FROM ai_generations
+    WHERE collection_id = ?
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(collectionId, limit) as AIGenerationRecord[];
+}
+
+export function getAIGeneration(id: number): AIGenerationRecord | null {
+  const db = getDb();
+  return db.query("SELECT * FROM ai_generations WHERE id = ?").get(id) as AIGenerationRecord | null;
+}
+
+export function updateAIGenerationOutputPath(id: number, outputPath: string): boolean {
+  const db = getDb();
+  const result = db.prepare("UPDATE ai_generations SET output_path = ? WHERE id = ?").run(outputPath, id);
+  return result.changes > 0;
+}
+
+export function findAIGenerationByYaml(collectionId: number, yaml: string): AIGenerationRecord | null {
+  const db = getDb();
+  return db.query(
+    "SELECT * FROM ai_generations WHERE collection_id = ? AND generated_yaml = ? ORDER BY created_at DESC LIMIT 1"
+  ).get(collectionId, yaml) as AIGenerationRecord | null;
+}

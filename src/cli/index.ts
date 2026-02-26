@@ -5,6 +5,7 @@ import { validateCommand } from "./commands/validate.ts";
 import { generateCommand } from "./commands/generate.ts";
 import { serveCommand } from "./commands/serve.ts";
 import { collectionsCommand } from "./commands/collections.ts";
+import { aiGenerateCommand } from "./commands/ai-generate.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
@@ -63,6 +64,7 @@ Usage:
   apitool run <path>       Run API tests
   apitool validate <path>  Validate test files without running
   apitool generate --from <spec>  Generate skeleton tests from OpenAPI spec
+  apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
   apitool collections      List test collections
   apitool serve            Start web dashboard
 
@@ -74,6 +76,15 @@ Options for 'run':
   --no-db              Do not save results to apitool.db
   --db <path>          Path to SQLite database file (default: apitool.db)
   --auth-token <token> Auth token injected as {{auth_token}} variable
+
+Options for 'ai-generate':
+  --from <spec>        Path to OpenAPI spec (required)
+  --prompt <text>      Test scenario description (required)
+  --provider <name>    LLM provider: ollama, openai, anthropic, custom (default: ollama)
+  --model <name>       Model name (default: provider-specific)
+  --api-key <key>      API key (or set APITOOL_AI_KEY env var)
+  --base-url <url>     Provider base URL override
+  --output <dir>       Output directory (default: ./generated/ai/)
 
 Options for 'serve':
   --port <port>        Server port (default: 8080)
@@ -162,6 +173,28 @@ async function main(): Promise<number> {
       }
       const output = typeof flags["output"] === "string" ? flags["output"] : "./generated/";
       return generateCommand({ from, output });
+    }
+
+    case "ai-generate": {
+      const from = flags["from"];
+      if (typeof from !== "string") {
+        printError("Missing --from <spec>. Usage: apitool ai-generate --from <spec> --prompt \"...\"");
+        return 2;
+      }
+      const prompt = flags["prompt"];
+      if (typeof prompt !== "string") {
+        printError("Missing --prompt <text>. Usage: apitool ai-generate --from <spec> --prompt \"...\"");
+        return 2;
+      }
+      return aiGenerateCommand({
+        from,
+        prompt,
+        provider: typeof flags["provider"] === "string" ? flags["provider"] : "ollama",
+        model: typeof flags["model"] === "string" ? flags["model"] : undefined,
+        apiKey: typeof flags["api-key"] === "string" ? flags["api-key"] : undefined,
+        baseUrl: typeof flags["base-url"] === "string" ? flags["base-url"] : undefined,
+        output: typeof flags["output"] === "string" ? flags["output"] : undefined,
+      });
     }
 
     case "collections": {
