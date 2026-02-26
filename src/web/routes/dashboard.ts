@@ -6,8 +6,10 @@ import {
   getFlakyTests,
   listRuns,
   listCollections,
+  getPassRateTrend,
 } from "../../db/queries.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
+import { renderTrendChart } from "../views/trend-chart.ts";
 
 const dashboard = new Hono();
 
@@ -121,6 +123,7 @@ function metricsHtml(): string {
       </div>
     </div>`;
 
+  const trendChart = renderTrendChart(getPassRateTrend(30));
   const collectionsSection = collectionsHtml();
   const addForm = addCollectionForm();
 
@@ -183,7 +186,7 @@ function metricsHtml(): string {
       <tbody>${flakyRows || "<tr><td colspan=\"3\">No flaky tests detected</td></tr>"}</tbody>
     </table>`;
 
-  return cards + collectionsSection + addForm + recentTable + slowTable + flakyTable;
+  return cards + trendChart + collectionsSection + addForm + recentTable + slowTable + flakyTable;
 }
 
 dashboard.get("/", (c) => {

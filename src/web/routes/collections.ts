@@ -3,6 +3,7 @@ import { layout, escapeHtml } from "../views/layout.ts";
 import {
   getCollectionById,
   getCollectionStats,
+  getCollectionPassRateTrend,
   listRunsByCollection,
   countRunsByCollection,
   createCollection,
@@ -10,6 +11,7 @@ import {
   normalizePath,
 } from "../../db/queries.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
+import { renderTrendChart } from "../views/trend-chart.ts";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import type { TestSuite } from "../../core/parser/types.ts";
 
@@ -179,6 +181,8 @@ collections.get("/collections/:id", async (c) => {
         <div class="card-value">${formatDuration(stats.avgDuration)}</div>
       </div>
     </div>
+
+    ${renderTrendChart(getCollectionPassRateTrend(id))}
 
     ${collection.openapi_spec ? `<p style="color:var(--text-dim);font-size:0.85rem;">OpenAPI: ${escapeHtml(collection.openapi_spec)}</p>` : ""}
 

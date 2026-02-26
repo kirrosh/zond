@@ -157,8 +157,60 @@ export function getRunById(runId: number): RunRecord | null {
   return db.query("SELECT * FROM runs WHERE id = ?").get(runId) as RunRecord | null;
 }
 
-export function listRuns(limit = 20, offset = 0): RunSummary[] {
+export interface RunFilters {
+  status?: string;
+  environment?: string;
+  date_from?: string;
+  date_to?: string;
+  test_name?: string;
+}
+
+function buildRunFilterSQL(filters: RunFilters): { where: string; params: unknown[] } {
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters.status === "has_failures") {
+    clauses.push("r.failed > 0");
+  } else if (filters.status === "all_passed") {
+    clauses.push("r.failed = 0 AND r.total > 0");
+  }
+
+  if (filters.environment) {
+    clauses.push("r.environment = ?");
+    params.push(filters.environment);
+  }
+
+  if (filters.date_from) {
+    clauses.push("r.started_at >= ?");
+    params.push(filters.date_from);
+  }
+
+  if (filters.date_to) {
+    clauses.push("r.started_at <= ?");
+    params.push(filters.date_to + "T23:59:59");
+  }
+
+  if (filters.test_name) {
+    clauses.push("r.id IN (SELECT DISTINCT run_id FROM results WHERE test_name LIKE ?)");
+    params.push(`%${filters.test_name}%`);
+  }
+
+  const where = clauses.length > 0 ? "WHERE " + clauses.join(" AND ") : "";
+  return { where, params };
+}
+
+export function listRuns(limit = 20, offset = 0, filters?: RunFilters): RunSummary[] {
   const db = getDb();
+  if (filters && Object.values(filters).some(Boolean)) {
+    const { where, params } = buildRunFilterSQL(filters);
+    return db.query(`
+      SELECT r.id, r.started_at, r.finished_at, r.total, r.passed, r.failed, r.skipped, r.environment, r.duration_ms, r.collection_id
+      FROM runs r
+      ${where}
+      ORDER BY r.started_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset) as RunSummary[];
+  }
   return db.query(`
     SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id
     FROM runs
@@ -336,10 +388,21 @@ export function getFlakyTests(runsBack = 20, limit = 5): FlakyTest[] {
   `).all(runsBack, limit) as FlakyTest[];
 }
 
-export function countRuns(): number {
+export function countRuns(filters?: RunFilters): number {
   const db = getDb();
+  if (filters && Object.values(filters).some(Boolean)) {
+    const { where, params } = buildRunFilterSQL(filters);
+    const row = db.query(`SELECT COUNT(*) AS cnt FROM runs r ${where}`).get(...params) as { cnt: number };
+    return row.cnt;
+  }
   const row = db.query("SELECT COUNT(*) AS cnt FROM runs").get() as { cnt: number };
   return row.cnt;
+}
+
+export function getDistinctEnvironments(): string[] {
+  const db = getDb();
+  const rows = db.query("SELECT DISTINCT environment FROM runs WHERE environment IS NOT NULL ORDER BY environment").all() as { environment: string }[];
+  return rows.map((r) => r.environment);
 }
 
 // ──────────────────────────────────────────────
@@ -430,6 +493,18 @@ export function listRunsByCollection(collectionId: number, limit = 20, offset = 
     ORDER BY started_at DESC
     LIMIT ? OFFSET ?
   `).all(collectionId, limit, offset) as RunSummary[];
+}
+
+export function getCollectionPassRateTrend(collectionId: number, limit = 30): PassRateTrendPoint[] {
+  const db = getDb();
+  return db.query(`
+    SELECT id AS run_id, started_at,
+      CASE WHEN total > 0 THEN ROUND(passed * 100.0 / total, 1) ELSE 0 END AS pass_rate
+    FROM runs
+    WHERE collection_id = ? AND finished_at IS NOT NULL
+    ORDER BY started_at DESC
+    LIMIT ?
+  `).all(collectionId, limit) as PassRateTrendPoint[];
 }
 
 export function countRunsByCollection(collectionId: number): number {

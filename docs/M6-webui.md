@@ -39,15 +39,17 @@ apitool serve [options]
 
 | Route | Описание |
 |-------|----------|
-| `GET /` | Dashboard: карточки метрик, последние прогоны, медленные/flaky тесты |
+| `GET /` | Dashboard: карточки метрик, SVG trend chart, коллекции, последние прогоны, медленные/flaky тесты |
 | `GET /metrics` | HTML-фрагмент метрик (для HTMX auto-refresh) |
-| `GET /runs` | Список прогонов с пагинацией (20 на страницу) |
-| `GET /runs/:id` | Детали прогона: шаги по suite, expand failed шагов |
+| `GET /runs` | Список прогонов с фильтрацией (статус, environment, дата, поиск) и пагинацией (20 на страницу) |
+| `GET /runs/:id` | Детали прогона: шаги по suite, expand failed, кнопки Export JUnit XML / JSON |
 | `GET /explorer` | Дерево API из OpenAPI спеки, multi-auth panel, "Try it" формы |
 | `GET /static/style.css` | CSS стили |
 | `POST /api/run` | Запуск тестов из WebUI |
 | `POST /api/try` | Единичный HTTP-запрос из Explorer (с auth injection) |
 | `POST /api/authorize` | Proxy login для Bearer auth |
+| `GET /api/export/:runId/junit` | Скачать JUnit XML отчёт (Content-Disposition: attachment) |
+| `GET /api/export/:runId/json` | Скачать JSON отчёт (Content-Disposition: attachment) |
 
 ---
 
@@ -58,6 +60,17 @@ apitool serve [options]
 - **Total Tests** — сумма всех тестов по всем прогонам
 - **Pass Rate** — `SUM(passed) * 100 / SUM(total)` (%)
 - **Avg Duration** — среднее время прогона
+
+**Pass Rate Trend Chart** (между карточками и коллекциями):
+- Inline SVG (viewBox 700x200, width=100%), area fill + polyline
+- Grid lines at 0/25/50/75/100%, Y-axis labels
+- Circle dots с `<title>` tooltips (run ID, pass rate, date)
+- X-axis: 3 date labels (first, middle, last)
+- Использует CSS variables — dark mode автоматически
+- Guard: < 2 data points → "Not enough data" текст
+- Shared модуль `src/web/views/trend-chart.ts` — переиспользуется на dashboard и collection page
+
+**Collection page** (`/collections/:id`) также показывает собственный тренд-график (только прогоны этой коллекции) между метриками и секцией Test Suites.
 
 Таблицы:
 - **Recent Runs** (последние 5) — ID, дата, total/pass/fail/skip, duration, badge
@@ -71,10 +84,13 @@ Auto-refresh: `hx-trigger="every 10s"` на блоке метрик.
 | Функция | Описание |
 |---------|----------|
 | `getDashboardStats()` → `DashboardStats` | Агрегаты: totalRuns, totalTests, overallPassRate, avgDuration |
-| `getPassRateTrend(limit)` → `PassRateTrendPoint[]` | Pass rate по последним N прогонам |
+| `getPassRateTrend(limit)` → `PassRateTrendPoint[]` | Pass rate по последним N прогонам (глобальный) |
+| `getCollectionPassRateTrend(collectionId, limit)` → `PassRateTrendPoint[]` | Pass rate по прогонам конкретной коллекции |
 | `getSlowestTests(limit)` → `SlowestTest[]` | AVG(duration_ms) GROUP BY suite+test, ORDER BY DESC |
 | `getFlakyTests(runsBack, limit)` → `FlakyTest[]` | Тесты с COUNT(DISTINCT status) > 1 |
-| `countRuns()` → `number` | Общее количество записей в runs |
+| `countRuns(filters?)` → `number` | Количество записей в runs (с фильтрами) |
+| `getDistinctEnvironments()` → `string[]` | Уникальные environment из runs |
+| `buildRunFilterSQL(filters)` → `{where, params}` | WHERE clause builder для RunFilters |
 
 ---
 
@@ -82,13 +98,28 @@ Auto-refresh: `hx-trigger="every 10s"` на блоке метрик.
 
 ### Список прогонов
 
+**Filter bar** (HTMX form, `hx-push-url`):
+- Status: `<select>` — All / Has Failures / All Passed
+- Environment: `<select>` из `getDistinctEnvironments()`
+- Date from/to: `<input type="date">`
+- Test name: `<input type="text">` (LIKE search)
+- Кнопки: Filter, Clear
+
 Таблица с колонками: ID | Date | Total | Pass | Fail | Skip | Duration | Status badge.
 
-Пагинация: `?page=N`, 20 записей на страницу. HTMX `hx-get` + `hx-push-url` для SPA-навигации.
+Пагинация: `?page=N`, 20 записей на страницу. Фильтры сохраняются в URL query params через `buildQueryString()`. HTMX `hx-get` + `hx-push-url` для SPA-навигации.
+
+DB-функции:
+- `RunFilters` interface: `{ status?, environment?, date_from?, date_to?, test_name? }`
+- `buildRunFilterSQL(filters)` — WHERE clause с parameterized placeholders
+- `listRuns(limit, offset, filters?)` — backward-compatible optional param
+- `countRuns(filters?)` — backward-compatible
+- `getDistinctEnvironments()` — `SELECT DISTINCT environment FROM runs`
 
 ### Детали прогона
 
 - Шапка: ID, дата, environment, duration, totals (pass/fail/skip)
+- **Export buttons**: "Export JUnit XML" / "Export JSON" — plain `<a download>` links to `/api/export/:runId/...`
 - Шаги сгруппированы по suite
 - Каждый шаг: badge (✓/✗/○), имя, duration
 - Клик на failed/error шаг раскрывает панель с:
@@ -209,6 +240,17 @@ Proxy для Bearer auth через login endpoint.
 - Статус с цветом (2xx=зелёный, 4xx=оранжевый, 5xx=красный)
 - Headers (в `<details>`)
 - Body (pretty-printed JSON если возможно)
+
+---
+
+### Export (`GET /api/export/:runId/junit`, `GET /api/export/:runId/json`)
+
+Скачивание результатов прогона в формате JUnit XML или JSON.
+
+**Реализация:**
+- `reconstructResults(runId)` — helper в `api.ts`, пересобирает `TestRunResult[]` из `getRunById()` + `getResultsByRunId()`, группирует по `suite_name`, маппит `StoredStepResult` → `StepResult`
+- `generateJunitXml(results)` — извлечена из `junitReporter.report()` в `junit.ts` (CLI поведение не изменилось)
+- Response: `Content-Disposition: attachment; filename="run-N-*.ext"`, соответствующий Content-Type
 
 ---
 

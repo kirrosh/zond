@@ -402,21 +402,33 @@ Hono-сервер рендерит HTML, интерактивность чере
 |-------|----------|
 | `GET /` | Dashboard: глобальные метрики, grid коллекций, форма добавления, recent runs, slowest/flaky |
 | `GET /collections/:id` | Детали коллекции: метрики, таблица прогонов с пагинацией, кнопка Delete |
-| `GET /runs` | Список прогонов (таблица с пагинацией) |
-| `GET /runs/:id` | Детали прогона: каждый тест → запрос/ответ/ассерты |
+| `GET /runs` | Список прогонов с фильтрацией (статус, environment, дата, поиск по имени теста) и пагинацией |
+| `GET /runs/:id` | Детали прогона: каждый тест → запрос/ответ/ассерты + кнопки Export (JUnit XML, JSON) |
 | `GET /explorer` | Дерево API из OpenAPI, параметры, описания, multi-auth panel |
 | `POST /api/collections` | Создать коллекцию из формы на дашборде |
 | `DELETE /api/collections/:id` | Удалить коллекцию (runs unlinked) |
 | `POST /api/run` | Запустить прогон из WebUI (HTMX), авто-привязка к коллекции |
 | `POST /api/try` | Отправить единичный запрос из Explorer (HTMX, с auth injection) |
 | `POST /api/authorize` | Proxy login для Bearer auth (username/password → token) |
+| `GET /api/export/:runId/junit` | Скачать JUnit XML отчёт для прогона |
+| `GET /api/export/:runId/json` | Скачать JSON отчёт для прогона |
 
 Dashboard-метрики (SQL-запросы):
 
-- **Pass rate trend:** последние 30 прогонов, `passed / total * 100`
+- **Pass rate trend:** последние 30 прогонов, `passed / total * 100` — SVG line chart с area fill
 - **Flaky-тесты:** тесты с разным статусом в последних N прогонах
 - **Средняя длительность:** `AVG(duration_ms)` по тестам
 - **Самые медленные:** `ORDER BY duration_ms DESC LIMIT 5`
+
+Фильтрация прогонов (`GET /runs`):
+- **Status:** All / Has Failures / All Passed
+- **Environment:** dropdown из `SELECT DISTINCT environment FROM runs`
+- **Date range:** from / to
+- **Test name:** поиск по имени теста (LIKE)
+
+Экспорт результатов (`/runs/:id`):
+- **JUnit XML** — `GET /api/export/:runId/junit` (Content-Disposition: attachment)
+- **JSON** — `GET /api/export/:runId/json` (Content-Disposition: attachment)
 
 Статика: HTMX (CDN или вкомпилирован), CSS (один файл, без фреймворков).
 
@@ -557,7 +569,7 @@ tests:
 | M3 (Generator) | DONE | `e3d94d8` | `apitool generate --from api.yaml` — skeleton тесты |
 | M4 (Reporter) + M7 (CLI basic) | DONE | `e179180` | console/json/junit отчёты, CLI команды |
 | M5 (Storage/SQLite) | DONE | `2245e79` | История прогонов в apitool.db |
-| M6 (WebUI) | DONE | `94a58e4` | `apitool serve --port 8080 --openapi <spec>`, multi-auth panel |
+| M6 (WebUI) | DONE | `94a58e4` | `apitool serve --port 8080 --openapi <spec>`, multi-auth panel, trend chart, filters, export |
 | M7 (CLI polish) | PARTIAL | — | Базовые команды + `--auth-token`, см. BACKLOG |
 | M8 (Standalone binary) | DONE | `6bd2401` | `bun run build` → `apitool.exe`, CSS embedded, runtime detection |
 | M9 (Collections) | DONE | — | Сущность Collection, группировка runs, CLI `collections`, dashboard redesign |
