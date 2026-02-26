@@ -1,5 +1,5 @@
 import { resolve, basename } from "path";
-import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSkeleton, writeSuites } from "../../core/generator/index.ts";
+import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSuites, writeSuites } from "../../core/generator/index.ts";
 import { printError, printSuccess } from "../output.ts";
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByTestPath, createCollection, normalizePath } from "../../db/queries.ts";
@@ -33,7 +33,7 @@ export async function generateCommand(options: GenerateCommandOptions): Promise<
       console.log(`Found ${securitySchemes.length} security scheme(s): ${securitySchemes.map((s) => s.name).join(", ")}`);
     }
 
-    const suites = generateSkeleton(endpoints, baseUrl, securitySchemes);
+    const suites = generateSuites(endpoints, baseUrl, securitySchemes);
     console.log(`Generated ${suites.length} test suite(s)`);
 
     const files = await writeSuites(suites, options.output);

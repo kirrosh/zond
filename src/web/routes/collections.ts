@@ -10,6 +10,8 @@ import {
   normalizePath,
 } from "../../db/queries.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
+import { parse } from "../../core/parser/yaml-parser.ts";
+import type { TestSuite } from "../../core/parser/types.ts";
 
 const collections = new Hono();
 
@@ -19,8 +21,86 @@ function statusBadge(total: number, passed: number, failed: number): string {
   return `<span class="badge badge-pass">pass</span>`;
 }
 
+async function loadSuitesHtml(testPath: string): Promise<string> {
+  try {
+    const suites = await parse(testPath);
+    return renderSuites(suites);
+  } catch {
+    return `<p style="color:var(--text-dim)">Could not load test files from path.</p>`;
+  }
+}
+
+function methodBadge(method: string): string {
+  const m = method.toLowerCase();
+  return `<span class="badge-method method-${m}">${method}</span>`;
+}
+
+function renderSuites(suites: TestSuite[]): string {
+  if (suites.length === 0) return `<p style="color:var(--text-dim)">No test files found.</p>`;
+
+  return suites.map(suite => {
+    // Detect captures in this suite
+    const captureVars = new Map<string, string>(); // varName → step name
+    for (const step of suite.tests) {
+      if (step.expect.body) {
+        for (const [field, rule] of Object.entries(step.expect.body)) {
+          if (rule.capture) captureVars.set(rule.capture, step.name);
+        }
+      }
+    }
+    const isChain = captureVars.size > 0;
+
+    const stepsHtml = suite.tests.map(step => {
+      // Find captures this step produces
+      const produces: string[] = [];
+      if (step.expect.body) {
+        for (const [, rule] of Object.entries(step.expect.body)) {
+          if (rule.capture) produces.push(rule.capture);
+        }
+      }
+
+      // Find captured vars this step consumes ({{var}} in path)
+      const consumes: string[] = [];
+      const varRefs = step.path.match(/\{\{(\w+)\}\}/g) ?? [];
+      for (const ref of varRefs) {
+        const varName = ref.slice(2, -2);
+        if (captureVars.has(varName)) consumes.push(varName);
+      }
+
+      const captureHtml = produces.map(v =>
+        `<span class="capture-badge">capture: ${escapeHtml(v)}</span>`
+      ).join(" ");
+
+      const consumeHtml = consumes.map(v =>
+        `<span class="capture-badge" style="opacity:0.7">uses: ${escapeHtml(v)}</span>`
+      ).join(" ");
+
+      const chainedClass = isChain ? " chained" : "";
+
+      return `<div class="step-row${chainedClass}">
+        <div>${methodBadge(step.method)}</div>
+        <div class="step-name">
+          ${escapeHtml(step.name)}
+          <span class="endpoint-path" style="margin-left:0.5rem">${escapeHtml(step.path)}</span>
+          ${captureHtml}${consumeHtml}
+        </div>
+        ${step.expect.status ? `<div class="step-duration" style="font-family:monospace">expect ${step.expect.status}</div>` : ""}
+      </div>`;
+    }).join("");
+
+    const chainClass = isChain ? " chain-suite" : "";
+
+    return `<div class="suite-section${chainClass}">
+      <h3>${escapeHtml(suite.name)}${isChain ? ' <span class="capture-badge" style="font-weight:400">chain</span>' : ""}</h3>
+      ${isChain ? '<div class="chain-connector">' : ""}
+      ${stepsHtml}
+      ${isChain ? "</div>" : ""}
+    </div>`;
+  }).join("");
+}
+
 // GET /collections/:id — collection detail page
-collections.get("/collections/:id", (c) => {
+collections.get("/collections/:id", async (c) => {
   const id = parseInt(c.req.param("id"), 10);
   const collection = getCollectionById(id);
   if (!collection) {
@@ -68,11 +148,17 @@ collections.get("/collections/:id", (c) => {
     <h1>${escapeHtml(collection.name)}</h1>
     <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
       <a class="btn btn-sm" href="/" >Back</a>
+      <button class="btn btn-sm btn-run"
+        hx-post="/api/run"
+        hx-vals='${JSON.stringify({ path: collection.test_path })}'
+        hx-indicator="#run-spinner-${id}"
+        hx-disabled-elt="this">Run Tests</button>
       ${explorerLink}
       <button class="btn btn-danger btn-sm"
         hx-delete="/api/collections/${id}"
         hx-confirm="Delete collection '${escapeHtml(collection.name)}'? Runs will be unlinked."
         hx-target="body">Delete</button>
+      <span id="run-spinner-${id}" class="htmx-indicator" style="margin-left:0.5rem;color:var(--text-dim);">Running...</span>
     </div>
 
     <div class="cards">
@@ -95,6 +181,9 @@ collections.get("/collections/:id", (c) => {
     </div>
 
     ${collection.openapi_spec ? `<p style="color:var(--text-dim);font-size:0.85rem;">OpenAPI: ${escapeHtml(collection.openapi_spec)}</p>` : ""}
+
+    <div class="section-title">Test Suites</div>
+    <div id="suites-section">${await loadSuitesHtml(collection.test_path)}</div>
 
     <div class="section-title">Runs</div>
     <table>

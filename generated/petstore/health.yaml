@@ -1,0 +1,14 @@
+name: health
+base_url: "http://localhost:3000"
+tests:
+  - name: Health check endpoint
+    GET: /health
+    headers:
+      Accept: application/json
+    expect:
+      status: 200
+      body:
+        status:
+          type: string
+        uptime:
+          type: number

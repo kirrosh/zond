@@ -113,12 +113,43 @@ runs.get("/runs/:id", (c) => {
       </div>
     </div>`;
 
+  // Build a map of which variables are captured by which step (for flow visualization)
+  const captureSourceMap = new Map<string, string>(); // varName → step test_name
+
+  // First pass: collect all captures
+  for (const [, steps] of suites) {
+    for (const step of steps) {
+      if (step.captures && typeof step.captures === "object") {
+        for (const varName of Object.keys(step.captures)) {
+          captureSourceMap.set(varName, step.test_name);
+        }
+      }
+    }
+  }
+
   let suitesHtml = "";
   for (const [suiteName, steps] of suites) {
+    // Detect if this suite has any captures (is a chain)
+    const suiteHasCaptures = steps.some(s =>
+      s.captures && typeof s.captures === "object" && Object.keys(s.captures).length > 0,
+    );
+    const isChainSuite = suiteHasCaptures || suiteName.endsWith("CRUD");
+
     const stepsHtml = steps
       .map((step, i) => {
         const detailId = `detail-${id}-${i}`;
         const hasFailed = step.status === "fail" || step.status === "error";
+
+        // Capture badges
+        let capturesHtml = "";
+        if (step.captures && typeof step.captures === "object") {
+          const captureEntries = Object.entries(step.captures);
+          if (captureEntries.length > 0) {
+            capturesHtml = captureEntries.map(([k, v]) =>
+              `<span class="capture-badge">${escapeHtml(k)} = ${escapeHtml(String(v))}</span>`,
+            ).join(" ");
+          }
+        }
 
         let assertionsHtml = "";
         if (step.assertions.length > 0) {
@@ -141,32 +172,52 @@ runs.get("/runs/:id", (c) => {
           errorHtml = `<div><strong>Error:</strong> ${escapeHtml(step.error_message)}</div>`;
         }
 
-        const detailPanel = hasFailed
+        // Skip reason enhancement for chained steps
+        let skipReasonHtml = "";
+        if (step.status === "skip" && step.error_message) {
+          const match = step.error_message.match(/Depends on missing capture: (\w+)/);
+          if (match) {
+            const depVar = match[1]!;
+            const sourceStep = captureSourceMap.get(depVar);
+            skipReasonHtml = sourceStep
+              ? `<div class="skip-reason">Skipped: depends on <code>${escapeHtml(depVar)}</code> (from step "${escapeHtml(sourceStep)}")</div>`
+              : `<div class="skip-reason">Skipped: depends on <code>${escapeHtml(depVar)}</code></div>`;
+          }
+        }
+
+        const detailPanel = (hasFailed || skipReasonHtml)
           ? `<div class="detail-panel" id="${detailId}" style="display:none">
               ${requestHtml}
               ${errorHtml}
+              ${skipReasonHtml}
               ${assertionsHtml}
             </div>`
           : "";
 
-        const toggle = hasFailed
+        const toggle = (hasFailed || skipReasonHtml)
           ? `onclick="var d=document.getElementById('${detailId}');d.style.display=d.style.display==='none'?'block':'none'"`
           : "";
 
+        const chainedClass = isChainSuite ? " chained" : "";
+
         return `
-          <div class="step-row" ${toggle}>
+          <div class="step-row${chainedClass}" ${toggle}>
             <div>${stepStatusBadge(step.status)}</div>
-            <div class="step-name">${escapeHtml(step.test_name)}</div>
+            <div class="step-name">${escapeHtml(step.test_name)}${capturesHtml ? ` ${capturesHtml}` : ""}</div>
             <div class="step-duration">${formatDuration(step.duration_ms)}</div>
           </div>
           ${detailPanel}`;
       })
       .join("");
 
+    const chainClass = isChainSuite ? " chain-suite" : "";
+
     suitesHtml += `
-      <div class="suite-section">
+      <div class="suite-section${chainClass}">
         <h2>${escapeHtml(suiteName)}</h2>
+        ${isChainSuite ? '<div class="chain-connector">' : ""}
         ${stepsHtml}
+        ${isChainSuite ? "</div>" : ""}
       </div>`;
   }
 

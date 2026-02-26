@@ -249,6 +249,7 @@ h2 { font-size: 1.25rem; margin: 1.5rem 0 0.5rem; }
 .collection-name { font-weight: 600; font-size: 1rem; }
 .collection-card-stats { display: flex; gap: 1rem; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.25rem; }
 .collection-card-date { font-size: 0.8rem; color: var(--text-dim); }
+.collection-card-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
 
 /* Add collection form */
 .add-collection-form { margin: 1rem 0; }
@@ -256,6 +257,60 @@ h2 { font-size: 1.25rem; margin: 1.5rem 0 0.5rem; }
 /* Danger button */
 .btn-danger { background: var(--fail); border-color: var(--fail); color: #fff; }
 .btn-danger:hover { background: #b91c1c; border-color: #b91c1c; }
+
+/* Run button */
+.btn-run { background: var(--pass); border-color: var(--pass); }
+.btn-run:hover { background: #15803d; border-color: #15803d; }
+.btn-run[disabled] { opacity: 0.6; cursor: wait; }
+
+/* Capture badges */
+.capture-badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-family: monospace;
+  background: #dbeafe;
+  color: #1e40af;
+  margin-left: 0.25rem;
+}
+@media (prefers-color-scheme: dark) {
+  .capture-badge { background: #1e3a5f; color: #93c5fd; }
+}
+
+/* Chain connector — vertical line linking chained steps */
+.chain-connector {
+  border-left: 2px solid var(--accent);
+  margin-left: 0.95rem;
+  padding-left: 0.75rem;
+}
+
+/* Chained step rows get a dot on the connector line */
+.step-row.chained { position: relative; }
+.step-row.chained::before {
+  content: "";
+  position: absolute;
+  left: -0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Skip reason */
+.skip-reason {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  padding: 0.25rem 0;
+}
+.skip-reason code {
+  background: var(--bg-secondary);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
 
 /* Htmx indicator */
 .htmx-indicator { display: none; }

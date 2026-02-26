@@ -96,6 +96,7 @@ export interface StoredStepResult {
   response_status: number | null;
   error_message: string | null;
   assertions: import("../core/runner/types.ts").AssertionResult[];
+  captures: Record<string, unknown>;
 }
 
 // ──────────────────────────────────────────────
@@ -185,11 +186,11 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
     INSERT INTO results
       (run_id, suite_name, test_name, status, duration_ms,
        request_method, request_url, request_body,
-       response_status, response_body, error_message, assertions)
+       response_status, response_body, error_message, assertions, captures)
     VALUES
       ($run_id, $suite_name, $test_name, $status, $duration_ms,
        $request_method, $request_url, $request_body,
-       $response_status, $response_body, $error_message, $assertions)
+       $response_status, $response_body, $error_message, $assertions, $captures)
   `);
 
   db.transaction(() => {
@@ -209,6 +210,7 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
           $response_body: keepBody ? (step.response?.body ?? null) : null,
           $error_message: step.error ?? null,
           $assertions: step.assertions.length > 0 ? JSON.stringify(step.assertions) : null,
+          $captures: Object.keys(step.captures).length > 0 ? JSON.stringify(step.captures) : null,
         });
       }
     }
@@ -218,11 +220,12 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
 export function getResultsByRunId(runId: number): StoredStepResult[] {
   const db = getDb();
   const rows = db.query("SELECT * FROM results WHERE run_id = ? ORDER BY id").all(runId) as Array<
-    Omit<StoredStepResult, "assertions"> & { assertions: string | null }
+    Omit<StoredStepResult, "assertions" | "captures"> & { assertions: string | null; captures: string | null }
   >;
   return rows.map((row) => ({
     ...row,
     assertions: row.assertions ? JSON.parse(row.assertions) : [],
+    captures: row.captures ? JSON.parse(row.captures) : {},
   }));
 }
 
