@@ -1,7 +1,7 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { existsSync, unlinkSync } from "node:fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { existsSync, unlinkSync } from "fs";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { validateCommand } from "../../src/cli/commands/validate.ts";
 import { closeDb } from "../../src/db/schema.ts";

@@ -527,13 +527,15 @@ tests:
 
 ## Roadmap (MVP)
 
-| Неделя | Задача | Результат |
-|--------|--------|-----------|
-| 1–2 | M1 (Parser) + M2 (Runner) | `apitool run test.yaml` работает |
-| 3 | M4 (Reporter) + M5 (Storage) | Отчёты + сохранение истории |
-| 4–5 | M3 (Generator) | `apitool generate --from api.yaml` |
-| 6–7 | M6 (WebUI) + M7 (CLI polish) | Веб-дашборд, все CLI-команды |
-| 8 | Сборка + публикация | `bun compile`, GitHub Release, README |
+| Модуль | Статус | Коммит | Результат |
+|--------|--------|--------|-----------|
+| M1 (Parser) + M2 (Runner) | DONE | `4e270ab` | `apitool run test.yaml` работает |
+| M3 (Generator) | DONE | `e3d94d8` | `apitool generate --from api.yaml` — skeleton тесты |
+| M4 (Reporter) + M7 (CLI basic) | DONE | `e179180` | console/json/junit отчёты, CLI команды |
+| M5 (Storage/SQLite) | DONE | `2245e79` | История прогонов в apitool.db |
+| M6 (WebUI) | DONE | `94a58e4` | `apitool serve --port 8080 --openapi <spec>` |
+| M7 (CLI polish) | PARTIAL | — | Базовые команды готовы, см. BACKLOG |
+| M8 (Сборка + публикация) | TODO | — | `bun compile`, GitHub Release, README |
 
 ---
 

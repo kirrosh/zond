@@ -1,4 +1,4 @@
-import { dirname } from "node:path";
+import { dirname } from "path";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
 import { runSuite } from "../../core/runner/executor.ts";

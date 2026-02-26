@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { unlinkSync } from "node:fs";
+import { tmpdir } from "os";
+import { join } from "path";
+import { unlinkSync } from "fs";
 import { getDb, closeDb } from "../../src/db/schema.ts";
 import {
   createRun,
