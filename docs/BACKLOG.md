@@ -6,11 +6,19 @@
 
 ## M3: Generator — незавершённые уровни
 
-### Уровень 2: CRUD-цепочки (`src/core/generator/crud.ts`)
+### Уровень 2: CRUD-цепочки (`src/core/generator/crud.ts`) — DONE
 
 - **Что:** Автоматическое распознавание CRUD-паттернов (POST + GET + PUT + DELETE на одном ресурсе)
 - **Зачем:** Генерация связанных тестов с captures (POST создаёт → GET проверяет → DELETE удаляет)
-- **Статус:** Файл `crud.ts` указан в APITOOL.md, но не реализован. Skeleton-уровень (Level 1) работает, включая auth-aware генерацию (bearer login, API Key, Basic Auth).
+- **Реализовано:**
+  - `detectCrudGroups()` — группировка эндпоинтов по ресурсу, определение idParam
+  - `generateCrudChain()` — POST→GET→PUT→DELETE цепочка с captures
+  - `generateSuites()` — оркестратор: CRUD-цепочки + skeleton для остальных
+  - Captures persistence в БД (колонка `results.captures`)
+  - UI: capture badges, chain connector, flow visualization на странице коллекции и run detail
+  - Кнопка Run на dashboard и collection page
+  - Explorer автоматически подхватывает OpenAPI spec из коллекции в БД
+  - Integration тест: полная цепочка login→create→get→update→delete→verify против live сервера
 
 ### Уровень 3: Текстовые тест-кейсы (`src/core/generator/testcases.ts`)
 
@@ -114,7 +122,7 @@
 
 1. ~~**M8: Сборка** — `bun compile`, проверить бинарник~~ DONE
 2. ~~**M9: Collections** — группировка тестов по API, dashboard redesign~~ DONE
-3. **Generator Level 2 (CRUD)** — самая ценная фича генератора
+3. ~~**Generator Level 2 (CRUD)** — самая ценная фича генератора~~ DONE
 4. **WebUI improvements** — график, фильтры, export
 5. **Generator Level 3 + describe** — тест-кейсы в Markdown
 6. **CLI init** — удобство для новых пользователей

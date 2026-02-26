@@ -1,0 +1,16 @@
+name: auth
+base_url: "http://localhost:3000"
+tests:
+  - name: Authenticate and get a JWT token
+    POST: /auth/login
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    json:
+      username: "{{$randomString}}"
+      password: "{{$randomString}}"
+    expect:
+      status: 200
+      body:
+        token:
+          type: string

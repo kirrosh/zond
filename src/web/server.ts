@@ -52,6 +52,19 @@ export async function startServer(options: ServerOptions = {}): Promise<void> {
   let securitySchemes: import("../core/generator/types.ts").SecuritySchemeInfo[] = [];
   let loginPath: string | null = null;
   let specPath: string | null = options.openapiSpec ?? null;
+
+  // Auto-detect spec from collections if not provided
+  if (!specPath) {
+    try {
+      const { listCollections } = await import("../db/queries.ts");
+      const cols = listCollections();
+      const withSpec = cols.find((c) => c.openapi_spec);
+      if (withSpec?.openapi_spec) {
+        specPath = withSpec.openapi_spec;
+      }
+    } catch { /* DB not critical */ }
+  }
+
   if (specPath) {
     try {
       const { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } = await import("../core/generator/openapi-reader.ts");

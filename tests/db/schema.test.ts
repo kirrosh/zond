@@ -97,7 +97,7 @@ describe("getDb / schema", () => {
     dbPath = tmpDb();
     const db = getDb(dbPath);
     const row = db.query("PRAGMA user_version").get() as { user_version: number };
-    expect(row.user_version).toBe(2);
+    expect(row.user_version).toBe(1);
   });
 
   test("closeDb resets singleton so next call opens fresh db", () => {

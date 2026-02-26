@@ -29,6 +29,18 @@ export interface SecuritySchemeInfo {
   apiKeyName?: string;
 }
 
+export interface CrudGroup {
+  resource: string;
+  basePath: string;
+  itemPath: string;
+  idParam: string;
+  create?: EndpointInfo;
+  list?: EndpointInfo;
+  read?: EndpointInfo;
+  update?: EndpointInfo;
+  delete?: EndpointInfo;
+}
+
 export interface GenerateOptions {
   specPath: string;
   outputDir: string;

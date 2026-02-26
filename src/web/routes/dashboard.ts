@@ -41,17 +41,28 @@ function collectionsHtml(): string {
 
   const cards = cols
     .map(
-      (c) => `<a class="collection-card" href="/collections/${c.id}" hx-get="/collections/${c.id}" hx-target="main" hx-push-url="true">
-      <div class="collection-card-header">
-        <span class="collection-name">${escapeHtml(c.name)}</span>
-        ${collectionBadge(c.last_run_total, c.last_run_passed, c.last_run_failed)}
+      (c) => `<div class="collection-card">
+      <a href="/collections/${c.id}" hx-get="/collections/${c.id}" hx-target="main" hx-push-url="true" style="text-decoration:none;color:inherit;">
+        <div class="collection-card-header">
+          <span class="collection-name">${escapeHtml(c.name)}</span>
+          ${collectionBadge(c.last_run_total, c.last_run_passed, c.last_run_failed)}
+        </div>
+        <div class="collection-card-stats">
+          <span>${c.total_runs} run${c.total_runs !== 1 ? "s" : ""}</span>
+          <span>${c.pass_rate}% pass rate</span>
+        </div>
+        <div class="collection-card-date">${c.last_run_at ? escapeHtml(c.last_run_at) : "No runs yet"}</div>
+      </a>
+      <div class="collection-card-actions">
+        <button class="btn btn-sm btn-run"
+          hx-post="/api/run"
+          hx-vals='${JSON.stringify({ path: c.test_path })}'
+          hx-indicator="#run-spinner-${c.id}"
+          hx-disabled-elt="this"
+          onclick="event.stopPropagation()">Run</button>
+        <span id="run-spinner-${c.id}" class="htmx-indicator" style="color:var(--text-dim);font-size:0.8rem;">Running...</span>
       </div>
-      <div class="collection-card-stats">
-        <span>${c.total_runs} run${c.total_runs !== 1 ? "s" : ""}</span>
-        <span>${c.pass_rate}% pass rate</span>
-      </div>
-      <div class="collection-card-date">${c.last_run_at ? escapeHtml(c.last_run_at) : "No runs yet"}</div>
-    </a>`,
+    </div>`,
     )
     .join("");
 

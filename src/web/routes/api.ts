@@ -6,9 +6,19 @@ const api = new Hono();
 // POST /api/run — run tests from WebUI
 api.post("/api/run", async (c) => {
   try {
-    const body = await c.req.json();
-    const testPath: string = body.path;
-    const envName: string | undefined = body.env;
+    const contentType = c.req.header("content-type") ?? "";
+    let testPath: string;
+    let envName: string | undefined;
+
+    if (contentType.includes("application/json")) {
+      const body = await c.req.json();
+      testPath = body.path;
+      envName = body.env;
+    } else {
+      const form = await c.req.parseBody();
+      testPath = form["path"] as string;
+      envName = (form["env"] as string) || undefined;
+    }
 
     if (!testPath) {
       return c.json({ error: "Missing 'path' field" }, 400);

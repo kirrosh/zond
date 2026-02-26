@@ -1,0 +1,74 @@
+name: pets CRUD
+base_url: "http://localhost:3000"
+headers:
+  Authorization: "Bearer {{auth_token}}"
+tests:
+  - name: "Auth: Login"
+    POST: /auth/login
+    headers:
+      Content-Type: application/json
+    json:
+      username: "{{auth_username}}"
+      password: "{{auth_password}}"
+    expect:
+      status: 200
+      body:
+        token:
+          capture: auth_token
+          type: string
+  - name: Create pet
+    POST: /pets
+    headers:
+      Content-Type: application/json
+    json:
+      name: "{{$randomName}}"
+      tag: "{{$randomString}}"
+      status: available
+    expect:
+      status: 201
+      body:
+        id:
+          capture: pet_id
+          type: number
+        name:
+          type: string
+        tag:
+          type: string
+        status:
+          type: string
+  - name: Get created pet
+    GET: /pets/{{pet_id}}
+    expect:
+      status: 200
+      body:
+        id:
+          equals: "{{pet_id}}"
+        name:
+          type: string
+        tag:
+          type: string
+        status:
+          type: string
+  - name: Update pet
+    PUT: /pets/{{pet_id}}
+    headers:
+      Content-Type: application/json
+    json:
+      name: Updated Name
+      tag: "{{$randomString}}"
+      status: available
+    expect:
+      status: 200
+      body:
+        name:
+          equals: Updated Name
+        id:
+          equals: "{{pet_id}}"
+  - name: Delete pet
+    DELETE: /pets/{{pet_id}}
+    expect:
+      status: 204
+  - name: Verify pet deleted
+    GET: /pets/{{pet_id}}
+    expect:
+      status: 404

@@ -1,5 +1,6 @@
 import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
 import { generateFromSchema } from "./data-factory.ts";
+import { detectCrudGroups, generateCrudChain, getCrudEndpoints } from "./crud.ts";
 
 interface RawStep {
   name: string;
@@ -105,13 +106,46 @@ export function generateSkeleton(
 }
 
 /**
+ * Generate test suites with CRUD chain detection.
+ * CRUD groups get chain suites (POST→GET→PUT→DELETE with captures).
+ * Remaining endpoints get skeleton suites.
+ */
+export function generateSuites(
+  endpoints: EndpointInfo[],
+  baseUrl?: string,
+  securitySchemes?: SecuritySchemeInfo[],
+): RawSuite[] {
+  const crudGroups = detectCrudGroups(endpoints);
+  const crudEndpointSet = getCrudEndpoints(crudGroups);
+
+  // Detect login endpoint for CRUD chains that need auth
+  const bearerScheme = securitySchemes?.find(
+    s => s.type === "http" && s.scheme === "bearer",
+  );
+  const loginEndpoint = bearerScheme ? findLoginEndpoint(endpoints) : undefined;
+
+  // Generate CRUD chain suites
+  const crudSuites = crudGroups.map(g =>
+    generateCrudChain(g, baseUrl, securitySchemes, loginEndpoint),
+  );
+
+  // Generate skeleton suites for non-CRUD endpoints
+  const remaining = endpoints.filter(ep => !crudEndpointSet.has(ep));
+  const skeletonSuites = remaining.length > 0
+    ? generateSkeleton(remaining, baseUrl, securitySchemes)
+    : [];
+
+  return [...crudSuites, ...skeletonSuites];
+}
+
+/**
  * Detect a login endpoint by heuristic:
  * - POST method
  * - path contains /auth, /login, or /token
  * - no security requirement
  * - response has "token" or "access_token" property
  */
-function findLoginEndpoint(endpoints: EndpointInfo[]): EndpointInfo | undefined {
+export function findLoginEndpoint(endpoints: EndpointInfo[]): EndpointInfo | undefined {
   const authPathPattern = /(\/auth|\/login|\/token)/i;
 
   return endpoints.find((ep) => {
