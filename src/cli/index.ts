@@ -3,6 +3,7 @@
 import { runCommand } from "./commands/run.ts";
 import { validateCommand } from "./commands/validate.ts";
 import { generateCommand } from "./commands/generate.ts";
+import { serveCommand } from "./commands/serve.ts";
 import { printError } from "./output.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
 
@@ -60,6 +61,7 @@ Usage:
   apitool run <path>       Run API tests
   apitool validate <path>  Validate test files without running
   apitool generate --from <spec>  Generate skeleton tests from OpenAPI spec
+  apitool serve            Start web dashboard
 
 Options for 'run':
   --env <name>         Use environment file (.env.<name>.yaml)
@@ -67,6 +69,12 @@ Options for 'run':
   --timeout <ms>       Override request timeout
   --bail               Stop on first suite failure
   --no-db              Do not save results to apitool.db
+  --db <path>          Path to SQLite database file (default: apitool.db)
+
+Options for 'serve':
+  --port <port>        Server port (default: 8080)
+  --host <host>        Server host (default: 0.0.0.0)
+  --openapi <spec>     Path to OpenAPI spec for Explorer
   --db <path>          Path to SQLite database file (default: apitool.db)
 
 General:
@@ -149,6 +157,24 @@ async function main(): Promise<number> {
       }
       const output = typeof flags["output"] === "string" ? flags["output"] : "./generated/";
       return generateCommand({ from, output });
+    }
+
+    case "serve": {
+      const portRaw = flags["port"];
+      let port: number | undefined;
+      if (typeof portRaw === "string") {
+        port = parseInt(portRaw, 10);
+        if (isNaN(port) || port <= 0) {
+          printError(`Invalid port value: ${portRaw}`);
+          return 2;
+        }
+      }
+      return serveCommand({
+        port,
+        host: typeof flags["host"] === "string" ? flags["host"] : undefined,
+        openapiSpec: typeof flags["openapi"] === "string" ? flags["openapi"] : undefined,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+      });
     }
 
     default: {

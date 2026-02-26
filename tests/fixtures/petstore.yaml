@@ -2,6 +2,9 @@ openapi: "3.0.3"
 info:
   title: Petstore
   version: "1.0.0"
+servers:
+  - url: https://petstore3.swagger.io/api/v3
+    description: Swagger Petstore (public demo)
 paths:
   /pets:
     get:
