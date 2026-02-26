@@ -1,0 +1,47 @@
+name: Pet CRUD Test Suite
+base_url: "{{base_url}}"
+headers:
+  Authorization: "Bearer {{auth_token}}"
+tests:
+  - name: Login and Get Token
+    POST: /auth/login
+    json:
+      username: "{{auth_username}}"
+      password: "{{auth_password}}"
+    expect:
+      status: 200
+      body:
+        token:
+          capture: auth_token
+          type: string
+  - name: Create Pet
+    POST: /pets
+    json:
+      name: "{{$randomString}}"
+      tag: "{{$randomString}}"
+      status: available
+    expect:
+      status: 201
+      body:
+        id:
+          capture: created_id
+          type: number
+        name:
+          type: string
+        tag:
+          type: string
+        status:
+          equals: available
+  - name: Get Created Pet
+    GET: /pets/{{created_id}}
+    expect:
+      status: 200
+      body:
+        id:
+          equals: "{{created_id}}"
+        status:
+          equals: available
+  - name: Delete Pet
+    DELETE: /pets/{{created_id}}
+    expect:
+      status: 204

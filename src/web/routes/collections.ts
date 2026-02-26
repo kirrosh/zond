@@ -10,11 +10,14 @@ import {
   deleteCollection,
   normalizePath,
   listAIGenerations,
+  listSavedAIGenerations,
 } from "../../db/queries.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
 import { renderTrendChart } from "../views/trend-chart.ts";
-import { parse } from "../../core/parser/yaml-parser.ts";
+import { parseDirectorySafe, parseFile } from "../../core/parser/yaml-parser.ts";
+import type { ParseDirectoryResult } from "../../core/parser/yaml-parser.ts";
 import type { TestSuite } from "../../core/parser/types.ts";
+import type { AIGenerationRecord } from "../../db/queries.ts";
 
 const collections = new Hono();
 
@@ -24,13 +27,62 @@ function statusBadge(total: number, passed: number, failed: number): string {
   return `<span class="badge badge-pass">pass</span>`;
 }
 
-async function loadSuitesHtml(testPath: string): Promise<string> {
+async function loadSuitesHtml(testPath: string, collectionId?: number): Promise<string> {
   try {
-    const suites = await parse(testPath);
-    return renderSuites(suites);
+    const { suites, errors } = await parseDirectorySafe(testPath);
+
+    // Read YAML content for each suite source file
+    const yamlMap = new Map<string, string>();
+    for (const suite of suites) {
+      const src = (suite as any)._source as string | undefined;
+      if (src) {
+        try {
+          yamlMap.set(src, await Bun.file(src).text());
+        } catch { /* skip unreadable */ }
+      }
+    }
+
+    // Load AI generation metadata keyed by output_path
+    const aiMap = new Map<string, { prompt: string; model: string }>();
+    if (collectionId) {
+      const gens = listSavedAIGenerations(collectionId);
+      for (const g of gens) {
+        if (g.output_path) {
+          aiMap.set(g.output_path, { prompt: g.prompt, model: g.model });
+        }
+      }
+    }
+
+    const suitesHtml = renderSuites(suites, yamlMap, aiMap);
+    const errorsHtml = renderParseErrors(errors, collectionId);
+    return suitesHtml + errorsHtml;
   } catch {
     return `<p style="color:var(--text-dim)">Could not load test files from path.</p>`;
   }
+}
+
+function renderParseErrors(errors: { file: string; error: string }[], collectionId?: number): string {
+  if (errors.length === 0) return "";
+  const rows = errors.map(e => {
+    const shortError = e.error.replace(/^.*?:\s*/, "");
+    return `<div class="parse-error-row">
+      <div class="parse-error-file">
+        <code>${escapeHtml(e.file)}</code>
+        <span class="parse-error-msg">${escapeHtml(shortError)}</span>
+      </div>
+      ${collectionId ? `<button class="btn btn-sm btn-danger"
+        hx-post="/api/ai-generate/delete-file"
+        hx-vals='${escapeHtml(JSON.stringify({ file_path: e.file, collection_id: collectionId }))}'
+        hx-confirm="Delete ${escapeHtml(e.file)}?"
+        hx-target="closest .parse-error-row"
+        hx-swap="outerHTML">Delete</button>` : ""}
+    </div>`;
+  }).join("");
+
+  return `<div class="parse-errors-block">
+    <div class="parse-errors-header">&#9888; ${errors.length} file${errors.length === 1 ? "" : "s"} failed to parse:</div>
+    ${rows}
+  </div>`;
 }
 
 function methodBadge(method: string): string {
@@ -38,7 +90,11 @@ function methodBadge(method: string): string {
   return `<span class="badge-method method-${m}">${method}</span>`;
 }
 
-function renderSuites(suites: TestSuite[]): string {
+function renderSuites(
+  suites: TestSuite[],
+  yamlMap: Map<string, string> = new Map(),
+  aiMap: Map<string, { prompt: string; model: string }> = new Map(),
+): string {
   if (suites.length === 0) return `<p style="color:var(--text-dim)">No test files found.</p>`;
 
   return suites.map(suite => {
@@ -97,11 +153,41 @@ function renderSuites(suites: TestSuite[]): string {
     const isAIGenerated = sourcePath.includes("ai-generated-") || suite.name.toLowerCase().startsWith("ai-generated");
     const aiBadge = isAIGenerated ? ' <span class="badge-ai">AI</span>' : "";
 
+    // Detail block: source file, YAML, AI metadata
+    const yamlText = yamlMap.get(sourcePath);
+    const aiMeta = aiMap.get(sourcePath);
+
+    let detailHtml = "";
+    if (sourcePath) {
+      detailHtml += `<div class="suite-detail-meta"><strong>Source:</strong> <code>${escapeHtml(sourcePath)}</code></div>`;
+    }
+    if (aiMeta) {
+      detailHtml += `<div class="suite-detail-meta"><strong>Prompt:</strong> ${escapeHtml(aiMeta.prompt)}</div>`;
+      detailHtml += `<div class="suite-detail-meta"><strong>Model:</strong> ${escapeHtml(aiMeta.model)}</div>`;
+    }
+    if (yamlText) {
+      detailHtml += `<pre class="suite-detail-yaml"><code>${escapeHtml(yamlText)}</code></pre>`;
+    }
+
     return `<div class="suite-section${chainClass}">
-      <h3>${escapeHtml(suite.name)}${aiBadge}${isChain ? ' <span class="capture-badge" style="font-weight:400">chain</span>' : ""}</h3>
-      ${isChain ? '<div class="chain-connector">' : ""}
-      ${stepsHtml}
-      ${isChain ? "</div>" : ""}
+      <details class="suite-details">
+        <summary class="suite-summary">
+          ${escapeHtml(suite.name)}${aiBadge}${isChain ? ' <span class="capture-badge" style="font-weight:400">chain</span>' : ""}
+          <span class="suite-step-count">${suite.tests.length} step${suite.tests.length === 1 ? "" : "s"}</span>
+          ${sourcePath ? `<button class="btn btn-sm btn-run suite-run-btn"
+            hx-post="/api/run"
+            hx-vals='${escapeHtml(JSON.stringify({ path: sourcePath }))}'
+            hx-indicator="closest .suite-details"
+            hx-disabled-elt="this"
+            onclick="event.stopPropagation()">Run</button>` : ""}
+        </summary>
+        <div class="suite-details-body">
+          ${detailHtml}
+          ${isChain ? '<div class="chain-connector">' : ""}
+          ${stepsHtml}
+          ${isChain ? "</div>" : ""}
+        </div>
+      </details>
     </div>`;
   }).join("");
 }
@@ -192,7 +278,7 @@ collections.get("/collections/:id", async (c) => {
     ${collection.openapi_spec ? `<p style="color:var(--text-dim);font-size:0.85rem;">OpenAPI: ${escapeHtml(collection.openapi_spec)}</p>` : ""}
 
     <div class="section-title">Test Suites</div>
-    <div id="suites-section">${await loadSuitesHtml(collection.test_path)}</div>
+    <div id="suites-section">${await loadSuitesHtml(collection.test_path, id)}</div>
 
     ${collection.openapi_spec ? renderAIGenerateSection(id, collection.openapi_spec) : ""}
 

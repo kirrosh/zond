@@ -613,6 +613,15 @@ export function updateAIGenerationOutputPath(id: number, outputPath: string): bo
   return result.changes > 0;
 }
 
+export function listSavedAIGenerations(collectionId: number): AIGenerationRecord[] {
+  const db = getDb();
+  return db.query(`
+    SELECT * FROM ai_generations
+    WHERE collection_id = ? AND output_path IS NOT NULL AND output_path != ''
+    ORDER BY created_at DESC
+  `).all(collectionId) as AIGenerationRecord[];
+}
+
 export function findAIGenerationByYaml(collectionId: number, yaml: string): AIGenerationRecord | null {
   const db = getDb();
   return db.query(

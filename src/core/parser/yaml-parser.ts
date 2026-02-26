@@ -47,6 +47,31 @@ export async function parseDirectory(dirPath: string): Promise<TestSuite[]> {
   return suites;
 }
 
+export interface ParseDirectoryResult {
+  suites: TestSuite[];
+  errors: { file: string; error: string }[];
+}
+
+export async function parseDirectorySafe(dirPath: string): Promise<ParseDirectoryResult> {
+  const glob = new Glob("**/*.{yaml,yml}");
+  const suites: TestSuite[] = [];
+  const errors: { file: string; error: string }[] = [];
+
+  for await (const file of glob.scan({ cwd: dirPath, absolute: false })) {
+    if (file.match(/\.env(\..+)?\.yaml$/) || file.match(/\.env(\..+)?\.yml$/)) {
+      continue;
+    }
+    const fullPath = `${dirPath}/${file}`;
+    try {
+      suites.push(await parseFile(fullPath));
+    } catch (err) {
+      errors.push({ file, error: (err as Error).message });
+    }
+  }
+
+  return { suites, errors };
+}
+
 export async function parse(path: string): Promise<TestSuite[]> {
   const file = Bun.file(path);
   const exists = await file.exists();
