@@ -212,6 +212,13 @@ h2 { font-size: 1.25rem; margin: 1.5rem 0 0.5rem; }
 .step-name { flex: 1; }
 .step-duration { color: var(--text-dim); font-size: 0.85rem; }
 
+/* Authorize panel */
+.authorize-panel { border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; }
+.authorize-panel summary { cursor: pointer; font-weight: 600; }
+.auth-status { display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.85rem; margin-left: 0.5rem; }
+.auth-ok { background: var(--pass); color: #fff; }
+.auth-none { background: var(--muted, var(--bg-secondary)); color: var(--text-dim); }
+
 /* Htmx indicator */
 .htmx-indicator { display: none; }
 .htmx-request .htmx-indicator { display: inline; }

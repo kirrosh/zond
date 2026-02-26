@@ -50,12 +50,15 @@ export async function startServer(options: ServerOptions = {}): Promise<void> {
   // Load OpenAPI spec if provided
   let endpoints: EndpointInfo[] = [];
   let servers: ServerInfo[] = [];
+  let securitySchemes: import("../core/generator/types.ts").SecuritySchemeInfo[] = [];
+  let loginPath: string | null = null;
   let specPath: string | null = options.openapiSpec ?? null;
   if (specPath) {
     try {
-      const { readOpenApiSpec, extractEndpoints } = await import("../core/generator/openapi-reader.ts");
+      const { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } = await import("../core/generator/openapi-reader.ts");
       const doc = await readOpenApiSpec(specPath);
       endpoints = extractEndpoints(doc);
+      securitySchemes = extractSecuritySchemes(doc);
       // Extract servers from spec (like Swagger UI does)
       if (doc.servers && Array.isArray(doc.servers)) {
         servers = doc.servers.map((s: any) => ({
@@ -63,13 +66,20 @@ export async function startServer(options: ServerOptions = {}): Promise<void> {
           description: s.description,
         }));
       }
+      // Auto-detect login endpoint: POST, path contains /auth or /login or /token, no security
+      const loginEndpoint = endpoints.find((ep) => {
+        if (ep.method !== "POST") return false;
+        if (ep.security.length > 0) return false;
+        return /\/(auth|login|token)/i.test(ep.path);
+      });
+      if (loginEndpoint) loginPath = loginEndpoint.path;
     } catch (err) {
       console.error(`Warning: failed to load OpenAPI spec: ${(err as Error).message}`);
       specPath = null;
     }
   }
 
-  const app = createApp({ endpoints, specPath, servers });
+  const app = createApp({ endpoints, specPath, servers, securitySchemes, loginPath });
 
   console.log(`apitool server running at http://${host === "0.0.0.0" ? "localhost" : host}:${port}`);
 
