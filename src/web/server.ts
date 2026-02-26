@@ -5,6 +5,7 @@ import runs from "./routes/runs.ts";
 import api from "./routes/api.ts";
 import { createExplorerRoute, type ExplorerDeps, type ServerInfo } from "./routes/explorer.ts";
 import type { EndpointInfo } from "../core/generator/types.ts";
+import styleCssPath from "./static/style.css" with { type: "file" };
 
 export interface ServerOptions {
   port?: number;
@@ -12,8 +13,6 @@ export interface ServerOptions {
   dbPath?: string;
   openapiSpec?: string;
 }
-
-const STATIC_DIR = `${import.meta.dirname ?? "."}/static`;
 
 export function createApp(explorerDeps: ExplorerDeps) {
   const app = new Hono();
@@ -23,9 +22,7 @@ export function createApp(explorerDeps: ExplorerDeps) {
     const file = c.req.param("file");
     // Only serve known files, prevent path traversal
     if (file !== "style.css") return c.notFound();
-    const bunFile = Bun.file(`${STATIC_DIR}/${file}`);
-    if (!(await bunFile.exists())) return c.notFound();
-    const content = await bunFile.text();
+    const content = await Bun.file(styleCssPath).text();
     c.header("Content-Type", "text/css; charset=utf-8");
     c.header("Cache-Control", "public, max-age=3600");
     return c.body(content);
@@ -81,7 +78,8 @@ export async function startServer(options: ServerOptions = {}): Promise<void> {
 
   const app = createApp({ endpoints, specPath, servers, securitySchemes, loginPath });
 
-  console.log(`apitool server running at http://${host === "0.0.0.0" ? "localhost" : host}:${port}`);
+  const { getRuntimeInfo } = await import("../cli/runtime.ts");
+  console.log(`apitool server (${getRuntimeInfo()}) running at http://${host === "0.0.0.0" ? "localhost" : host}:${port}`);
 
   Bun.serve({
     fetch: app.fetch,

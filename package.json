@@ -8,7 +8,8 @@
     "apitool": "src/cli/index.ts"
   },
   "scripts": {
-    "apitool": "bun run src/cli/index.ts"
+    "apitool": "bun run src/cli/index.ts",
+    "build": "bun build --compile src/cli/index.ts --outfile apitool"
   },
   "devDependencies": {
     "@types/bun": "latest"

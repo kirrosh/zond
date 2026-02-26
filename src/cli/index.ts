@@ -5,6 +5,7 @@ import { validateCommand } from "./commands/validate.ts";
 import { generateCommand } from "./commands/generate.ts";
 import { serveCommand } from "./commands/serve.ts";
 import { printError } from "./output.ts";
+import { getRuntimeInfo } from "./runtime.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
 
 export interface ParsedArgs {
@@ -96,7 +97,7 @@ async function main(): Promise<number> {
 
   // Version
   if (command === "--version" || flags["version"] === true || flags["v"] === true) {
-    console.log("apitool 0.1.0");
+    console.log(`apitool 0.1.0 (${getRuntimeInfo()})`);
     return 0;
   }
 
@@ -190,7 +191,9 @@ async function main(): Promise<number> {
 // Only run when executed directly, not when imported
 const scriptPath = process.argv[1]?.replaceAll("\\", "/") ?? "";
 const metaFile = import.meta.filename?.replaceAll("\\", "/") ?? "";
-const isMain = scriptPath === metaFile || scriptPath.endsWith("cli/index.ts");
+const isMain = scriptPath === metaFile
+  || scriptPath.endsWith("cli/index.ts")
+  || import.meta.main === true;
 if (isMain) {
   try {
     const code = await main();
