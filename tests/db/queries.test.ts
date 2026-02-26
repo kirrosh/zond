@@ -14,6 +14,11 @@ import {
   upsertEnvironment,
   getEnvironment,
   listEnvironments,
+  getDashboardStats,
+  getPassRateTrend,
+  getSlowestTests,
+  getFlakyTests,
+  countRuns,
 } from "../../src/db/queries.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
 
@@ -307,5 +312,98 @@ describe("environments", () => {
 
   test("listEnvironments returns empty array when none exist", () => {
     expect(listEnvironments()).toEqual([]);
+  });
+});
+
+// ──────────────────────────────────────────────
+// Dashboard metrics
+// ──────────────────────────────────────────────
+
+describe("getDashboardStats", () => {
+  test("returns zeros when no runs", () => {
+    const stats = getDashboardStats();
+    expect(stats.totalRuns).toBe(0);
+    expect(stats.totalTests).toBe(0);
+    expect(stats.overallPassRate).toBe(0);
+    expect(stats.avgDuration).toBe(0);
+  });
+
+  test("returns correct aggregates", () => {
+    const id1 = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    finalizeRun(id1, [makeSuiteResult({ total: 4, passed: 3, failed: 1 })]);
+    const id2 = createRun({ started_at: "2024-01-02T00:00:00.000Z" });
+    finalizeRun(id2, [makeSuiteResult({ total: 6, passed: 6, failed: 0 })]);
+
+    const stats = getDashboardStats();
+    expect(stats.totalRuns).toBe(2);
+    expect(stats.totalTests).toBe(10);
+    expect(stats.overallPassRate).toBe(90);
+  });
+});
+
+describe("getPassRateTrend", () => {
+  test("returns empty array when no runs", () => {
+    expect(getPassRateTrend()).toEqual([]);
+  });
+
+  test("returns pass rate per run", () => {
+    const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    finalizeRun(id, [makeSuiteResult({ total: 10, passed: 8, failed: 2 })]);
+
+    const trend = getPassRateTrend(10);
+    expect(trend).toHaveLength(1);
+    expect(trend[0]!.pass_rate).toBe(80);
+  });
+});
+
+describe("getSlowestTests", () => {
+  test("returns empty array when no results", () => {
+    expect(getSlowestTests()).toEqual([]);
+  });
+
+  test("returns tests sorted by avg duration desc", () => {
+    const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    saveResults(id, [makeSuiteResult()]);
+
+    const slow = getSlowestTests(5);
+    expect(slow.length).toBeGreaterThan(0);
+    expect(slow[0]!.suite_name).toBe("Users API");
+  });
+});
+
+describe("getFlakyTests", () => {
+  test("returns empty array when no flaky tests", () => {
+    expect(getFlakyTests()).toEqual([]);
+  });
+
+  test("detects flaky tests with multiple statuses", () => {
+    // Run 1: step passes
+    const id1 = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    saveResults(id1, [makeSuiteResult({
+      steps: [{ name: "Flaky step", status: "pass", duration_ms: 100, request: { method: "GET", url: "http://x", headers: {} }, assertions: [], captures: {} }],
+    })]);
+
+    // Run 2: same step fails
+    const id2 = createRun({ started_at: "2024-01-02T00:00:00.000Z" });
+    saveResults(id2, [makeSuiteResult({
+      steps: [{ name: "Flaky step", status: "fail", duration_ms: 100, request: { method: "GET", url: "http://x", headers: {} }, assertions: [], captures: {} }],
+    })]);
+
+    const flaky = getFlakyTests(10, 5);
+    expect(flaky.length).toBe(1);
+    expect(flaky[0]!.test_name).toBe("Flaky step");
+    expect(flaky[0]!.distinct_statuses).toBe(2);
+  });
+});
+
+describe("countRuns", () => {
+  test("returns 0 when no runs", () => {
+    expect(countRuns()).toBe(0);
+  });
+
+  test("returns correct count", () => {
+    createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    createRun({ started_at: "2024-01-02T00:00:00.000Z" });
+    expect(countRuns()).toBe(2);
   });
 });
