@@ -8,7 +8,7 @@ import type { TestSuite } from "../../core/parser/types.ts";
 import type { TestRunResult } from "../../core/runner/types.ts";
 import { printError, printWarning } from "../output.ts";
 import { getDb } from "../../db/schema.ts";
-import { createRun, finalizeRun, saveResults } from "../../db/queries.ts";
+import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from "../../db/queries.ts";
 
 export interface RunOptions {
   path: string;
@@ -88,9 +88,11 @@ export async function runCommand(options: RunOptions): Promise<number> {
   if (!options.noDb) {
     try {
       getDb(options.dbPath);
+      const collection = findCollectionByTestPath(options.path);
       const runId = createRun({
         started_at: results[0]?.started_at ?? new Date().toISOString(),
         environment: options.env,
+        collection_id: collection?.id,
       });
       finalizeRun(runId, results);
       saveResults(runId, results);

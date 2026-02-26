@@ -113,8 +113,9 @@
 ## Порядок приоритетов
 
 1. ~~**M8: Сборка** — `bun compile`, проверить бинарник~~ DONE
-2. **Generator Level 2 (CRUD)** — самая ценная фича генератора
-3. **WebUI improvements** — график, фильтры, export
-4. **Generator Level 3 + describe** — тест-кейсы в Markdown
-5. **CLI init** — удобство для новых пользователей
-6. **OAuth2/OIDC** — авторизация в Explorer
+2. ~~**M9: Collections** — группировка тестов по API, dashboard redesign~~ DONE
+3. **Generator Level 2 (CRUD)** — самая ценная фича генератора
+4. **WebUI improvements** — график, фильтры, export
+5. **Generator Level 3 + describe** — тест-кейсы в Markdown
+6. **CLI init** — удобство для новых пользователей
+7. **OAuth2/OIDC** — авторизация в Explorer

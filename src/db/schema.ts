@@ -82,6 +82,22 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_results_name   ON results(suite_name, test_name);
     `,
   },
+  {
+    version: 2,
+    sql: `
+      CREATE TABLE IF NOT EXISTS collections (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        name         TEXT NOT NULL,
+        test_path    TEXT NOT NULL,
+        openapi_spec TEXT,
+        created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      ALTER TABLE runs ADD COLUMN collection_id INTEGER REFERENCES collections(id);
+      CREATE INDEX IF NOT EXISTS idx_runs_collection ON runs(collection_id);
+      CREATE INDEX IF NOT EXISTS idx_collections_name ON collections(name);
+    `,
+  },
 ];
 
 function runMigrations(db: Database): void {

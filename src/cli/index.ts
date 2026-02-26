@@ -4,6 +4,7 @@ import { runCommand } from "./commands/run.ts";
 import { validateCommand } from "./commands/validate.ts";
 import { generateCommand } from "./commands/generate.ts";
 import { serveCommand } from "./commands/serve.ts";
+import { collectionsCommand } from "./commands/collections.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
@@ -62,6 +63,7 @@ Usage:
   apitool run <path>       Run API tests
   apitool validate <path>  Validate test files without running
   apitool generate --from <spec>  Generate skeleton tests from OpenAPI spec
+  apitool collections      List test collections
   apitool serve            Start web dashboard
 
 Options for 'run':
@@ -160,6 +162,12 @@ async function main(): Promise<number> {
       }
       const output = typeof flags["output"] === "string" ? flags["output"] : "./generated/";
       return generateCommand({ from, output });
+    }
+
+    case "collections": {
+      return collectionsCommand(
+        typeof flags["db"] === "string" ? flags["db"] : undefined,
+      );
     }
 
     case "serve": {

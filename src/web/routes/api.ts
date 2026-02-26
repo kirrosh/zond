@@ -19,8 +19,8 @@ api.post("/api/run", async (c) => {
     const { loadEnvironment } = await import("../../core/parser/variables.ts");
     const { runSuite } = await import("../../core/runner/executor.ts");
     const { getDb } = await import("../../db/schema.ts");
-    const { createRun, finalizeRun, saveResults } = await import("../../db/queries.ts");
-    const { dirname } = await import("node:path");
+    const { createRun, finalizeRun, saveResults, findCollectionByTestPath } = await import("../../db/queries.ts");
+    const { dirname, resolve } = await import("node:path");
 
     const suites = await parse(testPath);
     if (suites.length === 0) {
@@ -31,10 +31,12 @@ api.post("/api/run", async (c) => {
     const results = await Promise.all(suites.map((s) => runSuite(s, env)));
 
     getDb();
+    const collection = findCollectionByTestPath(resolve(testPath));
     const runId = createRun({
       started_at: results[0]?.started_at ?? new Date().toISOString(),
       environment: envName,
       trigger: "webui",
+      collection_id: collection?.id,
     });
     finalizeRun(runId, results);
     saveResults(runId, results);

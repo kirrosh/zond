@@ -57,7 +57,14 @@ describe("getDb / schema", () => {
     expect(rows).toHaveLength(1);
   });
 
-  test("creates all 4 indexes", () => {
+  test("creates collections table", () => {
+    dbPath = tmpDb();
+    const db = getDb(dbPath);
+    const rows = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='collections'").all();
+    expect(rows).toHaveLength(1);
+  });
+
+  test("creates all indexes", () => {
     dbPath = tmpDb();
     const db = getDb(dbPath);
     const indexes = db
@@ -68,6 +75,8 @@ describe("getDb / schema", () => {
     expect(names).toContain("idx_results_run");
     expect(names).toContain("idx_results_status");
     expect(names).toContain("idx_results_name");
+    expect(names).toContain("idx_runs_collection");
+    expect(names).toContain("idx_collections_name");
   });
 
   test("enables WAL journal mode", () => {
@@ -84,11 +93,11 @@ describe("getDb / schema", () => {
     expect(row.foreign_keys).toBe(1);
   });
 
-  test("sets user_version to 1 after migration", () => {
+  test("sets user_version to latest after migration", () => {
     dbPath = tmpDb();
     const db = getDb(dbPath);
     const row = db.query("PRAGMA user_version").get() as { user_version: number };
-    expect(row.user_version).toBe(1);
+    expect(row.user_version).toBe(2);
   });
 
   test("closeDb resets singleton so next call opens fresh db", () => {

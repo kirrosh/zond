@@ -3,6 +3,7 @@ import { getDb } from "../db/schema.ts";
 import dashboard from "./routes/dashboard.ts";
 import runs from "./routes/runs.ts";
 import api from "./routes/api.ts";
+import collections from "./routes/collections.ts";
 import { createExplorerRoute, type ExplorerDeps, type ServerInfo } from "./routes/explorer.ts";
 import type { EndpointInfo } from "../core/generator/types.ts";
 import styleCssPath from "./static/style.css" with { type: "file" };
@@ -32,6 +33,7 @@ export function createApp(explorerDeps: ExplorerDeps) {
   app.route("/", dashboard);
   app.route("/", runs);
   app.route("/", api);
+  app.route("/", collections);
   app.route("/", createExplorerRoute(explorerDeps));
 
   return app;

@@ -54,7 +54,8 @@ apitool/
 │   ├── web/
 │   │   ├── server.ts               # Hono-сервер
 │   │   ├── routes/
-│   │   │   ├── dashboard.ts        # GET / — главная
+│   │   │   ├── dashboard.ts        # GET / — главная с коллекциями
+│   │   │   ├── collections.ts      # GET /collections/:id, POST/DELETE /api/collections
 │   │   │   ├── runs.ts             # GET /runs, GET /runs/:id
 │   │   │   ├── explorer.ts         # GET /explorer — дерево API
 │   │   │   └── api.ts              # POST /api/run, POST /api/try
@@ -65,6 +66,7 @@ apitool/
 │       ├── commands/
 │       │   ├── run.ts              # apitool run
 │       │   ├── generate.ts         # apitool generate
+│       │   ├── collections.ts      # apitool collections
 │       │   ├── describe.ts         # apitool describe
 │       │   ├── serve.ts            # apitool serve
 │       │   ├── validate.ts         # apitool validate
@@ -329,6 +331,14 @@ Results: 3 passed, 1 failed, 1 skipped (1.2s)
 SQLite через `bun:sqlite`. Файл `apitool.db` создаётся автоматически при первом запуске.
 
 ```sql
+CREATE TABLE collections (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  name         TEXT NOT NULL,
+  test_path    TEXT NOT NULL,           -- абсолютный путь (forward slashes)
+  openapi_spec TEXT,                    -- путь к OpenAPI спеке
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE runs (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   started_at    TEXT NOT NULL,          -- ISO 8601
@@ -341,7 +351,8 @@ CREATE TABLE runs (
   commit_sha    TEXT,
   branch        TEXT,
   environment   TEXT,
-  duration_ms   INTEGER
+  duration_ms   INTEGER,
+  collection_id INTEGER REFERENCES collections(id)  -- nullable, привязка к коллекции
 );
 
 CREATE TABLE results (
@@ -368,12 +379,14 @@ CREATE TABLE environments (
 
 -- Индексы для дашборда
 CREATE INDEX idx_runs_started ON runs(started_at DESC);
+CREATE INDEX idx_runs_collection ON runs(collection_id);
 CREATE INDEX idx_results_run ON results(run_id);
 CREATE INDEX idx_results_status ON results(status);
 CREATE INDEX idx_results_name ON results(suite_name, test_name);
+CREATE INDEX idx_collections_name ON collections(name);
 ```
 
-Миграции: массив SQL-строк с номером версии. При старте проверяется `PRAGMA user_version`, применяются недостающие миграции.
+Миграции: массив SQL-строк с номером версии. При старте проверяется `PRAGMA user_version`, применяются недостающие миграции. Текущая версия: **2** (добавлены коллекции).
 
 ---
 
@@ -387,11 +400,14 @@ Hono-сервер рендерит HTML, интерактивность чере
 
 | Route | Описание |
 |-------|----------|
-| `GET /` | Dashboard: pass rate, тренды, последний прогон, top-5 медленных, top-5 flaky |
+| `GET /` | Dashboard: глобальные метрики, grid коллекций, форма добавления, recent runs, slowest/flaky |
+| `GET /collections/:id` | Детали коллекции: метрики, таблица прогонов с пагинацией, кнопка Delete |
 | `GET /runs` | Список прогонов (таблица с пагинацией) |
 | `GET /runs/:id` | Детали прогона: каждый тест → запрос/ответ/ассерты |
 | `GET /explorer` | Дерево API из OpenAPI, параметры, описания, multi-auth panel |
-| `POST /api/run` | Запустить прогон из WebUI (HTMX) |
+| `POST /api/collections` | Создать коллекцию из формы на дашборде |
+| `DELETE /api/collections/:id` | Удалить коллекцию (runs unlinked) |
+| `POST /api/run` | Запустить прогон из WebUI (HTMX), авто-привязка к коллекции |
 | `POST /api/try` | Отправить единичный запрос из Explorer (HTMX, с auth injection) |
 | `POST /api/authorize` | Proxy login для Bearer auth (username/password → token) |
 
@@ -410,8 +426,9 @@ Dashboard-метрики (SQL-запросы):
 
 | Команда | Описание | Основные флаги |
 |---------|----------|----------------|
-| `run <path>` | Запуск тестов | `--env`, `--report json\|junit\|console`, `--parallel`, `--timeout`, `--bail`, `--auth-token` |
-| `generate` | Генерация тестов из OpenAPI | `--from <spec>`, `--output <dir>`, `--level skeleton\|crud\|all` |
+| `run <path>` | Запуск тестов (авто-привязка к коллекции) | `--env`, `--report json\|junit\|console`, `--parallel`, `--timeout`, `--bail`, `--auth-token` |
+| `generate` | Генерация тестов из OpenAPI (авто-создание коллекции) | `--from <spec>`, `--output <dir>`, `--level skeleton\|crud\|all` |
+| `collections` | Список коллекций с pass rate и датой последнего прогона | `--db <path>` |
 | `describe` | Генерация Markdown тест-кейсов | `--from <spec>`, `--output <file>` |
 | `serve` | Запуск WebUI | `--port`, `--host`, `--tests <dir>`, `--openapi <spec>` |
 | `validate` | Проверка YAML-тестов | `<path>` |
@@ -543,6 +560,7 @@ tests:
 | M6 (WebUI) | DONE | `94a58e4` | `apitool serve --port 8080 --openapi <spec>`, multi-auth panel |
 | M7 (CLI polish) | PARTIAL | — | Базовые команды + `--auth-token`, см. BACKLOG |
 | M8 (Standalone binary) | DONE | `6bd2401` | `bun run build` → `apitool.exe`, CSS embedded, runtime detection |
+| M9 (Collections) | DONE | — | Сущность Collection, группировка runs, CLI `collections`, dashboard redesign |
 
 ---
 

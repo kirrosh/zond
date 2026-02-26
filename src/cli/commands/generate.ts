@@ -1,5 +1,8 @@
+import { resolve, basename } from "path";
 import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSkeleton, writeSuites } from "../../core/generator/index.ts";
 import { printError, printSuccess } from "../output.ts";
+import { getDb } from "../../db/schema.ts";
+import { findCollectionByTestPath, createCollection, normalizePath } from "../../db/queries.ts";
 
 export interface GenerateCommandOptions {
   from: string;
@@ -39,6 +42,24 @@ export async function generateCommand(options: GenerateCommandOptions): Promise<
     }
 
     printSuccess(`Done! Generated ${files.length} file(s) in ${options.output}`);
+
+    // Auto-create collection
+    try {
+      getDb();
+      const normalizedOutput = normalizePath(options.output);
+      const existing = findCollectionByTestPath(normalizedOutput);
+      if (!existing) {
+        const specName = (doc as any).info?.title ?? basename(options.from);
+        const collId = createCollection({
+          name: specName,
+          test_path: normalizedOutput,
+          openapi_spec: resolve(options.from),
+        });
+        printSuccess(`Created collection "${specName}" (id: ${collId})`);
+      }
+    } catch {
+      // DB not critical for generate
+    }
 
     // Print hint about auth env vars if bearer auth was detected
     const hasBearerAuth = securitySchemes.some((s) => s.type === "http" && s.scheme === "bearer");

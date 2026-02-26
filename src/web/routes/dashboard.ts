@@ -5,6 +5,7 @@ import {
   getSlowestTests,
   getFlakyTests,
   listRuns,
+  listCollections,
 } from "../../db/queries.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
 
@@ -26,6 +27,61 @@ function progressBar(total: number, passed: number, failed: number, skipped: num
     <div class="progress-fail" style="width:${pF}%"></div>
     <div class="progress-skip" style="width:${pS}%"></div>
   </div>`;
+}
+
+function collectionBadge(total: number, passed: number, failed: number): string {
+  if (total === 0) return `<span class="badge badge-skip">no runs</span>`;
+  if (failed > 0) return `<span class="badge badge-fail">fail</span>`;
+  return `<span class="badge badge-pass">pass</span>`;
+}
+
+function collectionsHtml(): string {
+  const cols = listCollections();
+  if (cols.length === 0) return "";
+
+  const cards = cols
+    .map(
+      (c) => `<a class="collection-card" href="/collections/${c.id}" hx-get="/collections/${c.id}" hx-target="main" hx-push-url="true">
+      <div class="collection-card-header">
+        <span class="collection-name">${escapeHtml(c.name)}</span>
+        ${collectionBadge(c.last_run_total, c.last_run_passed, c.last_run_failed)}
+      </div>
+      <div class="collection-card-stats">
+        <span>${c.total_runs} run${c.total_runs !== 1 ? "s" : ""}</span>
+        <span>${c.pass_rate}% pass rate</span>
+      </div>
+      <div class="collection-card-date">${c.last_run_at ? escapeHtml(c.last_run_at) : "No runs yet"}</div>
+    </a>`,
+    )
+    .join("");
+
+  return `
+    <div class="section-title">Collections</div>
+    <div class="collection-grid">${cards}</div>`;
+}
+
+function addCollectionForm(): string {
+  return `
+    <details class="add-collection-form">
+      <summary class="btn btn-outline btn-sm" style="margin:1rem 0;">Add Collection</summary>
+      <form action="/api/collections" method="POST" style="margin-top:0.75rem;">
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;align-items:end;">
+          <div>
+            <label style="font-size:0.85rem;font-weight:600;">Name</label>
+            <input name="name" required placeholder="e.g. Petstore API" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.85rem;width:100%;">
+          </div>
+          <div>
+            <label style="font-size:0.85rem;font-weight:600;">Test Path</label>
+            <input name="test_path" required placeholder="e.g. ./tests/pet" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.85rem;width:100%;">
+          </div>
+          <div>
+            <label style="font-size:0.85rem;font-weight:600;">OpenAPI Spec (optional)</label>
+            <input name="openapi_spec" placeholder="e.g. ./specs/pet.json" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.85rem;width:100%;">
+          </div>
+          <button type="submit" class="btn btn-sm">Create</button>
+        </div>
+      </form>
+    </details>`;
 }
 
 function metricsHtml(): string {
@@ -53,6 +109,9 @@ function metricsHtml(): string {
         <div class="card-value">${formatDuration(stats.avgDuration)}</div>
       </div>
     </div>`;
+
+  const collectionsSection = collectionsHtml();
+  const addForm = addCollectionForm();
 
   const recentRows = recent
     .map(
@@ -113,7 +172,7 @@ function metricsHtml(): string {
       <tbody>${flakyRows || "<tr><td colspan=\"3\">No flaky tests detected</td></tr>"}</tbody>
     </table>`;
 
-  return cards + recentTable + slowTable + flakyTable;
+  return cards + collectionsSection + addForm + recentTable + slowTable + flakyTable;
 }
 
 dashboard.get("/", (c) => {

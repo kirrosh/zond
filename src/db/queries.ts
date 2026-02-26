@@ -1,5 +1,14 @@
 import { getDb } from "./schema.ts";
+import { resolve } from "path";
 import type { StepResult, TestRunResult } from "../core/runner/types.ts";
+
+// ──────────────────────────────────────────────
+// Path normalization
+// ──────────────────────────────────────────────
+
+export function normalizePath(p: string): string {
+  return resolve(p).replace(/\\/g, "/");
+}
 
 // ──────────────────────────────────────────────
 // Types
@@ -11,6 +20,7 @@ export interface CreateRunOpts {
   trigger?: string;
   commit_sha?: string;
   branch?: string;
+  collection_id?: number;
 }
 
 export interface RunRecord {
@@ -26,6 +36,7 @@ export interface RunRecord {
   branch: string | null;
   environment: string | null;
   duration_ms: number | null;
+  collection_id: number | null;
 }
 
 export interface RunSummary {
@@ -38,6 +49,39 @@ export interface RunSummary {
   skipped: number;
   environment: string | null;
   duration_ms: number | null;
+  collection_id: number | null;
+}
+
+// ──────────────────────────────────────────────
+// Collection types
+// ──────────────────────────────────────────────
+
+export interface CollectionRecord {
+  id: number;
+  name: string;
+  test_path: string;
+  openapi_spec: string | null;
+  created_at: string;
+}
+
+export interface CollectionSummary {
+  id: number;
+  name: string;
+  test_path: string;
+  openapi_spec: string | null;
+  created_at: string;
+  total_runs: number;
+  pass_rate: number;
+  last_run_at: string | null;
+  last_run_passed: number;
+  last_run_failed: number;
+  last_run_total: number;
+}
+
+export interface CreateCollectionOpts {
+  name: string;
+  test_path: string;
+  openapi_spec?: string;
 }
 
 export interface StoredStepResult {
@@ -61,8 +105,8 @@ export interface StoredStepResult {
 export function createRun(opts: CreateRunOpts): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch)
-    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch)
+    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch, collection_id)
+    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch, $collection_id)
   `);
   const result = stmt.run({
     $started_at: opts.started_at,
@@ -70,6 +114,7 @@ export function createRun(opts: CreateRunOpts): number {
     $trigger: opts.trigger ?? "manual",
     $commit_sha: opts.commit_sha ?? null,
     $branch: opts.branch ?? null,
+    $collection_id: opts.collection_id ?? null,
   });
   return Number(result.lastInsertRowid);
 }
@@ -114,7 +159,7 @@ export function getRunById(runId: number): RunRecord | null {
 export function listRuns(limit = 20, offset = 0): RunSummary[] {
   const db = getDb();
   return db.query(`
-    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms
+    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id
     FROM runs
     ORDER BY started_at DESC
     LIMIT ? OFFSET ?
@@ -292,4 +337,121 @@ export function countRuns(): number {
   const db = getDb();
   const row = db.query("SELECT COUNT(*) AS cnt FROM runs").get() as { cnt: number };
   return row.cnt;
+}
+
+// ──────────────────────────────────────────────
+// Collections
+// ──────────────────────────────────────────────
+
+export function createCollection(opts: CreateCollectionOpts): number {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO collections (name, test_path, openapi_spec)
+    VALUES ($name, $test_path, $openapi_spec)
+  `);
+  const result = stmt.run({
+    $name: opts.name,
+    $test_path: opts.test_path,
+    $openapi_spec: opts.openapi_spec ?? null,
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export function getCollectionById(id: number): CollectionRecord | null {
+  const db = getDb();
+  return db.query("SELECT * FROM collections WHERE id = ?").get(id) as CollectionRecord | null;
+}
+
+export function listCollections(): CollectionSummary[] {
+  const db = getDb();
+  return db.query(`
+    SELECT
+      c.id, c.name, c.test_path, c.openapi_spec, c.created_at,
+      COUNT(r.id) AS total_runs,
+      CASE WHEN SUM(r.total) > 0
+        THEN ROUND(SUM(r.passed) * 100.0 / SUM(r.total), 1)
+        ELSE 0 END AS pass_rate,
+      MAX(r.started_at) AS last_run_at,
+      COALESCE((SELECT passed FROM runs WHERE collection_id = c.id ORDER BY started_at DESC LIMIT 1), 0) AS last_run_passed,
+      COALESCE((SELECT failed FROM runs WHERE collection_id = c.id ORDER BY started_at DESC LIMIT 1), 0) AS last_run_failed,
+      COALESCE((SELECT total FROM runs WHERE collection_id = c.id ORDER BY started_at DESC LIMIT 1), 0) AS last_run_total
+    FROM collections c
+    LEFT JOIN runs r ON r.collection_id = c.id AND r.finished_at IS NOT NULL
+    GROUP BY c.id
+    ORDER BY c.name
+  `).all() as CollectionSummary[];
+}
+
+export function updateCollection(id: number, opts: Partial<CreateCollectionOpts>): boolean {
+  const db = getDb();
+  const sets: string[] = [];
+  const params: Record<string, any> = { $id: id };
+
+  if (opts.name !== undefined) { sets.push("name = $name"); params.$name = opts.name; }
+  if (opts.test_path !== undefined) { sets.push("test_path = $test_path"); params.$test_path = opts.test_path; }
+  if (opts.openapi_spec !== undefined) { sets.push("openapi_spec = $openapi_spec"); params.$openapi_spec = opts.openapi_spec; }
+
+  if (sets.length === 0) return false;
+
+  const result = db.prepare(`UPDATE collections SET ${sets.join(", ")} WHERE id = $id`).run(params);
+  return result.changes > 0;
+}
+
+export function deleteCollection(id: number, deleteRuns = false): boolean {
+  const db = getDb();
+  if (deleteRuns) {
+    const runIds = db.query("SELECT id FROM runs WHERE collection_id = ?").all(id) as { id: number }[];
+    for (const row of runIds) {
+      db.prepare("DELETE FROM results WHERE run_id = ?").run(row.id);
+    }
+    db.prepare("DELETE FROM runs WHERE collection_id = ?").run(id);
+  } else {
+    db.prepare("UPDATE runs SET collection_id = NULL WHERE collection_id = ?").run(id);
+  }
+  const result = db.prepare("DELETE FROM collections WHERE id = ?").run(id);
+  return result.changes > 0;
+}
+
+export function findCollectionByTestPath(path: string): CollectionRecord | null {
+  const db = getDb();
+  const normalized = normalizePath(path);
+  return db.query("SELECT * FROM collections WHERE test_path = ?").get(normalized) as CollectionRecord | null;
+}
+
+export function listRunsByCollection(collectionId: number, limit = 20, offset = 0): RunSummary[] {
+  const db = getDb();
+  return db.query(`
+    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id
+    FROM runs
+    WHERE collection_id = ?
+    ORDER BY started_at DESC
+    LIMIT ? OFFSET ?
+  `).all(collectionId, limit, offset) as RunSummary[];
+}
+
+export function countRunsByCollection(collectionId: number): number {
+  const db = getDb();
+  const row = db.query("SELECT COUNT(*) AS cnt FROM runs WHERE collection_id = ?").get(collectionId) as { cnt: number };
+  return row.cnt;
+}
+
+export function getCollectionStats(collectionId: number): DashboardStats {
+  const db = getDb();
+  const row = db.query(`
+    SELECT
+      COUNT(*)            AS totalRuns,
+      COALESCE(SUM(total), 0)   AS totalTests,
+      CASE WHEN SUM(total) > 0
+        THEN ROUND(SUM(passed) * 100.0 / SUM(total), 1)
+        ELSE 0 END        AS overallPassRate,
+      COALESCE(ROUND(AVG(duration_ms), 0), 0) AS avgDuration
+    FROM runs
+    WHERE collection_id = ? AND finished_at IS NOT NULL
+  `).get(collectionId) as { totalRuns: number; totalTests: number; overallPassRate: number; avgDuration: number };
+  return row;
+}
+
+export function linkRunToCollection(runId: number, collectionId: number): void {
+  const db = getDb();
+  db.prepare("UPDATE runs SET collection_id = ? WHERE id = ?").run(collectionId, runId);
 }
