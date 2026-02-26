@@ -1,5 +1,9 @@
 export { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "./openapi-reader.ts";
-export { generateSkeleton, generateSuites, writeSuites, findLoginEndpoint } from "./skeleton.ts";
+export { generateSkeleton, generateSuites, writeSuites, findLoginEndpoint, serializeSuite } from "./skeleton.ts";
+export type { RawSuite, RawStep } from "./skeleton.ts";
 export { detectCrudGroups, generateCrudChain, getCrudEndpoints } from "./crud.ts";
 export { generateFromSchema } from "./data-factory.ts";
+export { generateWithAI } from "./ai/ai-generator.ts";
+export { resolveProviderConfig, PROVIDER_DEFAULTS } from "./ai/types.ts";
+export type { AIProviderConfig, AIGenerateOptions, AIGenerateResult } from "./ai/types.ts";
 export type { EndpointInfo, ResponseInfo, GenerateOptions, SecuritySchemeInfo, CrudGroup } from "./types.ts";

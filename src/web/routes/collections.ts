@@ -9,6 +9,7 @@ import {
   createCollection,
   deleteCollection,
   normalizePath,
+  listAIGenerations,
 } from "../../db/queries.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
 import { renderTrendChart } from "../views/trend-chart.ts";
@@ -92,8 +93,12 @@ function renderSuites(suites: TestSuite[]): string {
 
     const chainClass = isChain ? " chain-suite" : "";
 
+    const sourcePath: string = (suite as any)._source ?? "";
+    const isAIGenerated = sourcePath.includes("ai-generated-") || suite.name.toLowerCase().startsWith("ai-generated");
+    const aiBadge = isAIGenerated ? ' <span class="badge-ai">AI</span>' : "";
+
     return `<div class="suite-section${chainClass}">
-      <h3>${escapeHtml(suite.name)}${isChain ? ' <span class="capture-badge" style="font-weight:400">chain</span>' : ""}</h3>
+      <h3>${escapeHtml(suite.name)}${aiBadge}${isChain ? ' <span class="capture-badge" style="font-weight:400">chain</span>' : ""}</h3>
       ${isChain ? '<div class="chain-connector">' : ""}
       ${stepsHtml}
       ${isChain ? "</div>" : ""}
@@ -189,6 +194,8 @@ collections.get("/collections/:id", async (c) => {
     <div class="section-title">Test Suites</div>
     <div id="suites-section">${await loadSuitesHtml(collection.test_path)}</div>
 
+    ${collection.openapi_spec ? renderAIGenerateSection(id, collection.openapi_spec) : ""}
+
     <div class="section-title">Runs</div>
     <table>
       <thead><tr>
@@ -231,5 +238,90 @@ collections.delete("/api/collections/:id", (c) => {
   c.header("HX-Redirect", "/");
   return c.body(null, 200);
 });
+
+function renderAIGenerateSection(collectionId: number, specPath: string): string {
+  const generations = listAIGenerations(collectionId, 10);
+
+  const historyRows = generations.map((g) => `
+    <tr id="ai-gen-row-${g.id}">
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(g.prompt)}">${escapeHtml(g.prompt)}</td>
+      <td>${escapeHtml(g.model)}</td>
+      <td><span class="badge ${g.status === "success" ? "badge-pass" : "badge-fail"}">${g.status}</span></td>
+      <td>${g.duration_ms != null ? (g.duration_ms / 1000).toFixed(1) + "s" : "-"}</td>
+      <td style="font-size:0.8rem;color:var(--text-dim);">${escapeHtml(g.created_at)}</td>
+      <td class="ai-gen-actions">
+        ${g.status === "success" ? `<button class="btn btn-sm btn-outline"
+          hx-get="/api/ai-generation/${g.id}"
+          hx-target="#ai-gen-row-${g.id}"
+          hx-swap="afterend"
+          hx-on::after-request="this.closest('tr').classList.toggle('expanded')">View</button>` : ""}
+        <button class="btn btn-sm btn-outline" onclick="document.getElementById('ai-prompt').value = ${escapeHtml(JSON.stringify(g.prompt))}; document.getElementById('ai-prompt').scrollIntoView({behavior:'smooth'});">Reuse</button>
+      </td>
+    </tr>
+  `).join("");
+
+  return `
+    <div class="section-title">AI Test Generator</div>
+    <div class="ai-generate-section">
+      <form hx-post="/api/ai-generate" hx-target="#ai-result" hx-indicator="#ai-spinner">
+        <input type="hidden" name="collection_id" value="${collectionId}">
+        <input type="hidden" name="spec_path" value="${escapeHtml(specPath)}">
+
+        <label for="ai-prompt" style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:0.25rem;">
+          Describe your test scenario:
+        </label>
+        <textarea id="ai-prompt" name="prompt" rows="4" placeholder="e.g. Test name uniqueness: create entity, create duplicate, expect 409 conflict"
+          style="width:100%;padding:0.5rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:inherit;font-size:0.9rem;resize:vertical;"></textarea>
+
+        <details style="margin:0.75rem 0;">
+          <summary style="cursor:pointer;font-weight:600;font-size:0.85rem;color:var(--text-dim);">Provider Settings</summary>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem;">
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:var(--text-dim);display:block;">Provider</label>
+              <select name="provider" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);">
+                <option value="ollama" selected>Ollama (local)</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="custom">Custom (OpenAI-compatible)</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:var(--text-dim);display:block;">Model</label>
+              <input type="text" name="model" placeholder="llama3.2:3b"
+                style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:monospace;">
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:var(--text-dim);display:block;">URL</label>
+              <input type="text" name="base_url" placeholder="http://localhost:11434/v1"
+                style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:monospace;">
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:var(--text-dim);display:block;">API Key</label>
+              <input type="password" name="api_key" placeholder="sk-..."
+                style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:monospace;">
+            </div>
+          </div>
+        </details>
+
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <button type="submit" class="btn btn-sm">Generate Test Suite</button>
+          <span id="ai-spinner" class="htmx-indicator" style="color:var(--text-dim);">Generating...</span>
+        </div>
+      </form>
+
+      <div id="ai-result" style="margin-top:1rem;"></div>
+
+      ${generations.length > 0 ? `
+        <div style="margin-top:1.25rem;">
+          <div style="font-weight:600;font-size:0.9rem;margin-bottom:0.5rem;">Generation History</div>
+          <table class="ai-gen-history">
+            <thead><tr><th>Prompt</th><th>Model</th><th>Status</th><th>Duration</th><th>Date</th><th>Actions</th></tr></thead>
+            <tbody>${historyRows}</tbody>
+          </table>
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
 
 export default collections;
