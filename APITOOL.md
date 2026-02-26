@@ -6,6 +6,27 @@ OpenAPI спецификация → рабочие тесты + тест-кей
 
 ---
 
+## Содержание
+
+- [Стек](#стек)
+- [Структура проекта](#структура-проекта)
+- [Модули](#модули)
+  - [M1: Parser](#m1-parser-srcoreparser)
+  - [M2: Runner](#m2-runner-srcorerunner)
+  - [M3: Generator](#m3-generator-scoregenerator)
+  - [M4: Reporter](#m4-reporter-srcorereporter)
+  - [M5: Storage](#m5-storage-srcdb)
+  - [M6: WebUI](#m6-webui-srcweb)
+  - [M7: CLI](#m7-cli-srccli)
+  - [M10: AI Generation](#m10-ai-generation-srccoregeneratorai)
+- [Формат YAML-тестов](#формат-yaml-тестов)
+- [Поток данных](#поток-данных)
+- [Roadmap](#roadmap-mvp)
+- [Сборка и установка](#сборка-и-установка)
+- [Принципы](#принципы)
+
+---
+
 ## Стек
 
 | Компонент | Технология |
@@ -42,9 +63,13 @@ apitool/
 │   │   │   ├── openapi-reader.ts   # Парсинг OpenAPI 3.x
 │   │   │   ├── skeleton.ts         # Уровень 1: один запрос на эндпоинт
 │   │   │   ├── crud.ts             # Уровень 2: CRUD-цепочки
-│   │   │   ├── testcases.ts        # Уровень 3: Markdown тест-кейсы
 │   │   │   ├── data-factory.ts     # Генерация тестовых данных по схеме
-│   │   │   └── ai/                 # AI-генерация тестов (Ollama/OpenAI/Anthropic)
+│   │   │   └── ai/                 # AI-генерация тестов (M10)
+│   │   │       ├── ai-generator.ts   # Оркестратор: spec → prompt → LLM → YAML
+│   │   │       ├── llm-client.ts     # HTTP-клиент для LLM провайдеров
+│   │   │       ├── prompt-builder.ts # Сборка системного + user промпта
+│   │   │       ├── output-parser.ts  # Парсинг JSON-ответа LLM → TestSuite
+│   │   │       └── types.ts          # AIGenerateOptions, AIGenerateResult
 │   │   └── reporter/
 │   │       ├── json.ts             # JSON-отчёт
 │   │       ├── junit.ts            # JUnit XML
@@ -70,11 +95,10 @@ apitool/
 │       ├── commands/
 │       │   ├── run.ts              # apitool run
 │       │   ├── generate.ts         # apitool generate
+│       │   ├── ai-generate.ts      # apitool ai-generate
 │       │   ├── collections.ts      # apitool collections
-│       │   ├── describe.ts         # apitool describe
 │       │   ├── serve.ts            # apitool serve
-│       │   ├── validate.ts         # apitool validate
-│       │   └── init.ts             # apitool init
+│       │   └── validate.ts         # apitool validate
 │       ├── runtime.ts             # Определение standalone vs dev режима
 │       └── output.ts              # Форматирование CLI-вывода
 ├── tests/                          # Тесты самого инструмента
@@ -240,10 +264,10 @@ config:
 
 ### M3: Generator (`src/core/generator/`)
 
-Читает OpenAPI 3.x, генерирует YAML-тесты и Markdown тест-кейсы.
+Читает OpenAPI 3.x, генерирует YAML-тесты. Уровни 1 (Skeleton) и 2 (CRUD) полностью реализованы. Уровень 3 (Markdown тест-кейсы) — запланирован, см. BACKLOG.
 
 **Вход:** OpenAPI 3.x YAML/JSON
-**Выход:** `.yaml` файлы тестов + `.md` файл тест-кейсов
+**Выход:** `.yaml` файлы тестов
 
 #### Уровень 1 — Skeleton
 
@@ -275,26 +299,9 @@ expect:
 - `POST /resources` + `GET /resources/{id}` + `PUT /resources/{id}` + `DELETE /resources/{id}` → CRUD suite
 - Связывание через `capture` из POST → подстановка в GET/PUT/DELETE
 
-#### Уровень 3 — Текстовые тест-кейсы
+#### Уровень 3 — Текстовые тест-кейсы (Planned)
 
-```markdown
-## POST /users — Create User
-
-### TC-001: Успешное создание
-- **Шаги:** POST /users с валидным телом {name, email}
-- **Ожидание:** Status 201, тело содержит id (number), name и email совпадают с отправленными
-- **Приоритет:** High
-
-### TC-002: Отсутствует обязательное поле name
-- **Шаги:** POST /users без поля name
-- **Ожидание:** Status 400 или 422, тело содержит описание ошибки
-- **Приоритет:** High
-
-### TC-003: Невалидный email
-- **Шаги:** POST /users с email = "not-an-email"
-- **Ожидание:** Status 400 или 422
-- **Приоритет:** Medium
-```
+Генерация Markdown тест-кейсов из OpenAPI (TC-001, TC-002...) с приоритетами. Документация для QA-команды, покрытие негативных сценариев. CLI-команда `apitool describe` — запланирована. Подробности в BACKLOG.
 
 ---
 
@@ -411,7 +418,7 @@ CREATE INDEX idx_results_name ON results(suite_name, test_name);
 CREATE INDEX idx_collections_name ON collections(name);
 ```
 
-Миграции: массив SQL-строк с номером версии. При старте проверяется `PRAGMA user_version`, применяются недостающие миграции. Текущая версия: **3** (добавлена таблица `ai_generations`).
+Миграции: массив SQL-строк с номером версии. При старте проверяется `PRAGMA user_version`, применяются недостающие миграции. Текущая версия: **2** (добавлена таблица `ai_generations`).
 
 ---
 
@@ -467,15 +474,57 @@ Dashboard-метрики (SQL-запросы):
 
 | Команда | Описание | Основные флаги |
 |---------|----------|----------------|
-| `run <path>` | Запуск тестов (авто-привязка к коллекции) | `--env`, `--report json\|junit\|console`, `--parallel`, `--timeout`, `--bail`, `--auth-token` |
-| `generate` | Генерация тестов из OpenAPI (авто-создание коллекции) | `--from <spec>`, `--output <dir>`, `--level skeleton\|crud\|all` |
+| `run <path>` | Запуск тестов (авто-привязка к коллекции) | `--env`, `--report json\|junit\|console`, `--timeout`, `--bail`, `--no-db`, `--db`, `--auth-token` |
+| `generate` | Генерация тестов из OpenAPI (авто-создание коллекции) | `--from <spec>`, `--output <dir>` |
+| `ai-generate` | AI-генерация тестов из OpenAPI | `--from <spec>`, `--prompt`, `--provider`, `--model`, `--api-key`, `--base-url`, `--output` |
 | `collections` | Список коллекций с pass rate и датой последнего прогона | `--db <path>` |
-| `describe` | Генерация Markdown тест-кейсов | `--from <spec>`, `--output <file>` |
-| `serve` | Запуск WebUI | `--port`, `--host`, `--tests <dir>`, `--openapi <spec>` |
+| `serve` | Запуск WebUI | `--port`, `--host`, `--openapi <spec>`, `--db <path>` |
 | `validate` | Проверка YAML-тестов | `<path>` |
-| `init` | Создание структуры проекта | — |
 
 Exit codes: `0` — все тесты прошли, `1` — есть падения, `2` — ошибка конфигурации.
+
+---
+
+### M10: AI Generation (`src/core/generator/ai/`)
+
+AI-генерация тестов из OpenAPI-спецификации с использованием LLM.
+
+**Архитектура:**
+
+```
+OpenAPI spec + prompt
+        │
+        ▼
+  prompt-builder.ts    → системный промпт + контекст API + пользовательский запрос
+        │
+        ▼
+  llm-client.ts        → HTTP-запрос к LLM-провайдеру
+        │
+        ▼
+  output-parser.ts     → JSON-ответ LLM → TestSuite[] → serializeSuite() → YAML
+```
+
+**Ключевое решение:** LLM генерирует **JSON** (не YAML), затем `serializeSuite()` конвертирует в YAML. Это обеспечивает валидный формат вне зависимости от качества ответа модели.
+
+**Провайдеры:**
+
+| Провайдер | Base URL | Модель по умолчанию |
+|-----------|----------|-------------------|
+| `ollama` | `http://localhost:11434/v1` | `llama3.2:3b` |
+| `openai` | `https://api.openai.com/v1` | `gpt-4o` |
+| `anthropic` | `https://api.anthropic.com` | `claude-sonnet-4-20250514` |
+| `custom` | задаётся через `--base-url` | задаётся через `--model` |
+
+**CLI:** `apitool ai-generate --from <spec> --prompt "..." --provider <name> --model <name> --api-key <key> --output <dir>`
+
+**WebUI:**
+- Форма генерации: выбор провайдера, модель, промпт
+- Preview сгенерированного YAML перед сохранением
+- Сохранение в файл с привязкой к коллекции
+- История генераций с View/Reuse
+- AI badge на suite'ах, сгенерированных через AI
+
+**БД:** таблица `ai_generations` — хранит prompt, model, provider, результат, token usage, duration.
 
 ---
 
@@ -595,15 +644,15 @@ tests:
 | Модуль | Статус | Коммит | Результат |
 |--------|--------|--------|-----------|
 | M1 (Parser) + M2 (Runner) | DONE | `4e270ab` | `apitool run test.yaml` работает |
-| M3 (Generator) | DONE | `e3d94d8` | `apitool generate --from api.yaml` — skeleton тесты |
+| M3 (Generator) | DONE | `e3d94d8` | `apitool generate --from api.yaml` — skeleton + CRUD тесты |
 | M4 (Reporter) + M7 (CLI basic) | DONE | `e179180` | console/json/junit отчёты, CLI команды |
 | M5 (Storage/SQLite) | DONE | `2245e79` | История прогонов в apitool.db |
 | M6 (WebUI) | DONE | `94a58e4` | `apitool serve --port 8080 --openapi <spec>`, multi-auth panel, trend chart, filters, export |
-| M7 (CLI polish) | PARTIAL | — | Базовые команды + `--auth-token`, см. BACKLOG |
+| M7 (CLI) | DONE | — | run, generate, ai-generate, collections, serve, validate |
 | M8 (Standalone binary) | DONE | `6bd2401` | `bun run build` → `apitool.exe`, CSS embedded, runtime detection |
-| M9 (Collections) | DONE | — | Сущность Collection, группировка runs, CLI `collections`, dashboard redesign |
-| M10 (AI Generate) | DONE | — | AI-генерация тестов, история генераций с View/Reuse, AI badge на сьютах, сохранение с output_path |
-| M11 (Suite Details) | DONE | — | Кликабельные сьюты (YAML, source file, AI prompt/model), показ broken-файлов с Delete, per-suite Run, улучшенный AI-промпт |
+| M9 (Collections) | DONE | `56a3995` | Сущность Collection, группировка runs, CLI `collections`, dashboard redesign |
+| M10 (AI Generate) | DONE | `7901df7` | AI-генерация тестов, история генераций с View/Reuse, AI badge на сьютах, сохранение с output_path |
+| M11 (Suite Details) | DONE | `9e4e87e` | Кликабельные сьюты (YAML, source file, AI prompt/model), показ broken-файлов с Delete, per-suite Run, улучшенный AI-промпт |
 
 ---
 
