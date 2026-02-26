@@ -54,12 +54,14 @@ apitool/
 │   ├── web/
 │   │   ├── server.ts               # Hono-сервер
 │   │   ├── routes/
-│   │   │   ├── dashboard.ts        # GET / — главная с коллекциями
+│   │   │   ├── dashboard.ts        # GET / — главная с trend chart, коллекциями
 │   │   │   ├── collections.ts      # GET /collections/:id, POST/DELETE /api/collections
-│   │   │   ├── runs.ts             # GET /runs, GET /runs/:id
+│   │   │   ├── runs.ts             # GET /runs (с фильтрами), GET /runs/:id
 │   │   │   ├── explorer.ts         # GET /explorer — дерево API
-│   │   │   └── api.ts              # POST /api/run, POST /api/try
-│   │   ├── views/                  # HTML-шаблоны (JSX или template literals)
+│   │   │   └── api.ts              # POST /api/run, POST /api/try, GET /api/export
+│   │   ├── views/
+│   │   │   ├── layout.ts           # HTML layout, escapeHtml()
+│   │   │   └── trend-chart.ts      # Shared SVG trend chart component
 │   │   └── static/                 # HTMX, CSS, иконки
 │   └── cli/
 │       ├── index.ts                # Точка входа, роутинг команд
@@ -368,7 +370,8 @@ CREATE TABLE results (
   response_status INTEGER,
   response_body TEXT,                   -- хранить только при fail (экономия)
   error_message TEXT,
-  assertions    TEXT                    -- JSON массив AssertionResult[]
+  assertions    TEXT,                   -- JSON массив AssertionResult[]
+  captures      TEXT                    -- JSON Record<string, unknown>
 );
 
 CREATE TABLE environments (
@@ -401,7 +404,7 @@ Hono-сервер рендерит HTML, интерактивность чере
 | Route | Описание |
 |-------|----------|
 | `GET /` | Dashboard: глобальные метрики, grid коллекций, форма добавления, recent runs, slowest/flaky |
-| `GET /collections/:id` | Детали коллекции: метрики, таблица прогонов с пагинацией, кнопка Delete |
+| `GET /collections/:id` | Детали коллекции: метрики, trend chart, test suites, таблица прогонов с пагинацией |
 | `GET /runs` | Список прогонов с фильтрацией (статус, environment, дата, поиск по имени теста) и пагинацией |
 | `GET /runs/:id` | Детали прогона: каждый тест → запрос/ответ/ассерты + кнопки Export (JUnit XML, JSON) |
 | `GET /explorer` | Дерево API из OpenAPI, параметры, описания, multi-auth panel |
