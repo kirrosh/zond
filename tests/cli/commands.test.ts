@@ -13,6 +13,7 @@ function tryUnlink(path: string): void {
 }
 
 const FIXTURES = `${import.meta.dir}/../fixtures`;
+const originalFetch = globalThis.fetch;
 
 // Helper to mock fetch responses
 function mockFetchResponses(responses: Array<{ status: number; body: unknown; headers?: Record<string, string> }>) {
@@ -24,6 +25,10 @@ function mockFetchResponses(responses: Array<{ status: number; body: unknown; he
       headers: { "Content-Type": "application/json", ...resp.headers },
     });
   }) as typeof fetch;
+}
+
+function restoreFetch() {
+  globalThis.fetch = originalFetch;
 }
 
 // Suppress stdout/stderr during tests
@@ -47,6 +52,7 @@ describe("runCommand", () => {
 
   afterEach(() => {
     restore?.();
+    restoreFetch();
     closeDb();
   });
 

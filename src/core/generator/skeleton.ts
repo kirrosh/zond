@@ -1,4 +1,4 @@
-import type { EndpointInfo } from "./types.ts";
+import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
 import { generateFromSchema } from "./data-factory.ts";
 
 interface RawStep {
@@ -6,21 +6,27 @@ interface RawStep {
   [methodKey: string]: unknown;
   expect: {
     status?: number;
-    body?: Record<string, { type: string }>;
+    body?: Record<string, Record<string, string>>;
   };
 }
 
 interface RawSuite {
   name: string;
   base_url?: string;
+  headers?: Record<string, string>;
   tests: RawStep[];
 }
 
 /**
  * Generate skeleton test suites from extracted OpenAPI endpoints.
  * Groups endpoints by first tag (or path prefix).
+ * When securitySchemes are provided, generates auth login steps and suite-level headers.
  */
-export function generateSkeleton(endpoints: EndpointInfo[], baseUrl?: string): RawSuite[] {
+export function generateSkeleton(
+  endpoints: EndpointInfo[],
+  baseUrl?: string,
+  securitySchemes?: SecuritySchemeInfo[],
+): RawSuite[] {
   // Group by tag
   const groups = new Map<string, EndpointInfo[]>();
 
@@ -32,10 +38,24 @@ export function generateSkeleton(endpoints: EndpointInfo[], baseUrl?: string): R
     groups.get(group)!.push(ep);
   }
 
+  // Detect bearer auth scheme
+  const bearerScheme = securitySchemes?.find(
+    (s) => s.type === "http" && s.scheme === "bearer",
+  );
+
+  // Detect API key schemes
+  const apiKeySchemes = securitySchemes?.filter((s) => s.type === "apiKey") ?? [];
+
+  // Detect login endpoint for bearer auth
+  const loginEndpoint = bearerScheme ? findLoginEndpoint(endpoints) : undefined;
+
   const suites: RawSuite[] = [];
 
   for (const [groupName, eps] of groups) {
     const tests: RawStep[] = [];
+
+    // Check if any endpoint in this group requires auth
+    const needsAuth = eps.some((ep) => ep.security.length > 0);
 
     for (const ep of eps) {
       const step = buildStep(ep);
@@ -46,10 +66,103 @@ export function generateSkeleton(endpoints: EndpointInfo[], baseUrl?: string): R
     if (baseUrl) {
       suite.base_url = baseUrl;
     }
+
+    // Add auth support for suites that need it
+    if (needsAuth) {
+      if (bearerScheme && loginEndpoint) {
+        // Add login step at the beginning
+        const loginStep = buildLoginStep(loginEndpoint);
+        suite.tests.unshift(loginStep);
+        // Add suite-level Authorization header
+        suite.headers = { Authorization: "Bearer {{auth_token}}" };
+      }
+
+      // Add API key headers
+      for (const apiKey of apiKeySchemes) {
+        if (apiKey.in === "header" && apiKey.apiKeyName) {
+          if (!suite.headers) suite.headers = {};
+          const envVar = apiKey.name.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase();
+          suite.headers[apiKey.apiKeyName] = `{{${envVar}}}`;
+        }
+      }
+    }
+
     suites.push(suite);
   }
 
   return suites;
+}
+
+/**
+ * Detect a login endpoint by heuristic:
+ * - POST method
+ * - path contains /auth, /login, or /token
+ * - no security requirement
+ * - response has "token" or "access_token" property
+ */
+function findLoginEndpoint(endpoints: EndpointInfo[]): EndpointInfo | undefined {
+  const authPathPattern = /(\/auth|\/login|\/token)/i;
+
+  return endpoints.find((ep) => {
+    if (ep.method !== "POST") return false;
+    if (!authPathPattern.test(ep.path)) return false;
+    if (ep.security.length > 0) return false;
+
+    // Check if any 2xx response has token/access_token property
+    const hasTokenResponse = ep.responses.some((r) => {
+      if (r.statusCode < 200 || r.statusCode >= 300) return false;
+      if (!r.schema?.properties) return false;
+      return "token" in r.schema.properties || "access_token" in r.schema.properties;
+    });
+
+    return hasTokenResponse;
+  });
+}
+
+function buildLoginStep(ep: EndpointInfo): RawStep {
+  const step: RawStep = {
+    name: "Auth: Login",
+    POST: ep.path,
+    expect: {
+      status: 200,
+    },
+  };
+
+  // Generate json body with env var placeholders for credentials
+  if (ep.requestBodySchema?.properties) {
+    const json: Record<string, unknown> = {};
+    for (const key of Object.keys(ep.requestBodySchema.properties)) {
+      const lower = key.toLowerCase();
+      if (lower === "username" || lower === "email" || lower === "login") {
+        json[key] = "{{auth_username}}";
+      } else if (lower === "password" || lower === "secret") {
+        json[key] = "{{auth_password}}";
+      } else {
+        json[key] = generateFromSchema(
+          ep.requestBodySchema.properties[key] as import("openapi-types").OpenAPIV3.SchemaObject,
+          key,
+        );
+      }
+    }
+    step.json = json;
+  }
+
+  // Detect token field name from response schema
+  const successResponse = ep.responses.find(
+    (r) => r.statusCode >= 200 && r.statusCode < 300 && r.schema?.properties,
+  );
+  if (successResponse?.schema?.properties) {
+    const tokenField = "access_token" in successResponse.schema.properties
+      ? "access_token"
+      : "token";
+    step.expect.body = {
+      [tokenField]: { capture: "auth_token", type: "string" },
+    };
+  }
+
+  step.headers = { "Content-Type": "application/json" };
+
+  return step;
 }
 
 function deriveGroupFromPath(path: string): string {
@@ -230,6 +343,12 @@ function serializeSuite(suite: RawSuite): string {
   lines.push(`name: ${yamlScalar(suite.name)}`);
   if (suite.base_url) {
     lines.push(`base_url: ${yamlScalar(suite.base_url)}`);
+  }
+  if (suite.headers && Object.keys(suite.headers).length > 0) {
+    lines.push("headers:");
+    for (const [hk, hv] of Object.entries(suite.headers)) {
+      lines.push(`  ${hk}: ${yamlScalar(String(hv))}`);
+    }
   }
   lines.push("tests:");
 

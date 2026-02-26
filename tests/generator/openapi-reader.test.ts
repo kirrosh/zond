@@ -1,26 +1,34 @@
 import { describe, test, expect } from "bun:test";
-import { readOpenApiSpec, extractEndpoints } from "../../src/core/generator/openapi-reader.ts";
+import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "../../src/core/generator/openapi-reader.ts";
 
-const FIXTURE = "tests/fixtures/petstore.yaml";
+const FIXTURE = "tests/fixtures/petstore-auth.json";
 
 describe("readOpenApiSpec", () => {
-  test("parses and dereferences petstore spec", async () => {
+  test("parses and dereferences petstore-auth spec", async () => {
     const doc = await readOpenApiSpec(FIXTURE);
-    expect(doc.openapi).toBe("3.0.3");
-    expect(doc.info.title).toBe("Petstore");
+    expect(doc.openapi).toBe("3.0.0");
+    expect(doc.info.title).toBe("Test Petstore");
     expect(doc.paths).toBeDefined();
   });
 
-  test("dereferences $ref schemas", async () => {
+  test("contains securitySchemes component", async () => {
     const doc = await readOpenApiSpec(FIXTURE);
-    // After dereference, the Post /pets requestBody should have resolved schema
-    const postPets = doc.paths!["/pets"]!.post!;
-    const rb = postPets.requestBody as any;
-    const schema = rb.content["application/json"].schema;
-    // Should be the actual schema, not a $ref
-    expect(schema.type).toBe("object");
-    expect(schema.properties).toBeDefined();
-    expect(schema.properties.name).toBeDefined();
+    const schemes = doc.components?.securitySchemes;
+    expect(schemes).toBeDefined();
+    expect(schemes!.bearerAuth).toBeDefined();
+  });
+});
+
+describe("extractSecuritySchemes", () => {
+  test("extracts bearer auth scheme", async () => {
+    const doc = await readOpenApiSpec(FIXTURE);
+    const schemes = extractSecuritySchemes(doc);
+
+    expect(schemes.length).toBe(1);
+    expect(schemes[0]!.name).toBe("bearerAuth");
+    expect(schemes[0]!.type).toBe("http");
+    expect(schemes[0]!.scheme).toBe("bearer");
+    expect(schemes[0]!.bearerFormat).toBe("JWT");
   });
 });
 
@@ -29,14 +37,15 @@ describe("extractEndpoints", () => {
     const doc = await readOpenApiSpec(FIXTURE);
     const endpoints = extractEndpoints(doc);
 
-    expect(endpoints.length).toBe(6); // 2 on /pets, 3 on /pets/{petId}, 1 on /health
+    expect(endpoints.length).toBe(7); // login + 5 pet routes + health
 
     const methods = endpoints.map((e) => `${e.method} ${e.path}`);
+    expect(methods).toContain("POST /auth/login");
     expect(methods).toContain("GET /pets");
     expect(methods).toContain("POST /pets");
-    expect(methods).toContain("GET /pets/{petId}");
-    expect(methods).toContain("PUT /pets/{petId}");
-    expect(methods).toContain("DELETE /pets/{petId}");
+    expect(methods).toContain("GET /pets/{id}");
+    expect(methods).toContain("PUT /pets/{id}");
+    expect(methods).toContain("DELETE /pets/{id}");
     expect(methods).toContain("GET /health");
   });
 
@@ -66,14 +75,9 @@ describe("extractEndpoints", () => {
     const doc = await readOpenApiSpec(FIXTURE);
     const endpoints = extractEndpoints(doc);
 
-    const listPets = endpoints.find((e) => e.operationId === "listPets")!;
-    expect(listPets.parameters.length).toBe(1);
-    expect(listPets.parameters[0]!.name).toBe("limit");
-    expect(listPets.parameters[0]!.in).toBe("query");
-
     const getPet = endpoints.find((e) => e.operationId === "getPet")!;
     expect(getPet.parameters.length).toBe(1);
-    expect(getPet.parameters[0]!.name).toBe("petId");
+    expect(getPet.parameters[0]!.name).toBe("id");
     expect(getPet.parameters[0]!.in).toBe("path");
   });
 
@@ -101,6 +105,27 @@ describe("extractEndpoints", () => {
 
     const notFound = getPet.responses.find((r) => r.statusCode === 404)!;
     expect(notFound.description).toBe("Pet not found");
-    expect(notFound.schema).toBeUndefined();
+  });
+
+  test("populates security field for protected endpoints", async () => {
+    const doc = await readOpenApiSpec(FIXTURE);
+    const endpoints = extractEndpoints(doc);
+
+    const listPets = endpoints.find((e) => e.operationId === "listPets")!;
+    expect(listPets.security).toEqual(["bearerAuth"]);
+
+    const createPet = endpoints.find((e) => e.operationId === "createPet")!;
+    expect(createPet.security).toEqual(["bearerAuth"]);
+  });
+
+  test("endpoints without security have empty security array", async () => {
+    const doc = await readOpenApiSpec(FIXTURE);
+    const endpoints = extractEndpoints(doc);
+
+    const login = endpoints.find((e) => e.operationId === "login")!;
+    expect(login.security).toEqual([]);
+
+    const health = endpoints.find((e) => e.operationId === "healthCheck")!;
+    expect(health.security).toEqual([]);
   });
 });

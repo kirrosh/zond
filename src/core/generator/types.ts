@@ -17,6 +17,16 @@ export interface EndpointInfo {
   requestBodyContentType?: string;
   responseContentTypes: string[];
   responses: ResponseInfo[];
+  security: string[];
+}
+
+export interface SecuritySchemeInfo {
+  name: string;
+  type: "http" | "apiKey" | "oauth2" | "openIdConnect";
+  scheme?: string;
+  bearerFormat?: string;
+  in?: string;
+  apiKeyName?: string;
 }
 
 export interface GenerateOptions {

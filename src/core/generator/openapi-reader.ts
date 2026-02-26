@@ -1,12 +1,36 @@
 import { dereference } from "@readme/openapi-parser";
 import type { OpenAPIV3 } from "openapi-types";
-import type { EndpointInfo, ResponseInfo } from "./types.ts";
+import type { EndpointInfo, ResponseInfo, SecuritySchemeInfo } from "./types.ts";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
 export async function readOpenApiSpec(specPath: string): Promise<OpenAPIV3.Document> {
   const api = await dereference(specPath);
   return api as OpenAPIV3.Document;
+}
+
+export function extractSecuritySchemes(doc: OpenAPIV3.Document): SecuritySchemeInfo[] {
+  const schemes: SecuritySchemeInfo[] = [];
+  const securitySchemes = doc.components?.securitySchemes;
+  if (!securitySchemes) return schemes;
+
+  for (const [name, schemeObj] of Object.entries(securitySchemes)) {
+    const scheme = schemeObj as OpenAPIV3.SecuritySchemeObject;
+    const info: SecuritySchemeInfo = {
+      name,
+      type: scheme.type as SecuritySchemeInfo["type"],
+    };
+    if (scheme.type === "http") {
+      info.scheme = scheme.scheme;
+      info.bearerFormat = scheme.bearerFormat;
+    }
+    if (scheme.type === "apiKey") {
+      info.in = scheme.in;
+      info.apiKeyName = scheme.name;
+    }
+    schemes.push(info);
+  }
+  return schemes;
 }
 
 export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
@@ -86,6 +110,10 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
         }
       }
 
+      // Security: operation-level overrides doc-level
+      const securityReqs = operation.security ?? doc.security ?? [];
+      const security = securityReqs.flatMap((req) => Object.keys(req));
+
       endpoints.push({
         path,
         method: method.toUpperCase(),
@@ -97,6 +125,7 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
         requestBodyContentType,
         responseContentTypes: [...responseContentTypesSet],
         responses,
+        security,
       });
     }
   }
