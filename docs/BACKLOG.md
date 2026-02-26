@@ -77,13 +77,16 @@
 
 ## M8: Сборка и публикация
 
-### `bun build --compile`
+### `bun build --compile` — DONE
 
-- **Что:** Компиляция в один бинарник (~50-80 MB)
-- **Задачи:**
-  - Проверить что static/style.css и HTMX вкомпилированы
-  - Тестировать на Linux/macOS/Windows
-  - CI pipeline (GitHub Actions)
+- **Что:** Компиляция в standalone бинарник через `bun run build`
+- **Реализовано:**
+  - CSS embedded через `import ... with { type: "file" }` (работает в `$bunfs`)
+  - Runtime detection (standalone vs bun) в `--version` и server log
+  - isMain fix через `import.meta.main` для compiled context
+- **Оставшиеся задачи:**
+  - Тестировать на Linux/macOS (Windows проверен)
+  - CI pipeline (GitHub Actions) для multi-platform builds
 
 ### README.md
 
@@ -93,7 +96,7 @@
 ### GitHub Release
 
 - **Что:** Автоматическая сборка бинарников для 3 платформ, публикация release
-- **Зависит от:** bun compile + CI
+- **Зависит от:** CI pipeline
 
 ---
 
@@ -109,7 +112,7 @@
 
 ## Порядок приоритетов
 
-1. **M8: Сборка** — `bun compile`, проверить бинарник
+1. ~~**M8: Сборка** — `bun compile`, проверить бинарник~~ DONE
 2. **Generator Level 2 (CRUD)** — самая ценная фича генератора
 3. **WebUI improvements** — график, фильтры, export
 4. **Generator Level 3 + describe** — тест-кейсы в Markdown

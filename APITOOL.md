@@ -69,6 +69,7 @@ apitool/
 │       │   ├── serve.ts            # apitool serve
 │       │   ├── validate.ts         # apitool validate
 │       │   └── init.ts             # apitool init
+│       ├── runtime.ts             # Определение standalone vs dev режима
 │       └── output.ts              # Форматирование CLI-вывода
 ├── tests/                          # Тесты самого инструмента
 ├── examples/                       # Примеры YAML-тестов
@@ -541,22 +542,69 @@ tests:
 | M5 (Storage/SQLite) | DONE | `2245e79` | История прогонов в apitool.db |
 | M6 (WebUI) | DONE | `94a58e4` | `apitool serve --port 8080 --openapi <spec>`, multi-auth panel |
 | M7 (CLI polish) | PARTIAL | — | Базовые команды + `--auth-token`, см. BACKLOG |
-| M8 (Сборка + публикация) | TODO | — | `bun compile`, GitHub Release, README |
+| M8 (Standalone binary) | DONE | `6bd2401` | `bun run build` → `apitool.exe`, CSS embedded, runtime detection |
 
 ---
 
-## Сборка
+## Сборка и установка
 
 ```bash
-# Разработка
+# Разработка (требуется Bun runtime)
 bun run src/cli/index.ts run tests/
 
-# Компиляция в бинарник
-bun build --compile src/cli/index.ts --outfile apitool
+# Компиляция в standalone бинарник
+bun run build
+# или: bun build --compile src/cli/index.ts --outfile apitool
 
-# Результат: один файл ~50-80 MB
+# Результат: apitool / apitool.exe — один файл, Bun не нужен
 ./apitool run tests/*.yaml
 ./apitool serve --port 8080
+```
+
+### Установка
+
+Скопировать бинарник в любую папку из `PATH`:
+
+```bash
+# Linux / macOS
+cp apitool /usr/local/bin/
+
+# Windows — скопировать apitool.exe в папку из PATH
+```
+
+После этого `apitool` доступен из любой директории.
+
+### Как работает бинарник
+
+Бинарник **stateless** — он ничего не хранит внутри себя. Все файлы создаются в **текущей рабочей директории** (cwd):
+
+```bash
+cd ~/projects/myapi
+
+# Генерация тестов — создаст ./generated/*.yaml
+apitool generate --from openapi.json
+
+# Запуск тестов — создаст ./apitool.db для хранения результатов
+apitool run ./generated/
+
+# Web-дашборд — читает apitool.db и спеку из cwd
+apitool serve --port 4000 --openapi openapi.json
+```
+
+| Артефакт | Расположение | Описание |
+|----------|-------------|----------|
+| YAML-тесты | `./generated/` (или `--output <dir>`) | Сгенерированные/написанные тесты |
+| `apitool.db` | `./apitool.db` (или `--db <path>`) | SQLite — история прогонов |
+| OpenAPI спека | указывается через `--from` / `--openapi` | Читается, не копируется |
+
+### Runtime detection
+
+```bash
+./apitool --version
+# apitool 0.1.0 (standalone)   — из скомпилированного бинарника
+
+bun src/cli/index.ts --version
+# apitool 0.1.0 (bun)          — из dev-режима
 ```
 
 ---
