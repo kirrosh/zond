@@ -70,11 +70,26 @@ describe("Explorer routes", () => {
   let appWithSpec: ReturnType<typeof createApp>;
   let appWithoutSpec: ReturnType<typeof createApp>;
 
+  let appNoAuth: ReturnType<typeof createApp>;
+
   beforeAll(() => {
     try { unlinkSync(TEST_DB); } catch {}
     getDb(TEST_DB);
-    appWithSpec = createApp({ endpoints: mockEndpoints, specPath: "petstore.yaml", servers: [{ url: "https://petstore3.swagger.io/api/v3", description: "Swagger Petstore" }] });
-    appWithoutSpec = createApp({ endpoints: [], specPath: null, servers: [] });
+    appWithSpec = createApp({
+      endpoints: mockEndpoints,
+      specPath: "petstore-auth.json",
+      servers: [{ url: "http://localhost:3000", description: "Test Petstore" }],
+      securitySchemes: [{ name: "bearerAuth", type: "http", scheme: "bearer" }],
+      loginPath: "/auth/login",
+    });
+    appWithoutSpec = createApp({ endpoints: [], specPath: null, servers: [], securitySchemes: [], loginPath: null });
+    appNoAuth = createApp({
+      endpoints: mockEndpoints,
+      specPath: "petstore.json",
+      servers: [{ url: "http://localhost:3000" }],
+      securitySchemes: [],
+      loginPath: null,
+    });
   });
 
   afterAll(() => {
@@ -94,7 +109,7 @@ describe("Explorer routes", () => {
     const res = await appWithSpec.request("/explorer");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("petstore.yaml");
+    expect(html).toContain("petstore-auth.json");
     expect(html).toContain("4 endpoints");
     expect(html).toContain("/pets");
     expect(html).toContain("/users");
@@ -129,7 +144,7 @@ describe("Explorer routes", () => {
     const html = await res.text();
     expect(html).toContain("Try it");
     expect(html).toContain("/api/try");
-    expect(html).toContain("https://petstore3.swagger.io/api/v3");
+    expect(html).toContain("http://localhost:3000");
   });
 
   it("HTMX explorer request returns fragment", async () => {
@@ -138,5 +153,22 @@ describe("Explorer routes", () => {
     const html = await res.text();
     expect(html).toContain("API Explorer");
     expect(html).not.toContain("<!DOCTYPE html>");
+  });
+
+  it("authorize panel rendered when bearer scheme present", async () => {
+    const res = await appWithSpec.request("/explorer");
+    const html = await res.text();
+    expect(html).toContain("authorize-panel");
+    expect(html).toContain("Authorize");
+    expect(html).toContain("auth-user");
+    expect(html).toContain("auth-pass");
+    expect(html).toContain("/auth/login");
+  });
+
+  it("authorize panel not rendered when no security schemes", async () => {
+    const res = await appNoAuth.request("/explorer");
+    const html = await res.text();
+    expect(html).not.toContain("authorize-panel");
+    expect(html).not.toContain("auth-user");
   });
 });

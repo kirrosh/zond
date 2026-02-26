@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { layout, escapeHtml } from "../views/layout.ts";
-import type { EndpointInfo } from "../../core/generator/types.ts";
+import type { EndpointInfo, SecuritySchemeInfo } from "../../core/generator/types.ts";
 
 export interface ServerInfo {
   url: string;
@@ -11,6 +11,8 @@ export interface ExplorerDeps {
   endpoints: EndpointInfo[];
   specPath: string | null;
   servers: ServerInfo[];
+  securitySchemes: SecuritySchemeInfo[];
+  loginPath: string | null;
 }
 
 function methodBadge(method: string): string {
@@ -101,6 +103,71 @@ function tryItForm(endpoint: EndpointInfo, index: number, servers: ServerInfo[])
     </div>`;
 }
 
+function authorizePanel(deps: ExplorerDeps): string {
+  const hasBearerScheme = deps.securitySchemes.some(
+    (s) => s.type === "http" && s.scheme === "bearer",
+  );
+  if (!hasBearerScheme) return "";
+
+  const loginPathAttr = deps.loginPath ? escapeHtml(deps.loginPath) : "";
+
+  return `
+    <details class="authorize-panel" open>
+      <summary>Authorize <span id="auth-status" class="auth-status auth-none">Not authorized</span></summary>
+      <div style="margin-top:0.75rem">
+        <label style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:0.25rem">Username</label>
+        <input id="auth-user" type="text" placeholder="username" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:monospace;font-size:0.85rem;margin-bottom:0.5rem">
+        <label style="display:block;font-weight:600;font-size:0.85rem;margin-bottom:0.25rem">Password</label>
+        <input id="auth-pass" type="password" placeholder="password" style="width:100%;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:monospace;font-size:0.85rem;margin-bottom:0.75rem">
+        <button class="btn" type="button" onclick="doAuthorize()">Authorize</button>
+      </div>
+    </details>
+    <script>
+    window.__authToken = null;
+    function applyAuthToken(token) {
+      window.__authToken = token;
+      document.querySelectorAll('.try-form form').forEach(function(form) {
+        var inp = form.querySelector('input[name="header_Authorization"]');
+        if (!inp) {
+          inp = document.createElement('input');
+          inp.type = 'hidden'; inp.name = 'header_Authorization';
+          form.appendChild(inp);
+        }
+        inp.value = 'Bearer ' + token;
+      });
+      document.getElementById('auth-status').textContent = 'Authorized';
+      document.getElementById('auth-status').className = 'auth-status auth-ok';
+    }
+    // HTMX hook: inject token into every /api/try request
+    document.addEventListener('htmx:configRequest', function(evt) {
+      if (window.__authToken && evt.detail.path === '/api/try') {
+        evt.detail.parameters['header_Authorization'] = 'Bearer ' + window.__authToken;
+      }
+    });
+    async function doAuthorize() {
+      var base = document.querySelector('[name="base_url"]');
+      base = base ? (base.value || '') : '';
+      var resp = await fetch('/api/authorize', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          base_url: base,
+          path: '${loginPathAttr}',
+          username: document.getElementById('auth-user').value,
+          password: document.getElementById('auth-pass').value
+        })
+      });
+      var data = await resp.json();
+      if (data.token) applyAuthToken(data.token);
+      else {
+        var st = document.getElementById('auth-status');
+        st.textContent = 'Error: ' + (data.error || 'Login failed');
+        st.className = 'auth-status auth-none';
+      }
+    }
+    </script>`;
+}
+
 export function createExplorerRoute(deps: ExplorerDeps) {
   const explorer = new Hono();
 
@@ -156,6 +223,7 @@ export function createExplorerRoute(deps: ExplorerDeps) {
     const content = `
       <h1>API Explorer</h1>
       <p>Spec: <code>${escapeHtml(deps.specPath)}</code> — ${deps.endpoints.length} endpoints</p>
+      ${authorizePanel(deps)}
       ${groupsHtml}`;
 
     if (isHtmx) return c.html(content);

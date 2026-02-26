@@ -135,4 +135,36 @@ api.post("/api/try", async (c) => {
   }
 });
 
+// POST /api/authorize — proxy login request, extract token
+api.post("/api/authorize", async (c) => {
+  try {
+    const { base_url, path, username, password } = await c.req.json();
+    if (!base_url || !path) {
+      return c.json({ error: "Missing base_url or path" }, 400);
+    }
+
+    const url = base_url.replace(/\/+$/, "") + path;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      return c.json({ error: `Login failed (${response.status}): ${text}` }, 401);
+    }
+
+    const data = await response.json();
+    const token = data.token ?? data.access_token;
+    if (!token) {
+      return c.json({ error: "No token in response" }, 401);
+    }
+
+    return c.json({ token });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
 export default api;
