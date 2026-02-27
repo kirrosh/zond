@@ -1,28 +1,29 @@
 # BACKLOG — Приоритеты и милестоуны
 
-Следующие шаги развития APITOOL после M1-M11.
+Следующие шаги развития APITOOL после M1-M12.
 
 ---
 
-## Tier 1 — Публичный релиз
+## Tier 1 — Публичный релиз ✅
 
-### 1. README.md
+### 1. README.md ✅
 
 - Installation instructions (бинарник, Bun dev mode)
 - Quick start: generate → run → serve
-- Примеры YAML-тестов, скриншоты WebUI
-- Бейджи (CI, license, version)
+- Примеры YAML-тестов, CLI reference
+- Лицензия MIT
 
-### 2. CI pipeline (GitHub Actions)
+### 2. CI pipeline (GitHub Actions) ✅
 
-- Lint + typecheck (`bun run check`)
-- Тесты (`bun test`)
+- Тесты (`bun test`) на push в main/dev и PR
 - Multi-platform build: `linux-x64`, `darwin-arm64`, `win-x64`
+- Integration тесты исключены из CI (требуют test-server)
 
-### 3. GitHub Release
+### 3. GitHub Release ✅
 
-- Tag → build → publish бинарники для 3 платформ
-- Changelog из коммитов
+- Tag `v*` → matrix build на 3 OS → tar.gz/zip → GitHub Releases
+- CHANGELOG.md для v0.1.0
+- Branching flow: dev → PR → main → tag → release
 
 ---
 
@@ -79,20 +80,47 @@
 
 | Задача | Файл(ы) | Приоритет |
 |--------|---------|-----------|
-| Integration тесты для JSONPlaceholder нестабильны (внешний API) | `tests/integration/` | Medium |
+| CI: integration тесты не запускаются — нужен автозапуск test-server | `tests/integration/`, `.github/workflows/ci.yml` | High |
+| CI: typecheck (`tsc --noEmit`) отключён — test-server конфликтует с корневым tsconfig | `tsconfig.json`, `test-server/` | Medium |
 | Explorer: response body schema не показывает вложенные объекты | `explorer.ts` | Low |
 | `describe.ts`, `init.ts`, `testcases.ts` — упоминались в ранних версиях документации, не реализованы | — | Info |
+
+### CI: Integration тесты с test-server
+
+Сейчас integration тесты (`tests/integration/`) исключены из CI, т.к. требуют запущенный `test-server/`.
+
+**Что нужно:**
+- CI step: `cd test-server && bun install && bun run src/index.ts &` перед запуском тестов
+- Дождаться готовности сервера (health check `GET /health`)
+- Запустить `bun test tests/integration/` отдельным шагом
+- Graceful shutdown после завершения
+
+**Файлы:**
+- `test-server/` — Hono + zod-openapi сервер с JWT auth, CRUD pets
+- `tests/integration/crud-chain.test.ts` — CRUD цепочка
+- `tests/integration/auth-flow.test.ts` — генерация тестов из спеки + прогон с авторизацией
+
+### CI: Typecheck
+
+`tsc --noEmit` отключён из CI т.к. `test-server/` имеет свои зависимости (`@hono/zod-openapi`, `jose`) которые не установлены в корневом `node_modules`. Несмотря на `include: ["src/**/*.ts", "tests/**/*.ts"]` в tsconfig, tsc на CI всё равно подхватывает файлы из `test-server/`.
+
+**Варианты решения:**
+- Установить зависимости test-server в CI перед typecheck
+- Вынести test-server в отдельный репозиторий
+- Добавить composite tsconfig с project references
 
 ---
 
 ## Милестоуны
 
-### M12: Public Release Package
+### M12: Public Release Package ✅
 
-- README.md с бейджами, фичами, quick start, примерами, скриншотами
-- GitHub Actions CI: typecheck + test + compile (linux-x64, darwin-arm64, win-x64)
-- Release workflow: tag → build → publish
-- **Приоритет:** без дистрибуции инструмент невидим
+- README.md с фичами, quick start, примерами, CLI reference
+- MIT License, CHANGELOG.md
+- GitHub Actions CI: тесты на push main/dev и PR
+- Release workflow: tag → matrix build (3 OS) → tar.gz/zip → GitHub Releases
+- Branching flow: dev → main → tag
+- Первый релиз: v0.1.0
 
 ### M13: Environment Management в WebUI
 
@@ -123,5 +151,5 @@
 ### Порядок
 
 ```
-M12 (Release) → M13 (Environments) → M14 (DX) → M15 (WebSocket) → M16 (Analytics)
+M12 (Release) ✅ → M13 (Environments) → M14 (DX) → M15 (WebSocket) → M16 (Analytics)
 ```
