@@ -11,7 +11,7 @@ API testing platform — define tests in YAML, run from CLI or WebUI, generate f
 - **OpenAPI generator** — auto-generate skeleton tests from OpenAPI 3.x specs
 - **AI test generation** — generate tests using LLM providers (Ollama, OpenAI, Anthropic)
 - **Multiple reporters** — console (colored), JSON, JUnit XML
-- **Web dashboard** — run history, trend charts, API Explorer, collection management
+- **Web dashboard** — run history, trend charts, API Explorer, collection management, environment editor
 - **SQLite storage** — persist runs and results locally
 - **Standalone binary** — single executable, no runtime dependencies
 

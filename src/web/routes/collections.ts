@@ -11,6 +11,7 @@ import {
   normalizePath,
   listAIGenerations,
   listSavedAIGenerations,
+  listEnvironments,
 } from "../../db/queries.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
 import { renderTrendChart } from "../views/trend-chart.ts";
@@ -237,15 +238,21 @@ collections.get("/collections/:id", async (c) => {
     ? `<a class="btn btn-outline btn-sm" href="/explorer">Explorer</a>`
     : "";
 
+  const envs = listEnvironments();
+  const envOptions = envs.map(e => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`).join("");
+
   const content = `
     <h1>${escapeHtml(collection.name)}</h1>
-    <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+    <div style="display:flex;gap:0.5rem;margin-bottom:1rem;align-items:center;">
       <a class="btn btn-sm" href="/" >Back</a>
-      <button class="btn btn-sm btn-run"
-        hx-post="/api/run"
-        hx-vals='${JSON.stringify({ path: collection.test_path })}'
-        hx-indicator="#run-spinner-${id}"
-        hx-disabled-elt="this">Run Tests</button>
+      <form style="display:contents;" hx-post="/api/run" hx-indicator="#run-spinner-${id}">
+        <input type="hidden" name="path" value="${escapeHtml(collection.test_path)}">
+        <select name="env" style="padding:0.3rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.85rem;">
+          <option value="">No environment</option>
+          ${envOptions}
+        </select>
+        <button type="submit" class="btn btn-sm btn-run" hx-disabled-elt="this">Run Tests</button>
+      </form>
       ${explorerLink}
       <button class="btn btn-danger btn-sm"
         hx-delete="/api/collections/${id}"

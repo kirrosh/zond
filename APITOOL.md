@@ -84,6 +84,7 @@ apitool/
 │   │   │   ├── collections.ts      # GET /collections/:id, POST/DELETE /api/collections
 │   │   │   ├── ai-generate.ts     # POST /api/ai-generate, save, GET /api/ai-generation/:id
 │   │   │   ├── runs.ts             # GET /runs (с фильтрами), GET /runs/:id
+│   │   │   ├── environments.ts    # CRUD окружений: list, detail, create, update, delete
 │   │   │   ├── explorer.ts         # GET /explorer — дерево API
 │   │   │   └── api.ts              # POST /api/run, POST /api/try, GET /api/export
 │   │   ├── views/
@@ -436,6 +437,11 @@ Hono-сервер рендерит HTML, интерактивность чере
 | `GET /collections/:id` | Детали коллекции: метрики, trend chart, test suites (кликабельные — YAML, source, AI prompt/model), broken-файлы с Delete, per-suite Run, таблица прогонов |
 | `GET /runs` | Список прогонов с фильтрацией (статус, environment, дата, поиск по имени теста) и пагинацией |
 | `GET /runs/:id` | Детали прогона: каждый тест → запрос/ответ/ассерты + кнопки Export (JUnit XML, JSON) |
+| `GET /environments` | Список окружений: имя, кол-во переменных, actions (Edit/Delete), форма создания |
+| `GET /environments/:id` | Редактор окружения: key-value editor с добавлением/удалением строк |
+| `POST /api/environments` | Создать окружение |
+| `PUT /api/environments/:id` | Обновить переменные окружения |
+| `DELETE /api/environments/:id` | Удалить окружение |
 | `GET /explorer` | Дерево API из OpenAPI, параметры, описания, multi-auth panel |
 | `POST /api/collections` | Создать коллекцию из формы на дашборде |
 | `DELETE /api/collections/:id` | Удалить коллекцию (runs unlinked) |
@@ -458,7 +464,7 @@ Dashboard-метрики (SQL-запросы):
 
 Фильтрация прогонов (`GET /runs`):
 - **Status:** All / Has Failures / All Passed
-- **Environment:** dropdown из `SELECT DISTINCT environment FROM runs`
+- **Environment:** dropdown из `listEnvironments()` + `getDistinctEnvironments()` (объединение определённых и из истории прогонов)
 - **Date range:** from / to
 - **Test name:** поиск по имени теста (LIKE)
 
@@ -653,6 +659,8 @@ tests:
 | M9 (Collections) | DONE | `56a3995` | Сущность Collection, группировка runs, CLI `collections`, dashboard redesign |
 | M10 (AI Generate) | DONE | `7901df7` | AI-генерация тестов, история генераций с View/Reuse, AI badge на сьютах, сохранение с output_path |
 | M11 (Suite Details) | DONE | `9e4e87e` | Кликабельные сьюты (YAML, source file, AI prompt/model), показ broken-файлов с Delete, per-suite Run, улучшенный AI-промпт |
+| M12 (Public Release) | DONE | `da9e027` | README, CHANGELOG, CI pipeline, GitHub Release workflow |
+| M13 (Environments) | DONE | — | CRUD окружений в WebUI, key-value editor, env selector при запуске тестов |
 
 ---
 

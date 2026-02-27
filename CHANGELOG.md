@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Environment management in WebUI** — full CRUD for environments (`/environments`)
+- **Key-value editor** — add/remove variables with inline JavaScript
+- **Environment selector** — `<select name="env">` dropdown in collection "Run Tests" form
+- **DB queries** — `getEnvironmentById()`, `deleteEnvironment()`, `listEnvironmentRecords()`
+- **Navigation** — "Environments" link in navbar
+- **Improved runs filter** — environment dropdown merges defined environments + run history
+
 ## [0.1.0] - 2025-02-27
 
 Initial public release.

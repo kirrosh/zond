@@ -29,12 +29,12 @@
 
 ## Tier 2 — Ценные фичи
 
-### 4. Environment management в WebUI
+### 4. Environment management в WebUI ✅
 
 - CRUD routes: `GET /environments`, `POST /api/environments`, `PUT`, `DELETE`
 - Key-value editor для переменных
 - Selector окружения при запуске тестов в WebUI
-- Таблица `environments` уже в БД — нужны только routes + UI
+- Runs filter объединяет определённые environments + из истории прогонов
 
 ### 5. `apitool init` — scaffolding проекта
 
@@ -122,12 +122,14 @@
 - Branching flow: dev → main → tag
 - Первый релиз: v0.1.0
 
-### M13: Environment Management в WebUI
+### M13: Environment Management в WebUI ✅
 
-- CRUD routes для `environments`
-- Selector окружения при запуске тестов
-- Key-value editor для переменных
-- **Приоритет:** таблица уже в БД, нужны только routes + UI
+- CRUD routes: `GET /environments`, `GET /environments/:id`, `POST /api/environments`, `PUT /api/environments/:id`, `DELETE /api/environments/:id`
+- Key-value editor для переменных (добавление/удаление строк)
+- Selector окружения при запуске тестов в коллекции
+- Runs filter: объединение `listEnvironments()` + `getDistinctEnvironments()`
+- DB queries: `getEnvironmentById()`, `deleteEnvironment()`, `listEnvironmentRecords()`
+- Навигация: ссылка "Environments" в layout
 
 ### M14: Developer Experience
 
@@ -151,5 +153,5 @@
 ### Порядок
 
 ```
-M12 (Release) ✅ → M13 (Environments) → M14 (DX) → M15 (WebSocket) → M16 (Analytics)
+M12 (Release) ✅ → M13 (Environments) ✅ → M14 (DX) → M15 (WebSocket) → M16 (Analytics)
 ```
