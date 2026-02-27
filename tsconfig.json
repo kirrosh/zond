@@ -1,4 +1,5 @@
 {
+  "exclude": ["test-server"],
   "compilerOptions": {
     // Environment setup & latest features
     "lib": ["ESNext"],
