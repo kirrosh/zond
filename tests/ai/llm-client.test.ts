@@ -7,7 +7,7 @@ describe("llm-client", () => {
     let capturedRequest: { url: string; headers: Record<string, string>; body: any } | null = null;
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input: any, init: any) => {
+    globalThis.fetch = (async (input: any, init: any) => {
       capturedRequest = {
         url: typeof input === "string" ? input : input.url,
         headers: Object.fromEntries(Object.entries(init?.headers ?? {})),
@@ -17,7 +17,7 @@ describe("llm-client", () => {
         choices: [{ message: { content: '{"suites":[]}' } }],
         usage: { prompt_tokens: 10, completion_tokens: 5 },
       }), { status: 200 });
-    };
+    }) as unknown as typeof fetch;
 
     try {
       const config: AIProviderConfig = {
@@ -53,7 +53,7 @@ describe("llm-client", () => {
     let capturedRequest: { url: string; headers: Record<string, string>; body: any } | null = null;
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (input: any, init: any) => {
+    globalThis.fetch = (async (input: any, init: any) => {
       capturedRequest = {
         url: typeof input === "string" ? input : input.url,
         headers: Object.fromEntries(Object.entries(init?.headers ?? {})),
@@ -63,7 +63,7 @@ describe("llm-client", () => {
         content: [{ type: "text", text: '{"suites":[]}' }],
         usage: { input_tokens: 20, output_tokens: 10 },
       }), { status: 200 });
-    };
+    }) as unknown as typeof fetch;
 
     try {
       const config: AIProviderConfig = {
@@ -100,12 +100,12 @@ describe("llm-client", () => {
     let capturedHeaders: Record<string, string> = {};
 
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (_input: any, init: any) => {
+    globalThis.fetch = (async (_input: any, init: any) => {
       capturedHeaders = Object.fromEntries(Object.entries(init?.headers ?? {}));
       return new Response(JSON.stringify({
         choices: [{ message: { content: "test" } }],
       }), { status: 200 });
-    };
+    }) as unknown as typeof fetch;
 
     try {
       const config: AIProviderConfig = {
@@ -123,9 +123,9 @@ describe("llm-client", () => {
 
   test("throws on HTTP error", async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => {
+    globalThis.fetch = (async () => {
       return new Response("Rate limit exceeded", { status: 429 });
-    };
+    }) as unknown as typeof fetch;
 
     try {
       const config: AIProviderConfig = {

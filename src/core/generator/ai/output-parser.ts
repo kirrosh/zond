@@ -70,8 +70,8 @@ export function parseAIResponse(raw: string): ParseResult {
       errors.push(`Suite "${(rawSuite as any).name ?? i + 1}" validation: ${issues}`);
     }
 
-    validSuites.push(rawSuite as RawSuite);
-    yamlParts.push(serializeSuite(rawSuite as RawSuite));
+    validSuites.push(rawSuite as unknown as RawSuite);
+    yamlParts.push(serializeSuite(rawSuite as unknown as RawSuite));
   }
 
   if (validSuites.length === 0 && errors.length === 0) {

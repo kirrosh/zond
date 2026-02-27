@@ -1,14 +1,26 @@
 {
   "name": "apitool",
   "version": "0.1.0",
+  "description": "API testing platform — define tests in YAML, run from CLI or WebUI, generate from OpenAPI specs",
+  "license": "MIT",
   "module": "index.ts",
   "type": "module",
-  "private": true,
+  "keywords": [
+    "api",
+    "testing",
+    "openapi",
+    "yaml",
+    "cli",
+    "rest",
+    "http"
+  ],
   "bin": {
     "apitool": "src/cli/index.ts"
   },
   "scripts": {
     "apitool": "bun run src/cli/index.ts",
+    "test": "bun test",
+    "check": "tsc --noEmit",
     "build": "bun build --compile src/cli/index.ts --outfile apitool"
   },
   "devDependencies": {

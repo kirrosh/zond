@@ -22,6 +22,7 @@ const mockEndpoints: EndpointInfo[] = [
     requestBodyContentType: undefined,
     responseContentTypes: ["application/json"],
     responses: [{ statusCode: 200, description: "A list of pets" }],
+    security: [],
   },
   {
     path: "/pets/{petId}",
@@ -39,6 +40,7 @@ const mockEndpoints: EndpointInfo[] = [
       { statusCode: 200, description: "A pet" },
       { statusCode: 404, description: "Pet not found" },
     ],
+    security: [],
   },
   {
     path: "/pets",
@@ -51,6 +53,7 @@ const mockEndpoints: EndpointInfo[] = [
     requestBodyContentType: "application/json",
     responseContentTypes: ["application/json"],
     responses: [{ statusCode: 201, description: "Pet created" }],
+    security: [],
   },
   {
     path: "/users",
@@ -63,6 +66,7 @@ const mockEndpoints: EndpointInfo[] = [
     requestBodyContentType: undefined,
     responseContentTypes: ["application/json"],
     responses: [{ statusCode: 200, description: "A list of users" }],
+    security: [],
   },
 ];
 

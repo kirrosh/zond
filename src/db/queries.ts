@@ -209,7 +209,7 @@ export function listRuns(limit = 20, offset = 0, filters?: RunFilters): RunSumma
       ${where}
       ORDER BY r.started_at DESC
       LIMIT ? OFFSET ?
-    `).all(...params, limit, offset) as RunSummary[];
+    `).all(...(params as (string | number)[]), limit, offset) as RunSummary[];
   }
   return db.query(`
     SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id
@@ -392,7 +392,7 @@ export function countRuns(filters?: RunFilters): number {
   const db = getDb();
   if (filters && Object.values(filters).some(Boolean)) {
     const { where, params } = buildRunFilterSQL(filters);
-    const row = db.query(`SELECT COUNT(*) AS cnt FROM runs r ${where}`).get(...params) as { cnt: number };
+    const row = db.query(`SELECT COUNT(*) AS cnt FROM runs r ${where}`).get(...(params as (string | number)[])) as { cnt: number };
     return row.cnt;
   }
   const row = db.query("SELECT COUNT(*) AS cnt FROM runs").get() as { cnt: number };

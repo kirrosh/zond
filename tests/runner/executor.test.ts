@@ -17,7 +17,7 @@ function mockFetchResponses(responses: Array<{ status: number; body: unknown; he
       status: resp.status,
       headers: { "Content-Type": "application/json", ...resp.headers },
     });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 }
 
 describe("runSuite", () => {
@@ -144,7 +144,7 @@ describe("runSuite", () => {
       callCount++;
       if (callCount === 1) return new Response(JSON.stringify({}), { status: 500, headers: { "Content-Type": "application/json" } });
       return new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const result = await runSuite(suite);
     expect(result.total).toBe(3);
@@ -158,9 +158,9 @@ describe("runSuite", () => {
   test("merges suite-level headers with step headers", async () => {
     let capturedHeaders: Record<string, string> = {};
     globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
-      capturedHeaders = Object.fromEntries(new Headers(init?.headers as HeadersInit).entries());
+      capturedHeaders = Object.fromEntries(new Headers(init?.headers as Record<string, string>).entries());
       return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const suite: TestSuite = {
       name: "Headers",
@@ -186,7 +186,7 @@ describe("runSuite", () => {
     globalThis.fetch = mock(async (url: string | URL | Request) => {
       capturedUrl = typeof url === "string" ? url : (url as Request).url;
       return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const suite: TestSuite = {
       name: "Env test",
@@ -207,9 +207,9 @@ describe("runSuite", () => {
   test("auto-sets Content-Type for JSON body", async () => {
     let capturedHeaders: Record<string, string> = {};
     globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
-      capturedHeaders = Object.fromEntries(new Headers(init?.headers as HeadersInit).entries());
+      capturedHeaders = Object.fromEntries(new Headers(init?.headers as Record<string, string>).entries());
       return new Response("{}", { status: 201, headers: { "Content-Type": "application/json" } });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const suite: TestSuite = {
       name: "JSON",
@@ -230,7 +230,7 @@ describe("runSuite", () => {
   test("handles fetch error with error status", async () => {
     globalThis.fetch = mock(async () => {
       throw new Error("Connection refused");
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const suite: TestSuite = {
       name: "Error",
@@ -253,7 +253,7 @@ describe("runSuite", () => {
     globalThis.fetch = mock(async (url: string | URL | Request) => {
       capturedUrl = typeof url === "string" ? url : (url as Request).url;
       return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const suite: TestSuite = {
       name: "Query",
@@ -294,7 +294,7 @@ describe("runSuites", () => {
     globalThis.fetch = mock(async () => {
       callCount++;
       return new Response(JSON.stringify({ n: callCount }), { status: 200, headers: { "Content-Type": "application/json" } });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const suites: TestSuite[] = [
       { name: "A", config: DEFAULT_CONFIG, tests: [{ name: "A1", method: "GET", path: "http://x.com/a", expect: { status: 200 } }] },

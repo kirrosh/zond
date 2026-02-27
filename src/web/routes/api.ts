@@ -176,7 +176,7 @@ api.post("/api/authorize", async (c) => {
       return c.json({ error: `Login failed (${response.status}): ${text}` }, 401);
     }
 
-    const data = await response.json();
+    const data = await response.json() as any;
     const token = data.token ?? data.access_token;
     if (!token) {
       return c.json({ error: "No token in response" }, 401);
