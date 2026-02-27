@@ -65,17 +65,47 @@ chmod +x "$BINARY"
 # Choose install directory
 INSTALL_DIR="/usr/local/bin"
 if [ ! -w "$INSTALL_DIR" ]; then
-  INSTALL_DIR="$HOME/.local/bin"
-  mkdir -p "$INSTALL_DIR"
-  echo "Installing to $INSTALL_DIR (no write access to /usr/local/bin)"
-  case ":$PATH:" in
-    *":$INSTALL_DIR:"*) ;;
-    *) echo "Warning: $INSTALL_DIR is not in your PATH. Add it with:"
-       echo "  export PATH=\"$INSTALL_DIR:\$PATH\"" ;;
-  esac
+  # Try with sudo first
+  if command -v sudo >/dev/null 2>&1; then
+    echo "Need sudo to install to $INSTALL_DIR"
+    sudo cp "$BINARY" "$INSTALL_DIR/apitool"
+    sudo chmod +x "$INSTALL_DIR/apitool"
+  else
+    INSTALL_DIR="$HOME/.local/bin"
+    mkdir -p "$INSTALL_DIR"
+    cp "$BINARY" "$INSTALL_DIR/apitool"
+    echo "Installed to $INSTALL_DIR"
+
+    # Add to PATH in shell profile if not already there
+    case ":$PATH:" in
+      *":$INSTALL_DIR:"*) ;;
+      *)
+        PROFILE=""
+        if [ -f "$HOME/.zshrc" ]; then
+          PROFILE="$HOME/.zshrc"
+        elif [ -f "$HOME/.bashrc" ]; then
+          PROFILE="$HOME/.bashrc"
+        elif [ -f "$HOME/.profile" ]; then
+          PROFILE="$HOME/.profile"
+        fi
+
+        if [ -n "$PROFILE" ]; then
+          echo "" >> "$PROFILE"
+          echo "# apitool" >> "$PROFILE"
+          echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$PROFILE"
+          echo "Added $INSTALL_DIR to PATH in $PROFILE"
+          echo "Run: source $PROFILE   (or open a new terminal)"
+        else
+          echo "Warning: $INSTALL_DIR is not in your PATH. Add it with:"
+          echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+        fi
+        ;;
+    esac
+  fi
+else
+  cp "$BINARY" "$INSTALL_DIR/apitool"
 fi
 
-cp "$BINARY" "$INSTALL_DIR/apitool"
 echo "Installed to $INSTALL_DIR/apitool"
 
 # Verify
