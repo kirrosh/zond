@@ -21,4 +21,4 @@ jobs:
       - run: bun install
 
       - name: Tests
-        run: bun test
+        run: bun test tests/parser tests/runner tests/generator tests/reporter tests/db tests/web tests/cli tests/ai
