@@ -1,5 +1,6 @@
 {
-  "include": ["src", "tests"],
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["test-server", "node_modules"],
   "compilerOptions": {
     // Environment setup & latest features
     "lib": ["ESNext"],
