@@ -19,7 +19,7 @@ API testing platform — define tests in YAML, run from CLI or WebUI, generate f
 
 ### Download binary
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/anthropics/apitool/releases).
+Download the latest release for your platform from [GitHub Releases](https://github.com/kirrosh/apitool/releases).
 
 ```bash
 # Linux / macOS
@@ -33,7 +33,7 @@ apitool.exe --version
 ### From source (requires Bun)
 
 ```bash
-git clone https://github.com/anthropics/apitool.git
+git clone https://github.com/kirrosh/apitool.git
 cd apitool
 bun install
 bun run apitool --version
