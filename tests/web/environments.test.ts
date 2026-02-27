@@ -111,7 +111,7 @@ describe("Environments web routes", () => {
 
     const res = await app.request(`/api/environments/${devEnv.id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "HX-Request": "true" },
       body: form.toString(),
     });
 
@@ -125,7 +125,7 @@ describe("Environments web routes", () => {
 
     const res = await app.request("/api/environments/99999", {
       method: "PUT",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "HX-Request": "true" },
       body: form.toString(),
     });
 
@@ -139,7 +139,10 @@ describe("Environments web routes", () => {
     const records = listEnvironmentRecords();
     const env = records.find(r => r.name === "to-delete")!;
 
-    const res = await app.request(`/api/environments/${env.id}`, { method: "DELETE" });
+    const res = await app.request(`/api/environments/${env.id}`, {
+      method: "DELETE",
+      headers: { "HX-Request": "true" },
+    });
     expect(res.status).toBe(200);
 
     const after = listEnvironmentRecords();
