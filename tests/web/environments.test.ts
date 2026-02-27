@@ -68,12 +68,12 @@ describe("Environments web routes", () => {
     expect(res.status).toBe(400);
   });
 
-  // POST /api/environments
-  it("POST /api/environments creates environment and redirects", async () => {
+  // POST /environments
+  it("POST /environments creates environment and redirects", async () => {
     const form = new URLSearchParams();
     form.set("name", "staging");
 
-    const res = await app.request("/api/environments", {
+    const res = await app.request("/environments", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString(),
@@ -85,11 +85,11 @@ describe("Environments web routes", () => {
     expect(records.some(r => r.name === "staging")).toBe(true);
   });
 
-  it("POST /api/environments returns 400 for empty name", async () => {
+  it("POST /environments returns 400 for empty name", async () => {
     const form = new URLSearchParams();
     form.set("name", "");
 
-    const res = await app.request("/api/environments", {
+    const res = await app.request("/environments", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString(),
@@ -98,8 +98,8 @@ describe("Environments web routes", () => {
     expect(res.status).toBe(400);
   });
 
-  // PUT /api/environments/:id
-  it("PUT /api/environments/:id updates variables", async () => {
+  // PUT /environments/:id
+  it("PUT /environments/:id updates variables", async () => {
     const records = listEnvironmentRecords();
     const devEnv = records.find(r => r.name === "dev")!;
 
@@ -109,39 +109,38 @@ describe("Environments web routes", () => {
     form.append("key", "NEW_VAR");
     form.append("value", "new_value");
 
-    const res = await app.request(`/api/environments/${devEnv.id}`, {
+    const res = await app.request(`/environments/${devEnv.id}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "HX-Request": "true" },
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString(),
     });
 
     expect(res.status).toBe(302);
   });
 
-  it("PUT /api/environments/:id returns 404 for non-existent", async () => {
+  it("PUT /environments/:id returns 404 for non-existent", async () => {
     const form = new URLSearchParams();
     form.append("key", "X");
     form.append("value", "Y");
 
-    const res = await app.request("/api/environments/99999", {
+    const res = await app.request("/environments/99999", {
       method: "PUT",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "HX-Request": "true" },
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: form.toString(),
     });
 
     expect(res.status).toBe(404);
   });
 
-  // DELETE /api/environments/:id
-  it("DELETE /api/environments/:id deletes environment", async () => {
+  // DELETE /environments/:id
+  it("DELETE /environments/:id deletes environment", async () => {
     // Create a temp env to delete
     upsertEnvironment("to-delete", { X: "1" });
     const records = listEnvironmentRecords();
     const env = records.find(r => r.name === "to-delete")!;
 
-    const res = await app.request(`/api/environments/${env.id}`, {
+    const res = await app.request(`/environments/${env.id}`, {
       method: "DELETE",
-      headers: { "HX-Request": "true" },
     });
     expect(res.status).toBe(200);
 

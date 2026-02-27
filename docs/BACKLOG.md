@@ -32,7 +32,7 @@
 
 ### 4. Environment management в WebUI ✅
 
-- CRUD routes: `GET /environments`, `POST /api/environments`, `PUT`, `DELETE`
+- CRUD routes: `GET /environments`, `POST /environments`, `PUT /environments/:id`, `DELETE /environments/:id`
 - Key-value editor для переменных
 - Selector окружения при запуске тестов в WebUI
 - Runs filter объединяет определённые environments + из истории прогонов
@@ -85,7 +85,7 @@
 | CI: typecheck (`tsc --noEmit`) ✅ | `tsconfig.json`, `.github/workflows/ci.yml` | Done |
 | Explorer: response body schema не показывает вложенные объекты | `explorer.ts` | Low |
 | `describe.ts`, `init.ts`, `testcases.ts` — упоминались в ранних версиях документации, не реализованы | — | Info |
-| `tests/web/environments.test.ts` — 3 теста падают (PUT 400 вместо 302, DELETE 204 вместо 200) после перехода на OpenAPI routes | `tests/web/environments.test.ts` | Medium |
+| `tests/web/environments.test.ts` — исправлено в M14.1 (HTMX routes отделены от JSON API) | `tests/web/environments.test.ts` | Done |
 
 ---
 
@@ -102,7 +102,7 @@
 
 ### M13: Environment Management в WebUI ✅
 
-- CRUD routes: `GET /environments`, `GET /environments/:id`, `POST /api/environments`, `PUT /api/environments/:id`, `DELETE /api/environments/:id`
+- CRUD routes: `GET /environments`, `GET /environments/:id`, `POST /environments`, `PUT /environments/:id`, `DELETE /environments/:id`
 - Key-value editor для переменных (добавление/удаление строк)
 - Selector окружения при запуске тестов в коллекции
 - Runs filter: объединение `listEnvironments()` + `getDistinctEnvironments()`
@@ -124,6 +124,13 @@
 - CI: typecheck (`tsc --noEmit`) включён в pipeline
 - Исправлены ошибки типов в `schemas.ts`, `api.ts`
 
+### M14.1: Разделение HTMX и JSON API routes ✅
+
+- `/api/*` — только JSON (OpenAPI-documented)
+- HTMX form-data handlers перенесены на HTML-пути (`/environments`, `/collections`, `/run`)
+- Убраны хрупкие гейты (`if (content-type includes json) return next()`, `if (HX-Request) return next()`)
+- Тесты обновлены: URL и заголовки соответствуют новым путям
+
 ### M15: WebSocket Live Updates
 
 - Bun native WebSocket + Hono upgrade
@@ -140,5 +147,5 @@
 ### Порядок
 
 ```
-M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M15 (WebSocket) → M16 (Analytics)
+M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (WebSocket) → M16 (Analytics)
 ```

@@ -444,13 +444,13 @@ Hono-сервер рендерит HTML, интерактивность чере
 | `GET /runs/:id` | Детали прогона: каждый тест → запрос/ответ/ассерты + кнопки Export (JUnit XML, JSON) |
 | `GET /environments` | Список окружений: имя, кол-во переменных, actions (Edit/Delete), форма создания |
 | `GET /environments/:id` | Редактор окружения: key-value editor с добавлением/удалением строк |
-| `POST /api/environments` | Создать окружение |
-| `PUT /api/environments/:id` | Обновить переменные окружения |
-| `DELETE /api/environments/:id` | Удалить окружение |
+| `POST /environments` | Создать окружение (HTMX form-data) |
+| `PUT /environments/:id` | Обновить переменные окружения (HTMX form-data) |
+| `DELETE /environments/:id` | Удалить окружение (HTMX) |
 | `GET /explorer` | Дерево API из OpenAPI, параметры, описания, multi-auth panel |
-| `POST /api/collections` | Создать коллекцию из формы на дашборде |
-| `DELETE /api/collections/:id` | Удалить коллекцию (runs unlinked) |
-| `POST /api/run` | Запустить прогон из WebUI (HTMX), авто-привязка к коллекции |
+| `POST /collections` | Создать коллекцию из формы на дашборде (HTMX form-data) |
+| `DELETE /collections/:id` | Удалить коллекцию (HTMX, runs unlinked) |
+| `POST /run` | Запустить прогон из WebUI (HTMX form-data), авто-привязка к коллекции |
 | `POST /api/try` | Отправить единичный запрос из Explorer (HTMX, с auth injection) |
 | `POST /api/authorize` | Proxy login для Bearer auth (username/password → token) |
 | `GET /api/export/:runId/junit` | Скачать JUnit XML отчёт для прогона |

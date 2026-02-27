@@ -28,7 +28,7 @@ function envListPage(envs: EnvironmentRecord[]): string {
       <td>
         <a class="btn btn-sm btn-outline" href="/environments/${e.id}">Edit</a>
         <button class="btn btn-sm btn-danger"
-          hx-delete="/api/environments/${e.id}"
+          hx-delete="/environments/${e.id}"
           hx-confirm="Delete environment '${escapeHtml(e.name)}'?"
           hx-target="closest tr"
           hx-swap="outerHTML">Delete</button>
@@ -44,7 +44,7 @@ function envListPage(envs: EnvironmentRecord[]): string {
     </table>
 
     <div class="section-title" style="margin-top:2rem;">Create Environment</div>
-    <form hx-post="/api/environments" hx-target="body" style="max-width:400px;">
+    <form hx-post="/environments" hx-target="body" style="max-width:400px;">
       <div style="margin-bottom:0.75rem;">
         <label style="font-weight:600;font-size:0.85rem;display:block;margin-bottom:0.25rem;">Name</label>
         <input type="text" name="name" required placeholder="e.g. dev, staging, prod"
@@ -72,11 +72,11 @@ function envDetailPage(env: EnvironmentRecord): string {
     <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
       <a class="btn btn-sm" href="/environments">Back</a>
       <button class="btn btn-sm btn-danger"
-        hx-delete="/api/environments/${env.id}"
+        hx-delete="/environments/${env.id}"
         hx-confirm="Delete environment '${escapeHtml(env.name)}'?">Delete</button>
     </div>
 
-    <form id="env-form" hx-put="/api/environments/${env.id}" hx-target="body">
+    <form id="env-form" hx-put="/environments/${env.id}" hx-target="body">
       <div class="section-title">Variables</div>
       <div id="env-vars">
         ${varRows}
@@ -128,14 +128,11 @@ environments.get("/environments/:id", (c) => {
 });
 
 // ──────────────────────────────────────────────
-// Form-data handlers (HTMX) — registered before OpenAPI routes
+// Form-data handlers (HTMX) on HTML paths
 // ──────────────────────────────────────────────
 
-// POST /api/environments — form-data passthrough for HTMX
-environments.post("/api/environments", async (c, next) => {
-  const ct = c.req.header("content-type") ?? "";
-  if (ct.includes("application/json")) return next();
-
+// POST /environments — create environment (form-data from HTMX)
+environments.post("/environments", async (c) => {
   const body = await c.req.parseBody();
   const name = (body["name"] as string ?? "").trim();
   if (!name) {
@@ -146,10 +143,8 @@ environments.post("/api/environments", async (c, next) => {
   return c.redirect("/environments");
 });
 
-// PUT /api/environments/:id — form-data passthrough for HTMX
-environments.put("/api/environments/:id", async (c, next) => {
-  if (c.req.header("HX-Request") !== "true") return next();
-
+// PUT /environments/:id — update environment variables (form-data from HTMX)
+environments.put("/environments/:id", async (c) => {
   const id = parseInt(c.req.param("id"), 10);
   if (isNaN(id)) return c.html(layout("Error", "<h1>Invalid ID</h1>"), 400);
 
@@ -173,10 +168,8 @@ environments.put("/api/environments/:id", async (c, next) => {
   return c.redirect(`/environments/${id}`);
 });
 
-// DELETE /api/environments/:id — HTMX passthrough (returns empty body)
-environments.delete("/api/environments/:id", (c, next) => {
-  if (c.req.header("HX-Request") !== "true") return next();
-
+// DELETE /environments/:id — delete environment (HTMX)
+environments.delete("/environments/:id", (c) => {
   const id = parseInt(c.req.param("id"), 10);
   deleteEnvironment(id);
   c.header("HX-Redirect", "/environments");
