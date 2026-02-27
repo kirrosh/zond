@@ -20,7 +20,7 @@
   "scripts": {
     "apitool": "bun run src/cli/index.ts",
     "test": "bun test",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit --project tsconfig.json",
     "build": "bun build --compile src/cli/index.ts --outfile apitool"
   },
   "devDependencies": {
@@ -30,6 +30,8 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@hono/zod-openapi": "^1.2.2",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@readme/openapi-parser": "^5.5.0",
     "hono": "^4.12.2",
     "openapi-types": "^12.1.3",

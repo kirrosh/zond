@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
     branches: [main]
 
@@ -21,7 +21,10 @@ jobs:
       - run: bun install
 
       - name: Typecheck
-        run: bun run check
+        run: bunx tsc --noEmit
 
       - name: Tests
-        run: bun test
+        run: bun test tests/parser tests/runner tests/generator tests/reporter tests/db tests/web tests/cli tests/ai
+
+      - name: Integration tests (dogfooding)
+        run: bun test tests/integration/crud-chain.test.ts

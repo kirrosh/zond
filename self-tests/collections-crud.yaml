@@ -1,0 +1,46 @@
+name: collections CRUD
+base_url: "http://localhost:8080"
+tests:
+  - name: Create collection
+    POST: /api/collections
+    headers:
+      Content-Type: application/json
+    json:
+      name: "{{$randomName}}"
+      test_path: "{{$randomString}}"
+      openapi_spec: "{{$randomString}}"
+    expect:
+      status: 201
+      body:
+        id:
+          capture: collection_id
+          type: number
+        name:
+          type: string
+        test_path:
+          type: string
+        openapi_spec:
+          type: string
+  - name: Get created collection
+    GET: /api/collections/{{collection_id}}
+    expect:
+      status: 200
+      body:
+        id:
+          equals: "{{collection_id}}"
+        name:
+          type: string
+        test_path:
+          type: string
+        openapi_spec:
+          type: string
+        created_at:
+          type: string
+  - name: Delete collection
+    DELETE: /api/collections/{{collection_id}}
+    expect:
+      status: 204
+  - name: Verify collection deleted
+    GET: /api/collections/{{collection_id}}
+    expect:
+      status: 404

@@ -11,29 +11,35 @@ API testing platform — define tests in YAML, run from CLI or WebUI, generate f
 - **OpenAPI generator** — auto-generate skeleton tests from OpenAPI 3.x specs
 - **AI test generation** — generate tests using LLM providers (Ollama, OpenAI, Anthropic)
 - **Multiple reporters** — console (colored), JSON, JUnit XML
-- **Web dashboard** — run history, trend charts, API Explorer, collection management
+- **Web dashboard** — run history, trend charts, API Explorer, collection management, environment editor
 - **SQLite storage** — persist runs and results locally
 - **Standalone binary** — single executable, no runtime dependencies
 
 ## Installation
 
+### One-liner (Linux / macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kirrosh/apitool/master/install.sh | sh
+```
+
 ### Download binary
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/anthropics/apitool/releases).
+Download the latest release for your platform from [GitHub Releases](https://github.com/kirrosh/apitool/releases).
 
 ```bash
 # Linux / macOS
 chmod +x apitool
 ./apitool --version
 
-# Windows
+# Windows — download zip from GitHub Releases
 apitool.exe --version
 ```
 
 ### From source (requires Bun)
 
 ```bash
-git clone https://github.com/anthropics/apitool.git
+git clone https://github.com/kirrosh/apitool.git
 cd apitool
 bun install
 bun run apitool --version
@@ -47,7 +53,16 @@ bun run build    # produces ./apitool (or apitool.exe on Windows)
 
 ## Quick Start
 
-### 1. Create a test file
+### 1. Initialize a project (optional)
+
+```bash
+apitool init
+# Creates tests/example.yaml, .env.dev.yaml, and .mcp.json (if Claude Code detected)
+```
+
+Or create files manually:
+
+### 1a. Create a test file
 
 ```yaml
 # tests/health.yaml
@@ -133,12 +148,14 @@ apitool run tests/ --env dev
 ## CLI Reference
 
 ```
+apitool init                      Initialize a new apitool project
 apitool run <path>                Run API tests
 apitool validate <path>           Validate test files without running
 apitool generate --from <spec>    Generate skeleton tests from OpenAPI spec
 apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
 apitool collections               List test collections
 apitool serve                     Start web dashboard
+apitool mcp                       Start MCP server (stdio transport)
 ```
 
 ### Run options
@@ -173,6 +190,71 @@ apitool ai-generate --from petstore.yaml \
   --prompt "Generate CRUD tests for the Pet endpoints" \
   --provider openai --model gpt-4o
 ```
+
+## Self-Documented API
+
+apitool serves its own OpenAPI spec at `/api/openapi.json`. You can use apitool to test itself:
+
+```bash
+# Start the server
+apitool serve --port 8080
+
+# Generate tests from its own API
+apitool generate --from http://localhost:8080/api/openapi.json --output ./self-tests
+
+# Run the generated tests
+apitool run ./self-tests
+
+# Re-run generate — skips already-covered endpoints
+apitool generate --from http://localhost:8080/api/openapi.json --output ./self-tests
+# "All endpoints covered, nothing to generate"
+```
+
+## MCP Server (AI Agent Integration)
+
+apitool includes a built-in [MCP](https://modelcontextprotocol.io/) server, allowing AI agents (Claude Code, Cursor, Windsurf, Cline) to run and manage API tests directly.
+
+### Setup
+
+Add a `.mcp.json` file to your project root:
+
+```json
+{
+  "mcpServers": {
+    "apitool": {
+      "command": "apitool",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Or run from source:
+
+```json
+{
+  "mcpServers": {
+    "apitool": {
+      "command": "bun",
+      "args": ["run", "/path/to/apitool/src/cli/index.ts", "mcp"]
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `run_tests` | Run API tests from a YAML file or directory |
+| `validate_tests` | Validate YAML test files without running them |
+| `generate_tests` | Generate skeleton tests from an OpenAPI spec |
+| `list_collections` | List all test collections with run statistics |
+| `list_runs` | List recent test runs with summary statistics |
+| `get_run_results` | Get detailed results for a specific test run |
+| `list_environments` | List all saved environments (values hidden) |
+
+> **Note:** The database and test files are resolved relative to the working directory (`cwd`), not globally. Each project maintains its own test history.
 
 ## License
 

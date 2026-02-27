@@ -354,7 +354,7 @@ function openapiTypeToAssertionType(schema: import("openapi-types").OpenAPIV3.Sc
  * Write generated suites as YAML files to outputDir.
  */
 export async function writeSuites(suites: RawSuite[], outputDir: string): Promise<string[]> {
-  const { mkdir } = await import("node:fs/promises");
+  const { mkdir, access } = await import("node:fs/promises");
   await mkdir(outputDir, { recursive: true });
 
   const writtenFiles: string[] = [];
@@ -362,6 +362,14 @@ export async function writeSuites(suites: RawSuite[], outputDir: string): Promis
   for (const suite of suites) {
     const fileName = sanitizeFileName(suite.name) + ".yaml";
     const filePath = `${outputDir}/${fileName}`;
+
+    // Skip existing files (incremental generation)
+    try {
+      await access(filePath);
+      continue; // File exists, skip
+    } catch {
+      // File doesn't exist, write it
+    }
 
     const yamlContent = serializeSuite(suite);
     await Bun.write(filePath, yamlContent);

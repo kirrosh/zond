@@ -6,6 +6,8 @@ import { generateCommand } from "./commands/generate.ts";
 import { serveCommand } from "./commands/serve.ts";
 import { collectionsCommand } from "./commands/collections.ts";
 import { aiGenerateCommand } from "./commands/ai-generate.ts";
+import { mcpCommand } from "./commands/mcp.ts";
+import { initCommand } from "./commands/init.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
@@ -67,6 +69,8 @@ Usage:
   apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
   apitool collections      List test collections
   apitool serve            Start web dashboard
+  apitool init             Initialize a new apitool project
+  apitool mcp              Start MCP server (stdio transport for AI agents)
 
 Options for 'run':
   --env <name>         Use environment file (.env.<name>.yaml)
@@ -110,7 +114,7 @@ async function main(): Promise<number> {
 
   // Version
   if (command === "--version" || flags["version"] === true || flags["v"] === true) {
-    console.log(`apitool 0.1.0 (${getRuntimeInfo()})`);
+    console.log(`apitool 0.2.0 (${getRuntimeInfo()})`);
     return 0;
   }
 
@@ -217,6 +221,18 @@ async function main(): Promise<number> {
         port,
         host: typeof flags["host"] === "string" ? flags["host"] : undefined,
         openapiSpec: typeof flags["openapi"] === "string" ? flags["openapi"] : undefined,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+      });
+    }
+
+    case "init": {
+      return initCommand({
+        force: flags["force"] === true,
+      });
+    }
+
+    case "mcp": {
+      return mcpCommand({
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
       });
     }

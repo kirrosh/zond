@@ -1,0 +1,16 @@
+name: Runs
+base_url: "http://localhost:8080"
+tests:
+  - name: Run tests
+    POST: /api/run
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    json:
+      path: "{{$randomString}}"
+      env: "{{$randomString}}"
+    expect:
+      status: 200
+      body:
+        runId:
+          type: number

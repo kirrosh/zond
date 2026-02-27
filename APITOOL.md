@@ -35,7 +35,7 @@ OpenAPI спецификация → рабочие тесты + тест-кей
 | Язык | TypeScript (strict) |
 | HTTP-клиент | `fetch` (Bun native) |
 | БД | SQLite (`bun:sqlite`) |
-| Веб-сервер | Hono |
+| Веб-сервер | Hono + `@hono/zod-openapi` |
 | Frontend | HTMX + минимальный CSS |
 | OpenAPI парсер | `@readme/openapi-parser` |
 | Формат тестов | YAML |
@@ -57,12 +57,14 @@ apitool/
 │   │   ├── runner/
 │   │   │   ├── http-client.ts      # fetch-обёртка с таймаутами и retry
 │   │   │   ├── executor.ts         # Выполнение TestSuite, цепочки captures
+│   │   │   ├── execute-run.ts      # Shared executeRun() — парсинг, запуск, сохранение
 │   │   │   ├── assertions.ts       # Проверка ассертов (status, jsonpath, regex, type)
 │   │   │   └── types.ts            # TestRunResult, StepResult
 │   │   ├── generator/
 │   │   │   ├── openapi-reader.ts   # Парсинг OpenAPI 3.x
 │   │   │   ├── skeleton.ts         # Уровень 1: один запрос на эндпоинт
 │   │   │   ├── crud.ts             # Уровень 2: CRUD-цепочки
+│   │   │   ├── coverage-scanner.ts # Сканер покрытия для инкрементальной генерации
 │   │   │   ├── data-factory.ts     # Генерация тестовых данных по схеме
 │   │   │   └── ai/                 # AI-генерация тестов (M10)
 │   │   │       ├── ai-generator.ts   # Оркестратор: spec → prompt → LLM → YAML
@@ -78,18 +80,30 @@ apitool/
 │   │   ├── schema.ts               # Создание таблиц, миграции
 │   │   └── queries.ts              # CRUD-операции с историей прогонов
 │   ├── web/
-│   │   ├── server.ts               # Hono-сервер
+│   │   ├── server.ts               # OpenAPIHono-сервер, /api/openapi.json
+│   │   ├── schemas.ts              # Zod-схемы для API (валидация + OpenAPI)
 │   │   ├── routes/
 │   │   │   ├── dashboard.ts        # GET / — главная с trend chart, коллекциями
 │   │   │   ├── collections.ts      # GET /collections/:id, POST/DELETE /api/collections
 │   │   │   ├── ai-generate.ts     # POST /api/ai-generate, save, GET /api/ai-generation/:id
 │   │   │   ├── runs.ts             # GET /runs (с фильтрами), GET /runs/:id
+│   │   │   ├── environments.ts    # CRUD окружений: list, detail, create, update, delete
 │   │   │   ├── explorer.ts         # GET /explorer — дерево API
 │   │   │   └── api.ts              # POST /api/run, POST /api/try, GET /api/export
 │   │   ├── views/
 │   │   │   ├── layout.ts           # HTML layout, escapeHtml()
 │   │   │   └── trend-chart.ts      # Shared SVG trend chart component
 │   │   └── static/                 # HTMX, CSS, иконки
+│   ├── mcp/                        # MCP Server — AI-agent integration (M15)
+│   │   ├── server.ts               # McpServer setup + stdio transport
+│   │   └── tools/
+│   │       ├── run-tests.ts        # run_tests — запуск тестов
+│   │       ├── validate-tests.ts   # validate_tests — валидация YAML
+│   │       ├── generate-tests.ts   # generate_tests — генерация из OpenAPI
+│   │       ├── list-collections.ts # list_collections — список коллекций
+│   │       ├── list-runs.ts        # list_runs — список прогонов
+│   │       ├── get-run-results.ts  # get_run_results — детали прогона
+│   │       └── list-environments.ts # list_environments — список окружений
 │   └── cli/
 │       ├── index.ts                # Точка входа, роутинг команд
 │       ├── commands/
@@ -98,10 +112,12 @@ apitool/
 │       │   ├── ai-generate.ts      # apitool ai-generate
 │       │   ├── collections.ts      # apitool collections
 │       │   ├── serve.ts            # apitool serve
-│       │   └── validate.ts         # apitool validate
+│       │   ├── validate.ts         # apitool validate
+│       │   └── mcp.ts              # apitool mcp
 │       ├── runtime.ts             # Определение standalone vs dev режима
 │       └── output.ts              # Форматирование CLI-вывода
 ├── tests/                          # Тесты самого инструмента
+├── self-tests/                     # Сгенерированные skeleton-тесты для apitool API
 ├── examples/                       # Примеры YAML-тестов
 ├── docs/                           # Документация
 ├── package.json
@@ -265,6 +281,8 @@ config:
 ### M3: Generator (`src/core/generator/`)
 
 Читает OpenAPI 3.x, генерирует YAML-тесты. Уровни 1 (Skeleton) и 2 (CRUD) полностью реализованы. Уровень 3 (Markdown тест-кейсы) — запланирован, см. BACKLOG.
+
+`data-factory.ts` генерирует тестовые данные по схеме: строки → `{{$randomString}}`, числа → `{{$randomInt}}`, `additionalProperties` (Record-типы) → `{ key1: ..., key2: ... }`. Инкрементальная генерация: `scanCoveredEndpoints()` анализирует существующие YAML-файлы, `filterUncoveredEndpoints()` пропускает уже покрытые эндпоинты.
 
 **Вход:** OpenAPI 3.x YAML/JSON
 **Выход:** `.yaml` файлы тестов
@@ -436,10 +454,15 @@ Hono-сервер рендерит HTML, интерактивность чере
 | `GET /collections/:id` | Детали коллекции: метрики, trend chart, test suites (кликабельные — YAML, source, AI prompt/model), broken-файлы с Delete, per-suite Run, таблица прогонов |
 | `GET /runs` | Список прогонов с фильтрацией (статус, environment, дата, поиск по имени теста) и пагинацией |
 | `GET /runs/:id` | Детали прогона: каждый тест → запрос/ответ/ассерты + кнопки Export (JUnit XML, JSON) |
+| `GET /environments` | Список окружений: имя, кол-во переменных, actions (Edit/Delete), форма создания |
+| `GET /environments/:id` | Редактор окружения: key-value editor с добавлением/удалением строк |
+| `POST /environments` | Создать окружение (HTMX form-data) |
+| `PUT /environments/:id` | Обновить переменные окружения (HTMX form-data) |
+| `DELETE /environments/:id` | Удалить окружение (HTMX) |
 | `GET /explorer` | Дерево API из OpenAPI, параметры, описания, multi-auth panel |
-| `POST /api/collections` | Создать коллекцию из формы на дашборде |
-| `DELETE /api/collections/:id` | Удалить коллекцию (runs unlinked) |
-| `POST /api/run` | Запустить прогон из WebUI (HTMX), авто-привязка к коллекции |
+| `POST /collections` | Создать коллекцию из формы на дашборде (HTMX form-data) |
+| `DELETE /collections/:id` | Удалить коллекцию (HTMX, runs unlinked) |
+| `POST /run` | Запустить прогон из WebUI (HTMX form-data), авто-привязка к коллекции |
 | `POST /api/try` | Отправить единичный запрос из Explorer (HTMX, с auth injection) |
 | `POST /api/authorize` | Proxy login для Bearer auth (username/password → token) |
 | `GET /api/export/:runId/junit` | Скачать JUnit XML отчёт для прогона |
@@ -458,7 +481,7 @@ Dashboard-метрики (SQL-запросы):
 
 Фильтрация прогонов (`GET /runs`):
 - **Status:** All / Has Failures / All Passed
-- **Environment:** dropdown из `SELECT DISTINCT environment FROM runs`
+- **Environment:** dropdown из `listEnvironments()` + `getDistinctEnvironments()` (объединение определённых и из истории прогонов)
 - **Date range:** from / to
 - **Test name:** поиск по имени теста (LIKE)
 
@@ -653,6 +676,9 @@ tests:
 | M9 (Collections) | DONE | `56a3995` | Сущность Collection, группировка runs, CLI `collections`, dashboard redesign |
 | M10 (AI Generate) | DONE | `7901df7` | AI-генерация тестов, история генераций с View/Reuse, AI badge на сьютах, сохранение с output_path |
 | M11 (Suite Details) | DONE | `9e4e87e` | Кликабельные сьюты (YAML, source file, AI prompt/model), показ broken-файлов с Delete, per-suite Run, улучшенный AI-промпт |
+| M12 (Public Release) | DONE | `da9e027` | README, CHANGELOG, CI pipeline, GitHub Release workflow |
+| M13 (Environments) | DONE | — | CRUD окружений в WebUI, key-value editor, env selector при запуске тестов |
+| M14 (Self-Documented API) | DONE | — | OpenAPI спека из собственного API, инкрементальная генерация, dogfooding |
 
 ---
 
@@ -715,6 +741,45 @@ apitool serve --port 4000 --openapi openapi.json
 
 bun src/cli/index.ts --version
 # apitool 0.1.0 (bun)          — из dev-режима
+```
+
+---
+
+## M15: MCP Server (AI-agent интеграция)
+
+APITOOL предоставляет MCP (Model Context Protocol) сервер для интеграции с AI-агентами (Claude Code, Cursor, Windsurf, Cline).
+
+### Запуск
+
+```bash
+apitool mcp              # stdio transport
+apitool mcp --db ./my.db # с кастомным путём к БД
+```
+
+### MCP Tools
+
+| Tool | Описание |
+|------|----------|
+| `run_tests` | Запуск тестов из YAML-файла/директории, возврат summary |
+| `validate_tests` | Валидация YAML без запуска |
+| `generate_tests` | Генерация skeleton-тестов из OpenAPI спеки |
+| `list_collections` | Список коллекций с статистикой |
+| `list_runs` | Список последних прогонов |
+| `get_run_results` | Детальные результаты конкретного прогона |
+| `list_environments` | Список окружений (ключи переменных, без значений) |
+
+### Конфигурация Claude Code
+
+```json
+// .claude/settings.json или claude_desktop_config.json
+{
+  "mcpServers": {
+    "apitool": {
+      "command": "apitool",
+      "args": ["mcp"]
+    }
+  }
+}
 ```
 
 ---

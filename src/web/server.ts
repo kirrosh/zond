@@ -1,10 +1,11 @@
-import { Hono } from "hono";
+import { OpenAPIHono } from "@hono/zod-openapi";
 import { getDb } from "../db/schema.ts";
 import dashboard from "./routes/dashboard.ts";
 import runs from "./routes/runs.ts";
 import api from "./routes/api.ts";
 import collections from "./routes/collections.ts";
 import aiGenerate from "./routes/ai-generate.ts";
+import environments from "./routes/environments.ts";
 import { createExplorerRoute, type ExplorerDeps, type ServerInfo } from "./routes/explorer.ts";
 import type { EndpointInfo } from "../core/generator/types.ts";
 import styleCssPath from "./static/style.css" with { type: "file" };
@@ -17,7 +18,7 @@ export interface ServerOptions {
 }
 
 export function createApp(explorerDeps: ExplorerDeps) {
-  const app = new Hono();
+  const app = new OpenAPIHono();
 
   // Static files
   app.get("/static/:file", async (c) => {
@@ -36,7 +37,24 @@ export function createApp(explorerDeps: ExplorerDeps) {
   app.route("/", api);
   app.route("/", collections);
   app.route("/", aiGenerate);
+  app.route("/", environments);
   app.route("/", createExplorerRoute(explorerDeps));
+
+  // OpenAPI spec endpoint — derive server URL from the incoming request
+  app.doc("/api/openapi.json", (c) => ({
+    openapi: "3.0.0",
+    info: {
+      title: "apitool API",
+      version: "0.1.0",
+      description: "API testing platform — self-documented API",
+    },
+    servers: [
+      {
+        url: new URL(c.req.url).origin,
+        description: "Current server",
+      },
+    ],
+  }));
 
   return app;
 }
