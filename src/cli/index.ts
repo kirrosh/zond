@@ -8,9 +8,12 @@ import { collectionsCommand } from "./commands/collections.ts";
 import { aiGenerateCommand } from "./commands/ai-generate.ts";
 import { mcpCommand } from "./commands/mcp.ts";
 import { initCommand } from "./commands/init.ts";
+import { updateCommand } from "./commands/update.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
+
+export const VERSION = "0.2.0";
 
 export interface ParsedArgs {
   command: string | undefined;
@@ -71,6 +74,7 @@ Usage:
   apitool serve            Start web dashboard
   apitool init             Initialize a new apitool project
   apitool mcp              Start MCP server (stdio transport for AI agents)
+  apitool update           Update to latest version
 
 Options for 'run':
   --env <name>         Use environment file (.env.<name>.yaml)
@@ -123,7 +127,7 @@ async function main(): Promise<number> {
 
   // Version
   if (command === "--version" || flags["version"] === true || flags["v"] === true) {
-    console.log(`apitool 0.2.0 (${getRuntimeInfo()})`);
+    console.log(`apitool ${VERSION} (${getRuntimeInfo()})`);
     return 0;
   }
 
@@ -252,6 +256,10 @@ async function main(): Promise<number> {
       return mcpCommand({
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
       });
+    }
+
+    case "update": {
+      return updateCommand({ force: flags["force"] === true });
     }
 
     default: {

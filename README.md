@@ -156,6 +156,7 @@ apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
 apitool collections               List test collections
 apitool serve                     Start web dashboard
 apitool mcp                       Start MCP server (stdio transport)
+apitool update                    Update to latest version
 ```
 
 ### Run options
