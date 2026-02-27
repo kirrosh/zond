@@ -1,5 +1,5 @@
 {
-  "exclude": ["test-server"],
+  "include": ["src", "tests"],
   "compilerOptions": {
     // Environment setup & latest features
     "lib": ["ESNext"],
