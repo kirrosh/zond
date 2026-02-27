@@ -80,7 +80,7 @@
 
 | Задача | Файл(ы) | Приоритет |
 |--------|---------|-----------|
-| CI: integration тесты не запускаются — нужен автозапуск test-server | `tests/integration/`, `.github/workflows/ci.yml` | High |
+| CI: integration тесты (crud-chain) — теперь в CI через dogfooding ✅ | `tests/integration/`, `.github/workflows/ci.yml` | Done |
 | CI: typecheck (`tsc --noEmit`) отключён — test-server конфликтует с корневым tsconfig | `tsconfig.json`, `test-server/` | Medium |
 | Explorer: response body schema не показывает вложенные объекты | `explorer.ts` | Low |
 | `describe.ts`, `init.ts`, `testcases.ts` — упоминались в ранних версиях документации, не реализованы | — | Info |
@@ -131,11 +131,16 @@
 - DB queries: `getEnvironmentById()`, `deleteEnvironment()`, `listEnvironmentRecords()`
 - Навигация: ссылка "Environments" в layout
 
-### M14: Developer Experience
+### M14: Self-Documented API + Incremental Generation + Dogfooding ✅
 
-- `apitool init` — создание `tests/`, `generated/`, `.env.yaml`, example test
-- `serve --tests` — передача пути к тестам в WebUI
-- **Приоритет:** снижает порог входа для новых пользователей
+- API routes конвертированы на `@hono/zod-openapi` — автогенерация OpenAPI спеки
+- `GET /api/openapi.json` — apitool отдаёт свою OpenAPI спеку
+- JSON API для Environments и Collections (GET list, GET by ID, POST, PUT, DELETE)
+- Инкрементальная генерация: `apitool generate` пропускает уже покрытые эндпоинты
+- `writeSuites()` не перезаписывает существующие файлы
+- Coverage scanner: `scanCoveredEndpoints()`, `filterUncoveredEndpoints()`
+- Dogfooding: integration тесты используют apitool API вместо test-server
+- CI: `tests/integration/crud-chain.test.ts` включён в pipeline
 
 ### M15: WebSocket Live Updates
 
@@ -153,5 +158,5 @@
 ### Порядок
 
 ```
-M12 (Release) ✅ → M13 (Environments) ✅ → M14 (DX) → M15 (WebSocket) → M16 (Analytics)
+M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M15 (WebSocket) → M16 (Analytics)
 ```

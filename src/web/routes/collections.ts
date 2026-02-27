@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import { layout, escapeHtml } from "../views/layout.ts";
 import {
   getCollectionById,
@@ -8,6 +8,7 @@ import {
   countRunsByCollection,
   createCollection,
   deleteCollection,
+  listCollections,
   normalizePath,
   listAIGenerations,
   listSavedAIGenerations,
@@ -19,8 +20,16 @@ import { parseDirectorySafe, parseFile } from "../../core/parser/yaml-parser.ts"
 import type { ParseDirectoryResult } from "../../core/parser/yaml-parser.ts";
 import type { TestSuite } from "../../core/parser/types.ts";
 import type { AIGenerationRecord } from "../../db/queries.ts";
+import {
+  ErrorSchema,
+  IdParamSchema,
+  CollectionSchema,
+  CollectionListSchema,
+  CreateCollectionRequest,
+  CreateCollectionResponse,
+} from "../schemas.ts";
 
-const collections = new Hono();
+const collections = new OpenAPIHono();
 
 function statusBadge(total: number, passed: number, failed: number): string {
   if (total === 0) return `<span class="badge badge-skip">empty</span>`;
@@ -304,8 +313,15 @@ collections.get("/collections/:id", async (c) => {
   return c.html(layout(collection.name, content));
 });
 
-// POST /api/collections — create collection from form
-collections.post("/api/collections", async (c) => {
+// ──────────────────────────────────────────────
+// Form-data handlers (HTMX) — registered before OpenAPI routes
+// ──────────────────────────────────────────────
+
+// POST /api/collections — form-data passthrough for HTMX
+collections.post("/api/collections", async (c, next) => {
+  const ct = c.req.header("content-type") ?? "";
+  if (ct.includes("application/json")) return next();
+
   const body = await c.req.parseBody();
   const name = (body["name"] as string ?? "").trim();
   const testPath = (body["test_path"] as string ?? "").trim();
@@ -324,12 +340,126 @@ collections.post("/api/collections", async (c) => {
   return c.redirect(`/collections/${id}`);
 });
 
-// DELETE /api/collections/:id — delete collection
-collections.delete("/api/collections/:id", (c) => {
+// DELETE /api/collections/:id — HTMX passthrough
+collections.delete("/api/collections/:id", (c, next) => {
+  if (c.req.header("HX-Request") !== "true") return next();
+
   const id = parseInt(c.req.param("id"), 10);
   deleteCollection(id, false);
   c.header("HX-Redirect", "/");
   return c.body(null, 200);
+});
+
+// ──────────────────────────────────────────────
+// OpenAPI JSON API routes
+// ──────────────────────────────────────────────
+
+const listCollectionsRoute = createRoute({
+  method: "get",
+  path: "/api/collections",
+  tags: ["Collections"],
+  summary: "List all collections",
+  responses: {
+    200: {
+      content: { "application/json": { schema: CollectionListSchema } },
+      description: "List of collections",
+    },
+  },
+});
+
+collections.openapi(listCollectionsRoute, (c) => {
+  const cols = listCollections();
+  const result = cols.map((col) => ({
+    id: col.id,
+    name: col.name,
+    test_path: col.test_path,
+    openapi_spec: col.openapi_spec,
+    created_at: col.created_at,
+  }));
+  return c.json(result, 200);
+});
+
+const getCollectionRoute = createRoute({
+  method: "get",
+  path: "/api/collections/{id}",
+  tags: ["Collections"],
+  summary: "Get collection by ID",
+  request: { params: IdParamSchema },
+  responses: {
+    200: {
+      content: { "application/json": { schema: CollectionSchema } },
+      description: "Collection details",
+    },
+    404: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Not found",
+    },
+  },
+});
+
+collections.openapi(getCollectionRoute, (c) => {
+  const { id } = c.req.valid("param");
+  const col = getCollectionById(id);
+  if (!col) return c.json({ error: "Collection not found" }, 404);
+  return c.json(col, 200);
+});
+
+const createCollectionRoute = createRoute({
+  method: "post",
+  path: "/api/collections",
+  tags: ["Collections"],
+  summary: "Create a new collection",
+  request: {
+    body: {
+      content: { "application/json": { schema: CreateCollectionRequest } },
+      required: true,
+    },
+  },
+  responses: {
+    201: {
+      content: { "application/json": { schema: CreateCollectionResponse } },
+      description: "Collection created",
+    },
+    400: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Validation error",
+    },
+  },
+});
+
+collections.openapi(createCollectionRoute, (c) => {
+  const { name, test_path, openapi_spec } = c.req.valid("json");
+  const id = createCollection({
+    name,
+    test_path: normalizePath(test_path),
+    openapi_spec: openapi_spec || undefined,
+  });
+  const col = getCollectionById(id);
+  if (!col) return c.json({ error: "Failed to create collection" }, 400);
+  return c.json({ id: col.id, name: col.name, test_path: col.test_path, openapi_spec: col.openapi_spec }, 201);
+});
+
+const deleteCollectionRoute = createRoute({
+  method: "delete",
+  path: "/api/collections/{id}",
+  tags: ["Collections"],
+  summary: "Delete a collection",
+  request: { params: IdParamSchema },
+  responses: {
+    204: { description: "Collection deleted" },
+    404: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Not found",
+    },
+  },
+});
+
+collections.openapi(deleteCollectionRoute, (c) => {
+  const { id } = c.req.valid("param");
+  const col = getCollectionById(id);
+  if (!col) return c.json({ error: "Collection not found" }, 404);
+  deleteCollection(id, false);
+  return c.body(null, 204);
 });
 
 function renderAIGenerateSection(collectionId: number, specPath: string): string {

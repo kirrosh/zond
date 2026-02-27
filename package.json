@@ -30,6 +30,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@hono/zod-openapi": "^1.2.2",
     "@readme/openapi-parser": "^5.5.0",
     "hono": "^4.12.2",
     "openapi-types": "^12.1.3",

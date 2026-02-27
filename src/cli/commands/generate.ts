@@ -1,5 +1,6 @@
 import { resolve, basename } from "path";
 import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSuites, writeSuites } from "../../core/generator/index.ts";
+import { scanCoveredEndpoints, filterUncoveredEndpoints } from "../../core/generator/coverage-scanner.ts";
 import { printError, printSuccess } from "../output.ts";
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByTestPath, createCollection, normalizePath } from "../../db/queries.ts";
@@ -14,7 +15,7 @@ export async function generateCommand(options: GenerateCommandOptions): Promise<
     console.log(`Reading OpenAPI spec: ${options.from}`);
     const doc = await readOpenApiSpec(options.from);
 
-    const endpoints = extractEndpoints(doc);
+    let endpoints = extractEndpoints(doc);
     if (endpoints.length === 0) {
       printError("No endpoints found in the spec");
       return 2;
@@ -33,6 +34,27 @@ export async function generateCommand(options: GenerateCommandOptions): Promise<
       console.log(`Found ${securitySchemes.length} security scheme(s): ${securitySchemes.map((s) => s.name).join(", ")}`);
     }
 
+    // Incremental generation: scan existing coverage
+    let coveredCount = 0;
+    try {
+      const { access } = await import("node:fs/promises");
+      await access(options.output);
+      // Output dir exists — scan for covered endpoints
+      const covered = await scanCoveredEndpoints(options.output);
+      coveredCount = covered.length;
+      if (covered.length > 0) {
+        const uncovered = filterUncoveredEndpoints(endpoints, covered);
+        console.log(`${covered.length} of ${endpoints.length} endpoints already covered, generating ${uncovered.length} new`);
+        if (uncovered.length === 0) {
+          printSuccess("All endpoints covered, nothing to generate");
+          return 0;
+        }
+        endpoints = uncovered;
+      }
+    } catch {
+      // Output dir doesn't exist yet — generate everything
+    }
+
     const suites = generateSuites(endpoints, baseUrl, securitySchemes);
     console.log(`Generated ${suites.length} test suite(s)`);
 
@@ -41,7 +63,11 @@ export async function generateCommand(options: GenerateCommandOptions): Promise<
       printSuccess(`Written: ${f}`);
     }
 
-    printSuccess(`Done! Generated ${files.length} file(s) in ${options.output}`);
+    if (files.length === 0 && coveredCount > 0) {
+      printSuccess("All endpoints covered, no new files written");
+    } else {
+      printSuccess(`Done! Generated ${files.length} file(s) in ${options.output}`);
+    }
 
     // Auto-create collection
     try {

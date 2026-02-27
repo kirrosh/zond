@@ -22,3 +22,6 @@ jobs:
 
       - name: Tests
         run: bun test tests/parser tests/runner tests/generator tests/reporter tests/db tests/web tests/cli tests/ai
+
+      - name: Integration tests (dogfooding)
+        run: bun test tests/integration/crud-chain.test.ts

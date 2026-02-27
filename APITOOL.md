@@ -35,7 +35,7 @@ OpenAPI спецификация → рабочие тесты + тест-кей
 | Язык | TypeScript (strict) |
 | HTTP-клиент | `fetch` (Bun native) |
 | БД | SQLite (`bun:sqlite`) |
-| Веб-сервер | Hono |
+| Веб-сервер | Hono + `@hono/zod-openapi` |
 | Frontend | HTMX + минимальный CSS |
 | OpenAPI парсер | `@readme/openapi-parser` |
 | Формат тестов | YAML |
@@ -63,6 +63,7 @@ apitool/
 │   │   │   ├── openapi-reader.ts   # Парсинг OpenAPI 3.x
 │   │   │   ├── skeleton.ts         # Уровень 1: один запрос на эндпоинт
 │   │   │   ├── crud.ts             # Уровень 2: CRUD-цепочки
+│   │   │   ├── coverage-scanner.ts # Сканер покрытия для инкрементальной генерации
 │   │   │   ├── data-factory.ts     # Генерация тестовых данных по схеме
 │   │   │   └── ai/                 # AI-генерация тестов (M10)
 │   │   │       ├── ai-generator.ts   # Оркестратор: spec → prompt → LLM → YAML
@@ -78,7 +79,8 @@ apitool/
 │   │   ├── schema.ts               # Создание таблиц, миграции
 │   │   └── queries.ts              # CRUD-операции с историей прогонов
 │   ├── web/
-│   │   ├── server.ts               # Hono-сервер
+│   │   ├── server.ts               # OpenAPIHono-сервер, /api/openapi.json
+│   │   ├── schemas.ts              # Zod-схемы для API (валидация + OpenAPI)
 │   │   ├── routes/
 │   │   │   ├── dashboard.ts        # GET / — главная с trend chart, коллекциями
 │   │   │   ├── collections.ts      # GET /collections/:id, POST/DELETE /api/collections
@@ -661,6 +663,7 @@ tests:
 | M11 (Suite Details) | DONE | `9e4e87e` | Кликабельные сьюты (YAML, source file, AI prompt/model), показ broken-файлов с Delete, per-suite Run, улучшенный AI-промпт |
 | M12 (Public Release) | DONE | `da9e027` | README, CHANGELOG, CI pipeline, GitHub Release workflow |
 | M13 (Environments) | DONE | — | CRUD окружений в WebUI, key-value editor, env selector при запуске тестов |
+| M14 (Self-Documented API) | DONE | — | OpenAPI спека из собственного API, инкрементальная генерация, dogfooding |
 
 ---
 

@@ -1,66 +1,40 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import { escapeHtml } from "../views/layout.ts";
 import { getRunById, getResultsByRunId } from "../../db/queries.ts";
 import { generateJunitXml } from "../../core/reporter/junit.ts";
 import type { TestRunResult, StepResult } from "../../core/runner/types.ts";
+import {
+  ErrorSchema,
+  RunRequestSchema,
+  RunResponseSchema,
+  RunDetailSchema,
+  AuthorizeRequest,
+  AuthorizeResponse,
+  RunIdParam,
+} from "../schemas.ts";
 
-const api = new Hono();
+const api = new OpenAPIHono();
 
-// POST /api/run — run tests from WebUI
-api.post("/api/run", async (c) => {
+// ──────────────────────────────────────────────
+// POST /api/run — form-data passthrough for HTMX, then JSON via OpenAPI
+// ──────────────────────────────────────────────
+
+api.post("/api/run", async (c, next) => {
+  const ct = c.req.header("content-type") ?? "";
+  if (ct.includes("application/json")) return next();
+
+  // Form-data from HTMX
   try {
-    const contentType = c.req.header("content-type") ?? "";
-    let testPath: string;
-    let envName: string | undefined;
-
-    if (contentType.includes("application/json")) {
-      const body = await c.req.json();
-      testPath = body.path;
-      envName = body.env;
-    } else {
-      const form = await c.req.parseBody();
-      testPath = form["path"] as string;
-      envName = (form["env"] as string) || undefined;
-    }
+    const form = await c.req.parseBody();
+    const testPath = form["path"] as string;
+    const envName = (form["env"] as string) || undefined;
 
     if (!testPath) {
       return c.json({ error: "Missing 'path' field" }, 400);
     }
 
-    // Dynamic imports to avoid circular deps at module load time
-    const { parse } = await import("../../core/parser/yaml-parser.ts");
-    const { loadEnvironment } = await import("../../core/parser/variables.ts");
-    const { runSuite } = await import("../../core/runner/executor.ts");
-    const { getDb } = await import("../../db/schema.ts");
-    const { createRun, finalizeRun, saveResults, findCollectionByTestPath } = await import("../../db/queries.ts");
-    const { dirname, resolve } = await import("node:path");
+    const runId = await executeRun(testPath, envName);
 
-    const suites = await parse(testPath);
-    if (suites.length === 0) {
-      return c.json({ error: "No test files found" }, 404);
-    }
-
-    // Determine env search dir: for a file use its dirname, for a directory use the dir itself
-    const stat = await import("node:fs/promises").then(m => m.stat(testPath).catch(() => null));
-    const envDir = stat?.isDirectory() ? testPath : dirname(testPath);
-    const env = await loadEnvironment(envName, envDir);
-    const results = await Promise.all(suites.map((s) => runSuite(s, env)));
-
-    getDb();
-    // For single file, try to find collection by parent dir path too
-    const resolvedPath = resolve(testPath);
-    const collection = findCollectionByTestPath(resolvedPath)
-      ?? (stat?.isFile() ? findCollectionByTestPath(resolve(dirname(testPath))) : null);
-    const runId = createRun({
-      started_at: results[0]?.started_at ?? new Date().toISOString(),
-      environment: envName,
-      trigger: "webui",
-      collection_id: collection?.id,
-    });
-    finalizeRun(runId, results);
-    saveResults(runId, results);
-
-    // Return redirect header for HTMX
     c.header("HX-Redirect", `/runs/${runId}`);
     return c.json({ runId });
   } catch (err) {
@@ -68,7 +42,80 @@ api.post("/api/run", async (c) => {
   }
 });
 
-// POST /api/try — single request from Explorer
+const runRoute = createRoute({
+  method: "post",
+  path: "/api/run",
+  tags: ["Runs"],
+  summary: "Run tests",
+  request: {
+    body: {
+      content: { "application/json": { schema: RunRequestSchema } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: RunResponseSchema } },
+      description: "Run created",
+    },
+    400: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Validation error",
+    },
+    500: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Server error",
+    },
+  },
+});
+
+api.openapi(runRoute, async (c) => {
+  try {
+    const { path: testPath, env: envName } = c.req.valid("json");
+    const runId = await executeRun(testPath, envName);
+
+    c.header("HX-Redirect", `/runs/${runId}`);
+    return c.json({ runId }, 200);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+async function executeRun(testPath: string, envName?: string): Promise<number> {
+  const { parse } = await import("../../core/parser/yaml-parser.ts");
+  const { loadEnvironment } = await import("../../core/parser/variables.ts");
+  const { runSuite } = await import("../../core/runner/executor.ts");
+  const { getDb } = await import("../../db/schema.ts");
+  const { createRun, finalizeRun, saveResults, findCollectionByTestPath } = await import("../../db/queries.ts");
+  const { dirname, resolve } = await import("node:path");
+
+  const suites = await parse(testPath);
+  if (suites.length === 0) {
+    throw new Error("No test files found");
+  }
+
+  const stat = await import("node:fs/promises").then(m => m.stat(testPath).catch(() => null));
+  const envDir = stat?.isDirectory() ? testPath : dirname(testPath);
+  const env = await loadEnvironment(envName, envDir);
+  const results = await Promise.all(suites.map((s) => runSuite(s, env)));
+
+  getDb();
+  const resolvedPath = resolve(testPath);
+  const collection = findCollectionByTestPath(resolvedPath)
+    ?? (stat?.isFile() ? findCollectionByTestPath(resolve(dirname(testPath))) : null);
+  const runId = createRun({
+    started_at: results[0]?.started_at ?? new Date().toISOString(),
+    environment: envName,
+    trigger: "webui",
+    collection_id: collection?.id,
+  });
+  finalizeRun(runId, results);
+  saveResults(runId, results);
+
+  return runId;
+}
+
+// POST /api/try — HTMX-only, returns HTML fragment (not in OpenAPI spec)
 api.post("/api/try", async (c) => {
   try {
     let method: string;
@@ -79,13 +126,11 @@ api.post("/api/try", async (c) => {
     const contentType = c.req.header("content-type") ?? "";
 
     if (contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) {
-      // From HTMX form
       const formData = await c.req.parseBody();
       method = (formData["method"] as string)?.toUpperCase() ?? "GET";
       const basePath = formData["path"] as string ?? "/";
       const baseUrl = (formData["base_url"] as string ?? "").replace(/\/+$/, "");
 
-      // Build URL with path params
       let resolvedPath = basePath;
       const queryParts: string[] = [];
 
@@ -111,7 +156,6 @@ api.post("/api/try", async (c) => {
         if (!headers["Content-Type"]) headers["Content-Type"] = "application/json";
       }
     } else {
-      // JSON body
       const json = await c.req.json();
       method = (json.method ?? "GET").toUpperCase();
       url = json.url ?? "";
@@ -156,14 +200,44 @@ api.post("/api/try", async (c) => {
   }
 });
 
-// POST /api/authorize — proxy login request, extract token
-api.post("/api/authorize", async (c) => {
-  try {
-    const { base_url, path, username, password } = await c.req.json();
-    if (!base_url || !path) {
-      return c.json({ error: "Missing base_url or path" }, 400);
-    }
+// ──────────────────────────────────────────────
+// POST /api/authorize
+// ──────────────────────────────────────────────
 
+const authorizeRoute = createRoute({
+  method: "post",
+  path: "/api/authorize",
+  tags: ["Auth"],
+  summary: "Proxy login request and extract token",
+  request: {
+    body: {
+      content: { "application/json": { schema: AuthorizeRequest } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: AuthorizeResponse } },
+      description: "Token extracted",
+    },
+    400: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Missing fields",
+    },
+    401: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Login failed",
+    },
+    500: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Server error",
+    },
+  },
+});
+
+api.openapi(authorizeRoute, async (c) => {
+  try {
+    const { base_url, path, username, password } = c.req.valid("json");
     const url = base_url.replace(/\/+$/, "") + path;
     const response = await fetch(url, {
       method: "POST",
@@ -182,7 +256,7 @@ api.post("/api/authorize", async (c) => {
       return c.json({ error: "No token in response" }, 401);
     }
 
-    return c.json({ token });
+    return c.json({ token }, 200);
   } catch (err) {
     return c.json({ error: (err as Error).message }, 500);
   }
@@ -240,32 +314,71 @@ function reconstructResults(runId: number): TestRunResult[] | null {
   return results;
 }
 
-// GET /api/export/:runId/junit
-api.get("/api/export/:runId/junit", (c) => {
-  const runId = parseInt(c.req.param("runId"), 10);
-  if (isNaN(runId)) return c.text("Invalid run ID", 400);
+// ──────────────────────────────────────────────
+// Export routes (OpenAPI-documented)
+// ──────────────────────────────────────────────
 
-  const results = reconstructResults(runId);
-  if (!results) return c.text("Run not found", 404);
-
-  const xml = generateJunitXml(results);
-  c.header("Content-Disposition", `attachment; filename="run-${runId}-junit.xml"`);
-  c.header("Content-Type", "application/xml");
-  return c.body(xml);
+const exportJsonRoute = createRoute({
+  method: "get",
+  path: "/api/export/{runId}/json",
+  tags: ["Export"],
+  summary: "Export run results as JSON",
+  request: { params: RunIdParam },
+  responses: {
+    200: {
+      content: { "application/json": { schema: RunDetailSchema } },
+      description: "Run results",
+    },
+    400: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Invalid run ID",
+    },
+    404: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Run not found",
+    },
+  },
 });
 
-// GET /api/export/:runId/json
-api.get("/api/export/:runId/json", (c) => {
-  const runId = parseInt(c.req.param("runId"), 10);
-  if (isNaN(runId)) return c.text("Invalid run ID", 400);
-
+api.openapi(exportJsonRoute, (c) => {
+  const { runId } = c.req.valid("param");
   const results = reconstructResults(runId);
-  if (!results) return c.text("Run not found", 404);
+  if (!results) return c.json({ error: "Run not found" }, 404);
 
   const json = JSON.stringify(results, null, 2);
   c.header("Content-Disposition", `attachment; filename="run-${runId}-results.json"`);
   c.header("Content-Type", "application/json");
   return c.body(json);
+});
+
+const exportJunitRoute = createRoute({
+  method: "get",
+  path: "/api/export/{runId}/junit",
+  tags: ["Export"],
+  summary: "Export run results as JUnit XML",
+  request: { params: RunIdParam },
+  responses: {
+    200: { description: "JUnit XML file" },
+    400: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Invalid run ID",
+    },
+    404: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Run not found",
+    },
+  },
+});
+
+api.openapi(exportJunitRoute, (c) => {
+  const { runId } = c.req.valid("param");
+  const results = reconstructResults(runId);
+  if (!results) return c.json({ error: "Run not found" }, 404);
+
+  const xml = generateJunitXml(results);
+  c.header("Content-Disposition", `attachment; filename="run-${runId}-junit.xml"`);
+  c.header("Content-Type", "application/xml");
+  return c.body(xml);
 });
 
 export default api;

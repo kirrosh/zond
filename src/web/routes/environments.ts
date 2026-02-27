@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import { layout, escapeHtml } from "../views/layout.ts";
 import {
   listEnvironmentRecords,
@@ -7,8 +7,17 @@ import {
   deleteEnvironment,
 } from "../../db/queries.ts";
 import type { EnvironmentRecord } from "../../db/queries.ts";
+import {
+  ErrorSchema,
+  IdParamSchema,
+  EnvironmentSchema,
+  EnvironmentListSchema,
+  CreateEnvironmentRequest,
+  CreateEnvironmentResponse,
+  UpdateEnvironmentRequest,
+} from "../schemas.ts";
 
-const environments = new Hono();
+const environments = new OpenAPIHono();
 
 function envListPage(envs: EnvironmentRecord[]): string {
   const rows = envs.map((e) => {
@@ -93,7 +102,10 @@ function envDetailPage(env: EnvironmentRecord): string {
   `;
 }
 
-// GET /environments — list all environments
+// ──────────────────────────────────────────────
+// HTML routes (plain Hono)
+// ──────────────────────────────────────────────
+
 environments.get("/environments", (c) => {
   const envs = listEnvironmentRecords();
   const content = envListPage(envs);
@@ -102,7 +114,6 @@ environments.get("/environments", (c) => {
   return c.html(layout("Environments", content));
 });
 
-// GET /environments/:id — environment detail / edit page
 environments.get("/environments/:id", (c) => {
   const id = parseInt(c.req.param("id"), 10);
   if (isNaN(id)) return c.html(layout("Error", "<h1>Invalid ID</h1>"), 400);
@@ -116,23 +127,29 @@ environments.get("/environments/:id", (c) => {
   return c.html(layout(env.name, content));
 });
 
-// POST /api/environments — create environment
-environments.post("/api/environments", async (c) => {
+// ──────────────────────────────────────────────
+// Form-data handlers (HTMX) — registered before OpenAPI routes
+// ──────────────────────────────────────────────
+
+// POST /api/environments — form-data passthrough for HTMX
+environments.post("/api/environments", async (c, next) => {
+  const ct = c.req.header("content-type") ?? "";
+  if (ct.includes("application/json")) return next();
+
   const body = await c.req.parseBody();
   const name = (body["name"] as string ?? "").trim();
-
   if (!name) {
     return c.html(layout("Error", "<h1>Error</h1><p>Name is required.</p><a href=\"/environments\">Back</a>"), 400);
   }
-
   upsertEnvironment(name, {});
-
   c.header("HX-Redirect", "/environments");
   return c.redirect("/environments");
 });
 
-// PUT /api/environments/:id — update environment variables
-environments.put("/api/environments/:id", async (c) => {
+// PUT /api/environments/:id — form-data passthrough for HTMX
+environments.put("/api/environments/:id", async (c, next) => {
+  if (c.req.header("HX-Request") !== "true") return next();
+
   const id = parseInt(c.req.param("id"), 10);
   if (isNaN(id)) return c.html(layout("Error", "<h1>Invalid ID</h1>"), 400);
 
@@ -152,17 +169,153 @@ environments.put("/api/environments/:id", async (c) => {
   }
 
   upsertEnvironment(env.name, variables);
-
   c.header("HX-Redirect", `/environments/${id}`);
   return c.redirect(`/environments/${id}`);
 });
 
-// DELETE /api/environments/:id — delete environment
-environments.delete("/api/environments/:id", (c) => {
+// DELETE /api/environments/:id — HTMX passthrough (returns empty body)
+environments.delete("/api/environments/:id", (c, next) => {
+  if (c.req.header("HX-Request") !== "true") return next();
+
   const id = parseInt(c.req.param("id"), 10);
   deleteEnvironment(id);
   c.header("HX-Redirect", "/environments");
   return c.body(null, 200);
+});
+
+// ──────────────────────────────────────────────
+// OpenAPI JSON API routes
+// ──────────────────────────────────────────────
+
+const listEnvsRoute = createRoute({
+  method: "get",
+  path: "/api/environments",
+  tags: ["Environments"],
+  summary: "List all environments",
+  responses: {
+    200: {
+      content: { "application/json": { schema: EnvironmentListSchema } },
+      description: "List of environments",
+    },
+  },
+});
+
+environments.openapi(listEnvsRoute, (c) => {
+  const envs = listEnvironmentRecords();
+  return c.json(envs, 200);
+});
+
+const getEnvRoute = createRoute({
+  method: "get",
+  path: "/api/environments/{id}",
+  tags: ["Environments"],
+  summary: "Get environment by ID",
+  request: { params: IdParamSchema },
+  responses: {
+    200: {
+      content: { "application/json": { schema: EnvironmentSchema } },
+      description: "Environment details",
+    },
+    404: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Not found",
+    },
+  },
+});
+
+environments.openapi(getEnvRoute, (c) => {
+  const { id } = c.req.valid("param");
+  const env = getEnvironmentById(id);
+  if (!env) return c.json({ error: "Environment not found" }, 404);
+  return c.json(env, 200);
+});
+
+const createEnvRoute = createRoute({
+  method: "post",
+  path: "/api/environments",
+  tags: ["Environments"],
+  summary: "Create a new environment",
+  request: {
+    body: {
+      content: { "application/json": { schema: CreateEnvironmentRequest } },
+      required: true,
+    },
+  },
+  responses: {
+    201: {
+      content: { "application/json": { schema: CreateEnvironmentResponse } },
+      description: "Environment created",
+    },
+    400: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Validation error",
+    },
+  },
+});
+
+environments.openapi(createEnvRoute, (c) => {
+  const { name } = c.req.valid("json");
+  upsertEnvironment(name, {});
+  const envs = listEnvironmentRecords();
+  const created = envs.find((e) => e.name === name);
+  if (!created) return c.json({ error: "Failed to create environment" }, 400);
+  return c.json({ id: created.id, name: created.name, variables: created.variables }, 201);
+});
+
+const updateEnvRoute = createRoute({
+  method: "put",
+  path: "/api/environments/{id}",
+  tags: ["Environments"],
+  summary: "Update environment variables",
+  request: {
+    params: IdParamSchema,
+    body: {
+      content: { "application/json": { schema: UpdateEnvironmentRequest } },
+      required: true,
+    },
+  },
+  responses: {
+    200: {
+      content: { "application/json": { schema: EnvironmentSchema } },
+      description: "Updated environment",
+    },
+    404: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Not found",
+    },
+  },
+});
+
+environments.openapi(updateEnvRoute, (c) => {
+  const { id } = c.req.valid("param");
+  const env = getEnvironmentById(id);
+  if (!env) return c.json({ error: "Environment not found" }, 404);
+  const { variables } = c.req.valid("json");
+  upsertEnvironment(env.name, variables);
+  const updated = getEnvironmentById(id)!;
+  return c.json(updated, 200);
+});
+
+const deleteEnvRoute = createRoute({
+  method: "delete",
+  path: "/api/environments/{id}",
+  tags: ["Environments"],
+  summary: "Delete an environment",
+  request: { params: IdParamSchema },
+  responses: {
+    204: { description: "Environment deleted" },
+    404: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Not found",
+    },
+  },
+});
+
+environments.openapi(deleteEnvRoute, (c) => {
+  const { id } = c.req.valid("param");
+  const deleted = deleteEnvironment(id);
+  if (!deleted) return c.json({ error: "Environment not found" }, 404);
+  return c.body(null, 204);
 });
 
 export default environments;
