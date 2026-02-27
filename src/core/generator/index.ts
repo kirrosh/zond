@@ -1,5 +1,5 @@
 export { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "./openapi-reader.ts";
-export { generateSkeleton, generateSuites, writeSuites, findLoginEndpoint, serializeSuite } from "./skeleton.ts";
+export { generateSkeleton, generateSuites, writeSuites, findLoginEndpoint, serializeSuite, isRelativeUrl, sanitizeEnvName } from "./skeleton.ts";
 export type { RawSuite, RawStep } from "./skeleton.ts";
 export { detectCrudGroups, generateCrudChain, getCrudEndpoints } from "./crud.ts";
 export { generateFromSchema } from "./data-factory.ts";

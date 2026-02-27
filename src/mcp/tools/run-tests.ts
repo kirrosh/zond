@@ -8,13 +8,15 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
     inputSchema: {
       testPath: z.string().describe("Path to test YAML file or directory"),
       envName: z.optional(z.string()).describe("Environment name (loads .env.<name>.yaml)"),
+      safe: z.optional(z.boolean()).describe("Run only GET tests (read-only, safe mode)"),
     },
-  }, async ({ testPath, envName }) => {
+  }, async ({ testPath, envName, safe }) => {
     const { runId, results } = await executeRun({
       testPath,
       envName,
       trigger: "mcp",
       dbPath,
+      safe,
     });
 
     const total = results.reduce((s, r) => s + r.total, 0);

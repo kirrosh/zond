@@ -23,7 +23,7 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
   // Register all tools
   registerRunTestsTool(server, dbPath);
   registerValidateTestsTool(server);
-  registerGenerateTestsTool(server);
+  registerGenerateTestsTool(server, dbPath);
   registerListCollectionsTool(server, dbPath);
   registerListRunsTool(server, dbPath);
   registerGetRunResultsTool(server, dbPath);

@@ -19,6 +19,7 @@ export interface RunOptions {
   noDb?: boolean;
   dbPath?: string;
   authToken?: string;
+  safe?: boolean;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -34,6 +35,18 @@ export async function runCommand(options: RunOptions): Promise<number> {
   if (suites.length === 0) {
     printWarning(`No test files found in ${options.path}`);
     return 0;
+  }
+
+  // 1b. Safe mode: filter to GET-only tests
+  if (options.safe) {
+    for (const suite of suites) {
+      suite.tests = suite.tests.filter(t => t.method === "GET");
+    }
+    suites = suites.filter(s => s.tests.length > 0);
+    if (suites.length === 0) {
+      printWarning("No GET tests found. Nothing to run in safe mode.");
+      return 0;
+    }
   }
 
   // 2. Load environment

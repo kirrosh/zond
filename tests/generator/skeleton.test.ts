@@ -1,6 +1,6 @@
 import { describe, test, expect, afterAll } from "bun:test";
 import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "../../src/core/generator/openapi-reader.ts";
-import { generateSkeleton, writeSuites } from "../../src/core/generator/skeleton.ts";
+import { generateSkeleton, writeSuites, isRelativeUrl, sanitizeEnvName } from "../../src/core/generator/skeleton.ts";
 import { validateSuite } from "../../src/core/parser/schema.ts";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -232,6 +232,65 @@ describe("generateSkeleton with basic auth", () => {
     expect(mixedSuite.headers).toBeDefined();
     // Basic uses ?? so bearer header (if set) takes precedence
     expect(mixedSuite.headers!.Authorization).toBe("Basic {{basic_credentials}}");
+  });
+});
+
+describe("isRelativeUrl", () => {
+  test("returns true for paths starting with /", () => {
+    expect(isRelativeUrl("/api/v1")).toBe(true);
+    expect(isRelativeUrl("/")).toBe(true);
+    expect(isRelativeUrl("/docgen2/rest")).toBe(true);
+  });
+
+  test("returns false for absolute URLs", () => {
+    expect(isRelativeUrl("https://api.example.com")).toBe(false);
+    expect(isRelativeUrl("http://localhost:3000")).toBe(false);
+    expect(isRelativeUrl("http://localhost:3000/api")).toBe(false);
+  });
+});
+
+describe("relative base_url handling", () => {
+  test("generated suite with relative baseUrl uses {{base_url}} placeholder", () => {
+    const doc = { openapi: "3.0.0", info: { title: "Test" }, paths: {} };
+    const endpoints: import("../../src/core/generator/types.ts").EndpointInfo[] = [
+      {
+        path: "/items",
+        method: "GET",
+        operationId: "getItems",
+        summary: "Get items",
+        tags: ["items"],
+        parameters: [],
+        requestBodySchema: undefined,
+        requestBodyContentType: undefined,
+        responseContentTypes: [],
+        responses: [{ statusCode: 200, description: "OK" }],
+        security: [],
+      } as any,
+    ];
+
+    const suites = generateSkeleton(endpoints, "/api/v1");
+    expect(suites[0]!.base_url).toBe("{{base_url}}");
+  });
+
+  test("generated suite with absolute baseUrl uses it directly", () => {
+    const endpoints: import("../../src/core/generator/types.ts").EndpointInfo[] = [
+      {
+        path: "/items",
+        method: "GET",
+        operationId: "getItems",
+        summary: "Get items",
+        tags: ["items"],
+        parameters: [],
+        requestBodySchema: undefined,
+        requestBodyContentType: undefined,
+        responseContentTypes: [],
+        responses: [{ statusCode: 200, description: "OK" }],
+        security: [],
+      } as any,
+    ];
+
+    const suites = generateSkeleton(endpoints, "https://api.example.com");
+    expect(suites[0]!.base_url).toBe("https://api.example.com");
   });
 });
 
