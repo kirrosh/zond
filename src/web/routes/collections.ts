@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import { layout, escapeHtml } from "../views/layout.ts";
 import {
   getCollectionById,
@@ -8,9 +8,11 @@ import {
   countRunsByCollection,
   createCollection,
   deleteCollection,
+  listCollections,
   normalizePath,
   listAIGenerations,
   listSavedAIGenerations,
+  listEnvironments,
 } from "../../db/queries.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
 import { renderTrendChart } from "../views/trend-chart.ts";
@@ -18,8 +20,16 @@ import { parseDirectorySafe, parseFile } from "../../core/parser/yaml-parser.ts"
 import type { ParseDirectoryResult } from "../../core/parser/yaml-parser.ts";
 import type { TestSuite } from "../../core/parser/types.ts";
 import type { AIGenerationRecord } from "../../db/queries.ts";
+import {
+  ErrorSchema,
+  IdParamSchema,
+  CollectionSchema,
+  CollectionListSchema,
+  CreateCollectionRequest,
+  CreateCollectionResponse,
+} from "../schemas.ts";
 
-const collections = new Hono();
+const collections = new OpenAPIHono();
 
 function statusBadge(total: number, passed: number, failed: number): string {
   if (total === 0) return `<span class="badge badge-skip">empty</span>`;
@@ -175,7 +185,7 @@ function renderSuites(
           ${escapeHtml(suite.name)}${aiBadge}${isChain ? ' <span class="capture-badge" style="font-weight:400">chain</span>' : ""}
           <span class="suite-step-count">${suite.tests.length} step${suite.tests.length === 1 ? "" : "s"}</span>
           ${sourcePath ? `<button class="btn btn-sm btn-run suite-run-btn"
-            hx-post="/api/run"
+            hx-post="/run"
             hx-vals='${escapeHtml(JSON.stringify({ path: sourcePath }))}'
             hx-indicator="closest .suite-details"
             hx-disabled-elt="this"
@@ -237,18 +247,24 @@ collections.get("/collections/:id", async (c) => {
     ? `<a class="btn btn-outline btn-sm" href="/explorer">Explorer</a>`
     : "";
 
+  const envs = listEnvironments();
+  const envOptions = envs.map(e => `<option value="${escapeHtml(e)}">${escapeHtml(e)}</option>`).join("");
+
   const content = `
     <h1>${escapeHtml(collection.name)}</h1>
-    <div style="display:flex;gap:0.5rem;margin-bottom:1rem;">
+    <div style="display:flex;gap:0.5rem;margin-bottom:1rem;align-items:center;">
       <a class="btn btn-sm" href="/" >Back</a>
-      <button class="btn btn-sm btn-run"
-        hx-post="/api/run"
-        hx-vals='${JSON.stringify({ path: collection.test_path })}'
-        hx-indicator="#run-spinner-${id}"
-        hx-disabled-elt="this">Run Tests</button>
+      <form style="display:contents;" hx-post="/run" hx-indicator="#run-spinner-${id}">
+        <input type="hidden" name="path" value="${escapeHtml(collection.test_path)}">
+        <select name="env" style="padding:0.3rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.85rem;">
+          <option value="">No environment</option>
+          ${envOptions}
+        </select>
+        <button type="submit" class="btn btn-sm btn-run" hx-disabled-elt="this">Run Tests</button>
+      </form>
       ${explorerLink}
       <button class="btn btn-danger btn-sm"
-        hx-delete="/api/collections/${id}"
+        hx-delete="/collections/${id}"
         hx-confirm="Delete collection '${escapeHtml(collection.name)}'? Runs will be unlinked."
         hx-target="body">Delete</button>
       <span id="run-spinner-${id}" class="htmx-indicator" style="margin-left:0.5rem;color:var(--text-dim);">Running...</span>
@@ -297,8 +313,12 @@ collections.get("/collections/:id", async (c) => {
   return c.html(layout(collection.name, content));
 });
 
-// POST /api/collections — create collection from form
-collections.post("/api/collections", async (c) => {
+// ──────────────────────────────────────────────
+// Form-data handlers (HTMX) on HTML paths
+// ──────────────────────────────────────────────
+
+// POST /collections — create collection (form-data from HTMX)
+collections.post("/collections", async (c) => {
   const body = await c.req.parseBody();
   const name = (body["name"] as string ?? "").trim();
   const testPath = (body["test_path"] as string ?? "").trim();
@@ -317,12 +337,124 @@ collections.post("/api/collections", async (c) => {
   return c.redirect(`/collections/${id}`);
 });
 
-// DELETE /api/collections/:id — delete collection
-collections.delete("/api/collections/:id", (c) => {
+// DELETE /collections/:id — delete collection (HTMX)
+collections.delete("/collections/:id", (c) => {
   const id = parseInt(c.req.param("id"), 10);
   deleteCollection(id, false);
   c.header("HX-Redirect", "/");
   return c.body(null, 200);
+});
+
+// ──────────────────────────────────────────────
+// OpenAPI JSON API routes
+// ──────────────────────────────────────────────
+
+const listCollectionsRoute = createRoute({
+  method: "get",
+  path: "/api/collections",
+  tags: ["Collections"],
+  summary: "List all collections",
+  responses: {
+    200: {
+      content: { "application/json": { schema: CollectionListSchema } },
+      description: "List of collections",
+    },
+  },
+});
+
+collections.openapi(listCollectionsRoute, (c) => {
+  const cols = listCollections();
+  const result = cols.map((col) => ({
+    id: col.id,
+    name: col.name,
+    test_path: col.test_path,
+    openapi_spec: col.openapi_spec,
+    created_at: col.created_at,
+  }));
+  return c.json(result, 200);
+});
+
+const getCollectionRoute = createRoute({
+  method: "get",
+  path: "/api/collections/{id}",
+  tags: ["Collections"],
+  summary: "Get collection by ID",
+  request: { params: IdParamSchema },
+  responses: {
+    200: {
+      content: { "application/json": { schema: CollectionSchema } },
+      description: "Collection details",
+    },
+    404: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Not found",
+    },
+  },
+});
+
+collections.openapi(getCollectionRoute, (c) => {
+  const { id } = c.req.valid("param");
+  const col = getCollectionById(id);
+  if (!col) return c.json({ error: "Collection not found" }, 404);
+  return c.json(col, 200);
+});
+
+const createCollectionRoute = createRoute({
+  method: "post",
+  path: "/api/collections",
+  tags: ["Collections"],
+  summary: "Create a new collection",
+  request: {
+    body: {
+      content: { "application/json": { schema: CreateCollectionRequest } },
+      required: true,
+    },
+  },
+  responses: {
+    201: {
+      content: { "application/json": { schema: CreateCollectionResponse } },
+      description: "Collection created",
+    },
+    400: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Validation error",
+    },
+  },
+});
+
+collections.openapi(createCollectionRoute, (c) => {
+  const { name, test_path, openapi_spec } = c.req.valid("json");
+  const id = createCollection({
+    name,
+    test_path: normalizePath(test_path),
+    openapi_spec: openapi_spec || undefined,
+  });
+  const col = getCollectionById(id);
+  if (!col) return c.json({ error: "Failed to create collection" }, 400);
+  return c.json({ id: col.id, name: col.name, test_path: col.test_path, openapi_spec: col.openapi_spec }, 201);
+});
+
+const deleteCollectionRoute = createRoute({
+  method: "delete",
+  path: "/api/collections/{id}",
+  tags: ["Collections"],
+  summary: "Delete a collection",
+  request: { params: IdParamSchema },
+  responses: {
+    204: { description: "Collection deleted" },
+    404: {
+      content: { "application/json": { schema: ErrorSchema } },
+      description: "Not found",
+    },
+  },
+});
+
+collections.openapi(deleteCollectionRoute, (c) => {
+  const { id } = c.req.valid("param");
+  const col = getCollectionById(id);
+  if (!col) return c.json({ error: "Collection not found" }, 404);
+  deleteCollection(id, false);
+  return c.body(null, 204);
 });
 
 function renderAIGenerateSection(collectionId: number, specPath: string): string {

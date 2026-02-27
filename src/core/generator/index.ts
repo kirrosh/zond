@@ -6,4 +6,6 @@ export { generateFromSchema } from "./data-factory.ts";
 export { generateWithAI } from "./ai/ai-generator.ts";
 export { resolveProviderConfig, PROVIDER_DEFAULTS } from "./ai/types.ts";
 export type { AIProviderConfig, AIGenerateOptions, AIGenerateResult } from "./ai/types.ts";
+export { scanCoveredEndpoints, filterUncoveredEndpoints } from "./coverage-scanner.ts";
+export type { CoveredEndpoint } from "./coverage-scanner.ts";
 export type { EndpointInfo, ResponseInfo, GenerateOptions, SecuritySchemeInfo, CrudGroup } from "./types.ts";

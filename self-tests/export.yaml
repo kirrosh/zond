@@ -1,0 +1,32 @@
+name: Export
+base_url: "http://localhost:8080"
+tests:
+  - name: Export run results as JSON
+    GET: /api/export/{{$randomInt}}/json
+    headers:
+      Accept: application/json
+    expect:
+      status: 200
+      body:
+        suite_name:
+          type: string
+        started_at:
+          type: string
+        finished_at:
+          type: string
+        total:
+          type: number
+        passed:
+          type: number
+        failed:
+          type: number
+        skipped:
+          type: number
+        steps:
+          type: array
+  - name: Export run results as JUnit XML
+    GET: /api/export/{{$randomInt}}/junit
+    headers:
+      Accept: application/json
+    expect:
+      status: 200

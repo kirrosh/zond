@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { layout, escapeHtml } from "../views/layout.ts";
-import { listRuns, getRunById, getResultsByRunId, countRuns, getDistinctEnvironments } from "../../db/queries.ts";
+import { listRuns, getRunById, getResultsByRunId, countRuns, listEnvironments, getDistinctEnvironments } from "../../db/queries.ts";
 import type { RunFilters } from "../../db/queries.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
 
@@ -95,7 +95,9 @@ runs.get("/runs", (c) => {
   const items = listRuns(PAGE_SIZE, offset, filters);
   const total = countRuns(filters);
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const environments = getDistinctEnvironments();
+  const definedEnvs = listEnvironments();
+  const runEnvs = getDistinctEnvironments();
+  const environments = [...new Set([...definedEnvs, ...runEnvs])].sort();
 
   const rows = items
     .map(

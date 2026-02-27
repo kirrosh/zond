@@ -1,0 +1,48 @@
+name: environments CRUD
+base_url: "http://localhost:8080"
+tests:
+  - name: Create environment
+    POST: /api/environments
+    headers:
+      Content-Type: application/json
+    json:
+      name: "{{$randomName}}"
+    expect:
+      status: 201
+      body:
+        id:
+          capture: environment_id
+          type: number
+        name:
+          type: string
+        variables:
+          type: object
+  - name: Get created environment
+    GET: /api/environments/{{environment_id}}
+    expect:
+      status: 200
+      body:
+        id:
+          equals: "{{environment_id}}"
+        name:
+          type: string
+        variables:
+          type: object
+  - name: Update environment
+    PUT: /api/environments/{{environment_id}}
+    headers:
+      Content-Type: application/json
+    json:
+      variables:
+        key1: "{{$randomString}}"
+        key2: "{{$randomString}}"
+    expect:
+      status: 200
+  - name: Delete environment
+    DELETE: /api/environments/{{environment_id}}
+    expect:
+      status: 204
+  - name: Verify environment deleted
+    GET: /api/environments/{{environment_id}}
+    expect:
+      status: 404

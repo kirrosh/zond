@@ -1,0 +1,18 @@
+name: Auth
+base_url: "http://localhost:8080"
+tests:
+  - name: Proxy login request and extract token
+    POST: /api/authorize
+    headers:
+      Content-Type: application/json
+      Accept: application/json
+    json:
+      base_url: "{{$randomString}}"
+      path: "{{$randomString}}"
+      username: "{{$randomString}}"
+      password: "{{$randomString}}"
+    expect:
+      status: 200
+      body:
+        token:
+          type: string

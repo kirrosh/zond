@@ -301,10 +301,35 @@ export function getEnvironment(name: string): Record<string, string> | null {
   return row ? JSON.parse(row.variables) : null;
 }
 
+export interface EnvironmentRecord {
+  id: number;
+  name: string;
+  variables: Record<string, string>;
+}
+
 export function listEnvironments(): string[] {
   const db = getDb();
   const rows = db.query("SELECT name FROM environments ORDER BY name").all() as { name: string }[];
   return rows.map((r) => r.name);
+}
+
+export function listEnvironmentRecords(): EnvironmentRecord[] {
+  const db = getDb();
+  const rows = db.query("SELECT id, name, variables FROM environments ORDER BY name").all() as { id: number; name: string; variables: string }[];
+  return rows.map((r) => ({ id: r.id, name: r.name, variables: JSON.parse(r.variables) }));
+}
+
+export function getEnvironmentById(id: number): EnvironmentRecord | null {
+  const db = getDb();
+  const row = db.query("SELECT id, name, variables FROM environments WHERE id = ?").get(id) as { id: number; name: string; variables: string } | null;
+  if (!row) return null;
+  return { id: row.id, name: row.name, variables: JSON.parse(row.variables) };
+}
+
+export function deleteEnvironment(id: number): boolean {
+  const db = getDb();
+  const result = db.prepare("DELETE FROM environments WHERE id = ?").run(id);
+  return result.changes > 0;
 }
 
 // ──────────────────────────────────────────────

@@ -14,6 +14,7 @@ export function layout(title: string, content: string): string {
     <div class="nav-links">
       <a href="/">Dashboard</a>
       <a href="/runs">Runs</a>
+      <a href="/environments">Environments</a>
       <a href="/explorer">Explorer</a>
     </div>
   </nav>

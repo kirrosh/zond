@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Environment management in WebUI** — full CRUD for environments (`/environments`)
+- **Key-value editor** — add/remove variables with inline JavaScript
+- **Environment selector** — `<select name="env">` dropdown in collection "Run Tests" form
+- **DB queries** — `getEnvironmentById()`, `deleteEnvironment()`, `listEnvironmentRecords()`
+- **Navigation** — "Environments" link in navbar
+- **Improved runs filter** — environment dropdown merges defined environments + run history
+- **Self-documented API** — routes use `@hono/zod-openapi`, `GET /api/openapi.json` serves spec
+- **Incremental generation** — `apitool generate` skips already-covered endpoints
+- **Dogfooding** — integration tests run against apitool's own API
+- **Generator: `additionalProperties`** — Record types generate sample key-value pairs instead of `{}`
+- **CI: typecheck** — `tsc --noEmit` step added to CI pipeline
+
+### Changed
+
+- **Auth-flow test** — rewritten with inline OpenAPI server (no external `test-server/` dependency)
+
+### Removed
+
+- **`test-server/`** — replaced by inline test servers in integration tests
+- **Duplicate spec files** — `openapi-self.json`, `self-tests-spec.json` removed from project root
+
+### Fixed
+
+- **Type errors** — `z.coerce.number()` in schemas, `c.body()` return type in export route
+- **Environments CRUD skeleton** — `variables` field now generates test data correctly
+
 ## [0.1.0] - 2025-02-27
 
 Initial public release.
