@@ -2,6 +2,7 @@ import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
 import { escapeHtml } from "../views/layout.ts";
 import { getRunById, getResultsByRunId } from "../../db/queries.ts";
 import { generateJunitXml } from "../../core/reporter/junit.ts";
+import { executeRun } from "../../core/runner/execute-run.ts";
 import type { TestRunResult, StepResult } from "../../core/runner/types.ts";
 import {
   ErrorSchema,
@@ -29,7 +30,7 @@ api.post("/run", async (c) => {
       return c.json({ error: "Missing 'path' field" }, 400);
     }
 
-    const runId = await executeRun(testPath, envName);
+    const { runId } = await executeRun({ testPath, envName, trigger: "webui" });
 
     c.header("HX-Redirect", `/runs/${runId}`);
     return c.json({ runId });
@@ -68,7 +69,7 @@ const runRoute = createRoute({
 api.openapi(runRoute, async (c) => {
   try {
     const { path: testPath, env: envName } = c.req.valid("json");
-    const runId = await executeRun(testPath, envName);
+    const { runId } = await executeRun({ testPath, envName, trigger: "webui" });
 
     c.header("HX-Redirect", `/runs/${runId}`);
     return c.json({ runId }, 200);
@@ -76,40 +77,6 @@ api.openapi(runRoute, async (c) => {
     return c.json({ error: (err as Error).message }, 500);
   }
 });
-
-async function executeRun(testPath: string, envName?: string): Promise<number> {
-  const { parse } = await import("../../core/parser/yaml-parser.ts");
-  const { loadEnvironment } = await import("../../core/parser/variables.ts");
-  const { runSuite } = await import("../../core/runner/executor.ts");
-  const { getDb } = await import("../../db/schema.ts");
-  const { createRun, finalizeRun, saveResults, findCollectionByTestPath } = await import("../../db/queries.ts");
-  const { dirname, resolve } = await import("node:path");
-
-  const suites = await parse(testPath);
-  if (suites.length === 0) {
-    throw new Error("No test files found");
-  }
-
-  const stat = await import("node:fs/promises").then(m => m.stat(testPath).catch(() => null));
-  const envDir = stat?.isDirectory() ? testPath : dirname(testPath);
-  const env = await loadEnvironment(envName, envDir);
-  const results = await Promise.all(suites.map((s) => runSuite(s, env)));
-
-  getDb();
-  const resolvedPath = resolve(testPath);
-  const collection = findCollectionByTestPath(resolvedPath)
-    ?? (stat?.isFile() ? findCollectionByTestPath(resolve(dirname(testPath))) : null);
-  const runId = createRun({
-    started_at: results[0]?.started_at ?? new Date().toISOString(),
-    environment: envName,
-    trigger: "webui",
-    collection_id: collection?.id,
-  });
-  finalizeRun(runId, results);
-  saveResults(runId, results);
-
-  return runId;
-}
 
 // POST /api/try — HTMX-only, returns HTML fragment (not in OpenAPI spec)
 api.post("/api/try", async (c) => {

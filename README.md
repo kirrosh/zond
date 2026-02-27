@@ -139,6 +139,7 @@ apitool generate --from <spec>    Generate skeleton tests from OpenAPI spec
 apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
 apitool collections               List test collections
 apitool serve                     Start web dashboard
+apitool mcp                       Start MCP server (stdio transport)
 ```
 
 ### Run options
@@ -192,6 +193,52 @@ apitool run ./self-tests
 apitool generate --from http://localhost:8080/api/openapi.json --output ./self-tests
 # "All endpoints covered, nothing to generate"
 ```
+
+## MCP Server (AI Agent Integration)
+
+apitool includes a built-in [MCP](https://modelcontextprotocol.io/) server, allowing AI agents (Claude Code, Cursor, Windsurf, Cline) to run and manage API tests directly.
+
+### Setup
+
+Add a `.mcp.json` file to your project root:
+
+```json
+{
+  "mcpServers": {
+    "apitool": {
+      "command": "apitool",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Or run from source:
+
+```json
+{
+  "mcpServers": {
+    "apitool": {
+      "command": "bun",
+      "args": ["run", "/path/to/apitool/src/cli/index.ts", "mcp"]
+    }
+  }
+}
+```
+
+### Available MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `run_tests` | Run API tests from a YAML file or directory |
+| `validate_tests` | Validate YAML test files without running them |
+| `generate_tests` | Generate skeleton tests from an OpenAPI spec |
+| `list_collections` | List all test collections with run statistics |
+| `list_runs` | List recent test runs with summary statistics |
+| `get_run_results` | Get detailed results for a specific test run |
+| `list_environments` | List all saved environments (values hidden) |
+
+> **Note:** The database and test files are resolved relative to the working directory (`cwd`), not globally. Each project maintains its own test history.
 
 ## License
 

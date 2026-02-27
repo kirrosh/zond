@@ -57,6 +57,7 @@ apitool/
 │   │   ├── runner/
 │   │   │   ├── http-client.ts      # fetch-обёртка с таймаутами и retry
 │   │   │   ├── executor.ts         # Выполнение TestSuite, цепочки captures
+│   │   │   ├── execute-run.ts      # Shared executeRun() — парсинг, запуск, сохранение
 │   │   │   ├── assertions.ts       # Проверка ассертов (status, jsonpath, regex, type)
 │   │   │   └── types.ts            # TestRunResult, StepResult
 │   │   ├── generator/
@@ -93,6 +94,16 @@ apitool/
 │   │   │   ├── layout.ts           # HTML layout, escapeHtml()
 │   │   │   └── trend-chart.ts      # Shared SVG trend chart component
 │   │   └── static/                 # HTMX, CSS, иконки
+│   ├── mcp/                        # MCP Server — AI-agent integration (M15)
+│   │   ├── server.ts               # McpServer setup + stdio transport
+│   │   └── tools/
+│   │       ├── run-tests.ts        # run_tests — запуск тестов
+│   │       ├── validate-tests.ts   # validate_tests — валидация YAML
+│   │       ├── generate-tests.ts   # generate_tests — генерация из OpenAPI
+│   │       ├── list-collections.ts # list_collections — список коллекций
+│   │       ├── list-runs.ts        # list_runs — список прогонов
+│   │       ├── get-run-results.ts  # get_run_results — детали прогона
+│   │       └── list-environments.ts # list_environments — список окружений
 │   └── cli/
 │       ├── index.ts                # Точка входа, роутинг команд
 │       ├── commands/
@@ -101,7 +112,8 @@ apitool/
 │       │   ├── ai-generate.ts      # apitool ai-generate
 │       │   ├── collections.ts      # apitool collections
 │       │   ├── serve.ts            # apitool serve
-│       │   └── validate.ts         # apitool validate
+│       │   ├── validate.ts         # apitool validate
+│       │   └── mcp.ts              # apitool mcp
 │       ├── runtime.ts             # Определение standalone vs dev режима
 │       └── output.ts              # Форматирование CLI-вывода
 ├── tests/                          # Тесты самого инструмента
@@ -729,6 +741,45 @@ apitool serve --port 4000 --openapi openapi.json
 
 bun src/cli/index.ts --version
 # apitool 0.1.0 (bun)          — из dev-режима
+```
+
+---
+
+## M15: MCP Server (AI-agent интеграция)
+
+APITOOL предоставляет MCP (Model Context Protocol) сервер для интеграции с AI-агентами (Claude Code, Cursor, Windsurf, Cline).
+
+### Запуск
+
+```bash
+apitool mcp              # stdio transport
+apitool mcp --db ./my.db # с кастомным путём к БД
+```
+
+### MCP Tools
+
+| Tool | Описание |
+|------|----------|
+| `run_tests` | Запуск тестов из YAML-файла/директории, возврат summary |
+| `validate_tests` | Валидация YAML без запуска |
+| `generate_tests` | Генерация skeleton-тестов из OpenAPI спеки |
+| `list_collections` | Список коллекций с статистикой |
+| `list_runs` | Список последних прогонов |
+| `get_run_results` | Детальные результаты конкретного прогона |
+| `list_environments` | Список окружений (ключи переменных, без значений) |
+
+### Конфигурация Claude Code
+
+```json
+// .claude/settings.json или claude_desktop_config.json
+{
+  "mcpServers": {
+    "apitool": {
+      "command": "apitool",
+      "args": ["mcp"]
+    }
+  }
+}
 ```
 
 ---

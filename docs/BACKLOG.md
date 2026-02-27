@@ -86,6 +86,8 @@
 | Explorer: response body schema не показывает вложенные объекты | `explorer.ts` | Low |
 | `describe.ts`, `init.ts`, `testcases.ts` — упоминались в ранних версиях документации, не реализованы | — | Info |
 | `tests/web/environments.test.ts` — исправлено в M14.1 (HTMX routes отделены от JSON API) | `tests/web/environments.test.ts` | Done |
+| `apitool init` — генерация `.mcp.json` с конфигом MCP-сервера для новых проектов | `src/cli/commands/init.ts` | Medium |
+| MCP: `.mcp.json` содержит абсолютные пути — нужна поддержка относительных путей и `cwd` | `src/mcp/`, `.mcp.json` | Medium |
 
 ---
 
@@ -131,14 +133,23 @@
 - Убраны хрупкие гейты (`if (content-type includes json) return next()`, `if (HX-Request) return next()`)
 - Тесты обновлены: URL и заголовки соответствуют новым путям
 
-### M15: WebSocket Live Updates
+### M15: MCP Server — AI-agent интеграция ✅
+
+- MCP (Model Context Protocol) сервер для AI-агентов (Claude Code, Cursor, Windsurf, Cline)
+- `apitool mcp` — stdio transport, `--db` flag для кастомного пути к БД
+- 7 MCP tools: `run_tests`, `validate_tests`, `generate_tests`, `list_collections`, `list_runs`, `get_run_results`, `list_environments`
+- Извлечён `executeRun()` в shared модуль `src/core/runner/execute-run.ts`
+- `trigger: "mcp"` в DB runs для отличия MCP-запусков в дашборде
+- Первый API-testing инструмент с нативной поддержкой AI-агентов
+
+### M16: WebSocket Live Updates
 
 - Bun native WebSocket + Hono upgrade
 - Runner events: `{ suite, step, status, duration }`
 - Прогресс-бар в WebUI при запуске тестов
 - **Приоритет:** UX — сейчас при долгих тестах UI "висит"
 
-### M16: Test Analytics
+### M17: Test Analytics
 
 - Diff между двумя прогонами (изменения статусов, duration delta)
 - Расширенная flaky-детекция с историей
@@ -147,5 +158,5 @@
 ### Порядок
 
 ```
-M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (WebSocket) → M16 (Analytics)
+M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (MCP Server) ✅ → M16 (WebSocket) → M17 (Analytics)
 ```
