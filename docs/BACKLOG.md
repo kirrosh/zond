@@ -150,14 +150,26 @@
 - `--force` флаг для перезаписи существующих файлов
 - README обновлён: install one-liner, init в Quick Start и CLI Reference
 
-### M16: WebSocket Live Updates
+### M16: Generate Wizard — Smart Generate + Safe Run + Auth ✅
+
+- `isRelativeUrl` / `sanitizeEnvName` хелперы в generator
+- Relative base_url → `{{base_url}}` placeholder в генерируемых тестах
+- `loadEnvironment()` fallback на DB если YAML не найден
+- `--safe` флаг для CLI и MCP — запуск только GET-тестов
+- `generate` автоматически создаёт environment в DB (base_url, auth vars)
+- `--auth-token`, `--env-name`, `--no-wizard` флаги для generate
+- MCP `generate_tests` создаёт коллекцию и environment в DB
+- Интерактивный wizard при TTY (base URL, auth token, env name)
+- Предупреждение о деструктивных тестах (POST/PUT/PATCH/DELETE)
+
+### M17: WebSocket Live Updates
 
 - Bun native WebSocket + Hono upgrade
 - Runner events: `{ suite, step, status, duration }`
 - Прогресс-бар в WebUI при запуске тестов
 - **Приоритет:** UX — сейчас при долгих тестах UI "висит"
 
-### M17: Test Analytics
+### M18: Test Analytics
 
 - Diff между двумя прогонами (изменения статусов, duration delta)
 - Расширенная flaky-детекция с историей
@@ -166,5 +178,5 @@
 ### Порядок
 
 ```
-M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (MCP Server) ✅ → M15.1 (Install + Init) ✅ → M16 (WebSocket) → M17 (Analytics)
+M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (MCP Server) ✅ → M15.1 (Install + Init) ✅ → M16 (Generate Wizard) ✅ → M17 (WebSocket) → M18 (Analytics)
 ```

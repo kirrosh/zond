@@ -2,6 +2,14 @@ import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
 import { generateFromSchema } from "./data-factory.ts";
 import { detectCrudGroups, generateCrudChain, getCrudEndpoints } from "./crud.ts";
 
+export function isRelativeUrl(url: string): boolean {
+  return url.startsWith("/") && !url.includes("://");
+}
+
+export function sanitizeEnvName(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
+}
+
 export interface RawStep {
   name: string;
   [methodKey: string]: unknown;
@@ -70,7 +78,7 @@ export function generateSkeleton(
 
     const suite: RawSuite = { name: groupName, tests };
     if (baseUrl) {
-      suite.base_url = baseUrl;
+      suite.base_url = isRelativeUrl(baseUrl) ? "{{base_url}}" : baseUrl;
     }
 
     // Add auth support for suites that need it

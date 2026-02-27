@@ -8,9 +8,12 @@ import { collectionsCommand } from "./commands/collections.ts";
 import { aiGenerateCommand } from "./commands/ai-generate.ts";
 import { mcpCommand } from "./commands/mcp.ts";
 import { initCommand } from "./commands/init.ts";
+import { updateCommand } from "./commands/update.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
+
+export const VERSION = "0.2.0";
 
 export interface ParsedArgs {
   command: string | undefined;
@@ -71,6 +74,7 @@ Usage:
   apitool serve            Start web dashboard
   apitool init             Initialize a new apitool project
   apitool mcp              Start MCP server (stdio transport for AI agents)
+  apitool update           Update to latest version
 
 Options for 'run':
   --env <name>         Use environment file (.env.<name>.yaml)
@@ -80,6 +84,15 @@ Options for 'run':
   --no-db              Do not save results to apitool.db
   --db <path>          Path to SQLite database file (default: apitool.db)
   --auth-token <token> Auth token injected as {{auth_token}} variable
+  --safe               Run only GET tests (read-only, safe mode)
+
+Options for 'generate':
+  --from <spec>        Path to OpenAPI spec (required)
+  --output <dir>       Output directory (default: ./generated/)
+  --auth-token <token> Bearer auth token to save in environment
+  --env-name <name>    Environment name (default: derived from spec title)
+  --db <path>          Path to SQLite database file
+  --no-wizard          Skip interactive prompts
 
 Options for 'ai-generate':
   --from <spec>        Path to OpenAPI spec (required)
@@ -114,7 +127,7 @@ async function main(): Promise<number> {
 
   // Version
   if (command === "--version" || flags["version"] === true || flags["v"] === true) {
-    console.log(`apitool 0.2.0 (${getRuntimeInfo()})`);
+    console.log(`apitool ${VERSION} (${getRuntimeInfo()})`);
     return 0;
   }
 
@@ -156,6 +169,7 @@ async function main(): Promise<number> {
         noDb: flags["no-db"] === true,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
         authToken: typeof flags["auth-token"] === "string" ? flags["auth-token"] : undefined,
+        safe: flags["safe"] === true,
       });
     }
 
@@ -176,7 +190,14 @@ async function main(): Promise<number> {
         return 2;
       }
       const output = typeof flags["output"] === "string" ? flags["output"] : "./generated/";
-      return generateCommand({ from, output });
+      return generateCommand({
+        from,
+        output,
+        authToken: typeof flags["auth-token"] === "string" ? flags["auth-token"] : undefined,
+        envName: typeof flags["env-name"] === "string" ? flags["env-name"] : undefined,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+        noWizard: flags["no-wizard"] === true,
+      });
     }
 
     case "ai-generate": {
@@ -235,6 +256,10 @@ async function main(): Promise<number> {
       return mcpCommand({
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
       });
+    }
+
+    case "update": {
+      return updateCommand({ force: flags["force"] === true });
     }
 
     default: {

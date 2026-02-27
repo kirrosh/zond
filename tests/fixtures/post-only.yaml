@@ -1,0 +1,12 @@
+name: Write-only Suite
+tests:
+  - name: "Create item"
+    POST: /items
+    json:
+      name: "Test Item"
+    expect:
+      status: 201
+  - name: "Delete item"
+    DELETE: /items/1
+    expect:
+      status: 204

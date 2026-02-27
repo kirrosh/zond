@@ -194,4 +194,34 @@ describe("loadEnvironment", () => {
       expect(env).toEqual({});
     });
   });
+
+  test("falls back to DB when YAML not found and envName specified", async () => {
+    const { tmpdir } = await import("os");
+    const { join } = await import("path");
+    const { unlinkSync } = await import("fs");
+    const { getDb, closeDb } = await import("../../src/db/schema.ts");
+    const { upsertEnvironment } = await import("../../src/db/queries.ts");
+
+    const dbPath = join(tmpdir(), `apitool-vars-test-${Date.now()}.db`);
+    try {
+      getDb(dbPath);
+      upsertEnvironment("myenv", { base_url: "http://localhost:9000", api_key: "secret123" });
+
+      // loadEnvironment should find "myenv" in DB since no YAML file exists
+      const env = await loadEnvironment("myenv", "/nonexistent/path");
+      expect(env.base_url).toBe("http://localhost:9000");
+      expect(env.api_key).toBe("secret123");
+    } finally {
+      closeDb();
+      for (const suffix of ["", "-wal", "-shm"]) {
+        try { unlinkSync(dbPath + suffix); } catch { /* ignore */ }
+      }
+    }
+  });
+
+  test("returns empty when YAML not found and DB has no env", async () => {
+    // No YAML, no DB env — should return empty
+    const env = await loadEnvironment("nonexistent-env-xyz", "/nonexistent/path");
+    expect(env).toEqual({});
+  });
 });
