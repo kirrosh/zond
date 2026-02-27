@@ -17,6 +17,12 @@ API testing platform — define tests in YAML, run from CLI or WebUI, generate f
 
 ## Installation
 
+### One-liner (Linux / macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kirrosh/apitool/master/install.sh | sh
+```
+
 ### Download binary
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/kirrosh/apitool/releases).
@@ -26,7 +32,7 @@ Download the latest release for your platform from [GitHub Releases](https://git
 chmod +x apitool
 ./apitool --version
 
-# Windows
+# Windows — download zip from GitHub Releases
 apitool.exe --version
 ```
 
@@ -47,7 +53,16 @@ bun run build    # produces ./apitool (or apitool.exe on Windows)
 
 ## Quick Start
 
-### 1. Create a test file
+### 1. Initialize a project (optional)
+
+```bash
+apitool init
+# Creates tests/example.yaml, .env.dev.yaml, and .mcp.json (if Claude Code detected)
+```
+
+Or create files manually:
+
+### 1a. Create a test file
 
 ```yaml
 # tests/health.yaml
@@ -133,6 +148,7 @@ apitool run tests/ --env dev
 ## CLI Reference
 
 ```
+apitool init                      Initialize a new apitool project
 apitool run <path>                Run API tests
 apitool validate <path>           Validate test files without running
 apitool generate --from <spec>    Generate skeleton tests from OpenAPI spec
