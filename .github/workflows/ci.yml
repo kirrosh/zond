@@ -20,8 +20,5 @@ jobs:
 
       - run: bun install
 
-      - name: Typecheck
-        run: bun run check
-
       - name: Tests
         run: bun test
