@@ -38,7 +38,7 @@ describe("Auth flow integration", () => {
   test("fetch OpenAPI spec from running server", async () => {
     const res = await fetch(`${TEST_BASE}/doc`);
     expect(res.ok).toBe(true);
-    const spec = await res.json();
+    const spec = await res.json() as any;
     expect(spec.openapi).toBe("3.0.0");
     expect(spec.components.securitySchemes.bearerAuth).toBeDefined();
   });

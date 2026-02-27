@@ -14,7 +14,7 @@ describe("executeRequest", () => {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const response = await executeRequest({
       method: "GET",
@@ -33,7 +33,7 @@ describe("executeRequest", () => {
     globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
       capturedInit = init;
       return new Response("{}", { status: 201, headers: { "Content-Type": "application/json" } });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     await executeRequest({
       method: "POST",
@@ -52,7 +52,7 @@ describe("executeRequest", () => {
         status: 200,
         headers: { "Content-Type": "application/json; charset=utf-8" },
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const response = await executeRequest({ method: "GET", url: "http://example.com", headers: {} });
     expect(response.body_parsed).toEqual({ key: "value" });
@@ -64,7 +64,7 @@ describe("executeRequest", () => {
         status: 200,
         headers: { "Content-Type": "text/html" },
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const response = await executeRequest({ method: "GET", url: "http://example.com", headers: {} });
     expect(response.body_parsed).toBeUndefined();
@@ -77,7 +77,7 @@ describe("executeRequest", () => {
       callCount++;
       if (callCount === 1) throw new Error("Network error");
       return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const response = await executeRequest(
       { method: "GET", url: "http://example.com", headers: {} },
@@ -90,7 +90,7 @@ describe("executeRequest", () => {
   test("throws after all retries exhausted", async () => {
     globalThis.fetch = mock(async () => {
       throw new Error("Network error");
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     await expect(
       executeRequest(
@@ -105,7 +105,7 @@ describe("executeRequest", () => {
     globalThis.fetch = mock(async () => {
       callCount++;
       return new Response("Not Found", { status: 404, headers: {} });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const response = await executeRequest(
       { method: "GET", url: "http://example.com", headers: {} },
@@ -126,7 +126,7 @@ describe("executeRequest", () => {
         });
       });
       return new Response("{}", { status: 200, headers: {} });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     await expect(
       executeRequest(

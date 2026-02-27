@@ -65,7 +65,7 @@ describe("Web routes", () => {
     try { unlinkSync(TEST_DB); } catch {}
     getDb(TEST_DB);
     runId = seedData();
-    app = createApp({ endpoints: [], specPath: null, servers: [] });
+    app = createApp({ endpoints: [], specPath: null, servers: [], securitySchemes: [], loginPath: null });
   });
 
   afterAll(() => {

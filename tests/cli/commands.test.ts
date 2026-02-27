@@ -25,7 +25,7 @@ function mockFetchResponses(responses: Array<{ status: number; body: unknown; he
       status: resp.status,
       headers: { "Content-Type": "application/json", ...resp.headers },
     });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 }
 
 function restoreFetch() {
@@ -176,7 +176,7 @@ describe("runCommand", () => {
         status: 500,
         headers: { "Content-Type": "application/json" },
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     restore = suppressOutput();
 
@@ -298,7 +298,7 @@ describe("runCommand with --auth-token", () => {
         status: 200,
         headers: { "Content-Type": "application/json" },
       });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     restore = suppressOutput();
 
     const code = await runCommand({
