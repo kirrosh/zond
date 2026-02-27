@@ -185,7 +185,7 @@ function renderSuites(
           ${escapeHtml(suite.name)}${aiBadge}${isChain ? ' <span class="capture-badge" style="font-weight:400">chain</span>' : ""}
           <span class="suite-step-count">${suite.tests.length} step${suite.tests.length === 1 ? "" : "s"}</span>
           ${sourcePath ? `<button class="btn btn-sm btn-run suite-run-btn"
-            hx-post="/api/run"
+            hx-post="/run"
             hx-vals='${escapeHtml(JSON.stringify({ path: sourcePath }))}'
             hx-indicator="closest .suite-details"
             hx-disabled-elt="this"
@@ -254,7 +254,7 @@ collections.get("/collections/:id", async (c) => {
     <h1>${escapeHtml(collection.name)}</h1>
     <div style="display:flex;gap:0.5rem;margin-bottom:1rem;align-items:center;">
       <a class="btn btn-sm" href="/" >Back</a>
-      <form style="display:contents;" hx-post="/api/run" hx-indicator="#run-spinner-${id}">
+      <form style="display:contents;" hx-post="/run" hx-indicator="#run-spinner-${id}">
         <input type="hidden" name="path" value="${escapeHtml(collection.test_path)}">
         <select name="env" style="padding:0.3rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.85rem;">
           <option value="">No environment</option>
@@ -264,7 +264,7 @@ collections.get("/collections/:id", async (c) => {
       </form>
       ${explorerLink}
       <button class="btn btn-danger btn-sm"
-        hx-delete="/api/collections/${id}"
+        hx-delete="/collections/${id}"
         hx-confirm="Delete collection '${escapeHtml(collection.name)}'? Runs will be unlinked."
         hx-target="body">Delete</button>
       <span id="run-spinner-${id}" class="htmx-indicator" style="margin-left:0.5rem;color:var(--text-dim);">Running...</span>
@@ -314,14 +314,11 @@ collections.get("/collections/:id", async (c) => {
 });
 
 // ──────────────────────────────────────────────
-// Form-data handlers (HTMX) — registered before OpenAPI routes
+// Form-data handlers (HTMX) on HTML paths
 // ──────────────────────────────────────────────
 
-// POST /api/collections — form-data passthrough for HTMX
-collections.post("/api/collections", async (c, next) => {
-  const ct = c.req.header("content-type") ?? "";
-  if (ct.includes("application/json")) return next();
-
+// POST /collections — create collection (form-data from HTMX)
+collections.post("/collections", async (c) => {
   const body = await c.req.parseBody();
   const name = (body["name"] as string ?? "").trim();
   const testPath = (body["test_path"] as string ?? "").trim();
@@ -340,10 +337,8 @@ collections.post("/api/collections", async (c, next) => {
   return c.redirect(`/collections/${id}`);
 });
 
-// DELETE /api/collections/:id — HTMX passthrough
-collections.delete("/api/collections/:id", (c, next) => {
-  if (c.req.header("HX-Request") !== "true") return next();
-
+// DELETE /collections/:id — delete collection (HTMX)
+collections.delete("/collections/:id", (c) => {
   const id = parseInt(c.req.param("id"), 10);
   deleteCollection(id, false);
   c.header("HX-Redirect", "/");

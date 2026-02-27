@@ -57,7 +57,7 @@ function collectionsHtml(): string {
       </a>
       <div class="collection-card-actions">
         <button class="btn btn-sm btn-run"
-          hx-post="/api/run"
+          hx-post="/run"
           hx-vals='${JSON.stringify({ path: c.test_path })}'
           hx-indicator="#run-spinner-${c.id}"
           hx-disabled-elt="this"
@@ -77,7 +77,7 @@ function addCollectionForm(): string {
   return `
     <details class="add-collection-form">
       <summary class="btn btn-outline btn-sm" style="margin:1rem 0;">Add Collection</summary>
-      <form action="/api/collections" method="POST" style="margin-top:0.75rem;">
+      <form action="/collections" method="POST" style="margin-top:0.75rem;">
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;align-items:end;">
           <div>
             <label style="font-size:0.85rem;font-weight:600;">Name</label>

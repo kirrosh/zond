@@ -16,14 +16,10 @@ import {
 const api = new OpenAPIHono();
 
 // ──────────────────────────────────────────────
-// POST /api/run — form-data passthrough for HTMX, then JSON via OpenAPI
+// POST /run — form-data handler for HTMX
 // ──────────────────────────────────────────────
 
-api.post("/api/run", async (c, next) => {
-  const ct = c.req.header("content-type") ?? "";
-  if (ct.includes("application/json")) return next();
-
-  // Form-data from HTMX
+api.post("/run", async (c) => {
   try {
     const form = await c.req.parseBody();
     const testPath = form["path"] as string;
