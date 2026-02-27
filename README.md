@@ -174,6 +174,25 @@ apitool ai-generate --from petstore.yaml \
   --provider openai --model gpt-4o
 ```
 
+## Self-Documented API
+
+apitool serves its own OpenAPI spec at `/api/openapi.json`. You can use apitool to test itself:
+
+```bash
+# Start the server
+apitool serve --port 8080
+
+# Generate tests from its own API
+apitool generate --from http://localhost:8080/api/openapi.json --output ./self-tests
+
+# Run the generated tests
+apitool run ./self-tests
+
+# Re-run generate — skips already-covered endpoints
+apitool generate --from http://localhost:8080/api/openapi.json --output ./self-tests
+# "All endpoints covered, nothing to generate"
+```
+
 ## License
 
 [MIT](LICENSE)
