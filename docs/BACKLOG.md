@@ -37,9 +37,9 @@
 - Selector окружения при запуске тестов в WebUI
 - Runs filter объединяет определённые environments + из истории прогонов
 
-### 5. `apitool init` — scaffolding проекта
+### 5. `apitool init` — scaffolding проекта ✅
 
-- Создание `tests/`, `generated/`, `.env.yaml`, example test
+- Создание `tests/example.yaml`, `.env.dev.yaml`, `.mcp.json` (if Claude Code detected)
 - Быстрый старт для новых пользователей
 
 ### 6. WebSocket live updates
@@ -86,7 +86,7 @@
 | Explorer: response body schema не показывает вложенные объекты | `explorer.ts` | Low |
 | `describe.ts`, `init.ts`, `testcases.ts` — упоминались в ранних версиях документации, не реализованы | — | Info |
 | `tests/web/environments.test.ts` — исправлено в M14.1 (HTMX routes отделены от JSON API) | `tests/web/environments.test.ts` | Done |
-| `apitool init` — генерация `.mcp.json` с конфигом MCP-сервера для новых проектов | `src/cli/commands/init.ts` | Medium |
+| `apitool init` — генерация `.mcp.json` с конфигом MCP-сервера для новых проектов ✅ | `src/cli/commands/init.ts` | Done |
 | MCP: `.mcp.json` содержит абсолютные пути — нужна поддержка относительных путей и `cwd` | `src/mcp/`, `.mcp.json` | Medium |
 
 ---
@@ -142,6 +142,14 @@
 - `trigger: "mcp"` в DB runs для отличия MCP-запусков в дашборде
 - Первый API-testing инструмент с нативной поддержкой AI-агентов
 
+### M15.1: Install Script + `apitool init` ✅
+
+- `install.sh` — one-liner установка бинарника через curl | sh
+- `apitool init` — scaffolding нового проекта (tests/example.yaml, .env.dev.yaml, .mcp.json)
+- Обнаружение Claude Code для автоматической генерации .mcp.json
+- `--force` флаг для перезаписи существующих файлов
+- README обновлён: install one-liner, init в Quick Start и CLI Reference
+
 ### M16: WebSocket Live Updates
 
 - Bun native WebSocket + Hono upgrade
@@ -158,5 +166,5 @@
 ### Порядок
 
 ```
-M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (MCP Server) ✅ → M16 (WebSocket) → M17 (Analytics)
+M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (MCP Server) ✅ → M15.1 (Install + Init) ✅ → M16 (WebSocket) → M17 (Analytics)
 ```
