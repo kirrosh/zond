@@ -169,6 +169,20 @@ apitool mcp                       Start MCP server (stdio transport)
 | `--no-db` | Do not save results to database |
 | `--db <path>` | Path to SQLite database file |
 | `--auth-token <token>` | Auth token injected as `{{auth_token}}` |
+| `--safe` | Run only GET tests (read-only, safe mode) |
+
+### Generate options
+
+| Flag | Description |
+|------|-------------|
+| `--from <spec>` | Path to OpenAPI spec (required) |
+| `--output <dir>` | Output directory (default: `./generated/`) |
+| `--auth-token <token>` | Bearer auth token to save in environment |
+| `--env-name <name>` | Environment name (default: derived from spec title) |
+| `--db <path>` | Path to SQLite database file |
+| `--no-wizard` | Skip interactive prompts |
+
+The `generate` command automatically creates a DB environment with `base_url` and auth variables. Use `--safe` with `run` to execute only GET tests first.
 
 ### Serve options
 

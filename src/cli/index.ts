@@ -80,6 +80,15 @@ Options for 'run':
   --no-db              Do not save results to apitool.db
   --db <path>          Path to SQLite database file (default: apitool.db)
   --auth-token <token> Auth token injected as {{auth_token}} variable
+  --safe               Run only GET tests (read-only, safe mode)
+
+Options for 'generate':
+  --from <spec>        Path to OpenAPI spec (required)
+  --output <dir>       Output directory (default: ./generated/)
+  --auth-token <token> Bearer auth token to save in environment
+  --env-name <name>    Environment name (default: derived from spec title)
+  --db <path>          Path to SQLite database file
+  --no-wizard          Skip interactive prompts
 
 Options for 'ai-generate':
   --from <spec>        Path to OpenAPI spec (required)
@@ -156,6 +165,7 @@ async function main(): Promise<number> {
         noDb: flags["no-db"] === true,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
         authToken: typeof flags["auth-token"] === "string" ? flags["auth-token"] : undefined,
+        safe: flags["safe"] === true,
       });
     }
 
@@ -176,7 +186,14 @@ async function main(): Promise<number> {
         return 2;
       }
       const output = typeof flags["output"] === "string" ? flags["output"] : "./generated/";
-      return generateCommand({ from, output });
+      return generateCommand({
+        from,
+        output,
+        authToken: typeof flags["auth-token"] === "string" ? flags["auth-token"] : undefined,
+        envName: typeof flags["env-name"] === "string" ? flags["env-name"] : undefined,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+        noWizard: flags["no-wizard"] === true,
+      });
     }
 
     case "ai-generate": {

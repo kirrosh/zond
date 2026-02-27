@@ -121,6 +121,14 @@ export async function loadEnvironment(envName?: string, searchDir: string = ".")
     return env;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      // Fallback to DB if envName is specified
+      if (envName) {
+        try {
+          const { getEnvironment } = await import("../../db/queries.ts");
+          const dbEnv = getEnvironment(envName);
+          if (dbEnv) return dbEnv;
+        } catch { /* DB not initialized — OK, return empty */ }
+      }
       return {};
     }
     throw err;

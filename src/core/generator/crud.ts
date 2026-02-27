@@ -1,5 +1,6 @@
 import type { EndpointInfo, SecuritySchemeInfo, CrudGroup } from "./types.ts";
 import { generateFromSchema } from "./data-factory.ts";
+import { isRelativeUrl } from "./skeleton.ts";
 import type { OpenAPIV3 } from "openapi-types";
 
 interface RawStep {
@@ -147,7 +148,7 @@ export function generateCrudChain(
     tests,
   };
 
-  if (baseUrl) suite.base_url = baseUrl;
+  if (baseUrl) suite.base_url = isRelativeUrl(baseUrl) ? "{{base_url}}" : baseUrl;
 
   // Add auth headers and login step
   if (needsAuth) {

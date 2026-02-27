@@ -12,6 +12,7 @@ export interface ExecuteRunOptions {
   envName?: string;
   trigger?: string;  // "cli" | "webui" | "mcp"
   dbPath?: string;
+  safe?: boolean;
 }
 
 export interface ExecuteRunResult {
@@ -20,11 +21,22 @@ export interface ExecuteRunResult {
 }
 
 export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRunResult> {
-  const { testPath, envName, trigger = "cli", dbPath } = options;
+  const { testPath, envName, trigger = "cli", dbPath, safe } = options;
 
-  const suites = await parse(testPath);
+  let suites = await parse(testPath);
   if (suites.length === 0) {
     throw new Error("No test files found");
+  }
+
+  // Safe mode: filter to GET-only tests
+  if (safe) {
+    for (const suite of suites) {
+      suite.tests = suite.tests.filter(t => t.method === "GET");
+    }
+    suites = suites.filter(s => s.tests.length > 0);
+    if (suites.length === 0) {
+      throw new Error("No GET tests found. Nothing to run in safe mode.");
+    }
   }
 
   const fileStat = await stat(testPath).catch(() => null);
