@@ -9,6 +9,8 @@ import environments from "./routes/environments.ts";
 import { createExplorerRoute, type ExplorerDeps, type ServerInfo } from "./routes/explorer.ts";
 import type { EndpointInfo } from "../core/generator/types.ts";
 import styleCssPath from "./static/style.css" with { type: "file" };
+import { resolve, dirname } from "path";
+const htmxJsPath = resolve(dirname(new URL(import.meta.url).pathname), "static/htmx.min.js");
 
 export interface ServerOptions {
   port?: number;
@@ -24,11 +26,19 @@ export function createApp(explorerDeps: ExplorerDeps) {
   app.get("/static/:file", async (c) => {
     const file = c.req.param("file");
     // Only serve known files, prevent path traversal
-    if (file !== "style.css") return c.notFound();
-    const content = await Bun.file(styleCssPath).text();
-    c.header("Content-Type", "text/css; charset=utf-8");
-    c.header("Cache-Control", "public, max-age=3600");
-    return c.body(content);
+    if (file === "style.css") {
+      const content = await Bun.file(styleCssPath).text();
+      c.header("Content-Type", "text/css; charset=utf-8");
+      c.header("Cache-Control", "public, max-age=3600");
+      return c.body(content);
+    }
+    if (file === "htmx.min.js") {
+      const content = await Bun.file(htmxJsPath).text();
+      c.header("Content-Type", "application/javascript; charset=utf-8");
+      c.header("Cache-Control", "public, max-age=86400");
+      return c.body(content);
+    }
+    return c.notFound();
   });
 
   // Mount routes
@@ -97,6 +107,29 @@ export async function startServer(options: ServerOptions = {}): Promise<void> {
           url: (s.url ?? "").replace(/\/+$/, ""),
           description: s.description,
         }));
+      }
+
+      // If all servers are relative URLs, try to resolve using environment base_url
+      const allRelative = servers.length > 0 && servers.every(s => !s.url.startsWith("http"));
+      if (allRelative) {
+        try {
+          const { listCollections, getEnvironment } = await import("../db/queries.ts");
+          const { sanitizeEnvName } = await import("../core/generator/skeleton.ts");
+          const specTitle = (doc as any).info?.title;
+          // Try environment matching spec title
+          const envName = specTitle ? sanitizeEnvName(specTitle) : null;
+          const env = envName ? getEnvironment(envName) : null;
+          if (env?.base_url) {
+            const envBase = env.base_url.replace(/\/+$/, "");
+            // If env base_url is also relative, keep as-is
+            if (envBase.startsWith("http")) {
+              servers = servers.map(s => ({
+                url: envBase,
+                description: s.description ?? "From environment",
+              }));
+            }
+          }
+        } catch { /* DB not critical */ }
       }
       // Auto-detect login endpoint: POST, path contains /auth or /login or /token, no security
       const loginEndpoint = endpoints.find((ep) => {

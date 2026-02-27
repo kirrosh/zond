@@ -29,7 +29,8 @@ export function registerGenerateTestsTool(server: McpServer, dbPath?: string) {
     const baseUrl = (doc as any).servers?.[0]?.url as string | undefined;
     const securitySchemes = extractSecuritySchemes(doc);
     const suites = generateSuites(endpoints, baseUrl, securitySchemes);
-    const files = await writeSuites(suites, output);
+    const { written, skipped } = await writeSuites(suites, output);
+    const allFiles = [...written, ...skipped];
 
     const specName = (doc as any).info?.title ?? basename(specPath);
     let collectionName: string | undefined;
@@ -79,8 +80,9 @@ export function registerGenerateTestsTool(server: McpServer, dbPath?: string) {
         upsertEnvironment(resolvedEnvName, envVars);
         environmentName = resolvedEnvName;
       }
-    } catch {
-      // DB not critical
+    } catch (err) {
+      // DB not critical — but log for debugging
+      console.error("[generate_tests] DB error:", err instanceof Error ? err.message : String(err));
     }
 
     // Count destructive endpoints
@@ -92,7 +94,9 @@ export function registerGenerateTestsTool(server: McpServer, dbPath?: string) {
     const result: Record<string, unknown> = {
       endpoints: endpoints.length,
       suites: suites.length,
-      files,
+      files: allFiles,
+      written: written.length,
+      skipped: skipped.length,
       outputDir: output,
       ...(collectionName ? { collection: collectionName } : {}),
       ...(environmentName ? { environment: environmentName } : {}),

@@ -305,12 +305,12 @@ describe("writeSuites + round-trip", () => {
     const doc = await readOpenApiSpec(FIXTURE);
     const endpoints = extractEndpoints(doc);
     const suites = generateSkeleton(endpoints);
-    const files = await writeSuites(suites, tmpDir);
+    const { written } = await writeSuites(suites, tmpDir);
 
-    expect(files.length).toBe(3);
+    expect(written.length).toBe(3);
 
     // Round-trip: each file should parse back without errors
-    for (const filePath of files) {
+    for (const filePath of written) {
       const text = await Bun.file(filePath).text();
       const parsed = Bun.YAML.parse(text);
       const suite = validateSuite(parsed);
@@ -332,10 +332,10 @@ describe("writeSuites + round-trip", () => {
       const endpoints = extractEndpoints(doc);
       const securitySchemes = extractSecuritySchemes(doc);
       const suites = generateSkeleton(endpoints, "http://localhost:3000", securitySchemes);
-      const files = await writeSuites(suites, authTmpDir);
+      const { written } = await writeSuites(suites, authTmpDir);
 
       // Find pets suite file
-      const petsFile = files.find((f) => f.includes("pets"))!;
+      const petsFile = written.find((f) => f.includes("pets"))!;
       const text = await Bun.file(petsFile).text();
 
       // Verify YAML contains auth elements

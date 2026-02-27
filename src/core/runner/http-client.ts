@@ -37,6 +37,8 @@ export async function executeRequest(
         body: request.body ?? undefined,
         signal: controller.signal,
         redirect: opts.follow_redirects ? "follow" : "manual",
+        // @ts-expect-error Bun-specific: skip TLS verification for self-signed certs
+        tls: { rejectUnauthorized: false },
       });
 
       clearTimeout(timeoutId);

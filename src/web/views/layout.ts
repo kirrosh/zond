@@ -6,7 +6,7 @@ export function layout(title: string, content: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(title)} — apitool</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script src="/static/htmx.min.js"></script>
 </head>
 <body>
   <nav class="navbar">

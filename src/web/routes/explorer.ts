@@ -80,14 +80,24 @@ function tryItForm(endpoint: EndpointInfo, index: number, servers: ServerInfo[])
 
   // Base URL: dropdown if multiple servers, input with default if one, empty if none
   let baseUrlField: string;
+  const isRelative = (url: string) => !url.startsWith("http://") && !url.startsWith("https://");
+
   if (servers.length > 1) {
+    // Filter out relative URLs or warn
     const opts = servers
-      .map((s) => `<option value="${escapeHtml(s.url)}">${escapeHtml(s.url)}${s.description ? ` — ${escapeHtml(s.description)}` : ""}</option>`)
+      .map((s) => {
+        const warn = isRelative(s.url) ? " ⚠ relative" : "";
+        return `<option value="${escapeHtml(s.url)}">${escapeHtml(s.url)}${warn}${s.description ? ` — ${escapeHtml(s.description)}` : ""}</option>`;
+      })
       .join("");
     baseUrlField = `<label>Server</label><select name="base_url">${opts}</select>`;
   } else {
-    const defaultUrl = servers[0]?.url ?? "";
-    baseUrlField = `<label>Base URL</label><input name="base_url" value="${escapeHtml(defaultUrl)}" placeholder="https://api.example.com" required>`;
+    const rawUrl = servers[0]?.url ?? "";
+    const defaultUrl = isRelative(rawUrl) ? "" : rawUrl;
+    const placeholder = isRelative(rawUrl)
+      ? `https://your-host${rawUrl}`
+      : "https://api.example.com";
+    baseUrlField = `<label>Base URL</label><input name="base_url" value="${escapeHtml(defaultUrl)}" placeholder="${escapeHtml(placeholder)}" required>`;
   }
 
   return `

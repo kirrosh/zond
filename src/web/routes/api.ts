@@ -130,11 +130,18 @@ api.post("/api/try", async (c) => {
       return c.html(`<div class="response-status status-4xx">Error: missing URL</div>`, 400);
     }
 
+    // Auto-resolve relative URLs using Referer or Origin header
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      return c.html(`<div class="response-status status-4xx">Error: Base URL must be an absolute URL (e.g. https://api.example.com). Got: ${escapeHtml(url)}</div>`, 400);
+    }
+
     const start = performance.now();
     const response = await fetch(url, {
       method,
       headers,
       body: body ?? undefined,
+      // @ts-expect-error Bun-specific: skip TLS verification for self-signed certs
+      tls: { rejectUnauthorized: false },
     });
     const duration = Math.round(performance.now() - start);
 
@@ -206,6 +213,8 @@ api.openapi(authorizeRoute, async (c) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
+      // @ts-expect-error Bun-specific: skip TLS verification for self-signed certs
+      tls: { rejectUnauthorized: false },
     });
 
     if (!response.ok) {

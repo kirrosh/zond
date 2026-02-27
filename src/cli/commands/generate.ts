@@ -82,15 +82,15 @@ export async function generateCommand(options: GenerateCommandOptions): Promise<
     const suites = generateSuites(endpoints, baseUrl, securitySchemes);
     console.log(`Generated ${suites.length} test suite(s)`);
 
-    const files = await writeSuites(suites, options.output);
-    for (const f of files) {
+    const { written, skipped } = await writeSuites(suites, options.output);
+    for (const f of written) {
       printSuccess(`Written: ${f}`);
     }
 
-    if (files.length === 0 && coveredCount > 0) {
+    if (written.length === 0 && (coveredCount > 0 || skipped.length > 0)) {
       printSuccess("All endpoints covered, no new files written");
     } else {
-      printSuccess(`Done! Generated ${files.length} file(s) in ${options.output}`);
+      printSuccess(`Done! Generated ${written.length} file(s) in ${options.output}${skipped.length > 0 ? ` (${skipped.length} skipped)` : ""}`);
     }
 
     // Auto-create collection + save environment to DB

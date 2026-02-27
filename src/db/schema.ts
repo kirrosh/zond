@@ -1,12 +1,22 @@
 import { Database } from "bun:sqlite";
 import { resolve } from "path";
+import { existsSync } from "fs";
 
 let _db: Database | null = null;
+let _dbPath: string | null = null;
 
 export function getDb(dbPath?: string): Database {
-  if (_db) return _db;
-
   const path = dbPath ? resolve(dbPath) : resolve(process.cwd(), "apitool.db");
+
+  // If cached connection exists, verify the file still exists
+  if (_db && _dbPath === path && existsSync(path)) return _db;
+
+  // Close stale connection if any
+  if (_db) {
+    try { _db.close(); } catch {}
+    _db = null;
+    _dbPath = null;
+  }
   const db = new Database(path, { create: true });
 
   // Performance and integrity settings
@@ -16,13 +26,15 @@ export function getDb(dbPath?: string): Database {
   runMigrations(db);
 
   _db = db;
+  _dbPath = path;
   return db;
 }
 
 export function closeDb(): void {
   if (_db) {
-    _db.close();
+    try { _db.close(); } catch {}
     _db = null;
+    _dbPath = null;
   }
 }
 
