@@ -64,6 +64,14 @@ export function generateFromSchema(
         }
         return obj;
       }
+      // Record type: additionalProperties defines value schema
+      if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
+        const valSchema = schema.additionalProperties as OpenAPIV3.SchemaObject;
+        return { key1: generateFromSchema(valSchema, "key1"), key2: generateFromSchema(valSchema, "key2") };
+      }
+      if (schema.additionalProperties === true) {
+        return { key1: "value1", key2: "value2" };
+      }
       // Bare object with no properties
       if (schema.type === "object") {
         return {};

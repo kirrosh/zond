@@ -41,7 +41,7 @@ describe("Dogfooding: apitool tests its own API", () => {
     const res = await fetch(`${TEST_BASE}/api/openapi.json`);
     expect(res.status).toBe(200);
 
-    const spec = await res.json();
+    const spec = await res.json() as any;
     expect(spec.openapi).toBe("3.0.0");
     expect(spec.info.title).toBe("apitool API");
     expect(spec.paths).toBeDefined();

@@ -20,6 +20,9 @@ jobs:
 
       - run: bun install
 
+      - name: Typecheck
+        run: bunx tsc --noEmit
+
       - name: Tests
         run: bun test tests/parser tests/runner tests/generator tests/reporter tests/db tests/web tests/cli tests/ai
 

@@ -9,7 +9,7 @@ export const ErrorSchema = z.object({
 }).openapi("Error");
 
 export const IdParamSchema = z.object({
-  id: z.string().pipe(z.coerce.number().int().positive()).openapi({ type: "integer", example: 1 }),
+  id: z.string().transform(Number).pipe(z.number().int().positive()).openapi({ type: "integer", example: 1 }),
 });
 
 // ──────────────────────────────────────────────
@@ -132,5 +132,5 @@ export const AuthorizeResponse = z.object({
 // ──────────────────────────────────────────────
 
 export const RunIdParam = z.object({
-  runId: z.string().pipe(z.coerce.number().int().positive()).openapi({ type: "integer", example: 1 }),
+  runId: z.string().transform(Number).pipe(z.number().int().positive()).openapi({ type: "integer", example: 1 }),
 });

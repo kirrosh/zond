@@ -105,6 +105,7 @@ apitool/
 │       ├── runtime.ts             # Определение standalone vs dev режима
 │       └── output.ts              # Форматирование CLI-вывода
 ├── tests/                          # Тесты самого инструмента
+├── self-tests/                     # Сгенерированные skeleton-тесты для apitool API
 ├── examples/                       # Примеры YAML-тестов
 ├── docs/                           # Документация
 ├── package.json
@@ -268,6 +269,8 @@ config:
 ### M3: Generator (`src/core/generator/`)
 
 Читает OpenAPI 3.x, генерирует YAML-тесты. Уровни 1 (Skeleton) и 2 (CRUD) полностью реализованы. Уровень 3 (Markdown тест-кейсы) — запланирован, см. BACKLOG.
+
+`data-factory.ts` генерирует тестовые данные по схеме: строки → `{{$randomString}}`, числа → `{{$randomInt}}`, `additionalProperties` (Record-типы) → `{ key1: ..., key2: ... }`. Инкрементальная генерация: `scanCoveredEndpoints()` анализирует существующие YAML-файлы, `filterUncoveredEndpoints()` пропускает уже покрытые эндпоинты.
 
 **Вход:** OpenAPI 3.x YAML/JSON
 **Выход:** `.yaml` файлы тестов

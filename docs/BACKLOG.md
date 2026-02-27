@@ -16,8 +16,9 @@
 ### 2. CI pipeline (GitHub Actions) ✅
 
 - Тесты (`bun test`) на push в main/dev и PR
+- Typecheck (`tsc --noEmit`) в CI
 - Multi-platform build: `linux-x64`, `darwin-arm64`, `win-x64`
-- Integration тесты исключены из CI (требуют test-server)
+- Integration тесты (dogfooding) в CI
 
 ### 3. GitHub Release ✅
 
@@ -80,34 +81,11 @@
 
 | Задача | Файл(ы) | Приоритет |
 |--------|---------|-----------|
-| CI: integration тесты (crud-chain) — теперь в CI через dogfooding ✅ | `tests/integration/`, `.github/workflows/ci.yml` | Done |
-| CI: typecheck (`tsc --noEmit`) отключён — test-server конфликтует с корневым tsconfig | `tsconfig.json`, `test-server/` | Medium |
+| CI: integration тесты (crud-chain, auth-flow) ✅ | `tests/integration/`, `.github/workflows/ci.yml` | Done |
+| CI: typecheck (`tsc --noEmit`) ✅ | `tsconfig.json`, `.github/workflows/ci.yml` | Done |
 | Explorer: response body schema не показывает вложенные объекты | `explorer.ts` | Low |
 | `describe.ts`, `init.ts`, `testcases.ts` — упоминались в ранних версиях документации, не реализованы | — | Info |
-
-### CI: Integration тесты с test-server
-
-Сейчас integration тесты (`tests/integration/`) исключены из CI, т.к. требуют запущенный `test-server/`.
-
-**Что нужно:**
-- CI step: `cd test-server && bun install && bun run src/index.ts &` перед запуском тестов
-- Дождаться готовности сервера (health check `GET /health`)
-- Запустить `bun test tests/integration/` отдельным шагом
-- Graceful shutdown после завершения
-
-**Файлы:**
-- `test-server/` — Hono + zod-openapi сервер с JWT auth, CRUD pets
-- `tests/integration/crud-chain.test.ts` — CRUD цепочка
-- `tests/integration/auth-flow.test.ts` — генерация тестов из спеки + прогон с авторизацией
-
-### CI: Typecheck
-
-`tsc --noEmit` отключён из CI т.к. `test-server/` имеет свои зависимости (`@hono/zod-openapi`, `jose`) которые не установлены в корневом `node_modules`. Несмотря на `include: ["src/**/*.ts", "tests/**/*.ts"]` в tsconfig, tsc на CI всё равно подхватывает файлы из `test-server/`.
-
-**Варианты решения:**
-- Установить зависимости test-server в CI перед typecheck
-- Вынести test-server в отдельный репозиторий
-- Добавить composite tsconfig с project references
+| `tests/web/environments.test.ts` — 3 теста падают (PUT 400 вместо 302, DELETE 204 вместо 200) после перехода на OpenAPI routes | `tests/web/environments.test.ts` | Medium |
 
 ---
 
@@ -140,7 +118,11 @@
 - `writeSuites()` не перезаписывает существующие файлы
 - Coverage scanner: `scanCoveredEndpoints()`, `filterUncoveredEndpoints()`
 - Dogfooding: integration тесты используют apitool API вместо test-server
-- CI: `tests/integration/crud-chain.test.ts` включён в pipeline
+- CI: `tests/integration/crud-chain.test.ts` и `auth-flow.test.ts` в pipeline
+- Генератор: поддержка `additionalProperties` (Record-типы) в `data-factory.ts`
+- Удалён `test-server/` — auth-flow тест переписан с inline-сервером
+- CI: typecheck (`tsc --noEmit`) включён в pipeline
+- Исправлены ошибки типов в `schemas.ts`, `api.ts`
 
 ### M15: WebSocket Live Updates
 

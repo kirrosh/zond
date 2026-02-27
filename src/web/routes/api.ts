@@ -345,10 +345,8 @@ api.openapi(exportJsonRoute, (c) => {
   const results = reconstructResults(runId);
   if (!results) return c.json({ error: "Run not found" }, 404);
 
-  const json = JSON.stringify(results, null, 2);
   c.header("Content-Disposition", `attachment; filename="run-${runId}-results.json"`);
-  c.header("Content-Type", "application/json");
-  return c.body(json);
+  return c.json(results as any, 200);
 });
 
 const exportJunitRoute = createRoute({
