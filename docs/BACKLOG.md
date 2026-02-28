@@ -162,6 +162,17 @@
 - Интерактивный wizard при TTY (base URL, auth token, env name)
 - Предупреждение о деструктивных тестах (POST/PUT/PATCH/DELETE)
 
+### M19: Unified Capabilities ✅
+
+- CLI: `apitool request <METHOD> <URL>` — ad-hoc HTTP запросы с variable interpolation, цветной вывод
+- CLI: `apitool envs [list|get|set|delete]` — полный CRUD окружений
+- CLI: `apitool runs [id]` — история прогонов и детали с шагами
+- CLI: `apitool coverage --spec <path> --tests <dir>` — анализ покрытия API тестами
+- MCP: 5 новых tools — `send_request`, `explore_api`, `manage_environment`, `diagnose_failure`, `coverage_analysis`
+- Agent: 2 новых tools — `send_request` (safe mode: только GET), `explore_api` (компактный вывод)
+- Agent: `generate_tests` — добавлены `envName`, `authToken` параметры
+- 51 новых тестов (11 файлов)
+
 ### M17: WebSocket Live Updates
 
 - Bun native WebSocket + Hono upgrade
@@ -178,5 +189,5 @@
 ### Порядок
 
 ```
-M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (MCP Server) ✅ → M15.1 (Install + Init) ✅ → M16 (Generate Wizard) ✅ → M17 (WebSocket) → M18 (Analytics)
+M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (MCP Server) ✅ → M15.1 (Install + Init) ✅ → M16 (Generate Wizard) ✅ → M19 (Unified Capabilities) ✅ → M17 (WebSocket) → M18 (Analytics)
 ```

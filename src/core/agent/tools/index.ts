@@ -5,6 +5,8 @@ import { generateTestsTool } from "./generate-tests.ts";
 import { queryResultsTool } from "./query-results.ts";
 import { manageEnvironmentTool } from "./manage-environment.ts";
 import { diagnoseFailureTool } from "./diagnose-failure.ts";
+import { sendRequestTool } from "./send-request.ts";
+import { exploreApiTool } from "./explore-api.ts";
 import type { AgentConfig } from "../types.ts";
 
 export function buildAgentTools(config: AgentConfig) {
@@ -19,6 +21,20 @@ export function buildAgentTools(config: AgentConfig) {
       })
     : runTestsTool;
 
+  // In safe mode, wrap send_request to only allow GET
+  const send_request = config.safeMode
+    ? tool({
+        description: sendRequestTool.description,
+        inputSchema: sendRequestTool.inputSchema,
+        execute: async (args, options) => {
+          if (args.method !== "GET") {
+            return { error: "Safe mode: only GET requests are allowed" };
+          }
+          return sendRequestTool.execute!(args, options);
+        },
+      })
+    : sendRequestTool;
+
   return {
     run_tests,
     validate_tests: validateTestsTool,
@@ -26,7 +42,9 @@ export function buildAgentTools(config: AgentConfig) {
     query_results: queryResultsTool,
     manage_environment: manageEnvironmentTool,
     diagnose_failure: diagnoseFailureTool,
+    send_request,
+    explore_api: exploreApiTool,
   };
 }
 
-export { runTestsTool, validateTestsTool, generateTestsTool, queryResultsTool, manageEnvironmentTool, diagnoseFailureTool };
+export { runTestsTool, validateTestsTool, generateTestsTool, queryResultsTool, manageEnvironmentTool, diagnoseFailureTool, sendRequestTool, exploreApiTool };
