@@ -14,6 +14,7 @@ import { requestCommand } from "./commands/request.ts";
 import { envsCommand } from "./commands/envs.ts";
 import { runsCommand } from "./commands/runs.ts";
 import { coverageCommand } from "./commands/coverage.ts";
+import { doctorCommand } from "./commands/doctor.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
@@ -84,6 +85,7 @@ Usage:
   apitool init             Initialize a new apitool project
   apitool mcp              Start MCP server (stdio transport for AI agents)
   apitool chat             Start interactive AI chat for API testing
+  apitool doctor           Run diagnostic checks
   apitool update           Update to latest version
 
 Options for 'chat':
@@ -104,6 +106,8 @@ Options for 'envs':
   envs get <name>      Show variables in an environment
   envs set <name> K=V  Set variables (multiple KEY=VALUE pairs)
   envs delete <name>   Delete an environment
+  envs import <name> <file>  Import environment from YAML file
+  envs export <name>   Export environment as YAML to stdout
 
 Options for 'runs':
   runs                 List recent test runs
@@ -353,14 +357,17 @@ async function main(): Promise<number> {
 
     case "envs": {
       const sub = positional[0] as string | undefined;
-      const action = (sub === "get" || sub === "set" || sub === "delete") ? sub : "list";
+      const validActions = ["get", "set", "delete", "import", "export"] as const;
+      const action = validActions.includes(sub as any) ? (sub as typeof validActions[number]) : "list";
       const name = action === "list" ? undefined : positional[1];
       const pairs = action === "set" ? positional.slice(2) : undefined;
+      const file = action === "import" ? positional[2] : undefined;
 
       return envsCommand({
         action,
         name,
         pairs,
+        file,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
       });
     }
@@ -389,6 +396,12 @@ async function main(): Promise<number> {
       return runsCommand({
         runId,
         limit,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+      });
+    }
+
+    case "doctor": {
+      return doctorCommand({
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
       });
     }

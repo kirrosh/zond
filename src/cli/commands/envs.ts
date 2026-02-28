@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "fs";
+import { resolve } from "path";
 import { getDb } from "../../db/schema.ts";
 import {
   listEnvironmentRecords,
@@ -9,9 +11,10 @@ import {
 import { printError, printSuccess } from "../output.ts";
 
 export interface EnvsOptions {
-  action: "list" | "get" | "set" | "delete";
+  action: "list" | "get" | "set" | "delete" | "import" | "export";
   name?: string;
   pairs?: string[];
+  file?: string;
   dbPath?: string;
 }
 
@@ -115,8 +118,83 @@ export function envsCommand(options: EnvsOptions): number {
       return 0;
     }
 
+    case "import": {
+      if (!name) {
+        printError("Missing environment name. Usage: apitool envs import <name> <file>");
+        return 2;
+      }
+      const file = options.file;
+      if (!file) {
+        printError("Missing file path. Usage: apitool envs import <name> <file>");
+        return 2;
+      }
+      const filePath = resolve(file);
+      if (!existsSync(filePath)) {
+        printError(`File not found: ${filePath}`);
+        return 1;
+      }
+      try {
+        const content = readFileSync(filePath, "utf-8");
+        const parsed = parseYamlEnv(content);
+        if (!parsed || Object.keys(parsed).length === 0) {
+          printError("No variables found in YAML file");
+          return 1;
+        }
+        upsertEnvironment(name, parsed);
+        printSuccess(`Environment '${name}' imported (${Object.keys(parsed).length} variable(s))`);
+        return 0;
+      } catch (err) {
+        printError(`Failed to import: ${(err as Error).message}`);
+        return 1;
+      }
+    }
+
+    case "export": {
+      if (!name) {
+        printError("Missing environment name. Usage: apitool envs export <name>");
+        return 2;
+      }
+      const variables = getEnvironment(name);
+      if (!variables) {
+        printError(`Environment '${name}' not found`);
+        return 1;
+      }
+      console.log(toYaml(variables));
+      return 0;
+    }
+
     default:
       printError(`Unknown action: ${action}`);
       return 2;
   }
+}
+
+/** Parse a simple YAML key:value file into a flat Record */
+export function parseYamlEnv(content: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const idx = trimmed.indexOf(":");
+    if (idx === -1) continue;
+    const key = trimmed.slice(0, idx).trim();
+    let value = trimmed.slice(idx + 1).trim();
+    // Strip surrounding quotes
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    if (key) result[key] = value;
+  }
+  return result;
+}
+
+/** Serialize a flat Record as simple YAML */
+export function toYaml(vars: Record<string, string>): string {
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(vars)) {
+    // Quote values that contain special chars
+    const needsQuote = /[:#\[\]{}&*!|>'"@`,%]/.test(v) || v.includes(" ") || v === "";
+    lines.push(`${k}: ${needsQuote ? `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : v}`);
+  }
+  return lines.join("\n");
 }

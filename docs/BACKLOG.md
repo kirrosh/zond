@@ -1,6 +1,6 @@
 # BACKLOG — Приоритеты и милестоуны
 
-Следующие шаги развития APITOOL после M1-M12.
+Следующие шаги развития APITOOL после M1-M19.
 
 ---
 
@@ -42,12 +42,11 @@
 - Создание `tests/example.yaml`, `.env.dev.yaml`, `.mcp.json` (if Claude Code detected)
 - Быстрый старт для новых пользователей
 
-### 6. WebSocket live updates
+### 6. `apitool request --save`
 
-- Прогресс выполнения тестов в реальном времени при POST /api/run
-- Bun native WebSocket + Hono upgrade
-- Runner events: `{ suite, step, status, duration }`
-- Прогресс-бар в WebUI
+- Сохранение ad-hoc запроса как YAML тест-кейс
+- `apitool request GET /users --save tests/users.yaml`
+- Автоматическая генерация assertions из ответа
 
 ---
 
@@ -72,6 +71,12 @@
 ### 10. Run comparison / diff между прогонами
 
 - Сравнение двух прогонов: изменения статусов, duration delta
+- Расширенная flaky-детекция с историей
+- Trend длительности по отдельным тестам
+
+### 11. Test Analytics (low priority)
+
+- Diff между двумя прогонами (изменения статусов, duration delta)
 - Расширенная flaky-детекция с историей
 - Trend длительности по отдельным тестам
 
@@ -173,21 +178,15 @@
 - Agent: `generate_tests` — добавлены `envName`, `authToken` параметры
 - 51 новых тестов (11 файлов)
 
-### M17: WebSocket Live Updates
+### M20: Post-M19 Improvements ✅
 
-- Bun native WebSocket + Hono upgrade
-- Runner events: `{ suite, step, status, duration }`
-- Прогресс-бар в WebUI при запуске тестов
-- **Приоритет:** UX — сейчас при долгих тестах UI "висит"
-
-### M18: Test Analytics
-
-- Diff между двумя прогонами (изменения статусов, duration delta)
-- Расширенная flaky-детекция с историей
-- Trend длительности по отдельным тестам
+- DB singleton fix: `getDb()` без аргументов переиспользует существующий путь
+- README.md: добавлены новые CLI команды, MCP tools, AI chat, coverage
+- `apitool doctor` — диагностика (DB, тесты, OpenAPI, env файлы, Ollama)
+- `apitool envs import/export` — импорт/экспорт окружений через YAML файлы
 
 ### Порядок
 
 ```
-M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (MCP Server) ✅ → M15.1 (Install + Init) ✅ → M16 (Generate Wizard) ✅ → M19 (Unified Capabilities) ✅ → M17 (WebSocket) → M18 (Analytics)
+M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (MCP Server) ✅ → M15.1 (Install + Init) ✅ → M16 (Generate Wizard) ✅ → M19 (Unified Capabilities) ✅ → M20 (Post-M19) ✅
 ```

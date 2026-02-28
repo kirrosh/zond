@@ -6,7 +6,7 @@ let _db: Database | null = null;
 let _dbPath: string | null = null;
 
 export function getDb(dbPath?: string): Database {
-  const path = dbPath ? resolve(dbPath) : resolve(process.cwd(), "apitool.db");
+  const path = dbPath ? resolve(dbPath) : (_dbPath ?? resolve(process.cwd(), "apitool.db"));
 
   // If cached connection exists, verify the file still exists
   if (_db && _dbPath === path && existsSync(path)) return _db;
