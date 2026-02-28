@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 const mockReadSpec = mock(() => Promise.resolve({ openapi: "3.0.0", info: { title: "Pet API" }, paths: {} }));
 const mockExtractEndpoints = mock(() => [{ method: "GET", path: "/pets" }]);
@@ -16,6 +16,8 @@ mock.module("../../../src/core/generator/skeleton.ts", () => ({
   generateSuites: mockGenerateSuites,
   writeSuites: mockWriteSuites,
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { generateTestsTool } from "../../../src/core/agent/tools/generate-tests.ts";
 

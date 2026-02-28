@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 mock.module("../../../src/core/parser/yaml-parser.ts", () => ({
   parse: mock(() => Promise.resolve([
@@ -9,6 +9,8 @@ mock.module("../../../src/core/parser/yaml-parser.ts", () => ({
     errors: [],
   })),
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { validateTestsTool } from "../../../src/core/agent/tools/validate-tests.ts";
 import { parse } from "../../../src/core/parser/yaml-parser.ts";

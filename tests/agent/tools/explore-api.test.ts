@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 mock.module("../../../src/core/generator/openapi-reader.ts", () => ({
   readOpenApiSpec: mock(() => Promise.resolve({
@@ -15,6 +15,8 @@ mock.module("../../../src/core/generator/openapi-reader.ts", () => ({
     { name: "bearerAuth", type: "http", scheme: "bearer" },
   ]),
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { exploreApiTool } from "../../../src/core/agent/tools/explore-api.ts";
 import { readOpenApiSpec } from "../../../src/core/generator/openapi-reader.ts";

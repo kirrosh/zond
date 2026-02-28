@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 mock.module("../../src/core/generator/openapi-reader.ts", () => ({
   readOpenApiSpec: mock(() => Promise.resolve({ info: { title: "API" }, paths: {} })),
@@ -15,6 +15,8 @@ mock.module("../../src/core/generator/coverage-scanner.ts", () => ({
   ])),
   filterUncoveredEndpoints: mock((all: any[], _covered: any[]) => all.slice(1)),
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerCoverageAnalysisTool } from "../../src/mcp/tools/coverage-analysis.ts";

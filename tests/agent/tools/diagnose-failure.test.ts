@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 const mockGetRunById = mock((): unknown => ({
   id: 1, started_at: "2024-01-01", finished_at: "2024-01-01",
@@ -32,6 +32,8 @@ mock.module("../../../src/db/queries.ts", () => ({
 mock.module("../../../src/db/schema.ts", () => ({
   getDb: mock(() => ({})),
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { diagnoseFailureTool } from "../../../src/core/agent/tools/diagnose-failure.ts";
 

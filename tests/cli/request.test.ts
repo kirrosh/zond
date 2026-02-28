@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 // Mock executeRequest before importing
 mock.module("../../src/core/runner/http-client.ts", () => ({
@@ -18,6 +18,8 @@ mock.module("../../src/core/parser/variables.ts", () => ({
     return template.replace(/\{\{(.+?)\}\}/g, (_, key: string) => String(vars[key] ?? `{{${key}}}`));
   }),
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { requestCommand, parseHeaders } from "../../src/cli/commands/request.ts";
 import { executeRequest } from "../../src/core/runner/http-client.ts";
