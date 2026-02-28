@@ -4,6 +4,7 @@
 |----------|----------|
 | [APITOOL.md](../APITOOL.md) | Полная техническая документация — архитектура, модули, типы, API, примеры |
 | [BACKLOG.md](BACKLOG.md) | Приоритеты, милестоуны M12–M16, технический долг |
+| [agent.md](agent.md) | Agent Module — AI Chat Assistant (AI SDK v6, tools, провайдеры) |
 
 ## Архив
 

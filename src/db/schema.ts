@@ -42,7 +42,7 @@ export function closeDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA_V1 = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -119,6 +119,33 @@ const SCHEMA_V2 = `
   CREATE INDEX IF NOT EXISTS idx_ai_gen_collection ON ai_generations(collection_id);
 `;
 
+const SCHEMA_V3 = `
+  CREATE TABLE IF NOT EXISTS chat_sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT,
+    provider    TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    last_active TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    INTEGER NOT NULL REFERENCES chat_sessions(id),
+    role          TEXT NOT NULL,
+    content       TEXT NOT NULL,
+    tool_name     TEXT,
+    tool_args     TEXT,
+    tool_result   TEXT,
+    input_tokens  INTEGER,
+    output_tokens INTEGER,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+  CREATE INDEX IF NOT EXISTS idx_chat_sessions_active  ON chat_sessions(last_active DESC);
+`;
+
 function runMigrations(db: Database): void {
   const currentVersion = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 
@@ -130,6 +157,9 @@ function runMigrations(db: Database): void {
     }
     if (currentVersion < 2) {
       db.exec(SCHEMA_V2);
+    }
+    if (currentVersion < 3) {
+      db.exec(SCHEMA_V3);
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();
