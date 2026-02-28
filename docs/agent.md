@@ -28,10 +28,11 @@
 │         │                                         │
 │         ▼                                         │
 │  ┌──────────────────────────────────────┐        │
-│  │           6 Agent Tools              │        │
+│  │           8 Agent Tools              │        │
 │  │  run_tests    validate_tests         │        │
 │  │  generate_tests  query_results       │        │
 │  │  manage_environment  diagnose_failure│        │
+│  │  send_request    explore_api         │        │
 │  └──────────────────────────────────────┘        │
 └───────────────────────────────────────────────────┘
        │
@@ -88,14 +89,16 @@ apitool chat --safe
 |------|----------|--------------------|
 | `run_tests` | Запуск тестов | `testPath`, `envName?`, `safe?` |
 | `validate_tests` | Валидация YAML | `testPath` |
-| `generate_tests` | Генерация из OpenAPI | `specPath`, `outputDir?` |
+| `generate_tests` | Генерация из OpenAPI | `specPath`, `outputDir?`, `envName?`, `authToken?` |
 | `query_results` | Запрос к БД | `action`: `list_runs` / `get_run` / `list_collections` |
 | `manage_environment` | Управление окружениями | `action`: `list` / `get` / `set` |
 | `diagnose_failure` | Анализ падений | `runId` |
+| `send_request` | Ad-hoc HTTP запрос | `method`, `url`, `headers?`, `body?`, `timeout?`, `envName?` |
+| `explore_api` | Просмотр OpenAPI спеки | `specPath`, `tag?` |
 
 ### Safe Mode
 
-При `--safe` флаге `run_tests` принудительно получает `safe: true` — выполняются только GET-тесты.
+При `--safe` флаге `run_tests` принудительно получает `safe: true` — выполняются только GET-тесты. `send_request` в safe mode блокирует все методы кроме GET.
 
 ## Context Manager
 
@@ -119,7 +122,9 @@ src/core/agent/
     ├── generate-tests.ts # tool() — генерация из OpenAPI
     ├── query-results.ts  # tool() — запросы к БД
     ├── manage-environment.ts # tool() — управление окружениями
-    └── diagnose-failure.ts   # tool() — анализ падений
+    ├── diagnose-failure.ts   # tool() — анализ падений
+    ├── send-request.ts       # tool() — ad-hoc HTTP запросы
+    └── explore-api.ts        # tool() — просмотр OpenAPI спеки
 
 src/tui/
 └── chat-ui.ts           # readline TUI — ввод, вывод, tool events

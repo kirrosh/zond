@@ -10,6 +10,10 @@ import { mcpCommand } from "./commands/mcp.ts";
 import { initCommand } from "./commands/init.ts";
 import { updateCommand } from "./commands/update.ts";
 import { chatCommand } from "./commands/chat.ts";
+import { requestCommand } from "./commands/request.ts";
+import { envsCommand } from "./commands/envs.ts";
+import { runsCommand } from "./commands/runs.ts";
+import { coverageCommand } from "./commands/coverage.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
@@ -71,6 +75,10 @@ Usage:
   apitool validate <path>  Validate test files without running
   apitool generate --from <spec>  Generate skeleton tests from OpenAPI spec
   apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
+  apitool request <METHOD> <URL>  Send an ad-hoc HTTP request
+  apitool envs [list|get|set|delete]  Manage environments
+  apitool runs [id]        View test run history
+  apitool coverage --spec <path> --tests <dir>  Analyze API test coverage
   apitool collections      List test collections
   apitool serve            Start web dashboard
   apitool init             Initialize a new apitool project
@@ -84,6 +92,27 @@ Options for 'chat':
   --api-key <key>      API key (or set APITOOL_AI_KEY env var)
   --base-url <url>     Provider base URL override
   --safe               Only allow running GET tests (read-only mode)
+
+Options for 'request':
+  --header "K:V"       Add request header (repeatable)
+  --body '{}'          Request body
+  --env <name>         Use environment for variable interpolation
+  --timeout <ms>       Request timeout
+
+Options for 'envs':
+  envs                 List all environments
+  envs get <name>      Show variables in an environment
+  envs set <name> K=V  Set variables (multiple KEY=VALUE pairs)
+  envs delete <name>   Delete an environment
+
+Options for 'runs':
+  runs                 List recent test runs
+  runs <id>            Show run details with step results
+  --limit <n>          Number of runs to show (default: 20)
+
+Options for 'coverage':
+  --spec <path>        Path to OpenAPI spec (required)
+  --tests <dir>        Path to test files directory (required)
 
 Options for 'run':
   --env <name>         Use environment file (.env.<name>.yaml)
@@ -280,6 +309,102 @@ async function main(): Promise<number> {
 
     case "update": {
       return updateCommand({ force: flags["force"] === true });
+    }
+
+    case "request": {
+      const method = positional[0];
+      const url = positional[1];
+      if (!method || !url) {
+        printError("Missing arguments. Usage: apitool request <METHOD> <URL>");
+        return 2;
+      }
+
+      // Collect all --header flags (parseArgs only stores last one, so re-parse)
+      const headerValues: string[] = [];
+      const rawArgs = process.argv.slice(2);
+      for (let i = 0; i < rawArgs.length; i++) {
+        if (rawArgs[i] === "--header" && rawArgs[i + 1]) {
+          headerValues.push(rawArgs[i + 1]!);
+          i++;
+        } else if (rawArgs[i]?.startsWith("--header=")) {
+          headerValues.push(rawArgs[i]!.slice("--header=".length));
+        }
+      }
+
+      const timeoutRaw = flags["timeout"];
+      let timeout: number | undefined;
+      if (typeof timeoutRaw === "string") {
+        timeout = parseInt(timeoutRaw, 10);
+        if (isNaN(timeout) || timeout <= 0) {
+          printError(`Invalid timeout value: ${timeoutRaw}`);
+          return 2;
+        }
+      }
+
+      return requestCommand({
+        method,
+        url,
+        headers: headerValues,
+        body: typeof flags["body"] === "string" ? flags["body"] : undefined,
+        env: typeof flags["env"] === "string" ? flags["env"] : undefined,
+        timeout,
+      });
+    }
+
+    case "envs": {
+      const sub = positional[0] as string | undefined;
+      const action = (sub === "get" || sub === "set" || sub === "delete") ? sub : "list";
+      const name = action === "list" ? undefined : positional[1];
+      const pairs = action === "set" ? positional.slice(2) : undefined;
+
+      return envsCommand({
+        action,
+        name,
+        pairs,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+      });
+    }
+
+    case "runs": {
+      const idRaw = positional[0];
+      let runId: number | undefined;
+      if (idRaw) {
+        runId = parseInt(idRaw, 10);
+        if (isNaN(runId)) {
+          printError(`Invalid run ID: ${idRaw}`);
+          return 2;
+        }
+      }
+
+      const limitRaw = flags["limit"];
+      let limit: number | undefined;
+      if (typeof limitRaw === "string") {
+        limit = parseInt(limitRaw, 10);
+        if (isNaN(limit) || limit <= 0) {
+          printError(`Invalid limit value: ${limitRaw}`);
+          return 2;
+        }
+      }
+
+      return runsCommand({
+        runId,
+        limit,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+      });
+    }
+
+    case "coverage": {
+      const spec = flags["spec"];
+      if (typeof spec !== "string") {
+        printError("Missing --spec <path>. Usage: apitool coverage --spec <path> --tests <dir>");
+        return 2;
+      }
+      const tests = flags["tests"];
+      if (typeof tests !== "string") {
+        printError("Missing --tests <dir>. Usage: apitool coverage --spec <path> --tests <dir>");
+        return 2;
+      }
+      return coverageCommand({ spec, tests });
     }
 
     default: {

@@ -78,7 +78,7 @@ apitool/
 │   │       ├── context-manager.ts    # Автосжатие длинных диалогов
 │   │       ├── system-prompt.ts      # Системный промпт с примерами tools
 │   │       ├── types.ts              # AgentConfig, ToolEvent, AgentTurnResult
-│   │       └── tools/                # 6 tools как AI SDK tool()
+│   │       └── tools/                # 8 tools как AI SDK tool()
 │   │   └── reporter/
 │   │       ├── json.ts             # JSON-отчёт
 │   │       ├── junit.ts            # JUnit XML
@@ -110,7 +110,12 @@ apitool/
 │   │       ├── list-collections.ts # list_collections — список коллекций
 │   │       ├── list-runs.ts        # list_runs — список прогонов
 │   │       ├── get-run-results.ts  # get_run_results — детали прогона
-│   │       └── list-environments.ts # list_environments — список окружений
+│   │       ├── list-environments.ts # list_environments — список окружений
+│   │       ├── send-request.ts     # send_request — ad-hoc HTTP запросы
+│   │       ├── explore-api.ts      # explore_api — просмотр OpenAPI спеки
+│   │       ├── manage-environment.ts # manage_environment — CRUD окружений
+│   │       ├── diagnose-failure.ts # diagnose_failure — диагностика падений
+│   │       └── coverage-analysis.ts # coverage_analysis — анализ покрытия
 │   └── cli/
 │       ├── index.ts                # Точка входа, роутинг команд
 │       ├── commands/
@@ -120,7 +125,11 @@ apitool/
 │       │   ├── collections.ts      # apitool collections
 │       │   ├── serve.ts            # apitool serve
 │       │   ├── validate.ts         # apitool validate
-│       │   └── mcp.ts              # apitool mcp
+│       │   ├── mcp.ts              # apitool mcp
+│       │   ├── request.ts          # apitool request
+│       │   ├── envs.ts             # apitool envs
+│       │   ├── runs.ts             # apitool runs
+│       │   └── coverage.ts         # apitool coverage
 │       ├── runtime.ts             # Определение standalone vs dev режима
 │       └── output.ts              # Форматирование CLI-вывода
 ├── tests/                          # Тесты самого инструмента
@@ -504,9 +513,13 @@ Dashboard-метрики (SQL-запросы):
 
 | Команда | Описание | Основные флаги |
 |---------|----------|----------------|
-| `run <path>` | Запуск тестов (авто-привязка к коллекции) | `--env`, `--report json\|junit\|console`, `--timeout`, `--bail`, `--no-db`, `--db`, `--auth-token` |
-| `generate` | Генерация тестов из OpenAPI (авто-создание коллекции) | `--from <spec>`, `--output <dir>` |
+| `run <path>` | Запуск тестов (авто-привязка к коллекции) | `--env`, `--report json\|junit\|console`, `--timeout`, `--bail`, `--no-db`, `--db`, `--auth-token`, `--safe` |
+| `generate` | Генерация тестов из OpenAPI (авто-создание коллекции) | `--from <spec>`, `--output <dir>`, `--auth-token`, `--env-name`, `--no-wizard` |
 | `ai-generate` | AI-генерация тестов из OpenAPI | `--from <spec>`, `--prompt`, `--provider`, `--model`, `--api-key`, `--base-url`, `--output` |
+| `request <METHOD> <URL>` | Ad-hoc HTTP запрос с цветным выводом | `--header "K:V"` (multiple), `--body '{}'`, `--env`, `--timeout` |
+| `envs [list\|get\|set\|delete]` | Управление окружениями (CRUD) | `envs get <name>`, `envs set <name> K=V ...`, `envs delete <name>` |
+| `runs [id]` | История прогонов и детали | `--limit <n>`, `--db <path>` |
+| `coverage` | Анализ покрытия API тестами | `--spec <path>`, `--tests <dir>` |
 | `collections` | Список коллекций с pass rate и датой последнего прогона | `--db <path>` |
 | `serve` | Запуск WebUI | `--port`, `--host`, `--openapi <spec>`, `--db <path>` |
 | `validate` | Проверка YAML-тестов | `<path>` |
@@ -566,7 +579,7 @@ OpenAPI spec + prompt
 
 **Запуск:** `apitool chat` (Ollama/qwen3:4b по умолчанию), `apitool chat --provider openai --api-key sk-...`
 
-**6 tools:** `run_tests`, `validate_tests`, `generate_tests`, `query_results`, `manage_environment`, `diagnose_failure` — каждый как AI SDK `tool()` с Zod `inputSchema`.
+**8 tools:** `run_tests`, `validate_tests`, `generate_tests`, `query_results`, `manage_environment`, `diagnose_failure`, `send_request`, `explore_api` — каждый как AI SDK `tool()` с Zod `inputSchema`.
 
 **Особенности:**
 - Safe mode (`--safe`) — принудительно только GET-тесты
@@ -793,6 +806,11 @@ apitool mcp --db ./my.db # с кастомным путём к БД
 | `list_runs` | Список последних прогонов |
 | `get_run_results` | Детальные результаты конкретного прогона |
 | `list_environments` | Список окружений (ключи переменных, без значений) |
+| `send_request` | Ad-hoc HTTP запрос с variable interpolation из окружений |
+| `explore_api` | Просмотр OpenAPI спеки — endpoints, servers, security schemes, фильтр по tag |
+| `manage_environment` | CRUD окружений — list, get, set, delete |
+| `diagnose_failure` | Диагностика падений — анализ failed steps и assertion mismatches |
+| `coverage_analysis` | Анализ покрытия API тестами (spec vs test files) |
 
 ### Конфигурация Claude Code
 
