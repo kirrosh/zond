@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 mock.module("../../../src/core/runner/http-client.ts", () => ({
   executeRequest: mock(() => Promise.resolve({
@@ -30,6 +30,8 @@ mock.module("../../../src/core/parser/variables.ts", () => ({
   }),
   GENERATORS: {},
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { sendRequestTool } from "../../../src/core/agent/tools/send-request.ts";
 import { executeRequest } from "../../../src/core/runner/http-client.ts";

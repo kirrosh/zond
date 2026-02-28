@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 const mockListRuns = mock(() => [
   { id: 1, started_at: "2024-01-01", total: 5, passed: 4, failed: 1, skipped: 0 },
@@ -26,6 +26,8 @@ mock.module("../../../src/db/queries.ts", () => ({
 mock.module("../../../src/db/schema.ts", () => ({
   getDb: mock(() => ({})),
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { queryResultsTool } from "../../../src/core/agent/tools/query-results.ts";
 

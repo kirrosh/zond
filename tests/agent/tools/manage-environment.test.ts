@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 const mockListEnvRecords = mock(() => [
   { id: 1, name: "staging", variables: { base_url: "https://staging.api.com" } },
@@ -15,6 +15,8 @@ mock.module("../../../src/db/queries.ts", () => ({
 mock.module("../../../src/db/schema.ts", () => ({
   getDb: mock(() => ({})),
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { manageEnvironmentTool } from "../../../src/core/agent/tools/manage-environment.ts";
 

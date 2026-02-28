@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 mock.module("../../src/core/runner/http-client.ts", () => ({
   executeRequest: mock(() => Promise.resolve({
@@ -31,6 +31,8 @@ mock.module("../../src/core/parser/variables.ts", () => ({
   }),
   GENERATORS: {},
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerSendRequestTool } from "../../src/mcp/tools/send-request.ts";

@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 // Mock executeRun before importing the tool
 mock.module("../../../src/core/runner/execute-run.ts", () => ({
@@ -16,6 +16,8 @@ mock.module("../../../src/core/runner/execute-run.ts", () => ({
     }],
   })),
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { runTestsTool } from "../../../src/core/agent/tools/run-tests.ts";
 import { executeRun } from "../../../src/core/runner/execute-run.ts";

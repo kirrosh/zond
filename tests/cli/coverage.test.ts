@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 // Mock the generator modules
 mock.module("../../src/core/generator/openapi-reader.ts", () => ({
@@ -23,6 +23,8 @@ mock.module("../../src/core/generator/coverage-scanner.ts", () => ({
     return all.slice(1);
   }),
 }));
+
+afterAll(() => { mock.restore(); });
 
 import { coverageCommand } from "../../src/cli/commands/coverage.ts";
 import { readOpenApiSpec, extractEndpoints } from "../../src/core/generator/openapi-reader.ts";
