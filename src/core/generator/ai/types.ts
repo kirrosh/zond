@@ -26,7 +26,7 @@ export interface AIGenerateResult {
 export const PROVIDER_DEFAULTS: Record<string, Partial<AIProviderConfig>> = {
   ollama: {
     baseUrl: "http://localhost:11434/v1",
-    model: "llama3.2:3b",
+    model: "qwen3:4b",
   },
   openai: {
     baseUrl: "https://api.openai.com/v1",

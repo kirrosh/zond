@@ -653,3 +653,104 @@ export function findAIGenerationByYaml(collectionId: number, yaml: string): AIGe
     "SELECT * FROM ai_generations WHERE collection_id = ? AND generated_yaml = ? ORDER BY created_at DESC LIMIT 1"
   ).get(collectionId, yaml) as AIGenerationRecord | null;
 }
+
+// ──────────────────────────────────────────────
+// Chat Sessions & Messages
+// ──────────────────────────────────────────────
+
+export interface ChatSessionRecord {
+  id: number;
+  title: string | null;
+  provider: string;
+  model: string;
+  created_at: string;
+  last_active: string;
+}
+
+export interface ChatMessageRecord {
+  id: number;
+  session_id: number;
+  role: string;
+  content: string;
+  tool_name: string | null;
+  tool_args: string | null;
+  tool_result: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  created_at: string;
+}
+
+export interface SaveChatMessageOpts {
+  session_id: number;
+  role: string;
+  content: string;
+  tool_name?: string;
+  tool_args?: string;
+  tool_result?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+}
+
+export function createChatSession(provider: string, model: string, title?: string): number {
+  const db = getDb();
+  const result = db.prepare(`
+    INSERT INTO chat_sessions (title, provider, model)
+    VALUES ($title, $provider, $model)
+  `).run({
+    $title: title ?? null,
+    $provider: provider,
+    $model: model,
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export function saveChatMessage(opts: SaveChatMessageOpts): number {
+  const db = getDb();
+
+  // Update session last_active
+  db.prepare("UPDATE chat_sessions SET last_active = datetime('now') WHERE id = ?").run(opts.session_id);
+
+  const result = db.prepare(`
+    INSERT INTO chat_messages (session_id, role, content, tool_name, tool_args, tool_result, input_tokens, output_tokens)
+    VALUES ($session_id, $role, $content, $tool_name, $tool_args, $tool_result, $input_tokens, $output_tokens)
+  `).run({
+    $session_id: opts.session_id,
+    $role: opts.role,
+    $content: opts.content,
+    $tool_name: opts.tool_name ?? null,
+    $tool_args: opts.tool_args ?? null,
+    $tool_result: opts.tool_result ?? null,
+    $input_tokens: opts.input_tokens ?? null,
+    $output_tokens: opts.output_tokens ?? null,
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export function getChatMessages(sessionId: number): ChatMessageRecord[] {
+  const db = getDb();
+  return db.query(
+    "SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC"
+  ).all(sessionId) as ChatMessageRecord[];
+}
+
+export function listChatSessions(limit = 20): ChatSessionRecord[] {
+  const db = getDb();
+  return db.query(
+    "SELECT * FROM chat_sessions ORDER BY last_active DESC LIMIT ?"
+  ).all(limit) as ChatSessionRecord[];
+}
+
+export interface CoreMessageFormat {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export function loadSessionHistory(sessionId: number): CoreMessageFormat[] {
+  const messages = getChatMessages(sessionId);
+  return messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
+}

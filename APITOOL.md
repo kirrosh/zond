@@ -19,6 +19,7 @@ OpenAPI спецификация → рабочие тесты + тест-кей
   - [M6: WebUI](#m6-webui-srcweb)
   - [M7: CLI](#m7-cli-srccli)
   - [M10: AI Generation](#m10-ai-generation-srccoregeneratorai)
+  - [Agent — AI Chat](#agent--ai-chat)
 - [Формат YAML-тестов](#формат-yaml-тестов)
 - [Поток данных](#поток-данных)
 - [Roadmap](#roadmap-mvp)
@@ -72,6 +73,12 @@ apitool/
 │   │   │       ├── prompt-builder.ts # Сборка системного + user промпта
 │   │   │       ├── output-parser.ts  # Парсинг JSON-ответа LLM → TestSuite
 │   │   │       └── types.ts          # AIGenerateOptions, AIGenerateResult
+│   │   └── agent/                    # AI Chat Agent (AI SDK v6)
+│   │       ├── agent-loop.ts         # generateText + tools + stopWhen
+│   │       ├── context-manager.ts    # Автосжатие длинных диалогов
+│   │       ├── system-prompt.ts      # Системный промпт с примерами tools
+│   │       ├── types.ts              # AgentConfig, ToolEvent, AgentTurnResult
+│   │       └── tools/                # 6 tools как AI SDK tool()
 │   │   └── reporter/
 │   │       ├── json.ts             # JSON-отчёт
 │   │       ├── junit.ts            # JUnit XML
@@ -503,6 +510,8 @@ Dashboard-метрики (SQL-запросы):
 | `collections` | Список коллекций с pass rate и датой последнего прогона | `--db <path>` |
 | `serve` | Запуск WebUI | `--port`, `--host`, `--openapi <spec>`, `--db <path>` |
 | `validate` | Проверка YAML-тестов | `<path>` |
+| `chat` | Интерактивный AI-агент для управления тестами | `--provider`, `--model`, `--api-key`, `--base-url`, `--safe` |
+| `mcp` | MCP-сервер для AI-агентов | `--db` |
 
 Exit codes: `0` — все тесты прошли, `1` — есть падения, `2` — ошибка конфигурации.
 
@@ -533,7 +542,7 @@ OpenAPI spec + prompt
 
 | Провайдер | Base URL | Модель по умолчанию |
 |-----------|----------|-------------------|
-| `ollama` | `http://localhost:11434/v1` | `llama3.2:3b` |
+| `ollama` | `http://localhost:11434/v1` | `qwen3:4b` |
 | `openai` | `https://api.openai.com/v1` | `gpt-4o` |
 | `anthropic` | `https://api.anthropic.com` | `claude-sonnet-4-20250514` |
 | `custom` | задаётся через `--base-url` | задаётся через `--model` |
@@ -548,6 +557,23 @@ OpenAPI spec + prompt
 - AI badge на suite'ах, сгенерированных через AI
 
 **БД:** таблица `ai_generations` — хранит prompt, model, provider, результат, token usage, duration.
+
+---
+
+### Agent — AI Chat
+
+Интерактивный AI-агент в терминале. Использует AI SDK v6 (`generateText` + `tool()` + `stopWhen`).
+
+**Запуск:** `apitool chat` (Ollama/qwen3:4b по умолчанию), `apitool chat --provider openai --api-key sk-...`
+
+**6 tools:** `run_tests`, `validate_tests`, `generate_tests`, `query_results`, `manage_environment`, `diagnose_failure` — каждый как AI SDK `tool()` с Zod `inputSchema`.
+
+**Особенности:**
+- Safe mode (`--safe`) — принудительно только GET-тесты
+- Context manager — автосжатие диалога при >20 сообщений
+- Для Ollama system prompt инжектируется в user message (workaround для thinking-моделей)
+
+Подробная документация: [docs/agent.md](docs/agent.md)
 
 ---
 

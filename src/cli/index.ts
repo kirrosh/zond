@@ -9,6 +9,7 @@ import { aiGenerateCommand } from "./commands/ai-generate.ts";
 import { mcpCommand } from "./commands/mcp.ts";
 import { initCommand } from "./commands/init.ts";
 import { updateCommand } from "./commands/update.ts";
+import { chatCommand } from "./commands/chat.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
@@ -74,7 +75,15 @@ Usage:
   apitool serve            Start web dashboard
   apitool init             Initialize a new apitool project
   apitool mcp              Start MCP server (stdio transport for AI agents)
+  apitool chat             Start interactive AI chat for API testing
   apitool update           Update to latest version
+
+Options for 'chat':
+  --provider <name>    LLM provider: ollama, openai, anthropic, custom (default: ollama)
+  --model <name>       Model name (default: provider-specific)
+  --api-key <key>      API key (or set APITOOL_AI_KEY env var)
+  --base-url <url>     Provider base URL override
+  --safe               Only allow running GET tests (read-only mode)
 
 Options for 'run':
   --env <name>         Use environment file (.env.<name>.yaml)
@@ -254,6 +263,17 @@ async function main(): Promise<number> {
 
     case "mcp": {
       return mcpCommand({
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+      });
+    }
+
+    case "chat": {
+      return chatCommand({
+        provider: typeof flags["provider"] === "string" ? flags["provider"] : undefined,
+        model: typeof flags["model"] === "string" ? flags["model"] : undefined,
+        apiKey: typeof flags["api-key"] === "string" ? flags["api-key"] : undefined,
+        baseUrl: typeof flags["base-url"] === "string" ? flags["base-url"] : undefined,
+        safe: flags["safe"] === true,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
       });
     }
