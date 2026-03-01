@@ -1,7 +1,6 @@
 import { resolve } from "path";
 import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
 import { generateFromSchema } from "./data-factory.ts";
-import { detectCrudGroups, generateCrudChain, getCrudEndpoints } from "./crud.ts";
 
 export function isRelativeUrl(url: string): boolean {
   return url.startsWith("/") && !url.includes("://");
@@ -29,6 +28,8 @@ export interface RawStep {
 
 export interface RawSuite {
   name: string;
+  folder?: string;   // tag-folder (sanitized), e.g. "pet"
+  fileStem?: string; // pre-computed file name stem, e.g. "GET_findByStatus"
   base_url?: string;
   headers?: Record<string, string>;
   tests: RawStep[];
@@ -36,7 +37,7 @@ export interface RawSuite {
 
 /**
  * Generate skeleton test suites from extracted OpenAPI endpoints.
- * Groups endpoints by first tag (or path prefix).
+ * One suite per endpoint, grouped into tag-named subfolders.
  * When securitySchemes are provided, generates auth login steps and suite-level headers.
  */
 export function generateSkeleton(
@@ -44,17 +45,6 @@ export function generateSkeleton(
   baseUrl?: string,
   securitySchemes?: SecuritySchemeInfo[],
 ): RawSuite[] {
-  // Group by tag
-  const groups = new Map<string, EndpointInfo[]>();
-
-  for (const ep of endpoints) {
-    const group = ep.tags[0] ?? deriveGroupFromPath(ep.path);
-    if (!groups.has(group)) {
-      groups.set(group, []);
-    }
-    groups.get(group)!.push(ep);
-  }
-
   // Detect bearer auth scheme
   const bearerScheme = securitySchemes?.find(
     (s) => s.type === "http" && s.scheme === "bearer",
@@ -73,33 +63,30 @@ export function generateSkeleton(
 
   const suites: RawSuite[] = [];
 
-  for (const [groupName, eps] of groups) {
-    const tests: RawStep[] = [];
+  for (const ep of endpoints) {
+    const folder = sanitizeFileName(ep.tags[0] ?? deriveGroupFromPath(ep.path));
+    const fileStem = deriveSuiteFileStem(ep, folder);
+    const needsAuth = ep.security.length > 0;
 
-    // Check if any endpoint in this group requires auth
-    const needsAuth = eps.some((ep) => ep.security.length > 0);
+    const suite: RawSuite = {
+      name: ep.summary ?? `${ep.method.toUpperCase()} ${ep.path}`,
+      folder,
+      fileStem,
+      tests: [buildStep(ep)],
+    };
 
-    for (const ep of eps) {
-      const step = buildStep(ep);
-      tests.push(step);
-    }
-
-    const suite: RawSuite = { name: groupName, tests };
     if (baseUrl) {
       suite.base_url = isRelativeUrl(baseUrl) ? "{{base_url}}" : baseUrl;
     }
 
-    // Add auth support for suites that need it
+    // Add auth support
     if (needsAuth) {
       if (bearerScheme && loginEndpoint) {
-        // Add login step at the beginning
         const loginStep = buildLoginStep(loginEndpoint);
         suite.tests.unshift(loginStep);
-        // Add suite-level Authorization header
         suite.headers = { Authorization: "Bearer {{auth_token}}" };
       }
 
-      // Add API key headers
       for (const apiKey of apiKeySchemes) {
         if (apiKey.in === "header" && apiKey.apiKeyName) {
           if (!suite.headers) suite.headers = {};
@@ -108,7 +95,6 @@ export function generateSkeleton(
         }
       }
 
-      // Add Basic auth header
       if (basicScheme) {
         if (!suite.headers) suite.headers = {};
         suite.headers.Authorization = suite.headers.Authorization ?? "Basic {{basic_credentials}}";
@@ -119,39 +105,6 @@ export function generateSkeleton(
   }
 
   return suites;
-}
-
-/**
- * Generate test suites with CRUD chain detection.
- * CRUD groups get chain suites (POST→GET→PUT→DELETE with captures).
- * Remaining endpoints get skeleton suites.
- */
-export function generateSuites(
-  endpoints: EndpointInfo[],
-  baseUrl?: string,
-  securitySchemes?: SecuritySchemeInfo[],
-): RawSuite[] {
-  const crudGroups = detectCrudGroups(endpoints);
-  const crudEndpointSet = getCrudEndpoints(crudGroups);
-
-  // Detect login endpoint for CRUD chains that need auth
-  const bearerScheme = securitySchemes?.find(
-    s => s.type === "http" && s.scheme === "bearer",
-  );
-  const loginEndpoint = bearerScheme ? findLoginEndpoint(endpoints) : undefined;
-
-  // Generate CRUD chain suites
-  const crudSuites = crudGroups.map(g =>
-    generateCrudChain(g, baseUrl, securitySchemes, loginEndpoint),
-  );
-
-  // Generate skeleton suites for non-CRUD endpoints
-  const remaining = endpoints.filter(ep => !crudEndpointSet.has(ep));
-  const skeletonSuites = remaining.length > 0
-    ? generateSkeleton(remaining, baseUrl, securitySchemes)
-    : [];
-
-  return [...crudSuites, ...skeletonSuites];
 }
 
 /**
@@ -230,6 +183,25 @@ function deriveGroupFromPath(path: string): string {
   // /pets/{petId} -> "pets", /health -> "health"
   const segments = path.split("/").filter(Boolean);
   return segments[0] ?? "default";
+}
+
+/**
+ * Derive a file name stem from an endpoint and its folder.
+ * Examples: GET /pet/findByStatus → "GET_findByStatus"
+ *           POST /pet/{petId}/uploadImage → "POST_petId_uploadImage"
+ *           POST /pet → "POST"
+ */
+function deriveSuiteFileStem(ep: EndpointInfo, folder: string): string {
+  const method = ep.method.toUpperCase();
+  const prefix = `/${folder}`;
+  const remaining = ep.path.startsWith(prefix) ? ep.path.slice(prefix.length) : ep.path;
+
+  const parts = [method];
+  for (const seg of remaining.split("/").filter(Boolean)) {
+    parts.push(seg.replace(/[{}]/g, "")); // {petId} → petId
+  }
+
+  return parts.join("_");
 }
 
 function buildStep(ep: EndpointInfo): RawStep {
@@ -380,8 +352,15 @@ export async function writeSuites(suites: RawSuite[], outputDir: string): Promis
   const skipped: string[] = [];
 
   for (const suite of suites) {
-    const fileName = sanitizeFileName(suite.name) + ".yaml";
-    const filePath = `${outputDir}/${fileName}`;
+    let filePath: string;
+    if (suite.folder) {
+      const subDir = `${outputDir}/${suite.folder}`;
+      await mkdir(subDir, { recursive: true });
+      const stem = suite.fileStem ?? sanitizeFileName(suite.name);
+      filePath = `${subDir}/${stem}.yaml`;
+    } else {
+      filePath = `${outputDir}/${sanitizeFileName(suite.name)}.yaml`;
+    }
 
     // Skip existing files (incremental generation)
     try {

@@ -1,7 +1,7 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, sanitizeEnvName } from "../../generator/index.ts";
-import { generateSkeleton, generateSuites, writeSuites } from "../../generator/skeleton.ts";
+import { generateSkeleton, writeSuites } from "../../generator/skeleton.ts";
 import { getDb } from "../../../db/schema.ts";
 import { upsertEnvironment } from "../../../db/queries.ts";
 
@@ -12,7 +12,6 @@ export const generateTestsTool = tool({
     outputDir: z.string().optional().describe("Output directory (default: ./generated/)"),
     envName: z.string().optional().describe("Environment name for saving variables to DB"),
     authToken: z.string().optional().describe("Bearer auth token to save in environment"),
-    crud: z.boolean().optional().describe("Generate CRUD chain suites (POST→GET→DELETE) in addition to skeleton suites. Default: false"),
   }),
   execute: async (args) => {
     try {
@@ -21,9 +20,7 @@ export const generateTestsTool = tool({
       const endpoints = extractEndpoints(doc);
       const securitySchemes = extractSecuritySchemes(doc);
       const baseUrl = (doc as any).servers?.[0]?.url;
-      const suites = args.crud
-        ? generateSuites(endpoints, baseUrl, securitySchemes)
-        : generateSkeleton(endpoints, baseUrl, securitySchemes);
+      const suites = generateSkeleton(endpoints, baseUrl, securitySchemes);
       const { written, skipped } = await writeSuites(suites, outputDir);
 
       // Save environment to DB if envName or authToken provided

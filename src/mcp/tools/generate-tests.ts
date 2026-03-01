@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { basename } from "path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSkeleton, generateSuites, writeSuites, isRelativeUrl, sanitizeEnvName, resolveSpecPath } from "../../core/generator/index.ts";
+import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSkeleton, writeSuites, isRelativeUrl, sanitizeEnvName, resolveSpecPath } from "../../core/generator/index.ts";
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByTestPath, findCollectionBySpec, createCollection, normalizePath, upsertEnvironment } from "../../db/queries.ts";
 
@@ -13,9 +13,8 @@ export function registerGenerateTestsTool(server: McpServer, dbPath?: string) {
       outputDir: z.optional(z.string()).describe("Output directory (default: ./generated/)"),
       envName: z.optional(z.string()).describe("Environment name for saving variables to DB"),
       authToken: z.optional(z.string()).describe("Bearer auth token to save in environment"),
-      crud: z.optional(z.boolean()).describe("Generate CRUD chain suites (POST→GET→DELETE) in addition to skeleton suites. Default: false"),
     },
-  }, async ({ specPath, outputDir, envName, authToken, crud }) => {
+  }, async ({ specPath, outputDir, envName, authToken }) => {
     const output = outputDir ?? "./generated/";
     const doc = await readOpenApiSpec(specPath);
     const endpoints = extractEndpoints(doc);
@@ -29,9 +28,7 @@ export function registerGenerateTestsTool(server: McpServer, dbPath?: string) {
 
     const baseUrl = (doc as any).servers?.[0]?.url as string | undefined;
     const securitySchemes = extractSecuritySchemes(doc);
-    const suites = crud
-      ? generateSuites(endpoints, baseUrl, securitySchemes)
-      : generateSkeleton(endpoints, baseUrl, securitySchemes);
+    const suites = generateSkeleton(endpoints, baseUrl, securitySchemes);
     const { written, skipped } = await writeSuites(suites, output);
     const allFiles = [...written, ...skipped];
 

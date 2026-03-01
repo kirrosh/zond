@@ -1,5 +1,5 @@
 import { basename } from "path";
-import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSkeleton, generateSuites, writeSuites, isRelativeUrl, sanitizeEnvName, resolveSpecPath } from "../../core/generator/index.ts";
+import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSkeleton, writeSuites, isRelativeUrl, sanitizeEnvName, resolveSpecPath } from "../../core/generator/index.ts";
 import { scanCoveredEndpoints, filterUncoveredEndpoints } from "../../core/generator/coverage-scanner.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { getDb } from "../../db/schema.ts";
@@ -13,7 +13,6 @@ export interface GenerateCommandOptions {
   envName?: string;
   dbPath?: string;
   noWizard?: boolean;
-  crud?: boolean;
 }
 
 export async function generateCommand(options: GenerateCommandOptions): Promise<number> {
@@ -80,9 +79,7 @@ export async function generateCommand(options: GenerateCommandOptions): Promise<
       // Output dir doesn't exist yet — generate everything
     }
 
-    const suites = options.crud
-      ? generateSuites(endpoints, baseUrl, securitySchemes)
-      : generateSkeleton(endpoints, baseUrl, securitySchemes);
+    const suites = generateSkeleton(endpoints, baseUrl, securitySchemes);
     console.log(`Generated ${suites.length} test suite(s)`);
 
     const { written, skipped } = await writeSuites(suites, options.output);
