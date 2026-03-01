@@ -63,8 +63,7 @@ apitool/
 │   │   │   └── types.ts            # TestRunResult, StepResult
 │   │   ├── generator/
 │   │   │   ├── openapi-reader.ts   # Парсинг OpenAPI 3.x
-│   │   │   ├── skeleton.ts         # Уровень 1: один запрос на эндпоинт
-│   │   │   ├── crud.ts             # Уровень 2: CRUD-цепочки
+│   │   │   ├── serializer.ts       # RawSuite → YAML сериализация, sanitizeEnvName
 │   │   │   ├── coverage-scanner.ts # Сканер покрытия для инкрементальной генерации
 │   │   │   ├── data-factory.ts     # Генерация тестовых данных по схеме
 │   │   │   └── ai/                 # AI-генерация тестов (M10)
@@ -78,7 +77,7 @@ apitool/
 │   │       ├── context-manager.ts    # Автосжатие длинных диалогов
 │   │       ├── system-prompt.ts      # Системный промпт с примерами tools
 │   │       ├── types.ts              # AgentConfig, ToolEvent, AgentTurnResult
-│   │       └── tools/                # 8 tools как AI SDK tool()
+│   │       └── tools/                # 7 tools как AI SDK tool()
 │   │   └── reporter/
 │   │       ├── json.ts             # JSON-отчёт
 │   │       ├── junit.ts            # JUnit XML
@@ -92,6 +91,7 @@ apitool/
 │   │   ├── routes/
 │   │   │   ├── dashboard.ts        # GET / — главная с trend chart, коллекциями
 │   │   │   ├── collections.ts      # GET /collections/:id, POST/DELETE /api/collections
+│   │   │   ├── suites.ts          # GET /collections/:id/suites, detail — test file browser
 │   │   │   ├── ai-generate.ts     # POST /api/ai-generate, save, GET /api/ai-generation/:id
 │   │   │   ├── runs.ts             # GET /runs (с фильтрами), GET /runs/:id
 │   │   │   ├── environments.ts    # CRUD окружений: list, detail, create, update, delete
@@ -106,7 +106,6 @@ apitool/
 │   │   └── tools/
 │   │       ├── run-tests.ts        # run_tests — запуск тестов
 │   │       ├── validate-tests.ts   # validate_tests — валидация YAML
-│   │       ├── generate-tests.ts   # generate_tests — генерация из OpenAPI
 │   │       ├── list-collections.ts # list_collections — список коллекций
 │   │       ├── list-runs.ts        # list_runs — список прогонов
 │   │       ├── get-run-results.ts  # get_run_results — детали прогона
@@ -120,7 +119,6 @@ apitool/
 │       ├── index.ts                # Точка входа, роутинг команд
 │       ├── commands/
 │       │   ├── run.ts              # apitool run
-│       │   ├── generate.ts         # apitool generate
 │       │   ├── ai-generate.ts      # apitool ai-generate
 │       │   ├── collections.ts      # apitool collections
 │       │   ├── serve.ts            # apitool serve
@@ -296,46 +294,40 @@ config:
 
 ### M3: Generator (`src/core/generator/`)
 
-Читает OpenAPI 3.x, генерирует YAML-тесты. Уровни 1 (Skeleton) и 2 (CRUD) полностью реализованы. Уровень 3 (Markdown тест-кейсы) — запланирован, см. BACKLOG.
+Читает OpenAPI 3.x, генерирует YAML-тесты. Модель **tag-as-folder**: один файл на каждый endpoint, файлы группируются по тегам в поддиректории.
 
 `data-factory.ts` генерирует тестовые данные по схеме: строки → `{{$randomString}}`, числа → `{{$randomInt}}`, `additionalProperties` (Record-типы) → `{ key1: ..., key2: ... }`. Инкрементальная генерация: `scanCoveredEndpoints()` анализирует существующие YAML-файлы, `filterUncoveredEndpoints()` пропускает уже покрытые эндпоинты.
 
+`serializer.ts` — конвертирует `RawSuite` в YAML формат, содержит `sanitizeEnvName()`.
+
 **Вход:** OpenAPI 3.x YAML/JSON
-**Выход:** `.yaml` файлы тестов
+**Выход:** `.yaml` файлы тестов (tag/METHOD_path.yaml)
 
-#### Уровень 1 — Skeleton
+#### Структура генерации
 
-Один тест на каждый `path + method`. Генерирует тело запроса из `requestBody.content.application/json.schema`, ассерты из `responses`.
+Один файл на endpoint: `{tag}/{METHOD}_{path_segment}.yaml`. Генерирует тело запроса из `requestBody.content.application/json.schema`, ассерты из `responses`.
 
 Auth-aware генерация: при наличии security schemes автоматически добавляет:
-- **Bearer** — login-шаг с capture `auth_token` + suite-level `Authorization: Bearer {{auth_token}}`
-- **API Key** — suite-level header `X-API-Key: {{apikeyauth}}` (env-переменная из имени схемы)
+- **Bearer** — suite-level `Authorization: Bearer {{auth_token}}`
+- **API Key** — suite-level header из имени схемы (env-переменная)
 - **Basic** — suite-level header `Authorization: Basic {{basic_credentials}}`
 
 ```yaml
-# Сгенерировано из: POST /users
-name: "POST /users — 201"
-POST: /users
-json:
-  name: "{{$randomName}}"
-  email: "{{$randomEmail}}"
-expect:
-  status: 201
-  body:
-    id: { type: integer }
-    name: { type: string }
-    email: { type: string }
+# Сгенерировано из: POST /users → user/POST.yaml
+name: "Create user."
+base_url: "{{base_url}}"
+tests:
+  - name: "Create user."
+    POST: /users
+    json:
+      name: "{{$randomName}}"
+      email: "{{$randomEmail}}"
+    expect:
+      status: 201
+      body:
+        id: { type: integer }
+        name: { type: string }
 ```
-
-#### Уровень 2 — CRUD-цепочки
-
-Автоматическое распознавание паттернов:
-- `POST /resources` + `GET /resources/{id}` + `PUT /resources/{id}` + `DELETE /resources/{id}` → CRUD suite
-- Связывание через `capture` из POST → подстановка в GET/PUT/DELETE
-
-#### Уровень 3 — Текстовые тест-кейсы (Planned)
-
-Генерация Markdown тест-кейсов из OpenAPI (TC-001, TC-002...) с приоритетами. Документация для QA-команды, покрытие негативных сценариев. CLI-команда `apitool describe` — запланирована. Подробности в BACKLOG.
 
 ---
 
@@ -475,6 +467,8 @@ Hono-сервер рендерит HTML, интерактивность чере
 | `POST /environments` | Создать окружение (HTMX form-data) |
 | `PUT /environments/:id` | Обновить переменные окружения (HTMX form-data) |
 | `DELETE /environments/:id` | Удалить окружение (HTMX) |
+| `GET /collections/:id/suites` | Список YAML test files: имя suite, кол-во тестов, base URL, Run/View/Delete |
+| `GET /collections/:id/suites/detail?file=` | Детали suite: карточки метрик, таблица шагов с method badge, Run Suite |
 | `GET /explorer` | Дерево API из OpenAPI, параметры, описания, multi-auth panel |
 | `POST /collections` | Создать коллекцию из формы на дашборде (HTMX form-data) |
 | `DELETE /collections/:id` | Удалить коллекцию (HTMX, runs unlinked) |
@@ -514,7 +508,6 @@ Dashboard-метрики (SQL-запросы):
 | Команда | Описание | Основные флаги |
 |---------|----------|----------------|
 | `run <path>` | Запуск тестов (авто-привязка к коллекции) | `--env`, `--report json\|junit\|console`, `--timeout`, `--bail`, `--no-db`, `--db`, `--auth-token`, `--safe` |
-| `generate` | Генерация тестов из OpenAPI (авто-создание коллекции) | `--from <spec>`, `--output <dir>`, `--auth-token`, `--env-name`, `--no-wizard` |
 | `ai-generate` | AI-генерация тестов из OpenAPI | `--from <spec>`, `--prompt`, `--provider`, `--model`, `--api-key`, `--base-url`, `--output` |
 | `request <METHOD> <URL>` | Ad-hoc HTTP запрос с цветным выводом | `--header "K:V"` (multiple), `--body '{}'`, `--env`, `--timeout` |
 | `envs [list\|get\|set\|delete]` | Управление окружениями (CRUD) | `envs get <name>`, `envs set <name> K=V ...`, `envs delete <name>` |
@@ -579,7 +572,7 @@ OpenAPI spec + prompt
 
 **Запуск:** `apitool chat` (Ollama/qwen3:4b по умолчанию), `apitool chat --provider openai --api-key sk-...`
 
-**8 tools:** `run_tests`, `validate_tests`, `generate_tests`, `query_results`, `manage_environment`, `diagnose_failure`, `send_request`, `explore_api` — каждый как AI SDK `tool()` с Zod `inputSchema`.
+**7 tools:** `run_tests`, `validate_tests`, `query_results`, `manage_environment`, `diagnose_failure`, `send_request`, `explore_api` — каждый как AI SDK `tool()` с Zod `inputSchema`.
 
 **Особенности:**
 - Safe mode (`--safe`) — принудительно только GET-тесты
@@ -801,7 +794,6 @@ apitool mcp --db ./my.db # с кастомным путём к БД
 |------|----------|
 | `run_tests` | Запуск тестов из YAML-файла/директории, возврат summary |
 | `validate_tests` | Валидация YAML без запуска |
-| `generate_tests` | Генерация skeleton-тестов из OpenAPI спеки |
 | `list_collections` | Список коллекций с статистикой |
 | `list_runs` | Список последних прогонов |
 | `get_run_results` | Детальные результаты конкретного прогона |

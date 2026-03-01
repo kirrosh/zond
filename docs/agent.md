@@ -28,11 +28,11 @@
 │         │                                         │
 │         ▼                                         │
 │  ┌──────────────────────────────────────┐        │
-│  │           8 Agent Tools              │        │
+│  │           7 Agent Tools              │        │
 │  │  run_tests    validate_tests         │        │
-│  │  generate_tests  query_results       │        │
-│  │  manage_environment  diagnose_failure│        │
-│  │  send_request    explore_api         │        │
+│  │  query_results  manage_environment   │        │
+│  │  diagnose_failure  send_request      │        │
+│  │  explore_api                         │        │
 │  └──────────────────────────────────────┘        │
 └───────────────────────────────────────────────────┘
        │
@@ -89,7 +89,6 @@ apitool chat --safe
 |------|----------|--------------------|
 | `run_tests` | Запуск тестов | `testPath`, `envName?`, `safe?` |
 | `validate_tests` | Валидация YAML | `testPath` |
-| `generate_tests` | Генерация из OpenAPI | `specPath`, `outputDir?`, `envName?`, `authToken?` |
 | `query_results` | Запрос к БД | `action`: `list_runs` / `get_run` / `list_collections` |
 | `manage_environment` | Управление окружениями | `action`: `list` / `get` / `set` |
 | `diagnose_failure` | Анализ падений | `runId` |
@@ -119,7 +118,6 @@ src/core/agent/
     ├── index.ts          # buildAgentTools — фабрика с safe mode wrapping
     ├── run-tests.ts      # tool() — запуск тестов
     ├── validate-tests.ts # tool() — валидация YAML
-    ├── generate-tests.ts # tool() — генерация из OpenAPI
     ├── query-results.ts  # tool() — запросы к БД
     ├── manage-environment.ts # tool() — управление окружениями
     ├── diagnose-failure.ts   # tool() — анализ падений

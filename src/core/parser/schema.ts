@@ -29,23 +29,50 @@ function extractMethodAndPath(raw: unknown): unknown {
   return raw;
 }
 
-const AssertionRuleSchema: z.ZodType<AssertionRule> = z.object({
-  capture: z.string().optional(),
-  type: z.enum(["string", "integer", "number", "boolean", "array", "object"]).optional(),
-  equals: z.unknown().optional(),
-  contains: z.string().optional(),
-  matches: z.string().optional(),
-  gt: z.number().optional(),
-  lt: z.number().optional(),
-  exists: z.boolean().optional(),
-});
+const AssertionRuleSchema: z.ZodType<AssertionRule> = z.preprocess(
+  (val) => {
+    if (typeof val === "string") return { type: val };
+    if (val === null || val === undefined) return { exists: true };
+    if (typeof val === "object" && val !== null) {
+      const obj = val as Record<string, unknown>;
+      // Coerce exists: "true"/"false" → boolean
+      if (typeof obj.exists === "string") {
+        obj.exists = obj.exists === "true";
+      }
+      return obj;
+    }
+    return val;
+  },
+  z.object({
+    capture: z.string().optional(),
+    type: z.enum(["string", "integer", "number", "boolean", "array", "object"]).optional(),
+    equals: z.unknown().optional(),
+    contains: z.string().optional(),
+    matches: z.string().optional(),
+    gt: z.number().optional(),
+    lt: z.number().optional(),
+    exists: z.boolean().optional(),
+  }),
+) as z.ZodType<AssertionRule>;
 
-const TestStepExpectSchema: z.ZodType<TestStepExpect> = z.object({
-  status: z.number().int().optional(),
-  body: z.record(z.string(), AssertionRuleSchema).optional(),
-  headers: z.record(z.string(), z.string()).optional(),
-  duration: z.number().optional(),
-});
+const TestStepExpectSchema: z.ZodType<TestStepExpect> = z.preprocess(
+  (val) => {
+    if (typeof val !== "object" || val === null) return val;
+    const obj = val as Record<string, unknown>;
+    // body: null → remove it
+    if (obj.body === null) {
+      const { body: _, ...rest } = obj;
+      return rest;
+    }
+    return obj;
+  },
+  z.object({
+    status: z.number().int().optional(),
+    body: z.record(z.string(), AssertionRuleSchema).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    duration: z.number().optional(),
+  }),
+) as z.ZodType<TestStepExpect>;
 
 const TestStepSchema: z.ZodType<TestStep> = z.preprocess(
   extractMethodAndPath,

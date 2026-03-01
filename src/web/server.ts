@@ -7,6 +7,7 @@ import collections from "./routes/collections.ts";
 import aiGenerate from "./routes/ai-generate.ts";
 import environments from "./routes/environments.ts";
 import { createExplorerRoute, createCollectionExplorerRoute, loadExplorerDepsForSpec, type ExplorerDeps } from "./routes/explorer.ts";
+import { createCollectionSuitesRoute } from "./routes/suites.ts";
 import styleCssPath from "./static/style.css" with { type: "file" };
 import htmxJsPath from "./static/htmx.min.js" with { type: "file" };
 
@@ -80,6 +81,7 @@ export function createApp(explorerDeps: ExplorerDeps, options?: { dev?: boolean 
   app.route("/", environments);
   app.route("/", createExplorerRoute(explorerDeps));
   app.route("/", createCollectionExplorerRoute());
+  app.route("/", createCollectionSuitesRoute());
 
   // OpenAPI spec endpoint — derive server URL from the incoming request
   app.doc("/api/openapi.json", (c) => ({

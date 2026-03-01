@@ -6,7 +6,7 @@
 
 **Исправление:** `writeSuites` теперь возвращает `{ written: string[], skipped: string[] }`. MCP и CLI используют оба списка для полного отчёта.
 
-**Файлы:** `src/core/generator/skeleton.ts`, `src/mcp/tools/generate-tests.ts`, `src/cli/commands/generate.ts`
+**Файлы:** `src/core/generator/serializer.ts` (ранее skeleton.ts)
 
 ---
 

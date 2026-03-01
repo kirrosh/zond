@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { layout, escapeHtml } from "../views/layout.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../core/generator/types.ts";
+import type { CoveredEndpoint } from "../../core/generator/coverage-scanner.ts";
 
 export interface ServerInfo {
   url: string;
@@ -44,7 +45,7 @@ export async function loadExplorerDepsForSpec(specPath: string): Promise<Explore
   if (allRelative) {
     try {
       const { getEnvironment } = await import("../../db/queries.ts");
-      const { sanitizeEnvName } = await import("../../core/generator/skeleton.ts");
+      const { sanitizeEnvName } = await import("../../core/generator/serializer.ts");
       const specTitle = (doc as any).info?.title;
       const envName = specTitle ? sanitizeEnvName(specTitle) : null;
       const env = envName ? getEnvironment(envName) : null;
@@ -370,7 +371,95 @@ function authorizePanel(deps: ExplorerDeps): string {
     ${authScript(deps)}`;
 }
 
-function renderExplorerContent(deps: ExplorerDeps, options?: { breadcrumb?: string }): string {
+interface ExplorerRenderOptions {
+  breadcrumb?: string;
+  coveredMap?: Map<string, CoveredEndpoint[]>;
+  collectionId?: number;
+  specPath?: string;
+  aiSettingsLabel?: string;
+}
+
+function normalizeEndpointKey(method: string, path: string): string {
+  return `${method} ${path.replace(/\{[^}]+\}/g, "{*}").replace(/\{\{[^}]+\}\}/g, "{*}").replace(/\/+$/, "")}`;
+}
+
+function renderAISettingsPanel(aiSettingsLabel: string): string {
+  return `
+    <details class="authorize-panel" style="margin-top:0.75rem;">
+      <summary>AI Provider <span class="ai-settings-saved">${aiSettingsLabel ? escapeHtml(aiSettingsLabel) : "Not configured"}</span></summary>
+      <form hx-post="/api/settings/ai" hx-target="#ai-settings-status" hx-swap="innerHTML"
+        style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-top:0.5rem;">
+        <div>
+          <label style="font-size:0.8rem;font-weight:600;color:var(--text-dim);display:block;">Provider</label>
+          <select name="provider" style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);">
+            <option value="ollama">Ollama (local)</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="custom">Custom (OpenAI-compatible)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.8rem;font-weight:600;color:var(--text-dim);display:block;">Model</label>
+          <input type="text" name="model" placeholder="qwen3:4b"
+            style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:monospace;">
+        </div>
+        <div>
+          <label style="font-size:0.8rem;font-weight:600;color:var(--text-dim);display:block;">URL</label>
+          <input type="text" name="base_url" placeholder="http://localhost:11434/v1"
+            style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:monospace;">
+        </div>
+        <div>
+          <label style="font-size:0.8rem;font-weight:600;color:var(--text-dim);display:block;">API Key</label>
+          <input type="password" name="api_key" placeholder="sk-..."
+            style="width:100%;padding:0.35rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-family:monospace;">
+        </div>
+        <div style="grid-column:1/-1;display:flex;align-items:center;gap:0.5rem;">
+          <button type="submit" class="btn btn-sm">Save</button>
+          <span id="ai-settings-status"></span>
+        </div>
+      </form>
+    </details>`;
+}
+
+function renderEndpointSuites(files: CoveredEndpoint[]): string {
+  if (files.length === 0) return "";
+  const seen = new Set<string>();
+  const links: string[] = [];
+  for (const f of files) {
+    if (seen.has(f.file)) continue;
+    seen.add(f.file);
+    const shortPath = f.file.replace(/^.*[/\\]/, "");
+    links.push(`<span class="endpoint-suite-file"><code>${escapeHtml(shortPath)}</code></span>`);
+  }
+  return `<div class="endpoint-suites">${links.join(" ")}</div>`;
+}
+
+function renderGenerateButton(endpoint: EndpointInfo, idx: number, collectionId?: number, specPath?: string): string {
+  if (!collectionId || !specPath) return "";
+  const vals = JSON.stringify({
+    method: endpoint.method,
+    path: endpoint.path,
+    collection_id: String(collectionId),
+    spec_path: specPath,
+  });
+  return `
+    <div class="endpoint-ai-generate" style="margin-top:0.75rem;">
+      <div style="display:flex;align-items:center;gap:0.5rem;">
+        <button class="btn btn-sm"
+          hx-post="/api/ai-generate-endpoint"
+          hx-vals='${escapeHtml(vals)}'
+          hx-target="#endpoint-ai-result-${idx}"
+          hx-indicator="#endpoint-ai-spinner-${idx}"
+          hx-disabled-elt="this">
+          Generate Test
+        </button>
+        <span class="htmx-indicator" id="endpoint-ai-spinner-${idx}" style="color:var(--text-dim);">Generating...</span>
+      </div>
+      <div id="endpoint-ai-result-${idx}" style="margin-top:0.5rem;"></div>
+    </div>`;
+}
+
+function renderExplorerContent(deps: ExplorerDeps, options?: ExplorerRenderOptions): string {
   if (!deps.specPath || deps.endpoints.length === 0) {
     return `
       ${options?.breadcrumb ?? ""}
@@ -379,6 +468,8 @@ function renderExplorerContent(deps: ExplorerDeps, options?: { breadcrumb?: stri
         <p>No OpenAPI spec loaded. Start the server with <code>--openapi &lt;spec&gt;</code> to browse endpoints.</p>
       </div>`;
   }
+
+  const coveredMap = options?.coveredMap;
 
   // Group by tags
   const groups = new Map<string, { endpoint: EndpointInfo; idx: number }[]>();
@@ -394,17 +485,33 @@ function renderExplorerContent(deps: ExplorerDeps, options?: { breadcrumb?: stri
     const endpointsHtml = items
       .map(({ endpoint, idx }) => {
         const detailId = `endpoint-detail-${idx}`;
+        const key = normalizeEndpointKey(endpoint.method, endpoint.path);
+
+        // Coverage badge & related suites
+        let coverageBadge = "";
+        let suitesHtml = "";
+        if (coveredMap) {
+          const files = coveredMap.get(key) ?? [];
+          coverageBadge = files.length > 0
+            ? `<span class="badge-coverage badge-covered">tested</span>`
+            : `<span class="badge-coverage badge-uncovered">no tests</span>`;
+          suitesHtml = renderEndpointSuites(files);
+        }
+
         return `
           <div class="endpoint-item" onclick="var d=document.getElementById('${detailId}');d.style.display=d.style.display==='none'?'block':'none'">
             ${methodBadge(endpoint.method)}
             <span class="endpoint-path">${escapeHtml(endpoint.path)}</span>
+            ${coverageBadge}
             <span class="endpoint-summary">${endpoint.summary ? escapeHtml(endpoint.summary) : ""}</span>
           </div>
+          ${suitesHtml}
           <div class="detail-panel" id="${detailId}" style="display:none">
             ${parameterRows(endpoint)}
             ${requestBodySection(endpoint)}
             ${responsesSection(endpoint)}
             ${tryItForm(endpoint, idx, deps.servers)}
+            ${renderGenerateButton(endpoint, idx, options?.collectionId, options?.specPath)}
           </div>`;
       })
       .join("");
@@ -416,11 +523,15 @@ function renderExplorerContent(deps: ExplorerDeps, options?: { breadcrumb?: stri
       </div>`;
   }
 
+  // AI settings panel (only for collection explorer)
+  const aiPanel = options?.collectionId ? renderAISettingsPanel(options?.aiSettingsLabel ?? "") : "";
+
   return `
     ${options?.breadcrumb ?? ""}
     <h1>API Explorer</h1>
     <p>Spec: <code>${escapeHtml(deps.specPath)}</code> — ${deps.endpoints.length} endpoints</p>
     ${authorizePanel(deps)}
+    ${aiPanel}
     ${groupsHtml}`;
 }
 
@@ -464,7 +575,41 @@ export function createCollectionExplorerRoute() {
     try {
       const deps = await loadExplorerDepsForSpec(collection.openapi_spec);
       const breadcrumb = `<a href="/collections/${id}" style="color:var(--text-dim);text-decoration:none;font-size:0.9rem;">&larr; Back to ${escapeHtml(collection.name)}</a>`;
-      const content = renderExplorerContent(deps, { breadcrumb });
+
+      // Build coverage map from test files (method+path → files[])
+      let coveredMap: Map<string, CoveredEndpoint[]> | undefined;
+      if (collection.test_path) {
+        try {
+          const { scanCoveredEndpoints } = await import("../../core/generator/coverage-scanner.ts");
+          const covered = await scanCoveredEndpoints(collection.test_path);
+          coveredMap = new Map();
+          for (const ep of covered) {
+            const key = normalizeEndpointKey(ep.method, ep.path);
+            const list = coveredMap.get(key) ?? [];
+            if (!list.some(e => e.file === ep.file)) {
+              list.push(ep);
+            }
+            coveredMap.set(key, list);
+          }
+        } catch { /* coverage scan not critical */ }
+      }
+
+      // Load AI settings label
+      let aiSettingsLabel = "";
+      try {
+        const { getAISettings } = await import("../../db/queries.ts");
+        const ai = getAISettings();
+        if (ai.provider && ai.model) aiSettingsLabel = `${ai.provider} / ${ai.model}`;
+        else if (ai.provider) aiSettingsLabel = ai.provider;
+      } catch { /* not critical */ }
+
+      const content = renderExplorerContent(deps, {
+        breadcrumb,
+        coveredMap,
+        collectionId: id,
+        specPath: collection.openapi_spec,
+        aiSettingsLabel,
+      });
       if (isHtmx) return c.html(content);
       return c.html(layout(`${collection.name} — Explorer`, content));
     } catch (err) {
