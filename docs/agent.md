@@ -90,7 +90,7 @@ apitool chat --safe
 | `run_tests` | Запуск тестов | `testPath`, `envName?`, `safe?` |
 | `validate_tests` | Валидация YAML | `testPath` |
 | `query_results` | Запрос к БД | `action`: `list_runs` / `get_run` / `list_collections` |
-| `manage_environment` | Управление окружениями | `action`: `list` / `get` / `set` |
+| `manage_environment` | Управление окружениями | `action`: `list` / `get` / `set`, `collectionName?` |
 | `diagnose_failure` | Анализ падений | `runId` |
 | `send_request` | Ad-hoc HTTP запрос | `method`, `url`, `headers?`, `body?`, `timeout?`, `envName?` |
 | `explore_api` | Просмотр OpenAPI спеки | `specPath`, `tag?` |

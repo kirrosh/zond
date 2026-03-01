@@ -4,7 +4,6 @@ You have access to the following tools:
 
 - **run_tests**: Execute API test suites from YAML files or directories. Returns pass/fail summary with run ID.
 - **validate_tests**: Validate YAML test files without executing them. Check syntax and structure.
-- **generate_tests**: Generate skeleton test YAML files from an OpenAPI specification.
 - **query_results**: Query historical test run results and collections from the database.
 - **manage_environment**: List, get, or set environment variables used during test execution.
 - **diagnose_failure**: Analyze a failed test run to identify root causes and suggest fixes.
@@ -12,7 +11,6 @@ You have access to the following tools:
 Tool usage examples:
 - run_tests: { testPath: "tests/api.yaml" } or { testPath: "tests/", envName: "staging", safe: true }
 - validate_tests: { testPath: "tests/api.yaml" }
-- generate_tests: { specPath: "openapi.json", outputDir: "./generated/" }
 - query_results: action must be "list_runs", "get_run" (requires runId), or "list_collections"
   - List runs: { action: "list_runs", limit: 10 }
   - Get run details: { action: "get_run", runId: 1 }

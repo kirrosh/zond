@@ -10,6 +10,8 @@ import {
   findAIGenerationByYaml,
   updateAIGenerationOutputPath,
   getAIGeneration,
+  getAISettings,
+  setAISettings,
 } from "../../db/queries.ts";
 
 const aiGenerate = new Hono();
@@ -239,6 +241,148 @@ aiGenerate.get("/api/ai-generation/:id", (c) => {
       </td>
     </tr>
   `));
+});
+
+// GET /api/settings/ai — get AI provider settings
+aiGenerate.get("/api/settings/ai", (c) => {
+  const settings = getAISettings();
+  return c.json(settings);
+});
+
+// POST /api/settings/ai — save AI provider settings
+aiGenerate.post("/api/settings/ai", async (c) => {
+  const contentType = c.req.header("content-type") ?? "";
+  let provider: string, model: string, base_url: string, api_key: string;
+
+  if (contentType.includes("application/json")) {
+    const json = await c.req.json();
+    provider = json.provider ?? "";
+    model = json.model ?? "";
+    base_url = json.base_url ?? "";
+    api_key = json.api_key ?? "";
+  } else {
+    const body = await c.req.parseBody();
+    provider = (body["provider"] as string ?? "").trim();
+    model = (body["model"] as string ?? "").trim();
+    base_url = (body["base_url"] as string ?? "").trim();
+    api_key = (body["api_key"] as string ?? "").trim();
+  }
+
+  setAISettings({ provider, model, base_url, api_key });
+
+  const isHtmx = c.req.header("HX-Request") === "true";
+  if (isHtmx) {
+    const label = model ? `${provider} / ${model}` : provider;
+    return c.html(fragment(`<span class="ai-settings-saved">Saved: ${escapeHtml(label)}</span>`));
+  }
+  return c.json({ ok: true });
+});
+
+// POST /api/ai-generate-endpoint — generate test for a single endpoint
+aiGenerate.post("/api/ai-generate-endpoint", async (c) => {
+  const body = await c.req.parseBody();
+  const method = (body["method"] as string ?? "").trim();
+  const path = (body["path"] as string ?? "").trim();
+  const specPath = (body["spec_path"] as string ?? "").trim();
+  const collectionIdStr = body["collection_id"] as string ?? "";
+  const prompt = (body["prompt"] as string ?? "").trim();
+  const collectionId = collectionIdStr ? parseInt(collectionIdStr, 10) : undefined;
+
+  if (!method || !path || !specPath) {
+    return c.html(fragment(`<div class="ai-error">Missing method, path, or spec_path.</div>`));
+  }
+
+  // Load AI settings from DB
+  const aiSettings = getAISettings();
+  if (!aiSettings.provider) {
+    return c.html(fragment(`<div class="ai-error">AI provider not configured. Set up AI settings in the panel above.</div>`));
+  }
+
+  const provider = resolveProviderConfig({
+    provider: aiSettings.provider as AIProviderConfig["provider"],
+    model: aiSettings.model || undefined,
+    baseUrl: aiSettings.base_url || undefined,
+    apiKey: aiSettings.api_key || undefined,
+  });
+
+  // Build a focused prompt for this single endpoint
+  const endpointPrompt = prompt
+    ? `Generate tests for ${method} ${path}: ${prompt}`
+    : `Generate comprehensive tests for the ${method} ${path} endpoint. Include happy path, error cases, and edge cases.`;
+
+  const startTime = Date.now();
+
+  try {
+    const result = await generateWithAI({
+      specPath,
+      prompt: endpointPrompt,
+      provider,
+      collectionId,
+      filterEndpoint: { method, path },
+    });
+
+    const durationMs = Date.now() - startTime;
+
+    // Save to DB
+    if (collectionId) {
+      saveAIGeneration({
+        collection_id: collectionId,
+        prompt: endpointPrompt,
+        model: result.model,
+        provider: aiSettings.provider,
+        generated_yaml: result.yaml,
+        status: "success",
+        prompt_tokens: result.promptTokens,
+        completion_tokens: result.completionTokens,
+        duration_ms: durationMs,
+      });
+    }
+
+    return c.html(fragment(`
+      <div class="ai-result">
+        <div class="ai-result-header">
+          <span class="badge badge-pass">Generated</span>
+          <span style="color:var(--text-dim);font-size:0.85rem;">
+            ${escapeHtml(result.model)} &middot; ${(durationMs / 1000).toFixed(1)}s
+            ${result.promptTokens ? ` &middot; ${result.promptTokens}+${result.completionTokens} tokens` : ""}
+          </span>
+        </div>
+        <div class="ai-yaml-preview">
+          <pre><code>${escapeHtml(result.yaml)}</code></pre>
+        </div>
+        <div style="display:flex;gap:0.5rem;margin-top:0.75rem;">
+          <form hx-post="/api/ai-generate/save" hx-target="closest .ai-result" hx-swap="outerHTML">
+            <input type="hidden" name="yaml" value="${escapeHtml(result.yaml)}">
+            <input type="hidden" name="collection_id" value="${collectionId ?? ""}">
+            <input type="hidden" name="spec_path" value="${escapeHtml(specPath)}">
+            <button type="submit" class="btn btn-sm btn-run">Save to Collection</button>
+          </form>
+          <button type="button" class="btn btn-sm btn-outline" onclick="this.closest('.ai-result').remove()">Discard</button>
+        </div>
+      </div>
+    `));
+  } catch (err) {
+    const durationMs = Date.now() - startTime;
+    const errorMsg = err instanceof Error ? err.message : String(err);
+
+    if (collectionId) {
+      saveAIGeneration({
+        collection_id: collectionId,
+        prompt: endpointPrompt,
+        model: provider.model,
+        provider: aiSettings.provider,
+        status: "error",
+        error_message: errorMsg,
+        duration_ms: durationMs,
+      });
+    }
+
+    return c.html(fragment(`
+      <div class="ai-error">
+        <strong>Generation failed:</strong> ${escapeHtml(errorMsg)}
+      </div>
+    `));
+  }
 });
 
 export default aiGenerate;

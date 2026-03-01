@@ -2,7 +2,6 @@
 
 import { runCommand } from "./commands/run.ts";
 import { validateCommand } from "./commands/validate.ts";
-import { generateCommand } from "./commands/generate.ts";
 import { serveCommand } from "./commands/serve.ts";
 import { collectionsCommand } from "./commands/collections.ts";
 import { aiGenerateCommand } from "./commands/ai-generate.ts";
@@ -15,8 +14,11 @@ import { envsCommand } from "./commands/envs.ts";
 import { runsCommand } from "./commands/runs.ts";
 import { coverageCommand } from "./commands/coverage.ts";
 import { doctorCommand } from "./commands/doctor.ts";
+import { addApiCommand } from "./commands/add-api.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
+import { getDb } from "../db/schema.ts";
+import { findCollectionByNameOrId } from "../db/queries.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
 
 export const VERSION = "0.3.0";
@@ -72,9 +74,9 @@ function printUsage(): void {
   console.log(`apitool - API Testing Platform
 
 Usage:
+  apitool add-api <name>   Register a new API (collection)
   apitool run <path>       Run API tests
   apitool validate <path>  Validate test files without running
-  apitool generate --from <spec>  Generate skeleton tests from OpenAPI spec
   apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
   apitool request <METHOD> <URL>  Send an ad-hoc HTTP request
   apitool envs [list|get|set|delete]  Manage environments
@@ -87,6 +89,11 @@ Usage:
   apitool chat             Start interactive AI chat for API testing
   apitool doctor           Run diagnostic checks
   apitool update           Update to latest version
+
+Options for 'add-api':
+  --spec <path-or-url>   OpenAPI spec (extracts base_url from servers[0])
+  --dir <directory>      Base directory (default: ./apis/<name>/)
+  --env key=value        Set environment variables (repeatable)
 
 Options for 'chat':
   --provider <name>    LLM provider: ollama, openai, anthropic, custom (default: ollama)
@@ -108,6 +115,7 @@ Options for 'envs':
   envs delete <name>   Delete an environment
   envs import <name> <file>  Import environment from YAML file
   envs export <name>   Export environment as YAML to stdout
+  --api <name>         Scope operation to a specific API collection
 
 Options for 'runs':
   runs                 List recent test runs
@@ -115,10 +123,12 @@ Options for 'runs':
   --limit <n>          Number of runs to show (default: 20)
 
 Options for 'coverage':
-  --spec <path>        Path to OpenAPI spec (required)
-  --tests <dir>        Path to test files directory (required)
+  --api <name>         Use API collection (auto-resolves spec and tests dir)
+  --spec <path>        Path to OpenAPI spec (required unless --api used)
+  --tests <dir>        Path to test files directory (required unless --api used)
 
 Options for 'run':
+  --api <name>         Use API collection (resolves test path automatically)
   --env <name>         Use environment file (.env.<name>.yaml)
   --report <format>    Output format: console, json, junit (default: console)
   --timeout <ms>       Override request timeout
@@ -128,16 +138,9 @@ Options for 'run':
   --auth-token <token> Auth token injected as {{auth_token}} variable
   --safe               Run only GET tests (read-only, safe mode)
 
-Options for 'generate':
-  --from <spec>        Path to OpenAPI spec (required)
-  --output <dir>       Output directory (default: ./generated/)
-  --auth-token <token> Bearer auth token to save in environment
-  --env-name <name>    Environment name (default: derived from spec title)
-  --db <path>          Path to SQLite database file
-  --no-wizard          Skip interactive prompts
-
 Options for 'ai-generate':
-  --from <spec>        Path to OpenAPI spec (required)
+  --api <name>         Use API collection (auto-resolves spec and output dir)
+  --from <spec>        Path to OpenAPI spec (required unless --api used)
   --prompt <text>      Test scenario description (required)
   --provider <name>    LLM provider: ollama, openai, anthropic, custom (default: ollama)
   --model <name>       Model name (default: provider-specific)
@@ -180,10 +183,50 @@ async function main(): Promise<number> {
   }
 
   switch (command) {
+    case "add-api": {
+      const name = positional[0];
+      if (!name) {
+        printError("Missing name argument. Usage: apitool add-api <name> [--spec <path>] [--dir <dir>]");
+        return 2;
+      }
+
+      // Collect all --env flags (parseArgs only stores last one, so re-parse)
+      const envValues: string[] = [];
+      const rawArgs = process.argv.slice(2);
+      for (let i = 0; i < rawArgs.length; i++) {
+        if (rawArgs[i] === "--env" && rawArgs[i + 1] && rawArgs[i + 1]!.includes("=")) {
+          envValues.push(rawArgs[i + 1]!);
+          i++;
+        } else if (rawArgs[i]?.startsWith("--env=") && rawArgs[i]!.slice(6).includes("=")) {
+          envValues.push(rawArgs[i]!.slice(6));
+        }
+      }
+
+      return addApiCommand({
+        name,
+        spec: typeof flags["spec"] === "string" ? flags["spec"] : undefined,
+        dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
+        envPairs: envValues.length > 0 ? envValues : undefined,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+      });
+    }
+
     case "run": {
-      const path = positional[0];
+      let path = positional[0];
+      const apiFlag = typeof flags["api"] === "string" ? flags["api"] : undefined;
+      if (!path && apiFlag) {
+        try {
+          getDb(typeof flags["db"] === "string" ? flags["db"] : undefined);
+          const col = findCollectionByNameOrId(apiFlag);
+          if (!col) { printError(`API '${apiFlag}' not found`); return 1; }
+          path = col.test_path;
+        } catch (err) {
+          printError(`Failed to resolve --api: ${(err as Error).message}`);
+          return 2;
+        }
+      }
       if (!path) {
-        printError("Missing path argument. Usage: apitool run <path>");
+        printError("Missing path argument. Usage: apitool run <path> or apitool run --api <name>");
         return 2;
       }
 
@@ -226,25 +269,25 @@ async function main(): Promise<number> {
       return validateCommand({ path });
     }
 
-    case "generate": {
-      const from = flags["from"];
-      if (typeof from !== "string") {
-        printError("Missing --from <spec> argument. Usage: apitool generate --from <spec>");
-        return 2;
-      }
-      const output = typeof flags["output"] === "string" ? flags["output"] : "./generated/";
-      return generateCommand({
-        from,
-        output,
-        authToken: typeof flags["auth-token"] === "string" ? flags["auth-token"] : undefined,
-        envName: typeof flags["env-name"] === "string" ? flags["env-name"] : undefined,
-        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
-        noWizard: flags["no-wizard"] === true,
-      });
-    }
-
     case "ai-generate": {
-      const from = flags["from"];
+      let from = flags["from"] as string | undefined;
+      let output = typeof flags["output"] === "string" ? flags["output"] : undefined;
+      const aiGenApiFlag = typeof flags["api"] === "string" ? flags["api"] : undefined;
+
+      // Resolve --api to spec and output dir from collection
+      if (aiGenApiFlag) {
+        try {
+          getDb(typeof flags["db"] === "string" ? flags["db"] : undefined);
+          const col = findCollectionByNameOrId(aiGenApiFlag);
+          if (!col) { printError(`API '${aiGenApiFlag}' not found`); return 1; }
+          if (!from && col.openapi_spec) from = col.openapi_spec;
+          if (!output && col.test_path) output = col.test_path;
+        } catch (err) {
+          printError(`Failed to resolve --api: ${(err as Error).message}`);
+          return 2;
+        }
+      }
+
       if (typeof from !== "string") {
         printError("Missing --from <spec>. Usage: apitool ai-generate --from <spec> --prompt \"...\"");
         return 2;
@@ -261,7 +304,7 @@ async function main(): Promise<number> {
         model: typeof flags["model"] === "string" ? flags["model"] : undefined,
         apiKey: typeof flags["api-key"] === "string" ? flags["api-key"] : undefined,
         baseUrl: typeof flags["base-url"] === "string" ? flags["base-url"] : undefined,
-        output: typeof flags["output"] === "string" ? flags["output"] : undefined,
+        output,
       });
     }
 
@@ -370,6 +413,7 @@ async function main(): Promise<number> {
         name,
         pairs,
         file,
+        api: typeof flags["api"] === "string" ? flags["api"] : undefined,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
       });
     }
@@ -409,12 +453,27 @@ async function main(): Promise<number> {
     }
 
     case "coverage": {
-      const spec = flags["spec"];
+      let spec = flags["spec"] as string | undefined;
+      let tests = flags["tests"] as string | undefined;
+      const coverageApiFlag = typeof flags["api"] === "string" ? flags["api"] : undefined;
+
+      if (coverageApiFlag) {
+        try {
+          getDb(typeof flags["db"] === "string" ? flags["db"] : undefined);
+          const col = findCollectionByNameOrId(coverageApiFlag);
+          if (!col) { printError(`API '${coverageApiFlag}' not found`); return 1; }
+          if (!spec && col.openapi_spec) spec = col.openapi_spec;
+          if (!tests && col.test_path) tests = col.test_path;
+        } catch (err) {
+          printError(`Failed to resolve --api: ${(err as Error).message}`);
+          return 2;
+        }
+      }
+
       if (typeof spec !== "string") {
         printError("Missing --spec <path>. Usage: apitool coverage --spec <path> --tests <dir>");
         return 2;
       }
-      const tests = flags["tests"];
       if (typeof tests !== "string") {
         printError("Missing --tests <dir>. Usage: apitool coverage --spec <path> --tests <dir>");
         return 2;

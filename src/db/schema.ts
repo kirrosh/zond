@@ -42,7 +42,7 @@ export function closeDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 5;
 
 const SCHEMA_V1 = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -146,6 +146,33 @@ const SCHEMA_V3 = `
   CREATE INDEX IF NOT EXISTS idx_chat_sessions_active  ON chat_sessions(last_active DESC);
 `;
 
+const SCHEMA_V4 = `
+  CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+`;
+
+const SCHEMA_V5 = `
+  ALTER TABLE collections ADD COLUMN base_dir TEXT;
+
+  CREATE TABLE environments_new (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    collection_id INTEGER REFERENCES collections(id) ON DELETE CASCADE,
+    variables     TEXT NOT NULL
+  );
+
+  INSERT INTO environments_new (id, name, collection_id, variables)
+    SELECT id, name, NULL, variables FROM environments;
+
+  DROP TABLE environments;
+  ALTER TABLE environments_new RENAME TO environments;
+
+  CREATE UNIQUE INDEX idx_env_name_collection ON environments(name, collection_id);
+  CREATE UNIQUE INDEX idx_env_name_global ON environments(name) WHERE collection_id IS NULL;
+`;
+
 function runMigrations(db: Database): void {
   const currentVersion = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 
@@ -160,6 +187,21 @@ function runMigrations(db: Database): void {
     }
     if (currentVersion < 3) {
       db.exec(SCHEMA_V3);
+    }
+    if (currentVersion < 4) {
+      db.exec(SCHEMA_V4);
+    }
+    if (currentVersion < 5) {
+      db.exec(SCHEMA_V5);
+      // Backfill base_dir from dirname(test_path) for existing collections
+      const rows = db.query("SELECT id, test_path FROM collections WHERE base_dir IS NULL").all() as { id: number; test_path: string }[];
+      const updateStmt = db.prepare("UPDATE collections SET base_dir = ? WHERE id = ?");
+      for (const row of rows) {
+        // test_path uses forward slashes (normalizePath); get parent dir
+        const lastSlash = row.test_path.lastIndexOf("/");
+        const baseDir = lastSlash > 0 ? row.test_path.slice(0, lastSlash) : row.test_path;
+        updateStmt.run(baseDir, row.id);
+      }
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

@@ -49,11 +49,17 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
-  // 2. Load environment
+  // 2. Load environment (resolve collection for scoped envs)
   const searchDir = dirname(options.path);
+  let collectionForEnv: { id: number } | null = null;
+  try {
+    getDb(options.dbPath);
+    collectionForEnv = findCollectionByTestPath(options.path);
+  } catch { /* DB not available — OK */ }
+
   let env: Record<string, string> = {};
   try {
-    env = await loadEnvironment(options.env, searchDir);
+    env = await loadEnvironment(options.env, searchDir, collectionForEnv?.id);
   } catch (err) {
     printError(`Failed to load environment: ${(err as Error).message}`);
     return 2;

@@ -13,6 +13,8 @@ export interface AIGenerateOptions {
   provider: AIProviderConfig;
   baseUrl?: string;
   collectionId?: number;
+  /** Filter to a single endpoint by method+path */
+  filterEndpoint?: { method: string; path: string };
 }
 
 export interface AIGenerateResult {
@@ -26,7 +28,7 @@ export interface AIGenerateResult {
 export const PROVIDER_DEFAULTS: Record<string, Partial<AIProviderConfig>> = {
   ollama: {
     baseUrl: "http://localhost:11434/v1",
-    model: "qwen3:4b",
+    model: "llama3.2:3b",
   },
   openai: {
     baseUrl: "https://api.openai.com/v1",
@@ -40,12 +42,15 @@ export const PROVIDER_DEFAULTS: Record<string, Partial<AIProviderConfig>> = {
 
 export function resolveProviderConfig(partial: Partial<AIProviderConfig> & { provider: AIProviderConfig["provider"] }): AIProviderConfig {
   const defaults = PROVIDER_DEFAULTS[partial.provider] ?? {};
+  // Thinking models (e.g. qwen3) use reasoning tokens that count toward max_tokens,
+  // so local models need a higher budget than cloud APIs
+  const defaultMaxTokens = partial.provider === "ollama" || partial.provider === "custom" ? 8192 : 4096;
   return {
     provider: partial.provider,
     baseUrl: partial.baseUrl ?? defaults.baseUrl ?? "",
     apiKey: partial.apiKey,
     model: partial.model ?? defaults.model ?? "",
     temperature: partial.temperature ?? 0.2,
-    maxTokens: partial.maxTokens ?? 4096,
+    maxTokens: partial.maxTokens ?? defaultMaxTokens,
   };
 }

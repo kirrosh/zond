@@ -9,11 +9,23 @@ export async function generateWithAI(options: AIGenerateOptions): Promise<AIGene
   const doc = await readOpenApiSpec(options.specPath);
 
   // 2. Extract endpoints + security schemes
-  const endpoints = extractEndpoints(doc);
+  let endpoints = extractEndpoints(doc);
   if (endpoints.length === 0) {
     throw new Error("No endpoints found in the OpenAPI spec");
   }
   const securitySchemes = extractSecuritySchemes(doc);
+
+  // Filter to single endpoint if requested
+  if (options.filterEndpoint) {
+    const { method, path } = options.filterEndpoint;
+    const filtered = endpoints.filter(
+      (ep) => ep.method === method.toUpperCase() && ep.path === path,
+    );
+    if (filtered.length === 0) {
+      throw new Error(`Endpoint ${method} ${path} not found in spec`);
+    }
+    endpoints = filtered;
+  }
 
   // Determine base URL: explicit option, or from spec servers[0]
   const baseUrl = options.baseUrl ?? (doc as any).servers?.[0]?.url as string | undefined;

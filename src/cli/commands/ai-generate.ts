@@ -64,7 +64,7 @@ export async function aiGenerateCommand(options: AIGenerateCommandOptions): Prom
       const { getDb } = await import("../../db/schema.ts");
       getDb();
       const { findCollectionByTestPath, findCollectionBySpec, createCollection, normalizePath, saveAIGeneration } = await import("../../db/queries.ts");
-      const { resolveSpecPath } = await import("../../core/generator/index.ts");
+      const { resolveSpecPath } = await import("../../core/generator/serializer.ts");
       const normalizedOutput = normalizePath(outputDir);
       const resolvedSpec = resolveSpecPath(options.from);
 

@@ -105,32 +105,37 @@ export function extractVariableReferences(step: TestStep): string[] {
   return [...refs];
 }
 
-export async function loadEnvironment(envName?: string, searchDir: string = "."): Promise<Record<string, string>> {
+export async function loadEnvironment(envName?: string, searchDir: string = ".", collectionId?: number): Promise<Record<string, string>> {
   const fileName = envName ? `.env.${envName}.yaml` : ".env.yaml";
   const filePath = `${searchDir}/${fileName}`;
+  let fileVars: Record<string, string> | null = null;
+
   try {
     const text = await Bun.file(filePath).text();
     const parsed = Bun.YAML.parse(text);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       throw new Error(`Environment file ${filePath} must contain a YAML object`);
     }
-    const env: Record<string, string> = {};
+    fileVars = {};
     for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      env[k] = String(v);
+      fileVars[k] = String(v);
     }
-    return env;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      // Fallback to DB if envName is specified
-      if (envName) {
-        try {
-          const { getEnvironment } = await import("../../db/queries.ts");
-          const dbEnv = getEnvironment(envName);
-          if (dbEnv) return dbEnv;
-        } catch { /* DB not initialized — OK, return empty */ }
-      }
-      return {};
-    }
-    throw err;
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
+
+  // DB fallback/merge: resolve scoped + global env from DB
+  let dbVars: Record<string, string> | null = null;
+  if (envName) {
+    try {
+      const { resolveEnvironment } = await import("../../db/queries.ts");
+      dbVars = resolveEnvironment(envName, collectionId);
+    } catch { /* DB not initialized — OK */ }
+  }
+
+  // Merge priority: dbGlobal < dbScoped < file (resolveEnvironment already merges global+scoped)
+  if (!dbVars && !fileVars) return {};
+  if (!dbVars) return fileVars!;
+  if (!fileVars) return dbVars;
+  return { ...dbVars, ...fileVars };
 }

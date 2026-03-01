@@ -3,8 +3,10 @@
 | Документ | Описание |
 |----------|----------|
 | [APITOOL.md](../APITOOL.md) | Полная техническая документация — архитектура, модули, типы, API, примеры |
-| [BACKLOG.md](BACKLOG.md) | Приоритеты, милестоуны M12–M16, технический долг |
+| [GLOSSARY.md](GLOSSARY.md) | Тезаурус сущностей — Collection, Suite, Run, Environment и др. |
+| [BACKLOG.md](BACKLOG.md) | Приоритеты, милестоуны M12–M21, технический долг |
 | [agent.md](agent.md) | Agent Module — AI Chat Assistant (AI SDK v6, tools, провайдеры) |
+| [generation-issues.md](generation-issues.md) | Известные проблемы при генерации тестов и их решения |
 
 ## Архив
 

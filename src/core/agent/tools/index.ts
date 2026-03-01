@@ -1,7 +1,6 @@
 import { tool } from "ai";
 import { runTestsTool } from "./run-tests.ts";
 import { validateTestsTool } from "./validate-tests.ts";
-import { generateTestsTool } from "./generate-tests.ts";
 import { queryResultsTool } from "./query-results.ts";
 import { manageEnvironmentTool } from "./manage-environment.ts";
 import { diagnoseFailureTool } from "./diagnose-failure.ts";
@@ -38,7 +37,6 @@ export function buildAgentTools(config: AgentConfig) {
   return {
     run_tests,
     validate_tests: validateTestsTool,
-    generate_tests: generateTestsTool,
     query_results: queryResultsTool,
     manage_environment: manageEnvironmentTool,
     diagnose_failure: diagnoseFailureTool,
@@ -47,4 +45,4 @@ export function buildAgentTools(config: AgentConfig) {
   };
 }
 
-export { runTestsTool, validateTestsTool, generateTestsTool, queryResultsTool, manageEnvironmentTool, diagnoseFailureTool, sendRequestTool, exploreApiTool };
+export { runTestsTool, validateTestsTool, queryResultsTool, manageEnvironmentTool, diagnoseFailureTool, sendRequestTool, exploreApiTool };

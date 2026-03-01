@@ -41,13 +41,15 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
 
   const fileStat = await stat(testPath).catch(() => null);
   const envDir = fileStat?.isDirectory() ? testPath : dirname(testPath);
-  const env = await loadEnvironment(envName, envDir);
-  const results = await Promise.all(suites.map((s) => runSuite(s, env)));
 
   getDb(dbPath);
   const resolvedPath = resolve(testPath);
   const collection = findCollectionByTestPath(resolvedPath)
     ?? (fileStat?.isFile() ? findCollectionByTestPath(resolve(dirname(testPath))) : null);
+
+  const env = await loadEnvironment(envName, envDir, collection?.id);
+  const results = await Promise.all(suites.map((s) => runSuite(s, env)));
+
   const runId = createRun({
     started_at: results[0]?.started_at ?? new Date().toISOString(),
     environment: envName,

@@ -2,7 +2,6 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerRunTestsTool } from "./tools/run-tests.ts";
 import { registerValidateTestsTool } from "./tools/validate-tests.ts";
-import { registerGenerateTestsTool } from "./tools/generate-tests.ts";
 import { registerListCollectionsTool } from "./tools/list-collections.ts";
 import { registerListRunsTool } from "./tools/list-runs.ts";
 import { registerGetRunResultsTool } from "./tools/get-run-results.ts";
@@ -28,8 +27,7 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
   // Register all tools
   registerRunTestsTool(server, dbPath);
   registerValidateTestsTool(server);
-  registerGenerateTestsTool(server, dbPath);
-  registerListCollectionsTool(server, dbPath);
+registerListCollectionsTool(server, dbPath);
   registerListRunsTool(server, dbPath);
   registerGetRunResultsTool(server, dbPath);
   registerListEnvironmentsTool(server, dbPath);

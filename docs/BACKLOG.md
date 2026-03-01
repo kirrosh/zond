@@ -1,6 +1,6 @@
 # BACKLOG — Приоритеты и милестоуны
 
-Следующие шаги развития APITOOL после M1-M19.
+Следующие шаги развития APITOOL после M1-M21.
 
 ---
 
@@ -9,7 +9,7 @@
 ### 1. README.md ✅
 
 - Installation instructions (бинарник, Bun dev mode)
-- Quick start: generate → run → serve
+- Quick start: add-api → ai-generate → run → serve
 - Примеры YAML-тестов, CLI reference
 - Лицензия MIT
 
@@ -35,7 +35,7 @@
 - CRUD routes: `GET /environments`, `POST /environments`, `PUT /environments/:id`, `DELETE /environments/:id`
 - Key-value editor для переменных
 - Selector окружения при запуске тестов в WebUI
-- Runs filter объединяет определённые environments + из истории прогонов
+- Scope column (global / api:N) в списке окружений
 
 ### 5. `apitool init` — scaffolding проекта ✅
 
@@ -48,20 +48,19 @@
 - `apitool request GET /users --save tests/users.yaml`
 - Автоматическая генерация assertions из ответа
 
+### 7. Web UI: Add API form
+
+- Форма "Add API" на дашборде (сейчас — только CLI `add-api`)
+- Загрузка/URL спецификации из формы
+- Визуальный env editor при создании
+
 ---
 
 ## Tier 3 — Улучшения
 
-### 7. Generator Level 3 + `apitool describe`
-
-- Генерация Markdown тест-кейсов из OpenAPI (TC-001, TC-002...)
-- CLI-команда `apitool describe --from <spec> --output <file>`
-- Приоритеты, негативные сценарии
-
 ### 8. `serve --tests` flag
 
 - Флаг `--tests` для указания пути к YAML-тестам, используется WebUI кнопкой "Run"
-- Флаг не реализован — отсутствует и в CLI, и в WebUI
 
 ### 9. OAuth2/OIDC в Explorer
 
@@ -74,11 +73,10 @@
 - Расширенная flaky-детекция с историей
 - Trend длительности по отдельным тестам
 
-### 11. Test Analytics (low priority)
+### 11. Environment inheritance / profiles
 
-- Diff между двумя прогонами (изменения статусов, duration delta)
-- Расширенная flaky-детекция с историей
-- Trend длительности по отдельным тестам
+- Наследование env: `staging` extends `default` + overrides
+- Profile switching в WebUI
 
 ---
 
@@ -86,13 +84,12 @@
 
 | Задача | Файл(ы) | Приоритет |
 |--------|---------|-----------|
-| CI: integration тесты (crud-chain, auth-flow) ✅ | `tests/integration/`, `.github/workflows/ci.yml` | Done |
+| CI: integration тесты ✅ | `tests/integration/`, `.github/workflows/ci.yml` | Done |
 | CI: typecheck (`tsc --noEmit`) ✅ | `tsconfig.json`, `.github/workflows/ci.yml` | Done |
 | Explorer: response body schema не показывает вложенные объекты | `explorer.ts` | Low |
-| `describe.ts`, `init.ts`, `testcases.ts` — упоминались в ранних версиях документации, не реализованы | — | Info |
-| `tests/web/environments.test.ts` — исправлено в M14.1 (HTMX routes отделены от JSON API) | `tests/web/environments.test.ts` | Done |
-| `apitool init` — генерация `.mcp.json` с конфигом MCP-сервера для новых проектов ✅ | `src/cli/commands/init.ts` | Done |
 | MCP: `.mcp.json` содержит абсолютные пути — нужна поддержка относительных путей и `cwd` | `src/mcp/`, `.mcp.json` | Medium |
+| Test isolation: `mock.module()` в 13 тестах загрязняет Bun module cache | `tests/` | Medium |
+| Web UI: environments page — grouping by collection, Add API form | `src/web/routes/environments.ts` | Low |
 
 ---
 
@@ -104,89 +101,74 @@
 - MIT License, CHANGELOG.md
 - GitHub Actions CI: тесты на push main/dev и PR
 - Release workflow: tag → matrix build (3 OS) → tar.gz/zip → GitHub Releases
-- Branching flow: dev → main → tag
-- Первый релиз: v0.1.0
 
 ### M13: Environment Management в WebUI ✅
 
-- CRUD routes: `GET /environments`, `GET /environments/:id`, `POST /environments`, `PUT /environments/:id`, `DELETE /environments/:id`
-- Key-value editor для переменных (добавление/удаление строк)
+- CRUD routes: environments list/detail/create/update/delete
+- Key-value editor для переменных
 - Selector окружения при запуске тестов в коллекции
-- Runs filter: объединение `listEnvironments()` + `getDistinctEnvironments()`
-- DB queries: `getEnvironmentById()`, `deleteEnvironment()`, `listEnvironmentRecords()`
-- Навигация: ссылка "Environments" в layout
 
 ### M14: Self-Documented API + Incremental Generation + Dogfooding ✅
 
-- API routes конвертированы на `@hono/zod-openapi` — автогенерация OpenAPI спеки
-- `GET /api/openapi.json` — apitool отдаёт свою OpenAPI спеку
-- JSON API для Environments и Collections (GET list, GET by ID, POST, PUT, DELETE)
-- Инкрементальная генерация: `apitool generate` пропускает уже покрытые эндпоинты
-- `writeSuites()` не перезаписывает существующие файлы
-- Coverage scanner: `scanCoveredEndpoints()`, `filterUncoveredEndpoints()`
-- Dogfooding: integration тесты используют apitool API вместо test-server
-- CI: `tests/integration/crud-chain.test.ts` и `auth-flow.test.ts` в pipeline
-- Генератор: поддержка `additionalProperties` (Record-типы) в `data-factory.ts`
-- Удалён `test-server/` — auth-flow тест переписан с inline-сервером
-- CI: typecheck (`tsc --noEmit`) включён в pipeline
-- Исправлены ошибки типов в `schemas.ts`, `api.ts`
+- API routes конвертированы на `@hono/zod-openapi`
+- JSON API для Environments и Collections
+- Инкрементальная генерация, coverage scanner
+- Dogfooding: integration тесты используют apitool API
 
 ### M14.1: Разделение HTMX и JSON API routes ✅
 
 - `/api/*` — только JSON (OpenAPI-documented)
-- HTMX form-data handlers перенесены на HTML-пути (`/environments`, `/collections`, `/run`)
-- Убраны хрупкие гейты (`if (content-type includes json) return next()`, `if (HX-Request) return next()`)
-- Тесты обновлены: URL и заголовки соответствуют новым путям
+- HTMX form-data handlers перенесены на HTML-пути
 
 ### M15: MCP Server — AI-agent интеграция ✅
 
-- MCP (Model Context Protocol) сервер для AI-агентов (Claude Code, Cursor, Windsurf, Cline)
-- `apitool mcp` — stdio transport, `--db` flag для кастомного пути к БД
-- 7 MCP tools: `run_tests`, `validate_tests`, `generate_tests`, `list_collections`, `list_runs`, `get_run_results`, `list_environments`
-- Извлечён `executeRun()` в shared модуль `src/core/runner/execute-run.ts`
-- `trigger: "mcp"` в DB runs для отличия MCP-запусков в дашборде
-- Первый API-testing инструмент с нативной поддержкой AI-агентов
+- MCP сервер для AI-агентов (Claude Code, Cursor, Windsurf, Cline)
+- 11 MCP tools: run_tests, validate_tests, list_collections, list_runs, get_run_results, list_environments, send_request, explore_api, manage_environment, diagnose_failure, coverage_analysis
+- `executeRun()` — shared модуль
 
 ### M15.1: Install Script + `apitool init` ✅
 
-- `install.sh` — one-liner установка бинарника через curl | sh
-- `apitool init` — scaffolding нового проекта (tests/example.yaml, .env.dev.yaml, .mcp.json)
-- Обнаружение Claude Code для автоматической генерации .mcp.json
-- `--force` флаг для перезаписи существующих файлов
-- README обновлён: install one-liner, init в Quick Start и CLI Reference
+- `install.sh` — one-liner установка бинарника
+- `apitool init` — scaffolding нового проекта
 
 ### M16: Generate Wizard — Smart Generate + Safe Run + Auth ✅
 
-- `isRelativeUrl` / `sanitizeEnvName` хелперы в generator
-- Relative base_url → `{{base_url}}` placeholder в генерируемых тестах
-- `loadEnvironment()` fallback на DB если YAML не найден
 - `--safe` флаг для CLI и MCP — запуск только GET-тестов
-- `generate` автоматически создаёт environment в DB (base_url, auth vars)
-- `--auth-token`, `--env-name`, `--no-wizard` флаги для generate
-- MCP `generate_tests` создаёт коллекцию и environment в DB
-- Интерактивный wizard при TTY (base URL, auth token, env name)
-- Предупреждение о деструктивных тестах (POST/PUT/PATCH/DELETE)
+- `--auth-token`, `--env-name` флаги
+- `loadEnvironment()` fallback на DB
 
 ### M19: Unified Capabilities ✅
 
-- CLI: `apitool request <METHOD> <URL>` — ad-hoc HTTP запросы с variable interpolation, цветной вывод
-- CLI: `apitool envs [list|get|set|delete]` — полный CRUD окружений
-- CLI: `apitool runs [id]` — история прогонов и детали с шагами
-- CLI: `apitool coverage --spec <path> --tests <dir>` — анализ покрытия API тестами
+- CLI: `request`, `envs`, `runs`, `coverage`
 - MCP: 5 новых tools — `send_request`, `explore_api`, `manage_environment`, `diagnose_failure`, `coverage_analysis`
-- Agent: 2 новых tools — `send_request` (safe mode: только GET), `explore_api` (компактный вывод)
-- Agent: `generate_tests` — добавлены `envName`, `authToken` параметры
-- 51 новых тестов (11 файлов)
+- Agent: 2 новых tools — `send_request`, `explore_api`
 
 ### M20: Post-M19 Improvements ✅
 
-- DB singleton fix: `getDb()` без аргументов переиспользует существующий путь
-- README.md: добавлены новые CLI команды, MCP tools, AI chat, coverage
-- `apitool doctor` — диагностика (DB, тесты, OpenAPI, env файлы, Ollama)
-- `apitool envs import/export` — импорт/экспорт окружений через YAML файлы
+- DB singleton fix, README update
+- `apitool doctor` — диагностика
+- `apitool envs import/export`
+
+### M21: Collection Architecture + Environment Scoping ✅
+
+- `apitool add-api <name>` — явный флоу регистрации API
+  - Создаёт `apis/<name>/tests/`, `.env.yaml`, запись в DB с `base_dir`
+  - Валидация OpenAPI спеки, извлечение `base_url` из `servers[0]`
+  - Scoped environment `default` в DB
+- Флаг `--api <name>` для `run`, `ai-generate`, `coverage`, `envs`
+  - Автоматический резолв путей через `findCollectionByNameOrId()`
+- Environment scoping: `collection_id` в таблице environments
+  - Global (collection_id IS NULL) + scoped (привязан к коллекции)
+  - `resolveEnvironment()` — мерж global + scoped
+  - Приоритет: файл > DB scoped > DB global > генераторы
+- DB Schema V5: `base_dir` в collections, `collection_id` в environments
+  - Уникальные индексы: `(name, collection_id)` + partial index для глобальных
+  - Backfill `base_dir` = `dirname(test_path)` при миграции
+- MCP `manage_environment` — `collectionName` param для scoping
+- WebUI: scope column в списке окружений, сохранение scope при update
 
 ### Порядок
 
 ```
-M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (MCP Server) ✅ → M15.1 (Install + Init) ✅ → M16 (Generate Wizard) ✅ → M19 (Unified Capabilities) ✅ → M20 (Post-M19) ✅
+M12 (Release) ✅ → M13 (Environments) ✅ → M14 (Self-Doc API) ✅ → M14.1 (Route Split) ✅ → M15 (MCP Server) ✅ → M15.1 (Install + Init) ✅ → M16 (Generate Wizard) ✅ → M19 (Unified Capabilities) ✅ → M20 (Post-M19) ✅ → M21 (Collection Architecture) ✅
 ```

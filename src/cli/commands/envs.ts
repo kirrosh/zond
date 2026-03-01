@@ -7,6 +7,7 @@ import {
   upsertEnvironment,
   deleteEnvironment,
   getEnvironmentById,
+  findCollectionByNameOrId,
 } from "../../db/queries.ts";
 import { printError, printSuccess } from "../output.ts";
 
@@ -15,6 +16,7 @@ export interface EnvsOptions {
   name?: string;
   pairs?: string[];
   file?: string;
+  api?: string;
   dbPath?: string;
 }
 
@@ -40,9 +42,20 @@ export function envsCommand(options: EnvsOptions): number {
     return 2;
   }
 
+  // Resolve --api to collection_id
+  let collectionId: number | undefined;
+  if (options.api) {
+    const col = findCollectionByNameOrId(options.api);
+    if (!col) {
+      printError(`API '${options.api}' not found`);
+      return 1;
+    }
+    collectionId = col.id;
+  }
+
   switch (action) {
     case "list": {
-      const envs = listEnvironmentRecords();
+      const envs = listEnvironmentRecords(collectionId);
       if (envs.length === 0) {
         console.log("No environments found.");
         return 0;
@@ -50,12 +63,14 @@ export function envsCommand(options: EnvsOptions): number {
 
       // Print table
       const nameWidth = Math.max(4, ...envs.map(e => e.name.length));
-      const header = `${"NAME".padEnd(nameWidth)}  VARIABLES`;
+      const scopeWidth = 8;
+      const header = `${"NAME".padEnd(nameWidth)}  ${"SCOPE".padEnd(scopeWidth)}  VARIABLES`;
       console.log(header);
       console.log("-".repeat(header.length + 10));
       for (const env of envs) {
+        const scope = env.collection_id ? `api:${env.collection_id}` : "global";
         const varKeys = Object.keys(env.variables).join(", ");
-        console.log(`${env.name.padEnd(nameWidth)}  ${varKeys}`);
+        console.log(`${env.name.padEnd(nameWidth)}  ${scope.padEnd(scopeWidth)}  ${varKeys}`);
       }
       return 0;
     }
@@ -65,7 +80,7 @@ export function envsCommand(options: EnvsOptions): number {
         printError("Missing environment name. Usage: apitool envs get <name>");
         return 2;
       }
-      const variables = getEnvironment(name);
+      const variables = getEnvironment(name, collectionId);
       if (!variables) {
         printError(`Environment '${name}' not found`);
         return 1;
@@ -93,11 +108,12 @@ export function envsCommand(options: EnvsOptions): number {
         return 2;
       }
 
-      // Merge with existing
-      const existing = getEnvironment(name) ?? {};
+      // Merge with existing (scoped if --api provided)
+      const existing = getEnvironment(name, collectionId) ?? {};
       const merged = { ...existing, ...variables };
-      upsertEnvironment(name, merged);
-      printSuccess(`Environment '${name}' updated (${Object.keys(variables).length} variable(s) set)`);
+      upsertEnvironment(name, merged, collectionId);
+      const scope = collectionId ? ` (scoped to api:${collectionId})` : "";
+      printSuccess(`Environment '${name}' updated${scope} (${Object.keys(variables).length} variable(s) set)`);
       return 0;
     }
 
@@ -106,9 +122,11 @@ export function envsCommand(options: EnvsOptions): number {
         printError("Missing environment name. Usage: apitool envs delete <name>");
         return 2;
       }
-      // Find by name to get ID
-      const envs = listEnvironmentRecords();
-      const env = envs.find(e => e.name === name);
+      // Find by name (and scope) to get ID
+      const envs = listEnvironmentRecords(collectionId);
+      const env = collectionId
+        ? envs.find(e => e.name === name && e.collection_id === collectionId)
+        : envs.find(e => e.name === name && e.collection_id === null);
       if (!env) {
         printError(`Environment '${name}' not found`);
         return 1;
@@ -140,7 +158,7 @@ export function envsCommand(options: EnvsOptions): number {
           printError("No variables found in YAML file");
           return 1;
         }
-        upsertEnvironment(name, parsed);
+        upsertEnvironment(name, parsed, collectionId);
         printSuccess(`Environment '${name}' imported (${Object.keys(parsed).length} variable(s))`);
         return 0;
       } catch (err) {
@@ -154,7 +172,7 @@ export function envsCommand(options: EnvsOptions): number {
         printError("Missing environment name. Usage: apitool envs export <name>");
         return 2;
       }
-      const variables = getEnvironment(name);
+      const variables = getEnvironment(name, collectionId);
       if (!variables) {
         printError(`Environment '${name}' not found`);
         return 1;

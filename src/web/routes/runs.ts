@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { layout, escapeHtml } from "../views/layout.ts";
-import { listRuns, getRunById, getResultsByRunId, countRuns, listEnvironments, getDistinctEnvironments } from "../../db/queries.ts";
+import { listRuns, getRunById, getResultsByRunId, countRuns, listEnvironments, getDistinctEnvironments, getCollectionById } from "../../db/queries.ts";
 import type { RunFilters } from "../../db/queries.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
 
@@ -158,6 +158,16 @@ runs.get("/runs/:id", (c) => {
     suites.set(r.suite_name, list);
   }
 
+  // Resolve test_path for re-run button
+  const collection = run.collection_id ? getCollectionById(run.collection_id) : null;
+  const rerunBtnHtml = collection
+    ? `<button class="btn btn-sm btn-run"
+        hx-post="/run"
+        hx-vals='${escapeHtml(JSON.stringify({ path: collection.test_path, ...(run.environment ? { env: run.environment } : {}) }))}'
+        hx-disabled-elt="this"
+        style="margin-left:0.5rem;">Re-run</button>`
+    : "";
+
   const headerHtml = `
     <h1>Run #${run.id}</h1>
     <div class="cards">
@@ -181,6 +191,7 @@ runs.get("/runs/:id", (c) => {
     <div style="margin:0.5rem 0 1rem;">
       <a href="/api/export/${run.id}/junit" download class="btn btn-sm btn-outline">Export JUnit XML</a>
       <a href="/api/export/${run.id}/json" download class="btn btn-sm btn-outline" style="margin-left:0.5rem;">Export JSON</a>
+      ${rerunBtnHtml}
     </div>`;
 
   // Build a map of which variables are captured by which step (for flow visualization)
@@ -237,6 +248,16 @@ runs.get("/runs/:id", (c) => {
           requestHtml = `<div><strong>Request:</strong> ${escapeHtml(step.request_method)} ${escapeHtml(step.request_url ?? "")}</div>`;
         }
 
+        // Request/response body for failed/error steps
+        let reqBodyHtml = "";
+        if (hasFailed && step.request_body) {
+          reqBodyHtml = `<details class="body-details"><summary>Request Body</summary><pre>${escapeHtml(step.request_body)}</pre></details>`;
+        }
+        let resBodyHtml = "";
+        if (hasFailed && step.response_body) {
+          resBodyHtml = `<details class="body-details"><summary>Response Body</summary><pre>${escapeHtml(step.response_body)}</pre></details>`;
+        }
+
         let errorHtml = "";
         if (step.error_message) {
           errorHtml = `<div><strong>Error:</strong> ${escapeHtml(step.error_message)}</div>`;
@@ -261,6 +282,8 @@ runs.get("/runs/:id", (c) => {
               ${errorHtml}
               ${skipReasonHtml}
               ${assertionsHtml}
+              ${reqBodyHtml}
+              ${resBodyHtml}
             </div>`
           : "";
 
@@ -269,9 +292,10 @@ runs.get("/runs/:id", (c) => {
           : "";
 
         const chainedClass = isChainSuite ? " chained" : "";
+        const statusClass = (step.status === "fail" || step.status === "error") ? ` step-${step.status}` : "";
 
         return `
-          <div class="step-row${chainedClass}" ${toggle}>
+          <div class="step-row${chainedClass}${statusClass}" ${toggle}>
             <div>${stepStatusBadge(step.status)}</div>
             <div class="step-name">${escapeHtml(step.test_name)}${capturesHtml ? ` ${capturesHtml}` : ""}</div>
             <div class="step-duration">${formatDuration(step.duration_ms)}</div>
@@ -291,7 +315,23 @@ runs.get("/runs/:id", (c) => {
       </div>`;
   }
 
-  const content = headerHtml + suitesHtml + `<div style="margin-top:1rem"><a href="/runs" class="btn btn-outline btn-sm">← Back to Runs</a></div>`;
+  const failedFilterHtml = `
+    <label class="failed-filter-toggle" style="display:flex;align-items:center;gap:0.5rem;margin:1rem 0;font-size:0.85rem;cursor:pointer;">
+      <input type="checkbox" id="failed-only-toggle" onchange="
+        var on = this.checked;
+        document.querySelectorAll('.step-row').forEach(function(el) {
+          if (on && !el.classList.contains('step-fail') && !el.classList.contains('step-error')) {
+            el.style.display = 'none';
+            var next = el.nextElementSibling;
+            if (next && next.classList.contains('detail-panel')) next.style.display = 'none';
+          } else {
+            el.style.display = '';
+          }
+        });
+      "> Show only failed
+    </label>`;
+
+  const content = headerHtml + failedFilterHtml + suitesHtml + `<div style="margin-top:1rem"><a href="/runs" class="btn btn-outline btn-sm">← Back to Runs</a></div>`;
 
   const isHtmx = c.req.header("HX-Request") === "true";
   if (isHtmx) return c.html(content);

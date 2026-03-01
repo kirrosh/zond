@@ -22,8 +22,10 @@ const environments = new OpenAPIHono();
 function envListPage(envs: EnvironmentRecord[]): string {
   const rows = envs.map((e) => {
     const varCount = Object.keys(e.variables).length;
+    const scope = e.collection_id ? `<span class="badge">api:${e.collection_id}</span>` : '<span class="badge badge-muted">global</span>';
     return `<tr>
       <td><a href="/environments/${e.id}">${escapeHtml(e.name)}</a></td>
+      <td>${scope}</td>
       <td>${varCount} variable${varCount === 1 ? "" : "s"}</td>
       <td>
         <a class="btn btn-sm btn-outline" href="/environments/${e.id}">Edit</a>
@@ -39,8 +41,8 @@ function envListPage(envs: EnvironmentRecord[]): string {
   return `
     <h1>Environments</h1>
     <table>
-      <thead><tr><th>Name</th><th>Variables</th><th>Actions</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="3">No environments yet</td></tr>'}</tbody>
+      <thead><tr><th>Name</th><th>Scope</th><th>Variables</th><th>Actions</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="4">No environments yet</td></tr>'}</tbody>
     </table>
 
     <div class="section-title" style="margin-top:2rem;">Create Environment</div>
@@ -163,7 +165,7 @@ environments.put("/environments/:id", async (c) => {
     }
   }
 
-  upsertEnvironment(env.name, variables);
+  upsertEnvironment(env.name, variables, env.collection_id);
   c.header("HX-Redirect", `/environments/${id}`);
   return c.redirect(`/environments/${id}`);
 });
@@ -284,7 +286,7 @@ environments.openapi(updateEnvRoute, (c) => {
   const env = getEnvironmentById(id);
   if (!env) return c.json({ error: "Environment not found" }, 404);
   const { variables } = c.req.valid("json");
-  upsertEnvironment(env.name, variables);
+  upsertEnvironment(env.name, variables, env.collection_id);
   const updated = getEnvironmentById(id)!;
   return c.json(updated, 200);
 });
