@@ -140,7 +140,6 @@ api.post("/api/try", async (c) => {
       method,
       headers,
       body: body ?? undefined,
-      // @ts-expect-error Bun-specific: skip TLS verification for self-signed certs
       tls: { rejectUnauthorized: false },
     });
     const duration = Math.round(performance.now() - start);
@@ -213,7 +212,6 @@ api.openapi(authorizeRoute, async (c) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
-      // @ts-expect-error Bun-specific: skip TLS verification for self-signed certs
       tls: { rejectUnauthorized: false },
     });
 
