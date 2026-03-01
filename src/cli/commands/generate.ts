@@ -1,9 +1,9 @@
-import { resolve, basename } from "path";
-import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSuites, writeSuites, isRelativeUrl, sanitizeEnvName } from "../../core/generator/index.ts";
+import { basename } from "path";
+import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSkeleton, generateSuites, writeSuites, isRelativeUrl, sanitizeEnvName, resolveSpecPath } from "../../core/generator/index.ts";
 import { scanCoveredEndpoints, filterUncoveredEndpoints } from "../../core/generator/coverage-scanner.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { getDb } from "../../db/schema.ts";
-import { findCollectionByTestPath, createCollection, normalizePath, upsertEnvironment } from "../../db/queries.ts";
+import { findCollectionByTestPath, findCollectionBySpec, createCollection, normalizePath, upsertEnvironment } from "../../db/queries.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../core/generator/types.ts";
 
 export interface GenerateCommandOptions {
@@ -13,6 +13,7 @@ export interface GenerateCommandOptions {
   envName?: string;
   dbPath?: string;
   noWizard?: boolean;
+  crud?: boolean;
 }
 
 export async function generateCommand(options: GenerateCommandOptions): Promise<number> {
@@ -79,7 +80,9 @@ export async function generateCommand(options: GenerateCommandOptions): Promise<
       // Output dir doesn't exist yet — generate everything
     }
 
-    const suites = generateSuites(endpoints, baseUrl, securitySchemes);
+    const suites = options.crud
+      ? generateSuites(endpoints, baseUrl, securitySchemes)
+      : generateSkeleton(endpoints, baseUrl, securitySchemes);
     console.log(`Generated ${suites.length} test suite(s)`);
 
     const { written, skipped } = await writeSuites(suites, options.output);
@@ -97,12 +100,13 @@ export async function generateCommand(options: GenerateCommandOptions): Promise<
     try {
       getDb(options.dbPath);
       const normalizedOutput = normalizePath(options.output);
-      const existing = findCollectionByTestPath(normalizedOutput);
+      const resolvedSpec = resolveSpecPath(options.from);
+      const existing = findCollectionByTestPath(normalizedOutput) ?? findCollectionBySpec(resolvedSpec);
       if (!existing) {
         const collId = createCollection({
           name: specName,
           test_path: normalizedOutput,
-          openapi_spec: resolve(options.from),
+          openapi_spec: resolvedSpec,
         });
         printSuccess(`Created collection "${specName}" (id: ${collId})`);
       }

@@ -135,6 +135,7 @@ Options for 'generate':
   --env-name <name>    Environment name (default: derived from spec title)
   --db <path>          Path to SQLite database file
   --no-wizard          Skip interactive prompts
+  --crud               Generate CRUD chain suites (POST→GET→DELETE) in addition to skeleton
 
 Options for 'ai-generate':
   --from <spec>        Path to OpenAPI spec (required)
@@ -239,6 +240,7 @@ async function main(): Promise<number> {
         envName: typeof flags["env-name"] === "string" ? flags["env-name"] : undefined,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
         noWizard: flags["no-wizard"] === true,
+        crud: flags["crud"] === true,
       });
     }
 

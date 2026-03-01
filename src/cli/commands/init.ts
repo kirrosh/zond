@@ -15,7 +15,7 @@ tests:
     expect:
       status: 200
       body:
-        - id: { type: integer }
+        id: { type: integer }
 
   - name: "Get single post"
     GET: /posts/1

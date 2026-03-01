@@ -63,11 +63,13 @@ export async function aiGenerateCommand(options: AIGenerateCommandOptions): Prom
     try {
       const { getDb } = await import("../../db/schema.ts");
       getDb();
-      const { findCollectionByTestPath, createCollection, normalizePath, saveAIGeneration } = await import("../../db/queries.ts");
+      const { findCollectionByTestPath, findCollectionBySpec, createCollection, normalizePath, saveAIGeneration } = await import("../../db/queries.ts");
+      const { resolveSpecPath } = await import("../../core/generator/index.ts");
       const normalizedOutput = normalizePath(outputDir);
+      const resolvedSpec = resolveSpecPath(options.from);
 
       let collectionId: number | undefined;
-      const existing = findCollectionByTestPath(normalizedOutput);
+      const existing = findCollectionByTestPath(normalizedOutput) ?? findCollectionBySpec(resolvedSpec);
       if (existing) {
         collectionId = existing.id;
       } else {
@@ -75,7 +77,7 @@ export async function aiGenerateCommand(options: AIGenerateCommandOptions): Prom
         collectionId = createCollection({
           name: specName,
           test_path: normalizedOutput,
-          openapi_spec: resolve(options.from),
+          openapi_spec: resolvedSpec,
         });
         printSuccess(`Created collection "${specName}" (id: ${collectionId})`);
       }

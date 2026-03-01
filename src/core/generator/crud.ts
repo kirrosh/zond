@@ -76,8 +76,11 @@ export function detectCrudGroups(endpoints: EndpointInfo[]): CrudGroup[] {
     const group = pathMap.get(baseKey)!;
     group.endpoints.push(ep);
     if (isItemPath && idParam) {
-      group.itemPath = ep.path;
-      group.idParam = idParam;
+      // Keep the shortest path — direct item endpoint, not a nested sub-resource
+      if (!group.itemPath || ep.path.split("/").length < group.itemPath.split("/").length) {
+        group.itemPath = ep.path;
+        group.idParam = idParam;
+      }
     }
   }
 
@@ -308,7 +311,7 @@ function buildCreateStep(group: CrudGroup, captureVar: string): RawStep {
 
 function buildReadStep(group: CrudGroup, captureVar: string): RawStep {
   const ep = group.read!;
-  const itemPath = group.itemPath.replace(`{${group.idParam}}`, `{{${captureVar}}}`);
+  const itemPath = ep.path.replace(`{${group.idParam}}`, `{{${captureVar}}}`);
 
   const successResponse = ep.responses
     .filter(r => r.statusCode >= 200 && r.statusCode < 300)
@@ -350,7 +353,7 @@ function buildReadStep(group: CrudGroup, captureVar: string): RawStep {
 function buildUpdateStep(group: CrudGroup, captureVar: string): RawStep {
   const ep = group.update!;
   const method = ep.method.toUpperCase();
-  const itemPath = group.itemPath.replace(`{${group.idParam}}`, `{{${captureVar}}}`);
+  const itemPath = ep.path.replace(`{${group.idParam}}`, `{{${captureVar}}}`);
 
   const successResponse = ep.responses
     .filter(r => r.statusCode >= 200 && r.statusCode < 300)
@@ -392,7 +395,7 @@ function buildUpdateStep(group: CrudGroup, captureVar: string): RawStep {
 
 function buildDeleteStep(group: CrudGroup, captureVar: string): RawStep {
   const ep = group.delete!;
-  const itemPath = group.itemPath.replace(`{${group.idParam}}`, `{{${captureVar}}}`);
+  const itemPath = ep.path.replace(`{${group.idParam}}`, `{{${captureVar}}}`);
 
   const successResponse = ep.responses
     .filter(r => r.statusCode >= 200 && r.statusCode < 300)

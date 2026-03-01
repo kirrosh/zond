@@ -1,9 +1,17 @@
+import { resolve } from "path";
 import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
 import { generateFromSchema } from "./data-factory.ts";
 import { detectCrudGroups, generateCrudChain, getCrudEndpoints } from "./crud.ts";
 
 export function isRelativeUrl(url: string): boolean {
   return url.startsWith("/") && !url.includes("://");
+}
+
+export function resolveSpecPath(specPath: string): string {
+  if (specPath.startsWith("http://") || specPath.startsWith("https://")) {
+    return specPath;
+  }
+  return resolve(specPath);
 }
 
 export function sanitizeEnvName(name: string): string {
@@ -305,6 +313,9 @@ function substitutePathParams(ep: EndpointInfo): string {
 function generateParamPlaceholder(param: import("openapi-types").OpenAPIV3.ParameterObject): string {
   const schema = param.schema as import("openapi-types").OpenAPIV3.SchemaObject | undefined;
   if (schema) {
+    if (schema.enum && schema.enum.length > 0) {
+      return String(schema.enum[0]);
+    }
     if (schema.type === "integer" || schema.type === "number") {
       return "{{$randomInt}}";
     }
@@ -315,7 +326,7 @@ function generateParamPlaceholder(param: import("openapi-types").OpenAPIV3.Param
   // Heuristic by name
   const lower = param.name.toLowerCase();
   if (lower.endsWith("id")) return "{{$randomInt}}";
-  return "1";
+  return "{{$randomString}}";
 }
 
 function buildBodyAssertions(

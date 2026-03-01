@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { resolve, basename } from "path";
+import { basename } from "path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSuites, writeSuites, isRelativeUrl, sanitizeEnvName } from "../../core/generator/index.ts";
+import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, generateSkeleton, generateSuites, writeSuites, isRelativeUrl, sanitizeEnvName, resolveSpecPath } from "../../core/generator/index.ts";
 import { getDb } from "../../db/schema.ts";
-import { findCollectionByTestPath, createCollection, normalizePath, upsertEnvironment } from "../../db/queries.ts";
+import { findCollectionByTestPath, findCollectionBySpec, createCollection, normalizePath, upsertEnvironment } from "../../db/queries.ts";
 
 export function registerGenerateTestsTool(server: McpServer, dbPath?: string) {
   server.registerTool("generate_tests", {
@@ -13,8 +13,9 @@ export function registerGenerateTestsTool(server: McpServer, dbPath?: string) {
       outputDir: z.optional(z.string()).describe("Output directory (default: ./generated/)"),
       envName: z.optional(z.string()).describe("Environment name for saving variables to DB"),
       authToken: z.optional(z.string()).describe("Bearer auth token to save in environment"),
+      crud: z.optional(z.boolean()).describe("Generate CRUD chain suites (POST→GET→DELETE) in addition to skeleton suites. Default: false"),
     },
-  }, async ({ specPath, outputDir, envName, authToken }) => {
+  }, async ({ specPath, outputDir, envName, authToken, crud }) => {
     const output = outputDir ?? "./generated/";
     const doc = await readOpenApiSpec(specPath);
     const endpoints = extractEndpoints(doc);
@@ -28,7 +29,9 @@ export function registerGenerateTestsTool(server: McpServer, dbPath?: string) {
 
     const baseUrl = (doc as any).servers?.[0]?.url as string | undefined;
     const securitySchemes = extractSecuritySchemes(doc);
-    const suites = generateSuites(endpoints, baseUrl, securitySchemes);
+    const suites = crud
+      ? generateSuites(endpoints, baseUrl, securitySchemes)
+      : generateSkeleton(endpoints, baseUrl, securitySchemes);
     const { written, skipped } = await writeSuites(suites, output);
     const allFiles = [...written, ...skipped];
 
@@ -42,12 +45,13 @@ export function registerGenerateTestsTool(server: McpServer, dbPath?: string) {
 
       // Auto-create collection
       const normalizedOutput = normalizePath(output);
-      const existing = findCollectionByTestPath(normalizedOutput);
+      const resolvedSpec = resolveSpecPath(specPath);
+      const existing = findCollectionByTestPath(normalizedOutput) ?? findCollectionBySpec(resolvedSpec);
       if (!existing) {
         createCollection({
           name: specName,
           test_path: normalizedOutput,
-          openapi_spec: resolve(specPath),
+          openapi_spec: resolvedSpec,
         });
       }
       collectionName = specName;

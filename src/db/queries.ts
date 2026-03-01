@@ -509,6 +509,11 @@ export function findCollectionByTestPath(path: string): CollectionRecord | null 
   return db.query("SELECT * FROM collections WHERE test_path = ?").get(normalized) as CollectionRecord | null;
 }
 
+export function findCollectionBySpec(spec: string): CollectionRecord | null {
+  const db = getDb();
+  return db.query("SELECT * FROM collections WHERE openapi_spec = ?").get(spec) as CollectionRecord | null;
+}
+
 export function listRunsByCollection(collectionId: number, limit = 20, offset = 0): RunSummary[] {
   const db = getDb();
   return db.query(`
