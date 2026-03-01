@@ -244,7 +244,7 @@ collections.get("/collections/:id", async (c) => {
       : "";
 
   const explorerLink = collection.openapi_spec
-    ? `<a class="btn btn-outline btn-sm" href="/explorer">Explorer</a>`
+    ? `<a class="btn btn-sm" href="/collections/${id}/explorer">Explorer</a>`
     : "";
 
   const envs = listEnvironments();

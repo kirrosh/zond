@@ -15,6 +15,65 @@ export interface ExplorerDeps {
   loginPath: string | null;
 }
 
+// Cache for per-collection explorer deps
+const depsCache = new Map<string, ExplorerDeps>();
+
+export function clearExplorerCache(): void {
+  depsCache.clear();
+}
+
+export async function loadExplorerDepsForSpec(specPath: string): Promise<ExplorerDeps> {
+  const cached = depsCache.get(specPath);
+  if (cached) return cached;
+
+  const { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } = await import("../../core/generator/openapi-reader.ts");
+  const doc = await readOpenApiSpec(specPath);
+  const endpoints = extractEndpoints(doc);
+  const securitySchemes = extractSecuritySchemes(doc);
+
+  let servers: ServerInfo[] = [];
+  if (doc.servers && Array.isArray(doc.servers)) {
+    servers = doc.servers.map((s: any) => ({
+      url: (s.url ?? "").replace(/\/+$/, ""),
+      description: s.description,
+    }));
+  }
+
+  // Resolve relative server URLs using environment base_url
+  const allRelative = servers.length > 0 && servers.every(s => !s.url.startsWith("http"));
+  if (allRelative) {
+    try {
+      const { getEnvironment } = await import("../../db/queries.ts");
+      const { sanitizeEnvName } = await import("../../core/generator/skeleton.ts");
+      const specTitle = (doc as any).info?.title;
+      const envName = specTitle ? sanitizeEnvName(specTitle) : null;
+      const env = envName ? getEnvironment(envName) : null;
+      if (env?.base_url) {
+        const envBase = env.base_url.replace(/\/+$/, "");
+        if (envBase.startsWith("http")) {
+          servers = servers.map(s => ({
+            url: envBase,
+            description: s.description ?? "From environment",
+          }));
+        }
+      }
+    } catch { /* DB not critical */ }
+  }
+
+  // Auto-detect login endpoint
+  let loginPath: string | null = null;
+  const loginEndpoint = endpoints.find((ep) => {
+    if (ep.method !== "POST") return false;
+    if (ep.security.length > 0) return false;
+    return /\/(auth|login|token)/i.test(ep.path);
+  });
+  if (loginEndpoint) loginPath = loginEndpoint.path;
+
+  const deps: ExplorerDeps = { endpoints, specPath, servers, securitySchemes, loginPath };
+  depsCache.set(specPath, deps);
+  return deps;
+}
+
 function methodBadge(method: string): string {
   const m = method.toLowerCase();
   return `<span class="badge-method method-${m}">${method}</span>`;
@@ -311,69 +370,114 @@ function authorizePanel(deps: ExplorerDeps): string {
     ${authScript(deps)}`;
 }
 
+function renderExplorerContent(deps: ExplorerDeps, options?: { breadcrumb?: string }): string {
+  if (!deps.specPath || deps.endpoints.length === 0) {
+    return `
+      ${options?.breadcrumb ?? ""}
+      <h1>API Explorer</h1>
+      <div class="upload-form">
+        <p>No OpenAPI spec loaded. Start the server with <code>--openapi &lt;spec&gt;</code> to browse endpoints.</p>
+      </div>`;
+  }
+
+  // Group by tags
+  const groups = new Map<string, { endpoint: EndpointInfo; idx: number }[]>();
+  deps.endpoints.forEach((ep, idx) => {
+    const tag = ep.tags[0] ?? "default";
+    const list = groups.get(tag) ?? [];
+    list.push({ endpoint: ep, idx });
+    groups.set(tag, list);
+  });
+
+  let groupsHtml = "";
+  for (const [tag, items] of groups) {
+    const endpointsHtml = items
+      .map(({ endpoint, idx }) => {
+        const detailId = `endpoint-detail-${idx}`;
+        return `
+          <div class="endpoint-item" onclick="var d=document.getElementById('${detailId}');d.style.display=d.style.display==='none'?'block':'none'">
+            ${methodBadge(endpoint.method)}
+            <span class="endpoint-path">${escapeHtml(endpoint.path)}</span>
+            <span class="endpoint-summary">${endpoint.summary ? escapeHtml(endpoint.summary) : ""}</span>
+          </div>
+          <div class="detail-panel" id="${detailId}" style="display:none">
+            ${parameterRows(endpoint)}
+            ${requestBodySection(endpoint)}
+            ${responsesSection(endpoint)}
+            ${tryItForm(endpoint, idx, deps.servers)}
+          </div>`;
+      })
+      .join("");
+
+    groupsHtml += `
+      <div class="endpoint-group">
+        <h2>${escapeHtml(tag)}</h2>
+        ${endpointsHtml}
+      </div>`;
+  }
+
+  return `
+    ${options?.breadcrumb ?? ""}
+    <h1>API Explorer</h1>
+    <p>Spec: <code>${escapeHtml(deps.specPath)}</code> — ${deps.endpoints.length} endpoints</p>
+    ${authorizePanel(deps)}
+    ${groupsHtml}`;
+}
+
 export function createExplorerRoute(deps: ExplorerDeps) {
   const explorer = new Hono();
 
   explorer.get("/explorer", (c) => {
     const isHtmx = c.req.header("HX-Request") === "true";
-
-    if (!deps.specPath || deps.endpoints.length === 0) {
-      const content = `
-        <h1>API Explorer</h1>
-        <div class="upload-form">
-          <p>No OpenAPI spec loaded. Start the server with <code>--openapi &lt;spec&gt;</code> to browse endpoints.</p>
-        </div>`;
-      if (isHtmx) return c.html(content);
-      return c.html(layout("Explorer", content));
-    }
-
-    // Group by tags
-    const groups = new Map<string, { endpoint: EndpointInfo; idx: number }[]>();
-    deps.endpoints.forEach((ep, idx) => {
-      const tag = ep.tags[0] ?? "default";
-      const list = groups.get(tag) ?? [];
-      list.push({ endpoint: ep, idx });
-      groups.set(tag, list);
-    });
-
-    let groupsHtml = "";
-    for (const [tag, items] of groups) {
-      const endpointsHtml = items
-        .map(({ endpoint, idx }) => {
-          const detailId = `endpoint-detail-${idx}`;
-          return `
-            <div class="endpoint-item" onclick="var d=document.getElementById('${detailId}');d.style.display=d.style.display==='none'?'block':'none'">
-              ${methodBadge(endpoint.method)}
-              <span class="endpoint-path">${escapeHtml(endpoint.path)}</span>
-              <span class="endpoint-summary">${endpoint.summary ? escapeHtml(endpoint.summary) : ""}</span>
-            </div>
-            <div class="detail-panel" id="${detailId}" style="display:none">
-              ${parameterRows(endpoint)}
-              ${requestBodySection(endpoint)}
-              ${responsesSection(endpoint)}
-              ${tryItForm(endpoint, idx, deps.servers)}
-            </div>`;
-        })
-        .join("");
-
-      groupsHtml += `
-        <div class="endpoint-group">
-          <h2>${escapeHtml(tag)}</h2>
-          ${endpointsHtml}
-        </div>`;
-    }
-
-    const content = `
-      <h1>API Explorer</h1>
-      <p>Spec: <code>${escapeHtml(deps.specPath)}</code> — ${deps.endpoints.length} endpoints</p>
-      ${authorizePanel(deps)}
-      ${groupsHtml}`;
-
+    const content = renderExplorerContent(deps);
     if (isHtmx) return c.html(content);
     return c.html(layout("Explorer", content));
   });
 
   return explorer;
+}
+
+export function createCollectionExplorerRoute() {
+  const route = new Hono();
+
+  route.get("/collections/:id/explorer", async (c) => {
+    const id = parseInt(c.req.param("id"), 10);
+    const isHtmx = c.req.header("HX-Request") === "true";
+
+    const { getCollectionById } = await import("../../db/queries.ts");
+    const collection = getCollectionById(id);
+    if (!collection) {
+      const content = `<h1>Collection not found</h1><a href="/">Back to dashboard</a>`;
+      if (isHtmx) return c.html(content);
+      return c.html(layout("Not Found", content), 404);
+    }
+
+    if (!collection.openapi_spec) {
+      const content = `
+        <a href="/collections/${id}" style="color:var(--text-dim);text-decoration:none;font-size:0.9rem;">&larr; Back to collection</a>
+        <h1>${escapeHtml(collection.name)} — Explorer</h1>
+        <p>No OpenAPI spec linked to this collection.</p>`;
+      if (isHtmx) return c.html(content);
+      return c.html(layout("Explorer", content));
+    }
+
+    try {
+      const deps = await loadExplorerDepsForSpec(collection.openapi_spec);
+      const breadcrumb = `<a href="/collections/${id}" style="color:var(--text-dim);text-decoration:none;font-size:0.9rem;">&larr; Back to ${escapeHtml(collection.name)}</a>`;
+      const content = renderExplorerContent(deps, { breadcrumb });
+      if (isHtmx) return c.html(content);
+      return c.html(layout(`${collection.name} — Explorer`, content));
+    } catch (err) {
+      const content = `
+        <a href="/collections/${id}" style="color:var(--text-dim);text-decoration:none;font-size:0.9rem;">&larr; Back to collection</a>
+        <h1>${escapeHtml(collection.name)} — Explorer</h1>
+        <p style="color:var(--fail);">Failed to load OpenAPI spec: ${escapeHtml((err as Error).message)}</p>`;
+      if (isHtmx) return c.html(content);
+      return c.html(layout("Explorer", content));
+    }
+  });
+
+  return route;
 }
 
 export default createExplorerRoute;

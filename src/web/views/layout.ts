@@ -1,4 +1,13 @@
+let _devMode = false;
+
+export function setDevMode(enabled: boolean): void {
+  _devMode = enabled;
+}
+
 export function layout(title: string, content: string): string {
+  const devScript = _devMode
+    ? `<script>new EventSource('/dev/reload').onmessage = (e) => { if (e.data === 'reload') location.reload() }</script>`
+    : "";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,6 +16,7 @@ export function layout(title: string, content: string): string {
   <title>${escapeHtml(title)} — apitool</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
+  <script>htmx.config.refreshOnHistoryMiss = true;</script>
 </head>
 <body>
   <nav class="navbar">
@@ -15,7 +25,6 @@ export function layout(title: string, content: string): string {
       <a href="/">Dashboard</a>
       <a href="/runs">Runs</a>
       <a href="/environments">Environments</a>
-      <a href="/explorer">Explorer</a>
     </div>
   </nav>
   <main class="container">
@@ -24,6 +33,7 @@ export function layout(title: string, content: string): string {
   <footer class="footer">
     <div class="container">apitool v0.1.0</div>
   </footer>
+  ${devScript}
 </body>
 </html>`;
 }

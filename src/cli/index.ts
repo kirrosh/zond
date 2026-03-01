@@ -151,6 +151,7 @@ Options for 'serve':
   --host <host>        Server host (default: 0.0.0.0)
   --openapi <spec>     Path to OpenAPI spec for Explorer
   --db <path>          Path to SQLite database file (default: apitool.db)
+  --watch              Enable dev mode with hot reload (auto-refresh browser on file changes)
 
 General:
   --help, -h           Show this help
@@ -287,6 +288,7 @@ async function main(): Promise<number> {
         host: typeof flags["host"] === "string" ? flags["host"] : undefined,
         openapiSpec: typeof flags["openapi"] === "string" ? flags["openapi"] : undefined,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+        watch: flags["watch"] === true,
       });
     }
 

@@ -6,21 +6,51 @@ import api from "./routes/api.ts";
 import collections from "./routes/collections.ts";
 import aiGenerate from "./routes/ai-generate.ts";
 import environments from "./routes/environments.ts";
-import { createExplorerRoute, type ExplorerDeps, type ServerInfo } from "./routes/explorer.ts";
-import type { EndpointInfo } from "../core/generator/types.ts";
+import { createExplorerRoute, createCollectionExplorerRoute, loadExplorerDepsForSpec, type ExplorerDeps } from "./routes/explorer.ts";
 import styleCssPath from "./static/style.css" with { type: "file" };
-import { resolve, dirname } from "path";
-const htmxJsPath = resolve(dirname(new URL(import.meta.url).pathname), "static/htmx.min.js");
+import htmxJsPath from "./static/htmx.min.js" with { type: "file" };
 
 export interface ServerOptions {
   port?: number;
   host?: string;
   dbPath?: string;
   openapiSpec?: string;
+  dev?: boolean;
 }
 
-export function createApp(explorerDeps: ExplorerDeps) {
+// SSE clients for dev hot reload
+let devClients: ReadableStreamDefaultController[] = [];
+
+export function notifyDevReload() {
+  for (const ctrl of devClients) {
+    try { ctrl.enqueue("data: reload\n\n"); } catch { /* client gone */ }
+  }
+}
+
+export function createApp(explorerDeps: ExplorerDeps, options?: { dev?: boolean }) {
   const app = new OpenAPIHono();
+
+  // Dev hot reload SSE endpoint
+  if (options?.dev) {
+    app.get("/dev/reload", (c) => {
+      const stream = new ReadableStream({
+        start(controller) {
+          devClients.push(controller);
+          controller.enqueue("data: connected\n\n");
+        },
+        cancel() {
+          devClients = devClients.filter((c) => c !== arguments[0]);
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        },
+      });
+    });
+  }
 
   // Static files
   app.get("/static/:file", async (c) => {
@@ -49,6 +79,7 @@ export function createApp(explorerDeps: ExplorerDeps) {
   app.route("/", aiGenerate);
   app.route("/", environments);
   app.route("/", createExplorerRoute(explorerDeps));
+  app.route("/", createCollectionExplorerRoute());
 
   // OpenAPI spec endpoint — derive server URL from the incoming request
   app.doc("/api/openapi.json", (c) => ({
@@ -77,10 +108,6 @@ export async function startServer(options: ServerOptions = {}): Promise<void> {
   getDb(options.dbPath);
 
   // Load OpenAPI spec if provided
-  let endpoints: EndpointInfo[] = [];
-  let servers: ServerInfo[] = [];
-  let securitySchemes: import("../core/generator/types.ts").SecuritySchemeInfo[] = [];
-  let loginPath: string | null = null;
   let specPath: string | null = options.openapiSpec ?? null;
 
   // Auto-detect spec from collections if not provided
@@ -95,63 +122,49 @@ export async function startServer(options: ServerOptions = {}): Promise<void> {
     } catch { /* DB not critical */ }
   }
 
+  let explorerDeps: ExplorerDeps = { endpoints: [], specPath: null, servers: [], securitySchemes: [], loginPath: null };
   if (specPath) {
     try {
-      const { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } = await import("../core/generator/openapi-reader.ts");
-      const doc = await readOpenApiSpec(specPath);
-      endpoints = extractEndpoints(doc);
-      securitySchemes = extractSecuritySchemes(doc);
-      // Extract servers from spec (like Swagger UI does)
-      if (doc.servers && Array.isArray(doc.servers)) {
-        servers = doc.servers.map((s: any) => ({
-          url: (s.url ?? "").replace(/\/+$/, ""),
-          description: s.description,
-        }));
-      }
-
-      // If all servers are relative URLs, try to resolve using environment base_url
-      const allRelative = servers.length > 0 && servers.every(s => !s.url.startsWith("http"));
-      if (allRelative) {
-        try {
-          const { listCollections, getEnvironment } = await import("../db/queries.ts");
-          const { sanitizeEnvName } = await import("../core/generator/skeleton.ts");
-          const specTitle = (doc as any).info?.title;
-          // Try environment matching spec title
-          const envName = specTitle ? sanitizeEnvName(specTitle) : null;
-          const env = envName ? getEnvironment(envName) : null;
-          if (env?.base_url) {
-            const envBase = env.base_url.replace(/\/+$/, "");
-            // If env base_url is also relative, keep as-is
-            if (envBase.startsWith("http")) {
-              servers = servers.map(s => ({
-                url: envBase,
-                description: s.description ?? "From environment",
-              }));
-            }
-          }
-        } catch { /* DB not critical */ }
-      }
-      // Auto-detect login endpoint: POST, path contains /auth or /login or /token, no security
-      const loginEndpoint = endpoints.find((ep) => {
-        if (ep.method !== "POST") return false;
-        if (ep.security.length > 0) return false;
-        return /\/(auth|login|token)/i.test(ep.path);
-      });
-      if (loginEndpoint) loginPath = loginEndpoint.path;
+      explorerDeps = await loadExplorerDepsForSpec(specPath);
     } catch (err) {
       console.error(`Warning: failed to load OpenAPI spec: ${(err as Error).message}`);
-      specPath = null;
     }
   }
 
-  const app = createApp({ endpoints, specPath, servers, securitySchemes, loginPath });
+  // Enable dev mode in layout
+  if (options.dev) {
+    const { setDevMode } = await import("./views/layout.ts");
+    setDevMode(true);
+  }
+
+  const app = createApp(explorerDeps, { dev: options.dev });
 
   const { getRuntimeInfo } = await import("../cli/runtime.ts");
-  console.log(`apitool server (${getRuntimeInfo()}) running at http://${host === "0.0.0.0" ? "localhost" : host}:${port}`);
+  const devLabel = options.dev ? " [dev]" : "";
+  console.log(`apitool server (${getRuntimeInfo()}) running at http://${host === "0.0.0.0" ? "localhost" : host}:${port}${devLabel}`);
 
   Bun.serve({
     fetch: app.fetch,
     port,
     hostname: host,
   });
+
+  // File watcher for dev hot reload
+  if (options.dev) {
+    const { watch } = await import("fs");
+    const { dirname } = await import("path");
+    const { fileURLToPath } = await import("url");
+    const webDir = dirname(fileURLToPath(import.meta.url));
+    const { clearExplorerCache } = await import("./routes/explorer.ts");
+
+    console.log(`Watching ${webDir} for changes...`);
+    watch(webDir, { recursive: true }, (_event, filename) => {
+      if (!filename) return;
+      const ext = filename.split(".").pop();
+      if (!["ts", "css", "html", "js"].includes(ext ?? "")) return;
+      console.log(`[dev] changed: ${filename}`);
+      clearExplorerCache();
+      notifyDevReload();
+    });
+  }
 }
