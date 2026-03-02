@@ -7,6 +7,7 @@
 | [GLOSSARY.md](GLOSSARY.md) | Тезаурус сущностей — Collection, Suite, Run, Environment и др. |
 | [agent.md](agent.md) | Agent Module — AI Chat Assistant (AI SDK v6, tools, провайдеры) |
 | [generation-issues.md](generation-issues.md) | Известные проблемы при генерации тестов и их решения |
+| [ci.md](ci.md) | CI/CD интеграция — GitHub Actions, GitLab CI, Jenkins, секреты |
 
 ## Архив
 

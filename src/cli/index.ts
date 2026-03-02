@@ -14,6 +14,7 @@ import { runsCommand } from "./commands/runs.ts";
 import { coverageCommand } from "./commands/coverage.ts";
 import { doctorCommand } from "./commands/doctor.ts";
 import { addApiCommand } from "./commands/add-api.ts";
+import { ciInitCommand } from "./commands/ci-init.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { getDb } from "../db/schema.ts";
@@ -83,6 +84,7 @@ Usage:
   apitool collections      List test collections
   apitool serve            Start web dashboard
   apitool init             Initialize a new apitool project
+  apitool ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
   apitool mcp              Start MCP server (stdio transport for AI agents)
   apitool chat             Start interactive AI chat for API testing
   apitool doctor           Run diagnostic checks
@@ -147,6 +149,12 @@ Options for 'serve':
   --openapi <spec>     Path to OpenAPI spec for Explorer
   --db <path>          Path to SQLite database file (default: apitool.db)
   --watch              Enable dev mode with hot reload (auto-refresh browser on file changes)
+
+Options for 'ci init':
+  --github             Generate GitHub Actions workflow
+  --gitlab             Generate GitLab CI config
+  --dir <path>         Project root directory (default: current directory)
+  --force              Overwrite existing CI config
 
 General:
   --help, -h           Show this help
@@ -411,6 +419,22 @@ async function main(): Promise<number> {
         runId,
         limit,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+      });
+    }
+
+    case "ci": {
+      const ciSub = positional[0];
+      if (ciSub !== "init") {
+        printError("Usage: apitool ci init [--github|--gitlab] [--force]");
+        return 2;
+      }
+      let platform: "github" | "gitlab" | undefined;
+      if (flags["github"] === true) platform = "github";
+      else if (flags["gitlab"] === true) platform = "gitlab";
+      return ciInitCommand({
+        platform,
+        force: flags["force"] === true,
+        dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
       });
     }
 

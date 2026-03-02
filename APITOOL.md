@@ -62,9 +62,9 @@ apitool/
 │   ├── db/                   # SQLite storage (runs, collections, environments)
 │   ├── mcp/                  # MCP Server — AI agent integration
 │   │   ├── server.ts
-│   │   └── tools/            # 14 MCP tools
+│   │   └── tools/            # 15 MCP tools
 │   ├── web/                  # Hono + HTMX dashboard
-│   └── cli/                  # 15 CLI commands
+│   └── cli/                  # 16 CLI commands
 ```
 
 ---
@@ -87,7 +87,7 @@ apitool/
 
 ## MCP Tools
 
-The primary way AI agents interact with apitool. 14 tools available:
+The primary way AI agents interact with apitool. 15 tools available:
 
 | Tool | Description | When to use |
 |------|-------------|-------------|
@@ -101,6 +101,7 @@ The primary way AI agents interact with apitool. 14 tools available:
 | `send_request` | Ad-hoc HTTP request with variable interpolation | Manual API exploration |
 | `manage_environment` | CRUD for environments (list/get/set/delete) | Configure base_url, tokens, credentials |
 | `manage_server` | Start/stop/restart/status the WebUI server | View results in browser without leaving MCP |
+| `ci_init` | Generate CI/CD workflow (GitHub Actions / GitLab CI) | **After** tests pass — scaffold CI pipeline |
 | `list_collections` | List registered APIs with stats | Overview of registered APIs |
 | `list_runs` | Recent test run history | Review past results |
 | `get_run_results` | Detailed results for a specific run | Deep dive into a run |
@@ -136,6 +137,7 @@ The primary way AI agents interact with apitool. 14 tools available:
 | `mcp` | Start MCP server | `--db` |
 | `doctor` | Diagnostics | |
 | `init` | Scaffold new project | |
+| `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
 | `update` | Self-update | |
 
 ---

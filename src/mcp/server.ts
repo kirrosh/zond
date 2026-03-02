@@ -12,6 +12,7 @@ import { registerGenerateTestsGuideTool } from "./tools/generate-tests-guide.ts"
 import { registerSetupApiTool } from "./tools/setup-api.ts";
 import { registerGenerateMissingTestsTool } from "./tools/generate-missing-tests.ts";
 import { registerManageServerTool } from "./tools/manage-server.ts";
+import { registerCiInitTool } from "./tools/ci-init.ts";
 
 export interface McpServerOptions {
   dbPath?: string;
@@ -38,6 +39,7 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
   registerSetupApiTool(server, dbPath);
   registerGenerateMissingTestsTool(server);
   registerManageServerTool(server, dbPath);
+  registerCiInitTool(server);
 
   // Connect via stdio transport
   const transport = new StdioServerTransport();

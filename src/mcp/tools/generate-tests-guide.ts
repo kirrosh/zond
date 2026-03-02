@@ -293,5 +293,14 @@ ${hasAuth ? `**Auth suite** (\`auth.yaml\`):
 | \`query_db\` | Query runs, collections, results, diagnose failures |
 | \`coverage_analysis\` | Find untested endpoints for incremental generation |
 | \`explore_api\` | Re-check specific endpoints (use includeSchemas=true) |
+| \`ci_init\` | Generate CI/CD workflow (GitHub Actions / GitLab CI) to run tests on push |
+
+## Workflow After Tests Pass
+
+After tests are saved and running successfully, ask the user if they want to set up CI/CD:
+1. Use \`ci_init\` to generate a CI workflow (auto-detects platform or use platform param)
+2. Help them commit and push to their repository
+3. Tests will run automatically on push, PR, and on schedule
 `;
+}
 }

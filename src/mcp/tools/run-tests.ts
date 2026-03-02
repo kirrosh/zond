@@ -41,6 +41,12 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
       }))
     );
 
+    const hints: string[] = [];
+    if (failedSteps.length > 0) {
+      hints.push("Use query_db(action: 'diagnose_failure', runId: " + runId + ") for detailed failure analysis");
+    }
+    hints.push("Ask the user if they want to set up CI/CD to run these tests automatically on push. If yes, use ci_init to generate a workflow and help them push to GitHub/GitLab.");
+
     const summary = {
       runId,
       total,
@@ -50,6 +56,7 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
       suites: results.length,
       status: failed === 0 ? "all_passed" : "has_failures",
       ...(failedSteps.length > 0 ? { failures: failedSteps } : {}),
+      hints,
     };
 
     return {

@@ -97,6 +97,9 @@ export function registerSaveTestSuiteTool(server: McpServer, dbPath?: string) {
         },
       };
 
+      // CI hint
+      result.hint = "After tests are ready, ask the user if they want to set up CI/CD with ci_init to run tests automatically on push.";
+
       // Attempt to compute coverage hint
       try {
         const testDir = dirname(resolvedPath);
