@@ -10,7 +10,7 @@ export function registerGenerateTestsGuideTool(server: McpServer) {
       "Returns the full API specification (with request/response schemas) and a step-by-step algorithm " +
       "for creating YAML test files. Use this BEFORE generating tests — it gives you " +
       "everything you need to write high-quality test suites. " +
-      "After generating, use save_test_suite to save, run_tests to execute, and diagnose_failure to debug.",
+      "After generating, use save_test_suite to save, run_tests to execute, and query_db(action: 'diagnose_failure') to debug.",
     inputSchema: {
       specPath: z.string().describe("Path or URL to OpenAPI spec file"),
       outputDir: z.optional(z.string()).describe("Directory for saving test files (default: ./tests/)"),
@@ -252,7 +252,7 @@ ${hasAuth ? `**Auth suite** (\`auth.yaml\`):
 ### Step 4: Save, Run, Debug
 1. Use \`save_test_suite\` to save each file — it validates YAML before writing
 2. Use \`run_tests\` to execute — review pass/fail summary
-3. If failures: use \`diagnose_failure\` with the runId to see full request/response details
+3. If failures: use \`query_db\` with \`action: "diagnose_failure"\` and the runId to see full request/response details
 4. Fix issues and re-save with \`overwrite: true\`
 
 ---
@@ -290,7 +290,7 @@ ${hasAuth ? `**Auth suite** (\`auth.yaml\`):
 | \`generate_missing_tests\` | Get guide for only uncovered endpoints |
 | \`save_test_suite\` | Save generated YAML (validates before writing) |
 | \`run_tests\` | Execute saved test suites |
-| \`diagnose_failure\` | Analyze failures with full request/response details |
+| \`query_db\` | Query runs, collections, results, diagnose failures |
 | \`coverage_analysis\` | Find untested endpoints for incremental generation |
 | \`explore_api\` | Re-check specific endpoints (use includeSchemas=true) |
 `;

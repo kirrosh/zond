@@ -7,10 +7,6 @@ import {
   createRun,
   finalizeRun,
   saveResults,
-  listRuns,
-  listCollections,
-  listEnvironmentRecords,
-  upsertEnvironment,
 } from "../../src/db/queries.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
 
@@ -106,10 +102,10 @@ describe("validate_tests", () => {
 });
 
 // ──────────────────────────────────────────────
-// list_runs
+// query_db
 // ──────────────────────────────────────────────
 
-describe("list_runs", () => {
+describe("query_db", () => {
   let dbFile: string;
 
   beforeEach(() => {
@@ -122,32 +118,45 @@ describe("list_runs", () => {
     tryUnlink(dbFile);
   });
 
-  test("returns empty array on fresh DB", async () => {
-    const { registerListRunsTool } = await import("../../src/mcp/tools/list-runs.ts");
+  test("list_collections returns empty array on fresh DB", async () => {
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
 
     const server = new McpServer({ name: "test", version: "0.0.1" });
-    registerListRunsTool(server, dbFile);
+    registerQueryDbTool(server, dbFile);
 
-    const tool = (server as any)._registeredTools["list_runs"];
-    const result = await tool.handler({ limit: undefined });
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "list_collections" });
 
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed).toEqual([]);
   });
 
-  test("returns runs after inserting data", async () => {
+  test("list_runs returns empty array on fresh DB", async () => {
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
+
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerQueryDbTool(server, dbFile);
+
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "list_runs" });
+
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed).toEqual([]);
+  });
+
+  test("list_runs returns runs after inserting data", async () => {
     const suiteResult = makeSuiteResult();
     const runId = createRun({ started_at: suiteResult.started_at, trigger: "mcp" });
     finalizeRun(runId, [suiteResult]);
     saveResults(runId, [suiteResult]);
 
-    const { registerListRunsTool } = await import("../../src/mcp/tools/list-runs.ts");
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
 
     const server = new McpServer({ name: "test", version: "0.0.1" });
-    registerListRunsTool(server, dbFile);
+    registerQueryDbTool(server, dbFile);
 
-    const tool = (server as any)._registeredTools["list_runs"];
-    const result = await tool.handler({ limit: undefined });
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "list_runs", limit: 10 });
 
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed).toHaveLength(1);
@@ -155,52 +164,34 @@ describe("list_runs", () => {
     expect(parsed[0].passed).toBe(1);
     expect(parsed[0].failed).toBe(1);
   });
-});
 
-// ──────────────────────────────────────────────
-// get_run_results
-// ──────────────────────────────────────────────
-
-describe("get_run_results", () => {
-  let dbFile: string;
-
-  beforeEach(() => {
-    dbFile = tmpDb();
-    getDb(dbFile);
-  });
-
-  afterEach(() => {
-    closeDb();
-    tryUnlink(dbFile);
-  });
-
-  test("returns error for non-existent run", async () => {
-    const { registerGetRunResultsTool } = await import("../../src/mcp/tools/get-run-results.ts");
+  test("get_run_results returns error for non-existent run", async () => {
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
 
     const server = new McpServer({ name: "test", version: "0.0.1" });
-    registerGetRunResultsTool(server, dbFile);
+    registerQueryDbTool(server, dbFile);
 
-    const tool = (server as any)._registeredTools["get_run_results"];
-    const result = await tool.handler({ runId: 999 });
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "get_run_results", runId: 999 });
 
     expect(result.isError).toBe(true);
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.error).toContain("999");
   });
 
-  test("returns detailed results for existing run", async () => {
+  test("get_run_results returns detailed results for existing run", async () => {
     const suiteResult = makeSuiteResult();
     const runId = createRun({ started_at: suiteResult.started_at, trigger: "mcp" });
     finalizeRun(runId, [suiteResult]);
     saveResults(runId, [suiteResult]);
 
-    const { registerGetRunResultsTool } = await import("../../src/mcp/tools/get-run-results.ts");
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
 
     const server = new McpServer({ name: "test", version: "0.0.1" });
-    registerGetRunResultsTool(server, dbFile);
+    registerQueryDbTool(server, dbFile);
 
-    const tool = (server as any)._registeredTools["get_run_results"];
-    const result = await tool.handler({ runId });
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "get_run_results", runId });
 
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.run.id).toBe(runId);
@@ -209,86 +200,49 @@ describe("get_run_results", () => {
     expect(parsed.results[0].test_name).toBe("Get user");
     expect(parsed.results[1].test_name).toBe("Create user");
   });
-});
 
-// ──────────────────────────────────────────────
-// list_collections
-// ──────────────────────────────────────────────
-
-describe("list_collections", () => {
-  let dbFile: string;
-
-  beforeEach(() => {
-    dbFile = tmpDb();
-    getDb(dbFile);
-  });
-
-  afterEach(() => {
-    closeDb();
-    tryUnlink(dbFile);
-  });
-
-  test("returns empty array on fresh DB", async () => {
-    const { registerListCollectionsTool } = await import("../../src/mcp/tools/list-collections.ts");
+  test("get_run_results requires runId", async () => {
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
 
     const server = new McpServer({ name: "test", version: "0.0.1" });
-    registerListCollectionsTool(server, dbFile);
+    registerQueryDbTool(server, dbFile);
 
-    const tool = (server as any)._registeredTools["list_collections"];
-    const result = await tool.handler({});
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "get_run_results" });
 
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed).toEqual([]);
-  });
-});
-
-// ──────────────────────────────────────────────
-// list_environments
-// ──────────────────────────────────────────────
-
-describe("list_environments", () => {
-  let dbFile: string;
-
-  beforeEach(() => {
-    dbFile = tmpDb();
-    getDb(dbFile);
+    expect(result.isError).toBe(true);
   });
 
-  afterEach(() => {
-    closeDb();
-    tryUnlink(dbFile);
-  });
+  test("diagnose_failure returns only failures", async () => {
+    const suiteResult = makeSuiteResult();
+    const runId = createRun({ started_at: suiteResult.started_at, trigger: "mcp" });
+    finalizeRun(runId, [suiteResult]);
+    saveResults(runId, [suiteResult]);
 
-  test("returns empty array on fresh DB", async () => {
-    const { registerListEnvironmentsTool } = await import("../../src/mcp/tools/list-environments.ts");
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
 
     const server = new McpServer({ name: "test", version: "0.0.1" });
-    registerListEnvironmentsTool(server, dbFile);
+    registerQueryDbTool(server, dbFile);
 
-    const tool = (server as any)._registeredTools["list_environments"];
-    const result = await tool.handler({});
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "diagnose_failure", runId });
 
     const parsed = JSON.parse(result.content[0].text);
-    expect(parsed).toEqual([]);
+    expect(parsed.run.id).toBe(runId);
+    expect(parsed.summary.failed).toBe(1);
+    expect(parsed.failures.length).toBeGreaterThan(0);
+    expect(parsed.failures.every((f: any) => f.status === "fail" || f.status === "error")).toBe(true);
   });
 
-  test("returns environments with variable keys only", async () => {
-    upsertEnvironment("staging", { base_url: "https://staging.example.com", api_key: "secret123" });
-
-    const { registerListEnvironmentsTool } = await import("../../src/mcp/tools/list-environments.ts");
+  test("diagnose_failure returns error for missing run", async () => {
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
 
     const server = new McpServer({ name: "test", version: "0.0.1" });
-    registerListEnvironmentsTool(server, dbFile);
+    registerQueryDbTool(server, dbFile);
 
-    const tool = (server as any)._registeredTools["list_environments"];
-    const result = await tool.handler({});
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "diagnose_failure", runId: 9999 });
 
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].name).toBe("staging");
-    expect(parsed[0].variables).toContain("base_url");
-    expect(parsed[0].variables).toContain("api_key");
-    // Values should NOT be included
-    expect(result.content[0].text).not.toContain("secret123");
+    expect(result.isError).toBe(true);
   });
 });
