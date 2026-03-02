@@ -79,6 +79,12 @@ export function formatSuiteResult(result: TestRunResult, color: boolean): string
   const header = color ? ` ${BOLD}${result.suite_name}${RESET}` : ` ${result.suite_name}`;
   lines.push(header);
 
+  // Tags
+  if (result.suite_tags?.length) {
+    const tagsStr = result.suite_tags.map(t => `[${t}]`).join(" ");
+    lines.push(color ? `  ${DIM}${tagsStr}${RESET}` : `  ${tagsStr}`);
+  }
+
   // Steps
   for (const step of result.steps) {
     lines.push(formatStep(step, color));

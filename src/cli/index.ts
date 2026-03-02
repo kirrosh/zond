@@ -137,6 +137,7 @@ Options for 'run':
   --db <path>          Path to SQLite database file (default: apitool.db)
   --auth-token <token> Auth token injected as {{auth_token}} variable
   --safe               Run only GET tests (read-only, safe mode)
+  --tag <tag>          Filter suites by tag (repeatable, comma-separated, OR logic)
 
 Options for 'ai-generate':
   --api <name>         Use API collection (auto-resolves spec and output dir)
@@ -246,6 +247,20 @@ async function main(): Promise<number> {
         }
       }
 
+      // Collect all --tag flags (parseArgs only stores last one, so re-parse)
+      const tagValues: string[] = [];
+      const rawRunArgs = process.argv.slice(2);
+      for (let i = 0; i < rawRunArgs.length; i++) {
+        if (rawRunArgs[i] === "--tag" && rawRunArgs[i + 1]) {
+          tagValues.push(rawRunArgs[i + 1]!);
+          i++;
+        } else if (rawRunArgs[i]?.startsWith("--tag=")) {
+          tagValues.push(rawRunArgs[i]!.slice("--tag=".length));
+        }
+      }
+      // Support comma-separated: --tag smoke,crud → ["smoke", "crud"]
+      const tags = tagValues.flatMap(v => v.split(",")).filter(Boolean);
+
       return runCommand({
         path,
         env: typeof flags["env"] === "string" ? flags["env"] : undefined,
@@ -256,6 +271,7 @@ async function main(): Promise<number> {
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
         authToken: typeof flags["auth-token"] === "string" ? flags["auth-token"] : undefined,
         safe: flags["safe"] === true,
+        tag: tags.length > 0 ? tags : undefined,
       });
     }
 

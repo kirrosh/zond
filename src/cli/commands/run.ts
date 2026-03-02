@@ -1,6 +1,7 @@
 import { dirname } from "path";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
+import { filterSuitesByTags } from "../../core/parser/filter.ts";
 import { runSuite } from "../../core/runner/executor.ts";
 import { getReporter } from "../../core/reporter/index.ts";
 import type { ReporterName } from "../../core/reporter/types.ts";
@@ -20,6 +21,7 @@ export interface RunOptions {
   dbPath?: string;
   authToken?: string;
   safe?: boolean;
+  tag?: string[];
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -37,7 +39,16 @@ export async function runCommand(options: RunOptions): Promise<number> {
     return 0;
   }
 
-  // 1b. Safe mode: filter to GET-only tests
+  // 1b. Tag filter
+  if (options.tag && options.tag.length > 0) {
+    suites = filterSuitesByTags(suites, options.tag);
+    if (suites.length === 0) {
+      printWarning("No suites match the specified tags");
+      return 0;
+    }
+  }
+
+  // 1c. Safe mode: filter to GET-only tests
   if (options.safe) {
     for (const suite of suites) {
       suite.tests = suite.tests.filter(t => t.method === "GET");

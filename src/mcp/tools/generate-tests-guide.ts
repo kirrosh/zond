@@ -125,6 +125,8 @@ ${opts.apiContext}
 
 \`\`\`yaml
 name: "Suite Name"
+description: "What this suite tests"  # optional
+tags: [smoke, crud]                   # optional — used for filtering with --tag
 base_url: "{{base_url}}"
 headers:                          # optional suite-level headers
   Authorization: "Bearer {{auth_token}}"

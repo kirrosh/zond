@@ -1,5 +1,6 @@
 import { parse } from "../parser/yaml-parser.ts";
 import { loadEnvironment } from "../parser/variables.ts";
+import { filterSuitesByTags } from "../parser/filter.ts";
 import { runSuite } from "./executor.ts";
 import { getDb } from "../../db/schema.ts";
 import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from "../../db/queries.ts";
@@ -13,6 +14,7 @@ export interface ExecuteRunOptions {
   trigger?: string;  // "cli" | "webui" | "mcp"
   dbPath?: string;
   safe?: boolean;
+  tag?: string[];
 }
 
 export interface ExecuteRunResult {
@@ -21,11 +23,19 @@ export interface ExecuteRunResult {
 }
 
 export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRunResult> {
-  const { testPath, envName, trigger = "cli", dbPath, safe } = options;
+  const { testPath, envName, trigger = "cli", dbPath, safe, tag } = options;
 
   let suites = await parse(testPath);
   if (suites.length === 0) {
     throw new Error("No test files found");
+  }
+
+  // Tag filter
+  if (tag && tag.length > 0) {
+    suites = filterSuitesByTags(suites, tag);
+    if (suites.length === 0) {
+      throw new Error("No suites match the specified tags");
+    }
   }
 
   // Safe mode: filter to GET-only tests

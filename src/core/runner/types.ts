@@ -36,6 +36,8 @@ export interface StepResult {
 
 export interface TestRunResult {
   suite_name: string;
+  suite_tags?: string[];
+  suite_description?: string;
   started_at: string;
   finished_at: string;
   total: number;

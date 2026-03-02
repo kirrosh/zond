@@ -159,6 +159,8 @@ const TestSuiteSchema = z.preprocess(
   },
   z.object({
     name: z.string(),
+    description: z.string().optional(),
+    tags: z.array(z.string()).optional(),
     base_url: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),
     config: SuiteConfigSchema,
