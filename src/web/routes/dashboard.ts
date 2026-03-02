@@ -1,207 +1,329 @@
 import { Hono } from "hono";
 import { layout, escapeHtml } from "../views/layout.ts";
-import {
-  getDashboardStats,
-  getSlowestTests,
-  getFlakyTests,
-  listRuns,
-  listCollections,
-  getPassRateTrend,
-} from "../../db/queries.ts";
+import { statusBadge, renderSuiteResults, failedFilterToggle, autoExpandFailedScript, methodBadge } from "../views/results.ts";
 import { formatDuration } from "../../core/reporter/console.ts";
-import { renderTrendChart } from "../views/trend-chart.ts";
+import {
+  listCollections,
+  listEnvironmentRecords,
+  listRunsByCollection,
+  countRunsByCollection,
+  getResultsByRunId,
+  getRunById,
+  getCollectionById,
+} from "../../db/queries.ts";
+import type { CollectionSummary } from "../../db/queries.ts";
 
 const dashboard = new Hono();
 
-function statusBadge(total: number, passed: number, failed: number): string {
-  if (total === 0) return `<span class="badge badge-skip">empty</span>`;
-  if (failed > 0) return `<span class="badge badge-fail">fail</span>`;
-  return `<span class="badge badge-pass">pass</span>`;
-}
+const HISTORY_PAGE_SIZE = 10;
 
-function progressBar(total: number, passed: number, failed: number, skipped: number): string {
-  if (total === 0) return `<div class="progress-bar"><div class="progress-skip" style="width:100%"></div></div>`;
-  const pP = (passed / total) * 100;
-  const pF = (failed / total) * 100;
-  const pS = (skipped / total) * 100;
-  return `<div class="progress-bar">
-    <div class="progress-pass" style="width:${pP}%"></div>
-    <div class="progress-fail" style="width:${pF}%"></div>
-    <div class="progress-skip" style="width:${pS}%"></div>
-  </div>`;
-}
-
-function collectionBadge(total: number, passed: number, failed: number): string {
-  if (total === 0) return `<span class="badge badge-skip">no runs</span>`;
-  if (failed > 0) return `<span class="badge badge-fail">fail</span>`;
-  return `<span class="badge badge-pass">pass</span>`;
-}
-
-function collectionsHtml(): string {
-  const cols = listCollections();
-  if (cols.length === 0) return "";
-
-  const cards = cols
-    .map(
-      (c) => `<div class="collection-card">
-      <a href="/collections/${c.id}" hx-get="/collections/${c.id}" hx-target="main" hx-push-url="true" style="text-decoration:none;color:inherit;">
-        <div class="collection-card-header">
-          <span class="collection-name">${escapeHtml(c.name)}</span>
-          ${collectionBadge(c.last_run_total, c.last_run_passed, c.last_run_failed)}
-        </div>
-        <div class="collection-card-stats">
-          <span>${c.total_runs} run${c.total_runs !== 1 ? "s" : ""}</span>
-          <span>${c.pass_rate}% pass rate</span>
-        </div>
-        <div class="collection-card-date">${c.last_run_at ? escapeHtml(c.last_run_at) : "No runs yet"}</div>
-      </a>
-      <div class="collection-card-actions">
-        <button class="btn btn-sm btn-run"
-          hx-post="/run"
-          hx-vals='${JSON.stringify({ path: c.test_path })}'
-          hx-indicator="#run-spinner-${c.id}"
-          hx-disabled-elt="this"
-          onclick="event.stopPropagation()">Run</button>
-        <span id="run-spinner-${c.id}" class="htmx-indicator" style="color:var(--text-dim);font-size:0.8rem;">Running...</span>
-      </div>
-    </div>`,
-    )
-    .join("");
-
-  return `
-    <div class="section-title">Collections</div>
-    <div class="collection-grid">${cards}</div>`;
-}
-
-function addCollectionForm(): string {
-  return `
-    <details class="add-collection-form">
-      <summary class="btn btn-outline btn-sm" style="margin:1rem 0;">Add Collection</summary>
-      <form action="/collections" method="POST" style="margin-top:0.75rem;">
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:0.5rem;align-items:end;">
-          <div>
-            <label style="font-size:0.85rem;font-weight:600;">Name</label>
-            <input name="name" required placeholder="e.g. Petstore API" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.85rem;width:100%;">
-          </div>
-          <div>
-            <label style="font-size:0.85rem;font-weight:600;">Test Path</label>
-            <input name="test_path" required placeholder="e.g. ./tests/pet" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.85rem;width:100%;">
-          </div>
-          <div>
-            <label style="font-size:0.85rem;font-weight:600;">OpenAPI Spec (optional)</label>
-            <input name="openapi_spec" placeholder="e.g. ./specs/pet.json" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.85rem;width:100%;">
-          </div>
-          <button type="submit" class="btn btn-sm">Create</button>
-        </div>
-      </form>
-    </details>`;
-}
-
-function metricsHtml(): string {
-  const stats = getDashboardStats();
-  const recent = listRuns(5, 0);
-  const slowest = getSlowestTests(5);
-  const flaky = getFlakyTests(20, 5);
-
-  const cards = `
-    <div class="cards">
-      <div class="card">
-        <div class="card-label">Total Runs</div>
-        <div class="card-value">${stats.totalRuns}</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Total Tests</div>
-        <div class="card-value">${stats.totalTests}</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Pass Rate</div>
-        <div class="card-value">${stats.overallPassRate}%</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Avg Duration</div>
-        <div class="card-value">${formatDuration(stats.avgDuration)}</div>
-      </div>
-    </div>`;
-
-  const trendChart = renderTrendChart(getPassRateTrend(30));
-  const collectionsSection = collectionsHtml();
-  const addForm = addCollectionForm();
-
-  const recentRows = recent
-    .map(
-      (r) => `<tr>
-      <td><a href="/runs/${r.id}">#${r.id}</a></td>
-      <td>${escapeHtml(r.started_at)}</td>
-      <td>${r.total}</td>
-      <td>${r.passed}</td>
-      <td>${r.failed}</td>
-      <td>${r.skipped}</td>
-      <td>${r.duration_ms != null ? formatDuration(r.duration_ms) : "-"}</td>
-      <td>${statusBadge(r.total, r.passed, r.failed)}</td>
-    </tr>`,
-    )
-    .join("");
-
-  const recentTable = `
-    <div class="section-title">Recent Runs</div>
-    <table>
-      <thead><tr>
-        <th>ID</th><th>Date</th><th>Total</th><th>Pass</th><th>Fail</th><th>Skip</th><th>Duration</th><th>Status</th>
-      </tr></thead>
-      <tbody>${recentRows || "<tr><td colspan=\"8\">No runs yet</td></tr>"}</tbody>
-    </table>
-    <a href="/runs" class="btn btn-outline btn-sm" hx-get="/runs" hx-target="main" hx-push-url="true">View all runs</a>`;
-
-  const slowRows = slowest
-    .map(
-      (t) => `<tr>
-      <td>${escapeHtml(t.suite_name)}</td>
-      <td>${escapeHtml(t.test_name)}</td>
-      <td>${formatDuration(t.avg_duration)}</td>
-    </tr>`,
-    )
-    .join("");
-
-  const slowTable = `
-    <div class="section-title">Slowest Tests</div>
-    <table>
-      <thead><tr><th>Suite</th><th>Test</th><th>Avg Duration</th></tr></thead>
-      <tbody>${slowRows || "<tr><td colspan=\"3\">No data</td></tr>"}</tbody>
-    </table>`;
-
-  const flakyRows = flaky
-    .map(
-      (t) => `<tr>
-      <td>${escapeHtml(t.suite_name)}</td>
-      <td>${escapeHtml(t.test_name)}</td>
-      <td>${t.distinct_statuses} statuses</td>
-    </tr>`,
-    )
-    .join("");
-
-  const flakyTable = `
-    <div class="section-title">Flaky Tests</div>
-    <table>
-      <thead><tr><th>Suite</th><th>Test</th><th>Variation</th></tr></thead>
-      <tbody>${flakyRows || "<tr><td colspan=\"3\">No flaky tests detected</td></tr>"}</tbody>
-    </table>`;
-
-  return cards + trendChart + collectionsSection + addForm + recentTable + slowTable + flakyTable;
-}
+// ──────────────────────────────────────────────
+// GET / — Single-page dashboard
+// ──────────────────────────────────────────────
 
 dashboard.get("/", (c) => {
+  const collections = listCollections();
+
+  // Auto-select the only collection, or use query param
+  let selectedId: number | null = null;
+  const qId = c.req.query("collection");
+  if (qId) {
+    selectedId = parseInt(qId, 10) || null;
+  } else if (collections.length === 1) {
+    selectedId = collections[0]!.id;
+  }
+
+  const content = renderPage(collections, selectedId);
   const isHtmx = c.req.header("HX-Request") === "true";
-  const content = `<h1>Dashboard</h1>
-    <div id="metrics" hx-get="/metrics" hx-trigger="every 10s" hx-swap="innerHTML">
-      ${metricsHtml()}
+  if (isHtmx) return c.html(content);
+  return c.html(layout("apitool", content));
+});
+
+// ──────────────────────────────────────────────
+// HTMX panel endpoints
+// ──────────────────────────────────────────────
+
+dashboard.get("/panels/content", (c) => {
+  const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
+  if (isNaN(collectionId)) return c.html("");
+
+  const collection = getCollectionById(collectionId);
+  if (!collection) return c.html("<p>Collection not found</p>");
+
+  const envRecords = listEnvironmentRecords(collectionId);
+  return c.html(renderCollectionContent(collection, envRecords));
+});
+
+dashboard.get("/panels/results", async (c) => {
+  const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
+  const runId = parseInt(c.req.query("run_id") ?? "", 10);
+
+  if (!isNaN(runId)) {
+    return c.html(renderRunResults(runId));
+  }
+
+  if (!isNaN(collectionId)) {
+    // Get latest run for this collection
+    const runs = listRunsByCollection(collectionId, 1, 0);
+    if (runs.length === 0) return c.html(`<p style="color:var(--text-dim);">No runs yet. Click <strong>Run Tests</strong> to get started.</p>`);
+    return c.html(renderRunResults(runs[0]!.id));
+  }
+
+  return c.html("");
+});
+
+dashboard.get("/panels/coverage", async (c) => {
+  const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
+  if (isNaN(collectionId)) return c.html("");
+
+  const collection = getCollectionById(collectionId);
+  if (!collection?.openapi_spec) return c.html("");
+
+  return c.html(await renderCoveragePanel(collection));
+});
+
+dashboard.get("/panels/history", (c) => {
+  const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
+  const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10));
+  if (isNaN(collectionId)) return c.html("");
+
+  return c.html(renderHistoryPanel(collectionId, page));
+});
+
+// ──────────────────────────────────────────────
+// Rendering functions
+// ──────────────────────────────────────────────
+
+function renderPage(collections: CollectionSummary[], selectedId: number | null): string {
+  if (collections.length === 0) {
+    return `
+      <div style="text-align:center;padding:3rem 1rem;">
+        <h1>apitool</h1>
+        <p style="color:var(--text-dim);margin:1rem 0;">No API collections registered yet.</p>
+        <p style="color:var(--text-dim);">Use <code>setup_api</code> via CLI or MCP to register your first API.</p>
+      </div>`;
+  }
+
+  const selected = selectedId ? collections.find(col => col.id === selectedId) ?? null : null;
+  const envRecords = selected ? listEnvironmentRecords(selected.id) : [];
+
+  // API selector
+  const collectionOptions = collections.map(col =>
+    `<option value="${col.id}"${col.id === selectedId ? " selected" : ""}>${escapeHtml(col.name)}${col.last_run_total > 0 ? ` (${col.pass_rate}%)` : ""}</option>`,
+  ).join("");
+
+  const selectorHtml = collections.length === 1
+    ? `<span style="font-weight:600;font-size:1.1rem;">${escapeHtml(collections[0]!.name)}</span>
+       <input type="hidden" id="collection-select" value="${collections[0]!.id}">`
+    : `<select id="collection-select"
+        hx-get="/panels/content"
+        hx-target="#collection-content"
+        hx-swap="innerHTML"
+        name="collection_id"
+        style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:1rem;font-weight:600;">
+        <option value="">Select an API...</option>
+        ${collectionOptions}
+      </select>`;
+
+  return `
+    <div style="display:flex;align-items:center;gap:1rem;margin:1.5rem 0 1rem;">
+      ${selectorHtml}
+    </div>
+    <div id="collection-content">
+      ${selected ? renderCollectionContent(selected, envRecords) : ""}
+    </div>`;
+}
+
+function renderCollectionContent(collection: CollectionSummary, envRecords: { id: number; name: string; collection_id: number | null }[]): string {
+  // Auto-select: prefer first scoped env, then first env if only one
+  const defaultEnv = envRecords.find(e => e.collection_id !== null)?.name
+    ?? (envRecords.length === 1 ? envRecords[0]!.name : null);
+
+  const envOptions = envRecords.map(e =>
+    `<option value="${escapeHtml(e.name)}"${e.name === defaultEnv ? " selected" : ""}>${escapeHtml(e.name)}${e.collection_id ? "" : " (global)"}</option>`,
+  ).join("");
+
+  const envSelect = envRecords.length > 0
+    ? `<select name="env" form="run-form" style="padding:0.35rem 0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.85rem;">
+        <option value="">No environment</option>
+        ${envOptions}
+      </select>`
+    : "";
+
+  const actionBar = `
+    <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">
+      ${envSelect}
+      <form id="run-form"
+        hx-post="/run"
+        hx-target="#results-panel"
+        hx-swap="innerHTML"
+        hx-indicator="#run-spinner"
+        style="display:inline;">
+        <input type="hidden" name="path" value="${escapeHtml(collection.test_path)}">
+        <button type="submit" class="btn btn-run" hx-disabled-elt="this">Run Tests</button>
+        <span id="run-spinner" class="htmx-indicator" style="color:var(--text-dim);font-size:0.85rem;margin-left:0.25rem;">Running...</span>
+      </form>
     </div>`;
 
-  if (isHtmx) return c.html(content);
-  return c.html(layout("Dashboard", content));
-});
+  return `
+    ${actionBar}
+    <div id="coverage-panel"
+      hx-get="/panels/coverage?collection_id=${collection.id}"
+      hx-trigger="load"
+      hx-swap="innerHTML">
+    </div>
+    <div id="results-panel"
+      hx-get="/panels/results?collection_id=${collection.id}"
+      hx-trigger="load"
+      hx-swap="innerHTML">
+      <span class="htmx-indicator" style="color:var(--text-dim);">Loading results...</span>
+    </div>
+    <div id="history-panel"
+      hx-get="/panels/history?collection_id=${collection.id}"
+      hx-trigger="load"
+      hx-swap="innerHTML">
+    </div>`;
+}
 
-dashboard.get("/metrics", (c) => {
-  return c.html(metricsHtml());
-});
+function renderRunResults(runId: number): string {
+  const run = getRunById(runId);
+  if (!run) return `<p>Run not found</p>`;
+
+  const results = getResultsByRunId(runId);
+  if (results.length === 0) return `<p style="color:var(--text-dim);">No results for run #${runId}.</p>`;
+
+  const passed = run.passed;
+  const failed = run.failed;
+  const skipped = run.skipped;
+  const total = run.total;
+
+  const timeAgo = formatTimeAgo(run.started_at);
+  const duration = run.duration_ms != null ? formatDuration(run.duration_ms) : "-";
+
+  const header = `
+    <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);">
+      <strong>Run #${run.id}</strong>
+      <span style="color:var(--text-dim);font-size:0.85rem;">${escapeHtml(timeAgo)}</span>
+      <span style="font-size:0.9rem;">${passed}&#10003; ${failed}&#10007; ${skipped}&#9675;</span>
+      <span style="color:var(--text-dim);font-size:0.85rem;">${duration}</span>
+      ${statusBadge(total, passed, failed)}
+      <span style="flex:1;"></span>
+      <a href="/api/export/${run.id}/junit" download class="btn btn-sm btn-outline">Export JUnit</a>
+      <a href="/api/export/${run.id}/json" download class="btn btn-sm btn-outline">Export JSON</a>
+      ${failedFilterToggle()}
+    </div>`;
+
+  const suitesHtml = renderSuiteResults(results, runId);
+
+  return header + suitesHtml + autoExpandFailedScript();
+}
+
+async function renderCoveragePanel(collection: CollectionSummary & { openapi_spec: string }): Promise<string> {
+  try {
+    const { readOpenApiSpec, extractEndpoints } = await import("../../core/generator/openapi-reader.ts");
+    const { scanCoveredEndpoints, filterUncoveredEndpoints } = await import("../../core/generator/coverage-scanner.ts");
+
+    const doc = await readOpenApiSpec(collection.openapi_spec);
+    const allEndpoints = extractEndpoints(doc);
+    const covered = await scanCoveredEndpoints(collection.test_path);
+    const uncovered = filterUncoveredEndpoints(allEndpoints, covered);
+
+    const totalEndpoints = allEndpoints.length;
+    const coveredCount = totalEndpoints - uncovered.length;
+    const pct = totalEndpoints > 0 ? Math.round((coveredCount / totalEndpoints) * 100) : 0;
+
+    const badgeClass = pct >= 80 ? "badge-pass" : pct >= 50 ? "badge-skip" : "badge-fail";
+
+    // Build set of uncovered keys for lookup
+    const uncoveredSet = new Set(uncovered.map(ep => `${ep.method} ${ep.path}`));
+
+    // Show all endpoints: covered with checkmark, uncovered with X
+    const allItems = allEndpoints.map(ep => {
+      const isCovered = !uncoveredSet.has(`${ep.method} ${ep.path}`);
+      const icon = isCovered
+        ? `<span style="color:var(--pass);font-weight:700;">&#10003;</span>`
+        : `<span style="color:var(--fail);font-weight:700;">&#10007;</span>`;
+      return `<div style="padding:0.2rem 0;font-size:0.85rem;font-family:monospace;display:flex;align-items:center;gap:0.5rem;">
+          ${icon} ${methodBadge(ep.method)} ${escapeHtml(ep.path)}
+        </div>`;
+    }).join("");
+
+    const endpointsHtml = totalEndpoints > 0
+      ? `<details style="margin-top:0.5rem;">
+          <summary style="cursor:pointer;font-size:0.85rem;color:var(--text-dim);">Show all ${totalEndpoints} endpoints</summary>
+          <div style="margin-top:0.25rem;">${allItems}</div>
+        </details>`
+      : "";
+
+    return `
+      <div style="margin-bottom:1rem;">
+        <span style="font-size:0.9rem;font-weight:600;">Coverage:</span>
+        <span class="badge ${badgeClass}" style="margin-left:0.25rem;">${pct}% (${coveredCount}/${totalEndpoints})</span>
+        ${endpointsHtml}
+      </div>`;
+  } catch {
+    return "";
+  }
+}
+
+function renderHistoryPanel(collectionId: number, page: number): string {
+  const offset = (page - 1) * HISTORY_PAGE_SIZE;
+  const runs = listRunsByCollection(collectionId, HISTORY_PAGE_SIZE, offset);
+  const total = countRunsByCollection(collectionId);
+  const hasMore = offset + runs.length < total;
+
+  if (runs.length === 0 && page === 1) return "";
+
+  const rows = runs.map(r => {
+    const timeAgo = formatTimeAgo(r.started_at);
+    return `
+      <div class="history-row"
+        style="display:flex;align-items:center;gap:0.75rem;padding:0.4rem 0.5rem;border-bottom:1px solid var(--border);cursor:pointer;font-size:0.85rem;"
+        hx-get="/panels/results?run_id=${r.id}"
+        hx-target="#results-panel"
+        hx-swap="innerHTML">
+        <span style="font-weight:600;">#${r.id}</span>
+        <span style="color:var(--text-dim);min-width:5rem;">${escapeHtml(timeAgo)}</span>
+        <span>${r.passed}/${r.total} pass</span>
+        ${statusBadge(r.total, r.passed, r.failed)}
+        ${r.duration_ms != null ? `<span style="color:var(--text-dim);">${formatDuration(r.duration_ms)}</span>` : ""}
+      </div>`;
+  }).join("");
+
+  const loadMore = hasMore
+    ? `<div style="text-align:center;padding:0.5rem;">
+        <button class="btn btn-sm btn-outline"
+          hx-get="/panels/history?collection_id=${collectionId}&page=${page + 1}"
+          hx-target="#history-panel"
+          hx-swap="innerHTML">Load more...</button>
+      </div>`
+    : "";
+
+  return `
+    <div style="margin-top:1.5rem;">
+      <div style="font-weight:600;font-size:0.95rem;margin-bottom:0.5rem;padding-bottom:0.25rem;border-bottom:1px solid var(--border);">Run History</div>
+      ${rows}
+      ${loadMore}
+    </div>`;
+}
+
+function formatTimeAgo(isoDate: string): string {
+  try {
+    const date = new Date(isoDate);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    if (diffSec < 60) return "just now";
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    const diffDay = Math.floor(diffHr / 24);
+    if (diffDay < 7) return `${diffDay}d ago`;
+    return date.toLocaleDateString();
+  } catch {
+    return isoDate;
+  }
+}
 
 export default dashboard;

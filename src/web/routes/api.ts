@@ -1,16 +1,15 @@
 import { OpenAPIHono, createRoute } from "@hono/zod-openapi";
-import { escapeHtml } from "../views/layout.ts";
 import { getRunById, getResultsByRunId } from "../../db/queries.ts";
 import { generateJunitXml } from "../../core/reporter/junit.ts";
 import { executeRun } from "../../core/runner/execute-run.ts";
+import { statusBadge, renderSuiteResults, failedFilterToggle, autoExpandFailedScript } from "../views/results.ts";
+import { formatDuration } from "../../core/reporter/console.ts";
 import type { TestRunResult, StepResult } from "../../core/runner/types.ts";
 import {
   ErrorSchema,
   RunRequestSchema,
   RunResponseSchema,
   RunDetailSchema,
-  AuthorizeRequest,
-  AuthorizeResponse,
   RunIdParam,
 } from "../schemas.ts";
 
@@ -32,9 +31,46 @@ api.post("/run", async (c) => {
 
     const { runId } = await executeRun({ testPath, envName, trigger: "webui" });
 
+    // If targeted at the results panel (dashboard), return inline HTML
+    const hxTarget = c.req.header("HX-Target");
+    if (hxTarget === "results-panel") {
+      const run = getRunById(runId);
+      if (!run) {
+        c.header("HX-Redirect", `/runs/${runId}`);
+        return c.json({ runId });
+      }
+      const results = getResultsByRunId(runId);
+      const passed = run.passed;
+      const failed = run.failed;
+      const skipped = run.skipped;
+      const total = run.total;
+      const duration = run.duration_ms != null ? formatDuration(run.duration_ms) : "-";
+
+      const header = `
+        <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);">
+          <strong>Run #${run.id}</strong>
+          <span style="color:var(--text-dim);font-size:0.85rem;">just now</span>
+          <span style="font-size:0.9rem;">${passed}&#10003; ${failed}&#10007; ${skipped}&#9675;</span>
+          <span style="color:var(--text-dim);font-size:0.85rem;">${duration}</span>
+          ${statusBadge(total, passed, failed)}
+          <span style="flex:1;"></span>
+          <a href="/api/export/${run.id}/junit" download class="btn btn-sm btn-outline">Export JUnit</a>
+          <a href="/api/export/${run.id}/json" download class="btn btn-sm btn-outline">Export JSON</a>
+          ${failedFilterToggle()}
+        </div>`;
+
+      const suitesHtml = renderSuiteResults(results, runId);
+      return c.html(header + suitesHtml + autoExpandFailedScript());
+    }
+
+    // Default: redirect to run detail page
     c.header("HX-Redirect", `/runs/${runId}`);
     return c.json({ runId });
   } catch (err) {
+    const hxTarget = c.req.header("HX-Target");
+    if (hxTarget === "results-panel") {
+      return c.html(`<div style="color:var(--fail);padding:1rem;border:1px solid var(--fail);border-radius:6px;">Error: ${(err as Error).message}</div>`, 500);
+    }
     return c.json({ error: (err as Error).message }, 500);
   }
 });
@@ -73,160 +109,6 @@ api.openapi(runRoute, async (c) => {
 
     c.header("HX-Redirect", `/runs/${runId}`);
     return c.json({ runId }, 200);
-  } catch (err) {
-    return c.json({ error: (err as Error).message }, 500);
-  }
-});
-
-// POST /api/try — HTMX-only, returns HTML fragment (not in OpenAPI spec)
-api.post("/api/try", async (c) => {
-  try {
-    let method: string;
-    let url: string;
-    let headers: Record<string, string> = {};
-    let body: string | undefined;
-
-    const contentType = c.req.header("content-type") ?? "";
-
-    if (contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) {
-      const formData = await c.req.parseBody();
-      method = (formData["method"] as string)?.toUpperCase() ?? "GET";
-      const basePath = formData["path"] as string ?? "/";
-      const baseUrl = (formData["base_url"] as string ?? "").replace(/\/+$/, "");
-
-      let resolvedPath = basePath;
-      const queryParts: string[] = [];
-
-      for (const [key, value] of Object.entries(formData)) {
-        if (key.startsWith("path_") && typeof value === "string" && value) {
-          const paramName = key.slice(5);
-          resolvedPath = resolvedPath.replace(`{${paramName}}`, encodeURIComponent(value));
-        } else if (key.startsWith("query_") && typeof value === "string" && value) {
-          const paramName = key.slice(6);
-          queryParts.push(`${encodeURIComponent(paramName)}=${encodeURIComponent(value)}`);
-        } else if (key.startsWith("header_") && typeof value === "string" && value) {
-          const headerName = key.slice(7);
-          headers[headerName] = value;
-        }
-      }
-
-      url = baseUrl + resolvedPath;
-      if (queryParts.length > 0) url += "?" + queryParts.join("&");
-
-      const rawBody = formData["body"] as string | undefined;
-      if (rawBody && rawBody.trim()) {
-        body = rawBody;
-        if (!headers["Content-Type"]) headers["Content-Type"] = "application/json";
-      }
-    } else {
-      const json = await c.req.json();
-      method = (json.method ?? "GET").toUpperCase();
-      url = json.url ?? "";
-      headers = json.headers ?? {};
-      body = json.body ? (typeof json.body === "string" ? json.body : JSON.stringify(json.body)) : undefined;
-    }
-
-    if (!url) {
-      return c.html(`<div class="response-status status-4xx">Error: missing URL</div>`, 400);
-    }
-
-    // Auto-resolve relative URLs using Referer or Origin header
-    if (!url.startsWith("http://") && !url.startsWith("https://")) {
-      return c.html(`<div class="response-status status-4xx">Error: Base URL must be an absolute URL (e.g. https://api.example.com). Got: ${escapeHtml(url)}</div>`, 400);
-    }
-
-    const start = performance.now();
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: body ?? undefined,
-      tls: { rejectUnauthorized: false },
-    });
-    const duration = Math.round(performance.now() - start);
-
-    const responseBody = await response.text();
-    const statusClass = response.status < 400 ? "status-2xx" : response.status < 500 ? "status-4xx" : "status-5xx";
-
-    let prettyBody = escapeHtml(responseBody);
-    try {
-      const parsed = JSON.parse(responseBody);
-      prettyBody = escapeHtml(JSON.stringify(parsed, null, 2));
-    } catch {
-      // Not JSON, use raw
-    }
-
-    const respHeaders = Array.from(response.headers.entries())
-      .map(([k, v]) => `${escapeHtml(k)}: ${escapeHtml(v)}`)
-      .join("\n");
-
-    return c.html(`
-      <div class="response-status ${statusClass}">${response.status} ${escapeHtml(response.statusText)} (${duration}ms)</div>
-      <details><summary>Headers</summary><pre>${respHeaders}</pre></details>
-      <pre>${prettyBody}</pre>
-    `);
-  } catch (err) {
-    return c.html(`<div class="response-status status-5xx">Error: ${escapeHtml((err as Error).message)}</div>`, 500);
-  }
-});
-
-// ──────────────────────────────────────────────
-// POST /api/authorize
-// ──────────────────────────────────────────────
-
-const authorizeRoute = createRoute({
-  method: "post",
-  path: "/api/authorize",
-  tags: ["Auth"],
-  summary: "Proxy login request and extract token",
-  request: {
-    body: {
-      content: { "application/json": { schema: AuthorizeRequest } },
-      required: true,
-    },
-  },
-  responses: {
-    200: {
-      content: { "application/json": { schema: AuthorizeResponse } },
-      description: "Token extracted",
-    },
-    400: {
-      content: { "application/json": { schema: ErrorSchema } },
-      description: "Missing fields",
-    },
-    401: {
-      content: { "application/json": { schema: ErrorSchema } },
-      description: "Login failed",
-    },
-    500: {
-      content: { "application/json": { schema: ErrorSchema } },
-      description: "Server error",
-    },
-  },
-});
-
-api.openapi(authorizeRoute, async (c) => {
-  try {
-    const { base_url, path, username, password } = c.req.valid("json");
-    const url = base_url.replace(/\/+$/, "") + path;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-      tls: { rejectUnauthorized: false },
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      return c.json({ error: `Login failed (${response.status}): ${text}` }, 401);
-    }
-
-    const data = await response.json() as any;
-    const token = data.token ?? data.access_token;
-    if (!token) {
-      return c.json({ error: "No token in response" }, 401);
-    }
-
-    return c.json({ token }, 200);
   } catch (err) {
     return c.json({ error: (err as Error).message }, 500);
   }

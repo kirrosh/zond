@@ -20,12 +20,7 @@ export function layout(title: string, content: string): string {
 </head>
 <body>
   <nav class="navbar">
-    <div class="nav-brand">apitool</div>
-    <div class="nav-links">
-      <a href="/">Dashboard</a>
-      <a href="/runs">Runs</a>
-      <a href="/environments">Environments</a>
-    </div>
+    <a href="/" class="nav-brand" style="text-decoration:none;color:inherit;">apitool</a>
   </nav>
   <main class="container">
     ${content}
