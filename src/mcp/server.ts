@@ -22,7 +22,7 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
 
   const server = new McpServer({
     name: "apitool",
-    version: "0.1.0",
+    version: "0.4.0",
   });
 
   // Register all tools

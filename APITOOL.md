@@ -239,9 +239,12 @@ Current schema version: **5**. Tables: `collections`, `runs`, `results`, `enviro
 | M11-M14 | Done | Suite details, public release, environments, self-documented API |
 | M15-M16 | Done | MCP server (11 tools), generate wizard |
 | M19-M21 | Done | Unified capabilities, doctor/import/export, collection architecture |
-| **M22** | **Done** | **MCP-first smart test generation** — `generate_tests_guide`, `save_test_suite`, enhanced `explore_api` with schemas |
+| M22 | Done | MCP-first smart test generation — `generate_tests_guide`, `save_test_suite`, enhanced `explore_api` with schemas |
+| M23-M24 | Done | Runner improvements, tags/description in suites, unified `query_db` tool |
+| M26 | Done | WebUI single-page dashboard |
+| **M27** | **Done** | **`manage_server` MCP tool, coverage hint in `save_test_suite`, suite metadata in WebUI** |
 
-See [docs/BACKLOG-AI-NATIVE.md](docs/BACKLOG-AI-NATIVE.md) for future milestones (M23+).
+See [docs/BACKLOG-AI-NATIVE.md](docs/BACKLOG-AI-NATIVE.md) for future milestones.
 See [docs/archive/](docs/archive/) for historical documentation snapshots.
 
 ---
