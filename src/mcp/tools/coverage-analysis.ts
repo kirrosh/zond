@@ -4,7 +4,8 @@ import { readOpenApiSpec, extractEndpoints, scanCoveredEndpoints, filterUncovere
 
 export function registerCoverageAnalysisTool(server: McpServer) {
   server.registerTool("coverage_analysis", {
-    description: "Analyze API test coverage by comparing an OpenAPI spec against existing test files",
+    description: "Compare an OpenAPI spec against existing test files to find untested endpoints. " +
+      "Use to identify gaps and prioritize which endpoints to generate tests for next.",
     inputSchema: {
       specPath: z.string().describe("Path to OpenAPI spec file (JSON or YAML)"),
       testsDir: z.string().describe("Path to directory with test YAML files"),

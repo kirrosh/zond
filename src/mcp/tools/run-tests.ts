@@ -4,7 +4,8 @@ import { executeRun } from "../../core/runner/execute-run.ts";
 
 export function registerRunTestsTool(server: McpServer, dbPath?: string) {
   server.registerTool("run_tests", {
-    description: "Run API tests from a YAML file or directory and return results summary",
+    description: "Execute API tests from a YAML file or directory and return results summary with failures. " +
+      "Use after saving test suites with save_test_suite. Check diagnose_failure for detailed failure analysis.",
     inputSchema: {
       testPath: z.string().describe("Path to test YAML file or directory"),
       envName: z.optional(z.string()).describe("Environment name (loads .env.<name>.yaml)"),

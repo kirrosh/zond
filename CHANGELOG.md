@@ -6,6 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **M22: MCP-first smart test generation**
+  - `generate_tests_guide` MCP tool — returns full API spec with schemas + step-by-step generation algorithm
+  - `save_test_suite` MCP tool — validates YAML and saves test files with structured error reporting
+  - `explore_api` enhanced — new `includeSchemas` parameter for full request/response body schemas
+  - `schema-utils.ts` — extracted `compressSchema()` and `formatParam()` as shared utilities
+  - Improved MCP tool descriptions with "when to use" guidance
+
+### Removed
+
+- `list_environments` MCP tool — duplicated by `manage_environment(action: "list")`
+
+---
+
+## [0.3.0] - Unreleased (post-M21)
+
+### Added
+
 - **Environment management in WebUI** — full CRUD for environments (`/environments`)
 - **Key-value editor** — add/remove variables with inline JavaScript
 - **Environment selector** — `<select name="env">` dropdown in collection "Run Tests" form
