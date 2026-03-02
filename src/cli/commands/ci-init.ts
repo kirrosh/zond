@@ -16,6 +16,8 @@ on:
   schedule:
     - cron: "0 */6 * * *"
   workflow_dispatch:
+  repository_dispatch:
+    types: [api-updated]
 
 permissions:
   contents: read
@@ -51,7 +53,9 @@ jobs:
           path: test-results/junit.xml
 `;
 
-const GITLAB_CI_TEMPLATE = `api-tests:
+const GITLAB_CI_TEMPLATE = `# Trigger via API: curl -X POST --form ref=main --form token=TRIGGER_TOKEN $CI_API_V4_URL/projects/$CI_PROJECT_ID/trigger/pipeline
+
+api-tests:
   image: ubuntu:latest
   before_script:
     - apt-get update -qq && apt-get install -y -qq curl

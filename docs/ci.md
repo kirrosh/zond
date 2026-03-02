@@ -179,6 +179,80 @@ For simple bearer token auth, use `--auth-token` instead of an env file:
 apitool run apis/ --auth-token "$AUTH_TOKEN" --report junit --no-db
 ```
 
+## Triggers
+
+The generated workflow runs on push, PR, schedule, and manual dispatch by default. You can also trigger tests from external events.
+
+### Schedule (cron)
+
+Already included in the template. Adjust the cron expression:
+
+```yaml
+schedule:
+  - cron: "0 */6 * * *"   # every 6 hours
+  - cron: "0 9 * * 1-5"   # weekdays at 9am UTC
+  - cron: "*/30 * * * *"  # every 30 minutes
+```
+
+### Trigger from another repo (GitHub)
+
+Use `repository_dispatch` to trigger API tests when your backend repo deploys:
+
+**In the test repo workflow** (already included in template):
+```yaml
+on:
+  repository_dispatch:
+    types: [api-updated]
+```
+
+**In the backend repo** — add a step after deploy:
+```yaml
+# .github/workflows/deploy.yml (backend repo)
+- name: Trigger API tests
+  run: |
+    curl -X POST \
+      -H "Authorization: token ${{ secrets.TEST_REPO_PAT }}" \
+      -H "Accept: application/vnd.github.v3+json" \
+      https://api.github.com/repos/OWNER/apitool-tests/dispatches \
+      -d '{"event_type": "api-updated", "client_payload": {"env": "staging"}}'
+```
+
+Or with `gh` CLI:
+```bash
+gh api repos/OWNER/apitool-tests/dispatches \
+  -f event_type=api-updated \
+  -f 'client_payload[env]=staging'
+```
+
+> **Note:** Requires a Personal Access Token (PAT) with `repo` scope stored as a secret in the backend repo.
+
+### Trigger from another repo (GitLab)
+
+Use GitLab pipeline triggers:
+
+```bash
+curl -X POST \
+  --form "ref=main" \
+  --form "token=$TRIGGER_TOKEN" \
+  "https://gitlab.com/api/v4/projects/PROJECT_ID/trigger/pipeline"
+```
+
+Add the trigger token in GitLab: Settings → CI/CD → Pipeline triggers.
+
+### Webhook from external service
+
+Any service that can send HTTP POST requests can trigger tests:
+
+**GitHub:** Use `repository_dispatch` (see above)
+
+**GitLab:** Use pipeline trigger tokens
+
+**Generic (any CI):** Use the CI platform's API to trigger a build. Example with GitHub CLI:
+
+```bash
+gh workflow run api-tests.yml --repo OWNER/apitool-tests
+```
+
 ## Exit Codes
 
 | Code | Meaning |
