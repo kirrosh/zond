@@ -5,12 +5,13 @@ import { registerValidateTestsTool } from "./tools/validate-tests.ts";
 import { registerListCollectionsTool } from "./tools/list-collections.ts";
 import { registerListRunsTool } from "./tools/list-runs.ts";
 import { registerGetRunResultsTool } from "./tools/get-run-results.ts";
-import { registerListEnvironmentsTool } from "./tools/list-environments.ts";
 import { registerSendRequestTool } from "./tools/send-request.ts";
 import { registerExploreApiTool } from "./tools/explore-api.ts";
 import { registerManageEnvironmentTool } from "./tools/manage-environment.ts";
 import { registerDiagnoseFailureTool } from "./tools/diagnose-failure.ts";
 import { registerCoverageAnalysisTool } from "./tools/coverage-analysis.ts";
+import { registerSaveTestSuiteTool } from "./tools/save-test-suite.ts";
+import { registerGenerateTestsGuideTool } from "./tools/generate-tests-guide.ts";
 
 export interface McpServerOptions {
   dbPath?: string;
@@ -27,15 +28,16 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
   // Register all tools
   registerRunTestsTool(server, dbPath);
   registerValidateTestsTool(server);
-registerListCollectionsTool(server, dbPath);
+  registerListCollectionsTool(server, dbPath);
   registerListRunsTool(server, dbPath);
   registerGetRunResultsTool(server, dbPath);
-  registerListEnvironmentsTool(server, dbPath);
   registerSendRequestTool(server);
   registerExploreApiTool(server);
   registerManageEnvironmentTool(server, dbPath);
   registerDiagnoseFailureTool(server, dbPath);
   registerCoverageAnalysisTool(server);
+  registerSaveTestSuiteTool(server);
+  registerGenerateTestsGuideTool(server);
 
   // Connect via stdio transport
   const transport = new StdioServerTransport();

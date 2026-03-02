@@ -1,6 +1,6 @@
 import type { EndpointInfo, SecuritySchemeInfo } from "../types.ts";
 import type { ChatMessage } from "./llm-client.ts";
-import type { OpenAPIV3 } from "openapi-types";
+import { compressSchema, formatParam } from "../schema-utils.ts";
 
 const SYSTEM_PROMPT = `You are an API test generator. You produce JSON output that represents test suites for an API testing tool.
 
@@ -151,36 +151,3 @@ function compressEndpoints(
   return lines.join("\n");
 }
 
-function formatParam(p: OpenAPIV3.ParameterObject): string {
-  const schema = p.schema as OpenAPIV3.SchemaObject | undefined;
-  const type = schema?.type ?? "string";
-  const req = p.required ? " (req)" : "";
-  return `${p.name}: ${type}${req}`;
-}
-
-function compressSchema(schema: OpenAPIV3.SchemaObject, depth = 0): string {
-  if (depth > 2) return "{...}";
-
-  if (schema.type === "object" && schema.properties) {
-    const required = new Set(schema.required ?? []);
-    const fields = Object.entries(schema.properties).map(([key, propObj]) => {
-      const prop = propObj as OpenAPIV3.SchemaObject;
-      const type = prop.type ?? "any";
-      const flags: string[] = [];
-      if (required.has(key)) flags.push("req");
-      if (prop.format) flags.push(prop.format);
-      if (prop.enum) flags.push(`enum: ${prop.enum.join("|")}`);
-      const flagStr = flags.length > 0 ? ` (${flags.join(", ")})` : "";
-      return `${key}: ${type}${flagStr}`;
-    });
-    return `{ ${fields.join(", ")} }`;
-  }
-
-  if (schema.type === "array") {
-    const items = schema.items as OpenAPIV3.SchemaObject | undefined;
-    if (items) return `[${compressSchema(items, depth + 1)}]`;
-    return "[]";
-  }
-
-  return schema.type ?? "any";
-}

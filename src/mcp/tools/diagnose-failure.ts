@@ -5,7 +5,8 @@ import { getRunById, getResultsByRunId } from "../../db/queries.ts";
 
 export function registerDiagnoseFailureTool(server: McpServer, dbPath?: string) {
   server.registerTool("diagnose_failure", {
-    description: "Diagnose failures in a test run — analyze failed steps, errors, and assertion mismatches",
+    description: "Analyze failed tests with full request/response details, errors, and assertion mismatches. " +
+      "Use after run_tests reports failures — pass the runId to see exactly what went wrong.",
     inputSchema: {
       runId: z.number().int().describe("Run ID to diagnose"),
     },
