@@ -45,7 +45,7 @@ export function registerGenerateTestsGuideTool(server: McpServer) {
   });
 }
 
-function compressEndpointsWithSchemas(
+export function compressEndpointsWithSchemas(
   endpoints: EndpointInfo[],
   securitySchemes: SecuritySchemeInfo[],
 ): string {
@@ -99,20 +99,21 @@ function compressEndpointsWithSchemas(
   return lines.join("\n");
 }
 
-interface GuideOptions {
+export interface GuideOptions {
   title: string;
   baseUrl?: string;
   apiContext: string;
   outputDir: string;
   securitySchemes: SecuritySchemeInfo[];
   endpointCount: number;
+  coverageHeader?: string;
 }
 
-function buildGenerationGuide(opts: GuideOptions): string {
+export function buildGenerationGuide(opts: GuideOptions): string {
   const hasAuth = opts.securitySchemes.length > 0;
 
   return `# Test Generation Guide for ${opts.title}
-
+${opts.coverageHeader ? `\n${opts.coverageHeader}\n` : ""}
 ## API Specification (${opts.endpointCount} endpoints)
 ${opts.baseUrl ? `Base URL: ${opts.baseUrl}` : "Base URL: use {{base_url}} environment variable"}
 
@@ -164,6 +165,35 @@ tests:
 - \`gt: N\` / \`lt: N\` — numeric comparison
 - \`exists: true|false\` — field presence check (MUST be boolean, not string)
 
+### Nested Body Assertions
+Both forms are equivalent and supported:
+
+**Dot-notation (flat):**
+\`\`\`yaml
+body:
+  "category.name": { equals: "Dogs" }
+  "address.city": { type: "string" }
+\`\`\`
+
+**Nested YAML (auto-flattened):**
+\`\`\`yaml
+body:
+  category:
+    name: { equals: "Dogs" }
+  address:
+    city: { type: "string" }
+\`\`\`
+
+### Root Body Assertions (\`_body\`)
+Use \`_body\` to assert on the response body itself (not a field inside it):
+
+\`\`\`yaml
+body:
+  _body: { type: "array" }           # check that response body IS an array
+  _body: { type: "object" }          # check that response body IS an object
+  _body: { exists: true }            # check that body is not null/undefined
+\`\`\`
+
 ### Built-in Generators
 Use in string values: \`{{$randomInt}}\`, \`{{$uuid}}\`, \`{{$timestamp}}\`, \`{{$randomEmail}}\`, \`{{$randomString}}\`, \`{{$randomName}}\`
 These are the ONLY generators — do NOT invent others.
@@ -184,6 +214,8 @@ These are the ONLY generators — do NOT invent others.
 - Note required fields in request bodies
 
 ### Step 2: Plan Test Suites
+Before generating, check coverage with \`coverage_analysis\` to avoid duplicating existing tests. Use \`generate_missing_tests\` for incremental generation.
+
 Create separate files for each concern:
 ${hasAuth ? `- \`${opts.outputDir}auth.yaml\` — Authentication flow\n` : ""}\
 - \`${opts.outputDir}{resource}-crud.yaml\` — CRUD lifecycle per resource
@@ -199,24 +231,39 @@ ${hasAuth ? `**Auth suite** (\`auth.yaml\`):
 
 ` : ""}\
 **CRUD lifecycle** (\`{resource}-crud.yaml\`):
-1. Create resource (POST) → 201, capture \`id\`
-2. Read created resource (GET /resource/{{id}}) → 200, verify fields
-3. Update resource (PUT/PATCH /resource/{{id}}) → 200
-4. Read updated resource → verify changes
-5. Delete resource (DELETE /resource/{{id}}) → 200/204
-6. Verify deleted (GET /resource/{{id}}) → 404
+1. Create resource (POST) → 201, **always verify key fields in response body** (at minimum: id, name/title)
+2. Read created resource (GET /resource/{{id}}) → 200, verify fields match what was sent
+3. List resources (GET /resource) → 200, verify \`_body: { type: "array" }\` AND \`_body.length: { gt: 0 }\`
+4. Update resource (PUT/PATCH /resource/{{id}}) → 200
+5. Read updated resource → verify changes applied
+6. Delete resource (DELETE /resource/{{id}}) → 200/204
+7. Verify deleted (GET /resource/{{id}}) → 404
+8. For bulk create endpoints (createWithArray/List): create → then GET each to verify they exist
 
 **Validation suite** (\`{resource}-validation.yaml\`):
-1. Create with missing required fields → 400/422
+1. Create with missing required fields → 400/422, verify \`message: { exists: true }\` in error body
 2. Create with invalid field types → 400/422
 3. Get non-existent resource (e.g. id=999999) → 404
 4. Delete non-existent resource → 404
+5. For error responses: always assert error body has meaningful content, not just status code
 
 ### Step 4: Save, Run, Debug
 1. Use \`save_test_suite\` to save each file — it validates YAML before writing
 2. Use \`run_tests\` to execute — review pass/fail summary
 3. If failures: use \`diagnose_failure\` with the runId to see full request/response details
 4. Fix issues and re-save with \`overwrite: true\`
+
+---
+
+## Practical Tips
+
+- **int64 IDs**: For APIs returning large auto-generated IDs (int64), prefer setting fixed IDs in request bodies rather than capturing auto-generated ones, as JSON number precision may cause mismatches.
+- **Nested assertions**: Use dot-notation or nested YAML — both work identically.
+- **Root body type**: Use \`_body: { type: "array" }\` to verify the response body type itself.
+- **List endpoints**: Always check both type AND non-emptiness: \`_body: { type: "array" }\` + \`_body.length: { gt: 0 }\`
+- **Create responses**: Always verify at least the key identifying fields (id, name) in the response body — don't just check status.
+- **Error responses**: Assert that error bodies contain useful info (\`message: { exists: true }\`), not just status codes.
+- **Bulk operations**: After bulk create (createWithArray, createWithList), add GET steps to verify resources were actually created.
 
 ---
 
@@ -236,6 +283,9 @@ ${hasAuth ? `**Auth suite** (\`auth.yaml\`):
 
 | Tool | When |
 |------|------|
+| \`setup_api\` | Register a new API (creates dirs, reads spec, sets up env) |
+| \`generate_tests_guide\` | Get this guide for full API spec |
+| \`generate_missing_tests\` | Get guide for only uncovered endpoints |
 | \`save_test_suite\` | Save generated YAML (validates before writing) |
 | \`run_tests\` | Execute saved test suites |
 | \`diagnose_failure\` | Analyze failures with full request/response details |

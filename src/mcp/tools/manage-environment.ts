@@ -9,7 +9,7 @@ export function registerManageEnvironmentTool(server: McpServer, dbPath?: string
     inputSchema: {
       action: z.enum(["list", "get", "set", "delete"]).describe("Action: list, get, set, or delete"),
       name: z.optional(z.string()).describe("Environment name (required for get/set/delete)"),
-      variables: z.optional(z.record(z.string(), z.string())).describe("Variables to set (for set action)"),
+      variables: z.optional(z.string()).describe("Variables as JSON string (for set action, e.g. '{\"base_url\": \"...\"}')"),
       collectionName: z.optional(z.string()).describe("API/collection name or ID to scope the environment to"),
     },
   }, async ({ action, name, variables, collectionName }) => {
@@ -69,7 +69,16 @@ export function registerManageEnvironmentTool(server: McpServer, dbPath?: string
               isError: true,
             };
           }
-          upsertEnvironment(name, variables, collectionId);
+          let parsedVars: Record<string, string>;
+          try {
+            parsedVars = JSON.parse(variables);
+          } catch {
+            return {
+              content: [{ type: "text" as const, text: JSON.stringify({ error: "variables must be a valid JSON string" }, null, 2) }],
+              isError: true,
+            };
+          }
+          upsertEnvironment(name, parsedVars, collectionId);
           return {
             content: [{ type: "text" as const, text: JSON.stringify({ success: true, name, collection_id: collectionId ?? null }, null, 2) }],
           };

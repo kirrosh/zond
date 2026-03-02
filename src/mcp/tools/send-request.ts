@@ -9,7 +9,7 @@ export function registerSendRequestTool(server: McpServer) {
     inputSchema: {
       method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]).describe("HTTP method"),
       url: z.string().describe("Request URL (supports {{variable}} interpolation)"),
-      headers: z.optional(z.record(z.string(), z.string())).describe("Request headers"),
+      headers: z.optional(z.string()).describe("Request headers as JSON string (e.g. '{\"Content-Type\": \"application/json\"}')"),
       body: z.optional(z.string()).describe("Request body (JSON string)"),
       timeout: z.optional(z.number().int().positive()).describe("Request timeout in ms"),
       envName: z.optional(z.string()).describe("Environment name for variable interpolation"),
@@ -19,7 +19,8 @@ export function registerSendRequestTool(server: McpServer) {
       const vars = await loadEnvironment(envName);
 
       const resolvedUrl = substituteString(url, vars) as string;
-      const resolvedHeaders = headers ? substituteDeep(headers, vars) : {};
+      const parsedHeaders = headers ? JSON.parse(headers) as Record<string, string> : {};
+      const resolvedHeaders = Object.keys(parsedHeaders).length > 0 ? substituteDeep(parsedHeaders, vars) : {};
       const resolvedBody = body ? substituteString(body, vars) as string : undefined;
 
       const response = await executeRequest(

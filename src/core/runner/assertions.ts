@@ -131,7 +131,14 @@ export function checkAssertions(expect: TestStepExpect, response: HttpResponse):
 
   if (expect.body && response.body_parsed !== undefined) {
     for (const [path, rule] of Object.entries(expect.body)) {
-      const actual = getByPath(response.body_parsed, path);
+      let actual: unknown;
+      if (path === "_body") {
+        actual = response.body_parsed;
+      } else if (path.startsWith("_body.")) {
+        actual = getByPath(response.body_parsed, path.slice(6));
+      } else {
+        actual = getByPath(response.body_parsed, path);
+      }
       results.push(...checkRule(path, rule, actual));
     }
   }
@@ -148,7 +155,14 @@ export function extractCaptures(
 
   for (const [path, rule] of Object.entries(bodyRules)) {
     if (rule.capture) {
-      const value = getByPath(responseBody, path);
+      let value: unknown;
+      if (path === "_body") {
+        value = responseBody;
+      } else if (path.startsWith("_body.")) {
+        value = getByPath(responseBody, path.slice(6));
+      } else {
+        value = getByPath(responseBody, path);
+      }
       if (value !== undefined) {
         captures[rule.capture] = value;
       }

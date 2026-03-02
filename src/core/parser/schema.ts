@@ -29,6 +29,45 @@ function extractMethodAndPath(raw: unknown): unknown {
   return raw;
 }
 
+const ASSERTION_KEYS = new Set([
+  "capture", "type", "equals", "contains", "matches", "gt", "lt", "exists",
+]);
+
+/**
+ * Recursively flattens nested body assertion objects into dot-notation keys.
+ * e.g. { category: { name: { equals: "Dogs" } } } → { "category.name": { equals: "Dogs" } }
+ * Leaves assertion-level objects untouched (objects where all keys are ASSERTION_KEYS).
+ * Also skips the special `_body` key prefix.
+ */
+export function flattenBodyAssertions(body: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  function walk(obj: Record<string, unknown>, prefix: string) {
+    for (const [key, value] of Object.entries(obj)) {
+      const fullKey = prefix ? `${prefix}.${key}` : key;
+
+      if (
+        typeof value === "object" && value !== null && !Array.isArray(value) &&
+        !fullKey.startsWith("_body")
+      ) {
+        const objKeys = Object.keys(value as Record<string, unknown>);
+        const isAssertionRule = objKeys.length > 0 && objKeys.every(k => ASSERTION_KEYS.has(k));
+
+        if (isAssertionRule) {
+          result[fullKey] = value;
+        } else {
+          walk(value as Record<string, unknown>, fullKey);
+        }
+      } else {
+        result[fullKey] = value;
+      }
+    }
+  }
+
+  walk(body, "");
+  return result;
+}
+
 const AssertionRuleSchema: z.ZodType<AssertionRule> = z.preprocess(
   (val) => {
     if (typeof val === "string") return { type: val };
@@ -63,6 +102,10 @@ const TestStepExpectSchema: z.ZodType<TestStepExpect> = z.preprocess(
     if (obj.body === null) {
       const { body: _, ...rest } = obj;
       return rest;
+    }
+    // Flatten nested body assertions into dot-notation
+    if (obj.body && typeof obj.body === "object" && !Array.isArray(obj.body)) {
+      obj.body = flattenBodyAssertions(obj.body as Record<string, unknown>);
     }
     return obj;
   },
@@ -127,4 +170,4 @@ export function validateSuite(raw: unknown): TestSuite {
   return TestSuiteSchema.parse(raw) as TestSuite;
 }
 
-export { TestSuiteSchema, TestStepSchema, AssertionRuleSchema };
+export { TestSuiteSchema, TestStepSchema, AssertionRuleSchema, ASSERTION_KEYS };
