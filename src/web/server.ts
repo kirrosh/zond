@@ -3,11 +3,6 @@ import { getDb } from "../db/schema.ts";
 import dashboard from "./routes/dashboard.ts";
 import runs from "./routes/runs.ts";
 import api from "./routes/api.ts";
-import collections from "./routes/collections.ts";
-import aiGenerate from "./routes/ai-generate.ts";
-import environments from "./routes/environments.ts";
-import { createExplorerRoute, createCollectionExplorerRoute, loadExplorerDepsForSpec, type ExplorerDeps } from "./routes/explorer.ts";
-import { createCollectionSuitesRoute } from "./routes/suites.ts";
 import styleCssPath from "./static/style.css" with { type: "file" };
 import htmxJsPath from "./static/htmx.min.js" with { type: "file" };
 
@@ -15,7 +10,6 @@ export interface ServerOptions {
   port?: number;
   host?: string;
   dbPath?: string;
-  openapiSpec?: string;
   dev?: boolean;
 }
 
@@ -28,7 +22,7 @@ export function notifyDevReload() {
   }
 }
 
-export function createApp(explorerDeps: ExplorerDeps, options?: { dev?: boolean }) {
+export function createApp(options?: { dev?: boolean }) {
   const app = new OpenAPIHono();
 
   // Dev hot reload SSE endpoint
@@ -76,12 +70,6 @@ export function createApp(explorerDeps: ExplorerDeps, options?: { dev?: boolean 
   app.route("/", dashboard);
   app.route("/", runs);
   app.route("/", api);
-  app.route("/", collections);
-  app.route("/", aiGenerate);
-  app.route("/", environments);
-  app.route("/", createExplorerRoute(explorerDeps));
-  app.route("/", createCollectionExplorerRoute());
-  app.route("/", createCollectionSuitesRoute());
 
   // OpenAPI spec endpoint — derive server URL from the incoming request
   app.doc("/api/openapi.json", (c) => ({
@@ -109,37 +97,13 @@ export async function startServer(options: ServerOptions = {}): Promise<void> {
   // Initialize DB
   getDb(options.dbPath);
 
-  // Load OpenAPI spec if provided
-  let specPath: string | null = options.openapiSpec ?? null;
-
-  // Auto-detect spec from collections if not provided
-  if (!specPath) {
-    try {
-      const { listCollections } = await import("../db/queries.ts");
-      const cols = listCollections();
-      const withSpec = cols.find((c) => c.openapi_spec);
-      if (withSpec?.openapi_spec) {
-        specPath = withSpec.openapi_spec;
-      }
-    } catch { /* DB not critical */ }
-  }
-
-  let explorerDeps: ExplorerDeps = { endpoints: [], specPath: null, servers: [], securitySchemes: [], loginPath: null };
-  if (specPath) {
-    try {
-      explorerDeps = await loadExplorerDepsForSpec(specPath);
-    } catch (err) {
-      console.error(`Warning: failed to load OpenAPI spec: ${(err as Error).message}`);
-    }
-  }
-
   // Enable dev mode in layout
   if (options.dev) {
     const { setDevMode } = await import("./views/layout.ts");
     setDevMode(true);
   }
 
-  const app = createApp(explorerDeps, { dev: options.dev });
+  const app = createApp({ dev: options.dev });
 
   const { getRuntimeInfo } = await import("../cli/runtime.ts");
   const devLabel = options.dev ? " [dev]" : "";
@@ -157,7 +121,6 @@ export async function startServer(options: ServerOptions = {}): Promise<void> {
     const { dirname } = await import("path");
     const { fileURLToPath } = await import("url");
     const webDir = dirname(fileURLToPath(import.meta.url));
-    const { clearExplorerCache } = await import("./routes/explorer.ts");
 
     console.log(`Watching ${webDir} for changes...`);
     watch(webDir, { recursive: true }, (_event, filename) => {
@@ -165,7 +128,6 @@ export async function startServer(options: ServerOptions = {}): Promise<void> {
       const ext = filename.split(".").pop();
       if (!["ts", "css", "html", "js"].includes(ext ?? "")) return;
       console.log(`[dev] changed: ${filename}`);
-      clearExplorerCache();
       notifyDevReload();
     });
   }
