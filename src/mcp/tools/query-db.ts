@@ -106,6 +106,9 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
               request_method: r.request_method,
               request_url: r.request_url,
               response_status: r.response_status,
+              response_headers: r.response_headers
+                ? JSON.parse(r.response_headers)
+                : undefined,
               assertions: r.assertions,
               duration_ms: r.duration_ms,
             }));

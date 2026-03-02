@@ -23,6 +23,9 @@ Accept an array of `{filePath, content}` pairs in a single call. Reduces token u
 ### `apitool compare` command
 Compare two test runs — regression detection in CI.
 
+### Timestamp capture pattern
+When a `timestamp` field is detected in a request body schema (common in OAuth, AWS Sig, Ably tokens), add a hint in the guide: "consider GET /time before this step to capture the server timestamp".
+
 ### Per-suite env resolution
 When running `apitool run apis/` (directory with subdirs), resolve `.env.<name>.yaml` from each suite's directory, not from `dirname(path)`.
 
@@ -32,6 +35,9 @@ When running `apitool run apis/` (directory with subdirs), resolve `.env.<name>.
 
 ### Summary after batch generation
 After generating many suites, return a summary (created N files, total coverage %).
+
+### Env file location in MCP output
+`setup_api` should return the path to `.env.default.yaml` and a brief instruction for adding the API key in its response, so the agent knows exactly where to write credentials immediately after registration.
 
 ### Comment preservation
 Parser preserves YAML comments when reading/writing (currently lost).
