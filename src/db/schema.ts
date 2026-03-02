@@ -1,12 +1,22 @@
 import { Database } from "bun:sqlite";
 import { resolve } from "path";
+import { existsSync } from "fs";
 
 let _db: Database | null = null;
+let _dbPath: string | null = null;
 
 export function getDb(dbPath?: string): Database {
-  if (_db) return _db;
+  const path = dbPath ? resolve(dbPath) : (_dbPath ?? resolve(process.cwd(), "apitool.db"));
 
-  const path = dbPath ? resolve(dbPath) : resolve(process.cwd(), "apitool.db");
+  // If cached connection exists, verify the file still exists
+  if (_db && _dbPath === path && existsSync(path)) return _db;
+
+  // Close stale connection if any
+  if (_db) {
+    try { _db.close(); } catch {}
+    _db = null;
+    _dbPath = null;
+  }
   const db = new Database(path, { create: true });
 
   // Performance and integrity settings
@@ -16,13 +26,15 @@ export function getDb(dbPath?: string): Database {
   runMigrations(db);
 
   _db = db;
+  _dbPath = path;
   return db;
 }
 
 export function closeDb(): void {
   if (_db) {
-    _db.close();
+    try { _db.close(); } catch {}
     _db = null;
+    _dbPath = null;
   }
 }
 
@@ -30,7 +42,7 @@ export function closeDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 5;
 
 const SCHEMA_V1 = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -107,6 +119,60 @@ const SCHEMA_V2 = `
   CREATE INDEX IF NOT EXISTS idx_ai_gen_collection ON ai_generations(collection_id);
 `;
 
+const SCHEMA_V3 = `
+  CREATE TABLE IF NOT EXISTS chat_sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT,
+    provider    TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    last_active TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    INTEGER NOT NULL REFERENCES chat_sessions(id),
+    role          TEXT NOT NULL,
+    content       TEXT NOT NULL,
+    tool_name     TEXT,
+    tool_args     TEXT,
+    tool_result   TEXT,
+    input_tokens  INTEGER,
+    output_tokens INTEGER,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+  CREATE INDEX IF NOT EXISTS idx_chat_sessions_active  ON chat_sessions(last_active DESC);
+`;
+
+const SCHEMA_V4 = `
+  CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+`;
+
+const SCHEMA_V5 = `
+  ALTER TABLE collections ADD COLUMN base_dir TEXT;
+
+  CREATE TABLE environments_new (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL,
+    collection_id INTEGER REFERENCES collections(id) ON DELETE CASCADE,
+    variables     TEXT NOT NULL
+  );
+
+  INSERT INTO environments_new (id, name, collection_id, variables)
+    SELECT id, name, NULL, variables FROM environments;
+
+  DROP TABLE environments;
+  ALTER TABLE environments_new RENAME TO environments;
+
+  CREATE UNIQUE INDEX idx_env_name_collection ON environments(name, collection_id);
+  CREATE UNIQUE INDEX idx_env_name_global ON environments(name) WHERE collection_id IS NULL;
+`;
+
 function runMigrations(db: Database): void {
   const currentVersion = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 
@@ -118,6 +184,24 @@ function runMigrations(db: Database): void {
     }
     if (currentVersion < 2) {
       db.exec(SCHEMA_V2);
+    }
+    if (currentVersion < 3) {
+      db.exec(SCHEMA_V3);
+    }
+    if (currentVersion < 4) {
+      db.exec(SCHEMA_V4);
+    }
+    if (currentVersion < 5) {
+      db.exec(SCHEMA_V5);
+      // Backfill base_dir from dirname(test_path) for existing collections
+      const rows = db.query("SELECT id, test_path FROM collections WHERE base_dir IS NULL").all() as { id: number; test_path: string }[];
+      const updateStmt = db.prepare("UPDATE collections SET base_dir = ? WHERE id = ?");
+      for (const row of rows) {
+        // test_path uses forward slashes (normalizePath); get parent dir
+        const lastSlash = row.test_path.lastIndexOf("/");
+        const baseDir = lastSlash > 0 ? row.test_path.slice(0, lastSlash) : row.test_path;
+        updateStmt.run(baseDir, row.id);
+      }
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

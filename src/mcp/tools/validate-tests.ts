@@ -20,6 +20,8 @@ export function registerValidateTestsTool(server: McpServer) {
         details: suites.map(s => ({
           name: s.name,
           tests: s.tests.length,
+          tags: s.tags,
+          description: s.description,
           source: (s as any)._source,
         })),
       };

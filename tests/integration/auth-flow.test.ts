@@ -171,10 +171,10 @@ describe("Auth flow integration", () => {
     const suites = generateSuites(endpoints, TEST_BASE, securitySchemes);
 
     const outputDir = join(tmpDir, "generated");
-    const files = await writeSuites(suites, outputDir);
+    const { written } = await writeSuites(suites, outputDir);
 
     // Find the pets suite (has auth + CRUD)
-    const petsFile = files.find((f) => f.includes("pets"))!;
+    const petsFile = written.find((f) => f.includes("pets"))!;
     expect(petsFile).toBeDefined();
 
     // Write env file with auth credentials

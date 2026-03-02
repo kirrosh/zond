@@ -29,9 +29,27 @@ async function callOpenAICompatible(
 ): Promise<ChatCompletionResult> {
   const url = `${config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
 
+  // For ollama/custom providers, inject system prompt into first user message
+  // to avoid issues with thinking models (e.g. qwen3) that break with separate system messages
+  let apiMessages: Array<{ role: string; content: string }>;
+  if (config.provider === "ollama" || config.provider === "custom") {
+    const systemMsgs = messages.filter((m) => m.role === "system");
+    const nonSystem = messages.filter((m) => m.role !== "system");
+    if (systemMsgs.length > 0 && nonSystem.length > 0) {
+      const systemText = systemMsgs.map((m) => m.content).join("\n\n");
+      apiMessages = nonSystem.map((m, i) =>
+        i === 0 ? { role: m.role, content: `${systemText}\n\n${m.content}` } : { role: m.role, content: m.content }
+      );
+    } else {
+      apiMessages = messages.map((m) => ({ role: m.role, content: m.content }));
+    }
+  } else {
+    apiMessages = messages.map((m) => ({ role: m.role, content: m.content }));
+  }
+
   const body: Record<string, unknown> = {
     model: config.model,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    messages: apiMessages,
     temperature: config.temperature ?? 0.2,
     max_tokens: config.maxTokens ?? 4096,
   };
@@ -60,11 +78,13 @@ async function callOpenAICompatible(
   }
 
   const data = (await resp.json()) as {
-    choices: Array<{ message: { content: string } }>;
+    choices: Array<{ message: { content: string; reasoning?: string } }>;
     usage?: { prompt_tokens?: number; completion_tokens?: number };
   };
 
-  const content = data.choices?.[0]?.message?.content ?? "";
+  const msg = data.choices?.[0]?.message;
+  // Thinking models (e.g. qwen3) may put output in `reasoning` with empty `content`
+  const content = msg?.content || msg?.reasoning || "";
   return {
     content,
     usage: {

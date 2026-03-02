@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
 import { createApp } from "../../src/web/server.ts";
 import { getDb, closeDb } from "../../src/db/schema.ts";
-import { createRun, finalizeRun, saveResults } from "../../src/db/queries.ts";
+import { createRun, finalizeRun, saveResults, createCollection } from "../../src/db/queries.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
 import { unlinkSync } from "fs";
 import { tmpdir } from "os";
@@ -10,6 +10,9 @@ import { join } from "path";
 const TEST_DB = join(tmpdir(), `apitool-web-routes-${Date.now()}.db`);
 
 function seedData() {
+  // Create a collection first
+  const colId = createCollection({ name: "Test API", test_path: "./tests/pet" });
+
   const results: TestRunResult[] = [
     {
       suite_name: "petstore",
@@ -51,10 +54,10 @@ function seedData() {
     },
   ];
 
-  const runId = createRun({ started_at: "2025-01-01T00:00:00.000Z", environment: "test" });
+  const runId = createRun({ started_at: "2025-01-01T00:00:00.000Z", environment: "test", collection_id: colId });
   finalizeRun(runId, results);
   saveResults(runId, results);
-  return runId;
+  return { runId, colId };
 }
 
 describe("Web routes", () => {
@@ -64,8 +67,9 @@ describe("Web routes", () => {
   beforeAll(() => {
     try { unlinkSync(TEST_DB); } catch {}
     getDb(TEST_DB);
-    runId = seedData();
-    app = createApp({ endpoints: [], specPath: null, servers: [], securitySchemes: [], loginPath: null });
+    const seed = seedData();
+    runId = seed.runId;
+    app = createApp();
   });
 
   afterAll(() => {
@@ -73,28 +77,20 @@ describe("Web routes", () => {
     try { unlinkSync(TEST_DB); } catch {}
   });
 
-  it("GET / returns 200 with Dashboard", async () => {
+  it("GET / returns 200 with dashboard", async () => {
     const res = await app.request("/");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Dashboard");
-    expect(html).toContain("Total Runs");
-    expect(html).toContain("Pass Rate");
+    expect(html).toContain("apitool");
+    expect(html).toContain("Test API");
   });
 
-  it("GET /metrics returns HTML fragment", async () => {
-    const res = await app.request("/metrics");
+  it("GET / auto-selects single collection", async () => {
+    const res = await app.request("/");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Total Runs");
-  });
-
-  it("GET /runs returns 200 with table", async () => {
-    const res = await app.request("/runs");
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    expect(html).toContain("Test Runs");
-    expect(html).toContain(`#${runId}`);
+    // Should auto-select the only collection and show action bar
+    expect(html).toContain("Run Tests");
   });
 
   it("GET /runs/:id returns 200 for existing run", async () => {
@@ -119,14 +115,6 @@ describe("Web routes", () => {
     expect(res.status).toBe(400);
   });
 
-  it("GET /explorer returns 200 with no-spec message", async () => {
-    const res = await app.request("/explorer");
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    expect(html).toContain("Explorer");
-    expect(html).toContain("--openapi");
-  });
-
   it("GET /static/style.css returns 200 with CSS", async () => {
     const res = await app.request("/static/style.css");
     expect(res.status).toBe(200);
@@ -144,15 +132,29 @@ describe("Web routes", () => {
     const res = await app.request("/", { headers: { "HX-Request": "true" } });
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Dashboard");
     // Should not have full HTML boilerplate
     expect(html).not.toContain("<!DOCTYPE html>");
   });
 
-  it("GET /runs with pagination", async () => {
-    const res = await app.request("/runs?page=1");
+  it("GET /panels/results returns results for collection", async () => {
+    const res = await app.request("/panels/results?collection_id=1");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Page 1");
+    expect(html).toContain("Run #");
+  });
+
+  it("GET /panels/history returns run history", async () => {
+    const res = await app.request("/panels/history?collection_id=1");
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Run History");
+  });
+
+  it("removed routes return 404", async () => {
+    const removed = ["/explorer", "/environments", "/collections/1"];
+    for (const path of removed) {
+      const res = await app.request(path);
+      expect(res.status).toBe(404);
+    }
   });
 });

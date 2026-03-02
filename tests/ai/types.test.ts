@@ -5,7 +5,7 @@ describe("AI types", () => {
   test("resolveProviderConfig fills ollama defaults", () => {
     const config = resolveProviderConfig({ provider: "ollama" });
     expect(config.baseUrl).toBe("http://localhost:11434/v1");
-    expect(config.model).toBe("llama3.2:3b");
+    expect(config.model).toBe("qwen3:4b");
     expect(config.temperature).toBe(0.2);
     expect(config.maxTokens).toBe(4096);
     expect(config.apiKey).toBeUndefined();

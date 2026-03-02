@@ -97,7 +97,7 @@ describe("getDb / schema", () => {
     dbPath = tmpDb();
     const db = getDb(dbPath);
     const row = db.query("PRAGMA user_version").get() as { user_version: number };
-    expect(row.user_version).toBe(2);
+    expect(row.user_version).toBe(5);
   });
 
   test("closeDb resets singleton so next call opens fresh db", () => {
@@ -112,6 +112,19 @@ describe("getDb / schema", () => {
       closeDb();
       tryUnlink(path1);
       tryUnlink(path2);
+      dbPath = undefined;
+    }
+  });
+
+  test("getDb() without args reuses existing singleton path", () => {
+    const path1 = tmpDb();
+    try {
+      const db1 = getDb(path1);
+      const db2 = getDb(); // no args — should reuse path1
+      expect(db2).toBe(db1);
+    } finally {
+      closeDb();
+      tryUnlink(path1);
       dbPath = undefined;
     }
   });

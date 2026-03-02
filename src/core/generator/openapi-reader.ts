@@ -5,6 +5,14 @@ import type { EndpointInfo, ResponseInfo, SecuritySchemeInfo } from "./types.ts"
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
 export async function readOpenApiSpec(specPath: string): Promise<OpenAPIV3.Document> {
+  // For HTTP URLs, fetch the spec first then dereference the parsed object
+  if (specPath.startsWith("http://") || specPath.startsWith("https://")) {
+    const resp = await fetch(specPath);
+    if (!resp.ok) throw new Error(`Failed to fetch spec: ${resp.status} ${resp.statusText}`);
+    const spec = await resp.json();
+    const api = await dereference(spec);
+    return api as OpenAPIV3.Document;
+  }
   const api = await dereference(specPath);
   return api as OpenAPIV3.Document;
 }

@@ -10,6 +10,10 @@ API testing platform — define tests in YAML, run from CLI or WebUI, generate f
 - **Rich assertions** — status codes, JSON body (exact, contains, path, regex), headers, response time
 - **OpenAPI generator** — auto-generate skeleton tests from OpenAPI 3.x specs
 - **AI test generation** — generate tests using LLM providers (Ollama, OpenAI, Anthropic)
+- **MCP server** — 12 tools for AI agents (Claude Code, Cursor, Windsurf, Cline)
+- **AI chat agent** — interactive `apitool chat` with tool-calling for API exploration
+- **Ad-hoc HTTP requests** — `apitool request GET /users` with variable interpolation
+- **Coverage analysis** — compare OpenAPI spec vs test files to find untested endpoints
 - **Multiple reporters** — console (colored), JSON, JUnit XML
 - **Web dashboard** — run history, trend charts, API Explorer, collection management, environment editor
 - **SQLite storage** — persist runs and results locally
@@ -153,9 +157,15 @@ apitool run <path>                Run API tests
 apitool validate <path>           Validate test files without running
 apitool generate --from <spec>    Generate skeleton tests from OpenAPI spec
 apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
+apitool request <METHOD> <URL>    Send an ad-hoc HTTP request
+apitool envs [list|get|set|delete|import|export]  Manage environments
+apitool runs [id]                 View test run history
+apitool coverage --spec <path> --tests <dir>  Analyze API test coverage
 apitool collections               List test collections
 apitool serve                     Start web dashboard
 apitool mcp                       Start MCP server (stdio transport)
+apitool chat                      Start interactive AI chat
+apitool doctor                    Run diagnostic checks
 apitool update                    Update to latest version
 ```
 
@@ -171,6 +181,41 @@ apitool update                    Update to latest version
 | `--db <path>` | Path to SQLite database file |
 | `--auth-token <token>` | Auth token injected as `{{auth_token}}` |
 | `--safe` | Run only GET tests (read-only, safe mode) |
+
+### Request options
+
+| Flag | Description |
+|------|-------------|
+| `--header "K:V"` | Add request header (repeatable) |
+| `--body '{}'` | Request body (JSON string) |
+| `--env <name>` | Use environment for variable interpolation |
+| `--timeout <ms>` | Request timeout in milliseconds |
+
+### Envs options
+
+| Subcommand | Description |
+|------------|-------------|
+| `envs` | List all environments |
+| `envs get <name>` | Show variables in an environment |
+| `envs set <name> K=V ...` | Set variables (multiple KEY=VALUE pairs) |
+| `envs delete <name>` | Delete an environment |
+| `envs import <name> <file>` | Import environment from a YAML file |
+| `envs export <name>` | Export environment as YAML to stdout |
+
+### Runs options
+
+| Flag | Description |
+|------|-------------|
+| `runs` | List recent test runs |
+| `runs <id>` | Show run details with step results |
+| `--limit <n>` | Number of runs to show (default: 20) |
+
+### Coverage options
+
+| Flag | Description |
+|------|-------------|
+| `--spec <path>` | Path to OpenAPI spec (required) |
+| `--tests <dir>` | Path to test files directory (required) |
 
 ### Generate options
 
@@ -205,6 +250,18 @@ apitool ai-generate --from petstore.yaml \
   --prompt "Generate CRUD tests for the Pet endpoints" \
   --provider openai --model gpt-4o
 ```
+
+## AI Chat
+
+Start an interactive AI chat session for API testing:
+
+```bash
+apitool chat --provider ollama
+apitool chat --provider openai --model gpt-4o --api-key <key>
+apitool chat --provider anthropic --model claude-sonnet-4-20250514
+```
+
+The chat agent has access to all apitool capabilities — run tests, explore APIs, manage environments, diagnose failures, and more.
 
 ## Self-Documented API
 
@@ -268,6 +325,11 @@ Or run from source:
 | `list_runs` | List recent test runs with summary statistics |
 | `get_run_results` | Get detailed results for a specific test run |
 | `list_environments` | List all saved environments (values hidden) |
+| `send_request` | Send an ad-hoc HTTP request with variable interpolation |
+| `explore_api` | Parse and summarize an OpenAPI spec |
+| `manage_environment` | Create, update, or delete environments |
+| `diagnose_failure` | Analyze a failed test run and suggest fixes |
+| `coverage_analysis` | Compare OpenAPI spec vs test files for coverage gaps |
 
 > **Note:** The database and test files are resolved relative to the working directory (`cwd`), not globally. Each project maintains its own test history.
 

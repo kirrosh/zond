@@ -133,6 +133,8 @@ export async function runSuite(suite: TestSuite, env: Environment = {}): Promise
   const finishedAt = new Date().toISOString();
   return {
     suite_name: suite.name,
+    suite_tags: suite.tags,
+    suite_description: suite.description,
     started_at: startedAt,
     finished_at: finishedAt,
     total: steps.length,

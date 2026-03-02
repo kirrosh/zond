@@ -2,11 +2,16 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerRunTestsTool } from "./tools/run-tests.ts";
 import { registerValidateTestsTool } from "./tools/validate-tests.ts";
-import { registerGenerateTestsTool } from "./tools/generate-tests.ts";
-import { registerListCollectionsTool } from "./tools/list-collections.ts";
-import { registerListRunsTool } from "./tools/list-runs.ts";
-import { registerGetRunResultsTool } from "./tools/get-run-results.ts";
-import { registerListEnvironmentsTool } from "./tools/list-environments.ts";
+import { registerQueryDbTool } from "./tools/query-db.ts";
+import { registerSendRequestTool } from "./tools/send-request.ts";
+import { registerExploreApiTool } from "./tools/explore-api.ts";
+import { registerManageEnvironmentTool } from "./tools/manage-environment.ts";
+import { registerCoverageAnalysisTool } from "./tools/coverage-analysis.ts";
+import { registerSaveTestSuiteTool } from "./tools/save-test-suite.ts";
+import { registerGenerateTestsGuideTool } from "./tools/generate-tests-guide.ts";
+import { registerSetupApiTool } from "./tools/setup-api.ts";
+import { registerGenerateMissingTestsTool } from "./tools/generate-missing-tests.ts";
+import { registerManageServerTool } from "./tools/manage-server.ts";
 
 export interface McpServerOptions {
   dbPath?: string;
@@ -17,17 +22,22 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
 
   const server = new McpServer({
     name: "apitool",
-    version: "0.1.0",
+    version: "0.4.0",
   });
 
   // Register all tools
   registerRunTestsTool(server, dbPath);
   registerValidateTestsTool(server);
-  registerGenerateTestsTool(server, dbPath);
-  registerListCollectionsTool(server, dbPath);
-  registerListRunsTool(server, dbPath);
-  registerGetRunResultsTool(server, dbPath);
-  registerListEnvironmentsTool(server, dbPath);
+  registerQueryDbTool(server, dbPath);
+  registerSendRequestTool(server);
+  registerExploreApiTool(server);
+  registerManageEnvironmentTool(server, dbPath);
+  registerCoverageAnalysisTool(server);
+  registerSaveTestSuiteTool(server, dbPath);
+  registerGenerateTestsGuideTool(server);
+  registerSetupApiTool(server, dbPath);
+  registerGenerateMissingTestsTool(server);
+  registerManageServerTool(server, dbPath);
 
   // Connect via stdio transport
   const transport = new StdioServerTransport();

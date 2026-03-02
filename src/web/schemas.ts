@@ -113,21 +113,6 @@ export const RunDetailSchema = z.object({
 }).openapi("RunDetail");
 
 // ──────────────────────────────────────────────
-// Auth
-// ──────────────────────────────────────────────
-
-export const AuthorizeRequest = z.object({
-  base_url: z.string().min(1),
-  path: z.string().min(1),
-  username: z.string().optional(),
-  password: z.string().optional(),
-}).openapi("AuthorizeRequest");
-
-export const AuthorizeResponse = z.object({
-  token: z.string(),
-}).openapi("AuthorizeResponse");
-
-// ──────────────────────────────────────────────
 // Export
 // ──────────────────────────────────────────────
 

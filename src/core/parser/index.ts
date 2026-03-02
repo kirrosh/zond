@@ -18,3 +18,4 @@ export {
   loadEnvironment,
 } from "./variables.ts";
 export { parse, parseFile, parseDirectory } from "./yaml-parser.ts";
+export { filterSuitesByTags } from "./filter.ts";

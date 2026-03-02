@@ -37,6 +37,7 @@ export async function executeRequest(
         body: request.body ?? undefined,
         signal: controller.signal,
         redirect: opts.follow_redirects ? "follow" : "manual",
+        tls: { rejectUnauthorized: false },
       });
 
       clearTimeout(timeoutId);

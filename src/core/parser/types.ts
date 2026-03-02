@@ -39,6 +39,8 @@ export interface SuiteConfig {
 
 export interface TestSuite {
   name: string;
+  description?: string;
+  tags?: string[];
   base_url?: string;
   headers?: Record<string, string>;
   config: SuiteConfig;

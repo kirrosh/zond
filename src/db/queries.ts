@@ -59,6 +59,7 @@ export interface RunSummary {
 export interface CollectionRecord {
   id: number;
   name: string;
+  base_dir: string | null;
   test_path: string;
   openapi_spec: string | null;
   created_at: string;
@@ -67,6 +68,7 @@ export interface CollectionRecord {
 export interface CollectionSummary {
   id: number;
   name: string;
+  base_dir: string | null;
   test_path: string;
   openapi_spec: string | null;
   created_at: string;
@@ -80,6 +82,7 @@ export interface CollectionSummary {
 
 export interface CreateCollectionOpts {
   name: string;
+  base_dir?: string;
   test_path: string;
   openapi_spec?: string;
 }
@@ -93,7 +96,9 @@ export interface StoredStepResult {
   duration_ms: number;
   request_method: string | null;
   request_url: string | null;
+  request_body: string | null;
   response_status: number | null;
+  response_body: string | null;
   error_message: string | null;
   assertions: import("../core/runner/types.ts").AssertionResult[];
   captures: Record<string, unknown>;
@@ -285,45 +290,88 @@ export function getResultsByRunId(runId: number): StoredStepResult[] {
 // Environments
 // ──────────────────────────────────────────────
 
-export function upsertEnvironment(name: string, vars: Record<string, string>): void {
+export function upsertEnvironment(name: string, vars: Record<string, string>, collectionId?: number | null): void {
   const db = getDb();
-  db.prepare(`
-    INSERT INTO environments (name, variables) VALUES ($name, $variables)
-    ON CONFLICT(name) DO UPDATE SET variables = excluded.variables
-  `).run({ $name: name, $variables: JSON.stringify(vars) });
+  const cid = collectionId ?? null;
+  // Check if exists first (unique index is composite)
+  const existing = cid === null
+    ? db.query("SELECT id FROM environments WHERE name = ? AND collection_id IS NULL").get(name) as { id: number } | null
+    : db.query("SELECT id FROM environments WHERE name = ? AND collection_id = ?").get(name, cid) as { id: number } | null;
+
+  if (existing) {
+    db.prepare("UPDATE environments SET variables = ? WHERE id = ?").run(JSON.stringify(vars), existing.id);
+  } else {
+    db.prepare("INSERT INTO environments (name, collection_id, variables) VALUES (?, ?, ?)").run(name, cid, JSON.stringify(vars));
+  }
 }
 
-export function getEnvironment(name: string): Record<string, string> | null {
+export function getEnvironment(name: string, collectionId?: number): Record<string, string> | null {
   const db = getDb();
-  const row = db.query("SELECT variables FROM environments WHERE name = ?").get(name) as
-    | { variables: string }
-    | null;
-  return row ? JSON.parse(row.variables) : null;
+  if (collectionId !== undefined) {
+    // Try scoped first, then global
+    const scoped = db.query("SELECT variables FROM environments WHERE name = ? AND collection_id = ?").get(name, collectionId) as { variables: string } | null;
+    if (scoped) return JSON.parse(scoped.variables);
+  }
+  const global = db.query("SELECT variables FROM environments WHERE name = ? AND collection_id IS NULL").get(name) as { variables: string } | null;
+  return global ? JSON.parse(global.variables) : null;
+}
+
+export function resolveEnvironment(name: string, collectionId?: number): Record<string, string> | null {
+  const db = getDb();
+  // Start with global as base
+  const globalRow = db.query("SELECT variables FROM environments WHERE name = ? AND collection_id IS NULL").get(name) as { variables: string } | null;
+  const globalVars = globalRow ? JSON.parse(globalRow.variables) as Record<string, string> : null;
+
+  if (collectionId === undefined) return globalVars;
+
+  // Scoped overrides
+  const scopedRow = db.query("SELECT variables FROM environments WHERE name = ? AND collection_id = ?").get(name, collectionId) as { variables: string } | null;
+  if (!scopedRow) return globalVars;
+
+  const scopedVars = JSON.parse(scopedRow.variables) as Record<string, string>;
+  if (!globalVars) return scopedVars;
+
+  // Merge: global base + scoped overrides
+  return { ...globalVars, ...scopedVars };
 }
 
 export interface EnvironmentRecord {
   id: number;
   name: string;
+  collection_id: number | null;
   variables: Record<string, string>;
 }
 
-export function listEnvironments(): string[] {
+export function listEnvironments(collectionId?: number): string[] {
   const db = getDb();
+  if (collectionId !== undefined) {
+    const rows = db.query("SELECT DISTINCT name FROM environments WHERE collection_id = ? OR collection_id IS NULL ORDER BY name").all(collectionId) as { name: string }[];
+    return rows.map((r) => r.name);
+  }
   const rows = db.query("SELECT name FROM environments ORDER BY name").all() as { name: string }[];
   return rows.map((r) => r.name);
 }
 
-export function listEnvironmentRecords(): EnvironmentRecord[] {
+export function listEnvironmentRecords(collectionId?: number | null): EnvironmentRecord[] {
   const db = getDb();
-  const rows = db.query("SELECT id, name, variables FROM environments ORDER BY name").all() as { id: number; name: string; variables: string }[];
-  return rows.map((r) => ({ id: r.id, name: r.name, variables: JSON.parse(r.variables) }));
+  let rows: { id: number; name: string; collection_id: number | null; variables: string }[];
+  if (collectionId !== undefined) {
+    if (collectionId === null) {
+      rows = db.query("SELECT id, name, collection_id, variables FROM environments WHERE collection_id IS NULL ORDER BY name").all() as typeof rows;
+    } else {
+      rows = db.query("SELECT id, name, collection_id, variables FROM environments WHERE collection_id = ? OR collection_id IS NULL ORDER BY collection_id IS NULL, name").all(collectionId) as typeof rows;
+    }
+  } else {
+    rows = db.query("SELECT id, name, collection_id, variables FROM environments ORDER BY name").all() as typeof rows;
+  }
+  return rows.map((r) => ({ id: r.id, name: r.name, collection_id: r.collection_id, variables: JSON.parse(r.variables) }));
 }
 
 export function getEnvironmentById(id: number): EnvironmentRecord | null {
   const db = getDb();
-  const row = db.query("SELECT id, name, variables FROM environments WHERE id = ?").get(id) as { id: number; name: string; variables: string } | null;
+  const row = db.query("SELECT id, name, collection_id, variables FROM environments WHERE id = ?").get(id) as { id: number; name: string; collection_id: number | null; variables: string } | null;
   if (!row) return null;
-  return { id: row.id, name: row.name, variables: JSON.parse(row.variables) };
+  return { id: row.id, name: row.name, collection_id: row.collection_id, variables: JSON.parse(row.variables) };
 }
 
 export function deleteEnvironment(id: number): boolean {
@@ -437,11 +485,12 @@ export function getDistinctEnvironments(): string[] {
 export function createCollection(opts: CreateCollectionOpts): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO collections (name, test_path, openapi_spec)
-    VALUES ($name, $test_path, $openapi_spec)
+    INSERT INTO collections (name, base_dir, test_path, openapi_spec)
+    VALUES ($name, $base_dir, $test_path, $openapi_spec)
   `);
   const result = stmt.run({
     $name: opts.name,
+    $base_dir: opts.base_dir ?? null,
     $test_path: opts.test_path,
     $openapi_spec: opts.openapi_spec ?? null,
   });
@@ -457,7 +506,7 @@ export function listCollections(): CollectionSummary[] {
   const db = getDb();
   return db.query(`
     SELECT
-      c.id, c.name, c.test_path, c.openapi_spec, c.created_at,
+      c.id, c.name, c.base_dir, c.test_path, c.openapi_spec, c.created_at,
       COUNT(r.id) AS total_runs,
       CASE WHEN SUM(r.total) > 0
         THEN ROUND(SUM(r.passed) * 100.0 / SUM(r.total), 1)
@@ -479,6 +528,7 @@ export function updateCollection(id: number, opts: Partial<CreateCollectionOpts>
   const params: Record<string, any> = { $id: id };
 
   if (opts.name !== undefined) { sets.push("name = $name"); params.$name = opts.name; }
+  if (opts.base_dir !== undefined) { sets.push("base_dir = $base_dir"); params.$base_dir = opts.base_dir; }
   if (opts.test_path !== undefined) { sets.push("test_path = $test_path"); params.$test_path = opts.test_path; }
   if (opts.openapi_spec !== undefined) { sets.push("openapi_spec = $openapi_spec"); params.$openapi_spec = opts.openapi_spec; }
 
@@ -507,6 +557,23 @@ export function findCollectionByTestPath(path: string): CollectionRecord | null 
   const db = getDb();
   const normalized = normalizePath(path);
   return db.query("SELECT * FROM collections WHERE test_path = ?").get(normalized) as CollectionRecord | null;
+}
+
+export function findCollectionByNameOrId(nameOrId: string): CollectionRecord | null {
+  const db = getDb();
+  // Try as numeric ID first
+  const id = parseInt(nameOrId, 10);
+  if (!isNaN(id)) {
+    const byId = db.query("SELECT * FROM collections WHERE id = ?").get(id) as CollectionRecord | null;
+    if (byId) return byId;
+  }
+  // Then by name (case-insensitive)
+  return db.query("SELECT * FROM collections WHERE lower(name) = lower(?)").get(nameOrId) as CollectionRecord | null;
+}
+
+export function findCollectionBySpec(spec: string): CollectionRecord | null {
+  const db = getDb();
+  return db.query("SELECT * FROM collections WHERE openapi_spec = ?").get(spec) as CollectionRecord | null;
 }
 
 export function listRunsByCollection(collectionId: number, limit = 20, offset = 0): RunSummary[] {
@@ -652,4 +719,146 @@ export function findAIGenerationByYaml(collectionId: number, yaml: string): AIGe
   return db.query(
     "SELECT * FROM ai_generations WHERE collection_id = ? AND generated_yaml = ? ORDER BY created_at DESC LIMIT 1"
   ).get(collectionId, yaml) as AIGenerationRecord | null;
+}
+
+// ──────────────────────────────────────────────
+// Settings
+// ──────────────────────────────────────────────
+
+export function getSetting(key: string): string | null {
+  const db = getDb();
+  const row = db.query("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | null;
+  return row?.value ?? null;
+}
+
+export function setSetting(key: string, value: string): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO settings (key, value) VALUES ($key, $value)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run({ $key: key, $value: value });
+}
+
+export interface AISettingsConfig {
+  provider: string;
+  model: string;
+  base_url: string;
+  api_key: string;
+}
+
+export function getAISettings(): AISettingsConfig {
+  return {
+    provider: getSetting("ai_provider") ?? "ollama",
+    model: getSetting("ai_model") ?? "",
+    base_url: getSetting("ai_base_url") ?? "",
+    api_key: getSetting("ai_api_key") ?? "",
+  };
+}
+
+export function setAISettings(config: Partial<AISettingsConfig>): void {
+  if (config.provider !== undefined) setSetting("ai_provider", config.provider);
+  if (config.model !== undefined) setSetting("ai_model", config.model);
+  if (config.base_url !== undefined) setSetting("ai_base_url", config.base_url);
+  if (config.api_key !== undefined) setSetting("ai_api_key", config.api_key);
+}
+
+// ──────────────────────────────────────────────
+// Chat Sessions & Messages
+// ──────────────────────────────────────────────
+
+export interface ChatSessionRecord {
+  id: number;
+  title: string | null;
+  provider: string;
+  model: string;
+  created_at: string;
+  last_active: string;
+}
+
+export interface ChatMessageRecord {
+  id: number;
+  session_id: number;
+  role: string;
+  content: string;
+  tool_name: string | null;
+  tool_args: string | null;
+  tool_result: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  created_at: string;
+}
+
+export interface SaveChatMessageOpts {
+  session_id: number;
+  role: string;
+  content: string;
+  tool_name?: string;
+  tool_args?: string;
+  tool_result?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+}
+
+export function createChatSession(provider: string, model: string, title?: string): number {
+  const db = getDb();
+  const result = db.prepare(`
+    INSERT INTO chat_sessions (title, provider, model)
+    VALUES ($title, $provider, $model)
+  `).run({
+    $title: title ?? null,
+    $provider: provider,
+    $model: model,
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export function saveChatMessage(opts: SaveChatMessageOpts): number {
+  const db = getDb();
+
+  // Update session last_active
+  db.prepare("UPDATE chat_sessions SET last_active = datetime('now') WHERE id = ?").run(opts.session_id);
+
+  const result = db.prepare(`
+    INSERT INTO chat_messages (session_id, role, content, tool_name, tool_args, tool_result, input_tokens, output_tokens)
+    VALUES ($session_id, $role, $content, $tool_name, $tool_args, $tool_result, $input_tokens, $output_tokens)
+  `).run({
+    $session_id: opts.session_id,
+    $role: opts.role,
+    $content: opts.content,
+    $tool_name: opts.tool_name ?? null,
+    $tool_args: opts.tool_args ?? null,
+    $tool_result: opts.tool_result ?? null,
+    $input_tokens: opts.input_tokens ?? null,
+    $output_tokens: opts.output_tokens ?? null,
+  });
+  return Number(result.lastInsertRowid);
+}
+
+export function getChatMessages(sessionId: number): ChatMessageRecord[] {
+  const db = getDb();
+  return db.query(
+    "SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC"
+  ).all(sessionId) as ChatMessageRecord[];
+}
+
+export function listChatSessions(limit = 20): ChatSessionRecord[] {
+  const db = getDb();
+  return db.query(
+    "SELECT * FROM chat_sessions ORDER BY last_active DESC LIMIT ?"
+  ).all(limit) as ChatSessionRecord[];
+}
+
+export interface CoreMessageFormat {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export function loadSessionHistory(sessionId: number): CoreMessageFormat[] {
+  const messages = getChatMessages(sessionId);
+  return messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
 }

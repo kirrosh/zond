@@ -6,6 +6,7 @@ export interface ServeOptions {
   openapiSpec?: string;
   testsDir?: string;
   dbPath?: string;
+  watch?: boolean;
 }
 
 export async function serveCommand(options: ServeOptions): Promise<number> {
@@ -13,7 +14,7 @@ export async function serveCommand(options: ServeOptions): Promise<number> {
     port: options.port,
     host: options.host,
     dbPath: options.dbPath,
-    openapiSpec: options.openapiSpec,
+    dev: options.watch,
   });
 
   // Keep running — Bun.serve keeps the process alive
