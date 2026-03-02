@@ -9,7 +9,6 @@ import { mcpCommand } from "./commands/mcp.ts";
 import { initCommand } from "./commands/init.ts";
 import { updateCommand } from "./commands/update.ts";
 import { chatCommand } from "./commands/chat.ts";
-import { requestCommand } from "./commands/request.ts";
 import { envsCommand } from "./commands/envs.ts";
 import { runsCommand } from "./commands/runs.ts";
 import { coverageCommand } from "./commands/coverage.ts";
@@ -78,7 +77,6 @@ Usage:
   apitool run <path>       Run API tests
   apitool validate <path>  Validate test files without running
   apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
-  apitool request <METHOD> <URL>  Send an ad-hoc HTTP request
   apitool envs [list|get|set|delete]  Manage environments
   apitool runs [id]        View test run history
   apitool coverage --spec <path> --tests <dir>  Analyze API test coverage
@@ -101,12 +99,6 @@ Options for 'chat':
   --api-key <key>      API key (or set APITOOL_AI_KEY env var)
   --base-url <url>     Provider base URL override
   --safe               Only allow running GET tests (read-only mode)
-
-Options for 'request':
-  --header "K:V"       Add request header (repeatable)
-  --body '{}'          Request body
-  --env <name>         Use environment for variable interpolation
-  --timeout <ms>       Request timeout
 
 Options for 'envs':
   envs                 List all environments
@@ -374,46 +366,6 @@ async function main(): Promise<number> {
 
     case "update": {
       return updateCommand({ force: flags["force"] === true });
-    }
-
-    case "request": {
-      const method = positional[0];
-      const url = positional[1];
-      if (!method || !url) {
-        printError("Missing arguments. Usage: apitool request <METHOD> <URL>");
-        return 2;
-      }
-
-      // Collect all --header flags (parseArgs only stores last one, so re-parse)
-      const headerValues: string[] = [];
-      const rawArgs = process.argv.slice(2);
-      for (let i = 0; i < rawArgs.length; i++) {
-        if (rawArgs[i] === "--header" && rawArgs[i + 1]) {
-          headerValues.push(rawArgs[i + 1]!);
-          i++;
-        } else if (rawArgs[i]?.startsWith("--header=")) {
-          headerValues.push(rawArgs[i]!.slice("--header=".length));
-        }
-      }
-
-      const timeoutRaw = flags["timeout"];
-      let timeout: number | undefined;
-      if (typeof timeoutRaw === "string") {
-        timeout = parseInt(timeoutRaw, 10);
-        if (isNaN(timeout) || timeout <= 0) {
-          printError(`Invalid timeout value: ${timeoutRaw}`);
-          return 2;
-        }
-      }
-
-      return requestCommand({
-        method,
-        url,
-        headers: headerValues,
-        body: typeof flags["body"] === "string" ? flags["body"] : undefined,
-        env: typeof flags["env"] === "string" ? flags["env"] : undefined,
-        timeout,
-      });
     }
 
     case "envs": {
