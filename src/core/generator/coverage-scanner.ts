@@ -27,7 +27,7 @@ export async function scanCoveredEndpoints(outputDir: string): Promise<CoveredEn
         for (const method of HTTP_METHODS) {
           // Match lines like "POST: /users" or "GET: /users/{{user_id}}"
           if (trimmed.startsWith(`${method}:`) || trimmed.startsWith(`${method} :`)) {
-            const path = trimmed.slice(trimmed.indexOf(":") + 1).trim();
+            const path = trimmed.slice(trimmed.indexOf(":") + 1).trim().replace(/^["']|["']$/g, "");
             if (path) {
               covered.push({ method, path: normalizePath(path), file });
             }
@@ -56,19 +56,32 @@ function normalizePath(path: string): string {
 }
 
 /**
+ * Convert a spec path to a regex that matches both parameterized and concrete paths.
+ * e.g. /pet/{petId} matches /pet/100001 and /pet/{{pet_id}}
+ */
+function specPathToRegex(specPath: string): RegExp {
+  const pattern = specPath
+    .split("/")
+    .map((seg) =>
+      /^\{[^}]+\}$/.test(seg)
+        ? "[^/]+"
+        : seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+    )
+    .join("/");
+  return new RegExp(`^${pattern}$`);
+}
+
+/**
  * Filter endpoints that don't yet have test coverage.
  */
 export function filterUncoveredEndpoints(
   all: EndpointInfo[],
   covered: CoveredEndpoint[],
 ): EndpointInfo[] {
-  const coveredSet = new Set(
-    covered.map((c) => `${c.method} ${c.path}`),
-  );
-
   return all.filter((ep) => {
-    const normalizedPath = normalizePath(ep.path);
-    const key = `${ep.method} ${normalizedPath}`;
-    return !coveredSet.has(key);
+    const specRegex = specPathToRegex(ep.path);
+    return !covered.some(
+      (c) => c.method === ep.method && specRegex.test(normalizePath(c.path)),
+    );
   });
 }
