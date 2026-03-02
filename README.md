@@ -1,294 +1,34 @@
 # apitool
 
-API testing platform — define tests in YAML, run from CLI or WebUI, generate from OpenAPI specs.
+AI-native API testing tool. OpenAPI spec in, tests out. One binary, zero config.
 
-## Features
+[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=apitool&config=eyJjb21tYW5kIjoiYXBpdG9vbCIsImFyZ3MiOlsibWNwIl19)
 
-- **Declarative YAML tests** — readable, version-controlled API test suites
-- **Variable substitution** — environments, captures, built-in generators (`$randomName`, `$randomEmail`)
-- **Chained requests** — capture values from responses and use them in subsequent steps
-- **Rich assertions** — status codes, JSON body (exact, contains, path, regex), headers, response time
-- **OpenAPI generator** — auto-generate skeleton tests from OpenAPI 3.x specs
-- **AI test generation** — generate tests using LLM providers (Ollama, OpenAI, Anthropic)
-- **MCP server** — 12 tools for AI agents (Claude Code, Cursor, Windsurf, Cline)
-- **AI chat agent** — interactive `apitool chat` with tool-calling for API exploration
-- **Ad-hoc HTTP requests** — `apitool request GET /users` with variable interpolation
-- **Coverage analysis** — compare OpenAPI spec vs test files to find untested endpoints
-- **Multiple reporters** — console (colored), JSON, JUnit XML
-- **Web dashboard** — run history, trend charts, API Explorer, collection management, environment editor
-- **SQLite storage** — persist runs and results locally
-- **Standalone binary** — single executable, no runtime dependencies
-
-## Installation
-
-### One-liner (Linux / macOS)
+## Install
 
 ```bash
+# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/kirrosh/apitool/master/install.sh | sh
+
+# Windows — download from GitHub Releases
 ```
 
-### Download binary
-
-Download the latest release for your platform from [GitHub Releases](https://github.com/kirrosh/apitool/releases).
-
-```bash
-# Linux / macOS
-chmod +x apitool
-./apitool --version
-
-# Windows — download zip from GitHub Releases
-apitool.exe --version
-```
-
-### From source (requires Bun)
-
-```bash
-git clone https://github.com/kirrosh/apitool.git
-cd apitool
-bun install
-bun run apitool --version
-```
-
-### Build standalone binary
-
-```bash
-bun run build    # produces ./apitool (or apitool.exe on Windows)
-```
+[All releases](https://github.com/kirrosh/apitool/releases) (Linux x64, macOS ARM, Windows x64)
 
 ## Quick Start
 
-### 1. Initialize a project (optional)
-
 ```bash
-apitool init
-# Creates tests/example.yaml, .env.dev.yaml, and .mcp.json (if Claude Code detected)
+# Register API + generate + run — all in one flow via MCP or CLI
+apitool add-api petstore --spec https://petstore.swagger.io/v2/swagger.json
+apitool run apis/petstore/tests/ --env default
+apitool serve   # web dashboard at http://localhost:8080
 ```
 
-Or create files manually:
+Or let your AI agent do it — just say: *"Test the API from openapi.json"*
 
-### 1a. Create a test file
+## MCP Setup (Cursor / Claude Code / Windsurf)
 
-```yaml
-# tests/health.yaml
-name: Health Check
-base_url: https://jsonplaceholder.typicode.com
-
-tests:
-  - name: "List posts"
-    GET: /posts
-    expect:
-      status: 200
-      body:
-        - id: { type: integer }
-```
-
-### 2. Run tests
-
-```bash
-apitool run tests/health.yaml
-```
-
-### 3. Start web dashboard
-
-```bash
-apitool serve --port 8080
-# Open http://localhost:8080
-```
-
-## YAML Test Format
-
-```yaml
-name: Users CRUD
-base_url: "{{base}}"
-headers:
-  Authorization: "Bearer {{token}}"
-  Content-Type: application/json
-
-config:
-  timeout: 10000
-  retries: 1
-
-tests:
-  - name: "Create user"
-    POST: /users
-    json:
-      name: "{{$randomName}}"
-      email: "{{$randomEmail}}"
-    expect:
-      status: 201
-      body:
-        id: { capture: user_id, type: integer }
-        name: { type: string }
-      duration: 2000
-
-  - name: "Get created user"
-    GET: /users/{{user_id}}
-    expect:
-      status: 200
-      body:
-        id: { equals: "{{user_id}}" }
-        email: { matches: ".+@.+" }
-
-  - name: "Delete user"
-    DELETE: /users/{{user_id}}
-    expect:
-      status: 204
-```
-
-## Environment Files
-
-Create `.env.<name>.yaml` files for per-environment configuration:
-
-```yaml
-# .env.dev.yaml
-base: http://localhost:3000
-token: dev-token-123
-```
-
-```bash
-apitool run tests/ --env dev
-```
-
-## CLI Reference
-
-```
-apitool init                      Initialize a new apitool project
-apitool run <path>                Run API tests
-apitool validate <path>           Validate test files without running
-apitool generate --from <spec>    Generate skeleton tests from OpenAPI spec
-apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
-apitool request <METHOD> <URL>    Send an ad-hoc HTTP request
-apitool envs [list|get|set|delete|import|export]  Manage environments
-apitool runs [id]                 View test run history
-apitool coverage --spec <path> --tests <dir>  Analyze API test coverage
-apitool collections               List test collections
-apitool serve                     Start web dashboard
-apitool mcp                       Start MCP server (stdio transport)
-apitool chat                      Start interactive AI chat
-apitool doctor                    Run diagnostic checks
-apitool update                    Update to latest version
-```
-
-### Run options
-
-| Flag | Description |
-|------|-------------|
-| `--env <name>` | Use environment file (`.env.<name>.yaml`) |
-| `--report <format>` | Output format: `console`, `json`, `junit` |
-| `--timeout <ms>` | Override request timeout |
-| `--bail` | Stop on first suite failure |
-| `--no-db` | Do not save results to database |
-| `--db <path>` | Path to SQLite database file |
-| `--auth-token <token>` | Auth token injected as `{{auth_token}}` |
-| `--safe` | Run only GET tests (read-only, safe mode) |
-
-### Request options
-
-| Flag | Description |
-|------|-------------|
-| `--header "K:V"` | Add request header (repeatable) |
-| `--body '{}'` | Request body (JSON string) |
-| `--env <name>` | Use environment for variable interpolation |
-| `--timeout <ms>` | Request timeout in milliseconds |
-
-### Envs options
-
-| Subcommand | Description |
-|------------|-------------|
-| `envs` | List all environments |
-| `envs get <name>` | Show variables in an environment |
-| `envs set <name> K=V ...` | Set variables (multiple KEY=VALUE pairs) |
-| `envs delete <name>` | Delete an environment |
-| `envs import <name> <file>` | Import environment from a YAML file |
-| `envs export <name>` | Export environment as YAML to stdout |
-
-### Runs options
-
-| Flag | Description |
-|------|-------------|
-| `runs` | List recent test runs |
-| `runs <id>` | Show run details with step results |
-| `--limit <n>` | Number of runs to show (default: 20) |
-
-### Coverage options
-
-| Flag | Description |
-|------|-------------|
-| `--spec <path>` | Path to OpenAPI spec (required) |
-| `--tests <dir>` | Path to test files directory (required) |
-
-### Generate options
-
-| Flag | Description |
-|------|-------------|
-| `--from <spec>` | Path to OpenAPI spec (required) |
-| `--output <dir>` | Output directory (default: `./generated/`) |
-| `--auth-token <token>` | Bearer auth token to save in environment |
-| `--env-name <name>` | Environment name (default: derived from spec title) |
-| `--db <path>` | Path to SQLite database file |
-| `--no-wizard` | Skip interactive prompts |
-
-The `generate` command automatically creates a DB environment with `base_url` and auth variables. Use `--safe` with `run` to execute only GET tests first.
-
-### Serve options
-
-| Flag | Description |
-|------|-------------|
-| `--port <port>` | Server port (default: 8080) |
-| `--host <host>` | Server host (default: 0.0.0.0) |
-| `--openapi <spec>` | Path to OpenAPI spec for Explorer |
-| `--db <path>` | Path to SQLite database file |
-
-## Generate Tests from OpenAPI
-
-```bash
-# Skeleton tests
-apitool generate --from petstore.yaml
-
-# AI-powered generation
-apitool ai-generate --from petstore.yaml \
-  --prompt "Generate CRUD tests for the Pet endpoints" \
-  --provider openai --model gpt-4o
-```
-
-## AI Chat
-
-Start an interactive AI chat session for API testing:
-
-```bash
-apitool chat --provider ollama
-apitool chat --provider openai --model gpt-4o --api-key <key>
-apitool chat --provider anthropic --model claude-sonnet-4-20250514
-```
-
-The chat agent has access to all apitool capabilities — run tests, explore APIs, manage environments, diagnose failures, and more.
-
-## Self-Documented API
-
-apitool serves its own OpenAPI spec at `/api/openapi.json`. You can use apitool to test itself:
-
-```bash
-# Start the server
-apitool serve --port 8080
-
-# Generate tests from its own API
-apitool generate --from http://localhost:8080/api/openapi.json --output ./self-tests
-
-# Run the generated tests
-apitool run ./self-tests
-
-# Re-run generate — skips already-covered endpoints
-apitool generate --from http://localhost:8080/api/openapi.json --output ./self-tests
-# "All endpoints covered, nothing to generate"
-```
-
-## MCP Server (AI Agent Integration)
-
-apitool includes a built-in [MCP](https://modelcontextprotocol.io/) server, allowing AI agents (Claude Code, Cursor, Windsurf, Cline) to run and manage API tests directly.
-
-### Setup
-
-Add a `.mcp.json` file to your project root:
+Click the badge above, or add manually:
 
 ```json
 {
@@ -301,37 +41,59 @@ Add a `.mcp.json` file to your project root:
 }
 ```
 
-Or run from source:
+**Where to put this:**
 
-```json
-{
-  "mcpServers": {
-    "apitool": {
-      "command": "bun",
-      "args": ["run", "/path/to/apitool/src/cli/index.ts", "mcp"]
-    }
-  }
-}
+| Editor | Config file |
+|--------|-------------|
+| Cursor | Settings > MCP, or `.cursor/mcp.json` in project root |
+| Claude Code | `.mcp.json` in project root |
+| Windsurf | `.windsurfrules/mcp.json` or settings |
+
+14 MCP tools: `setup_api`, `generate_tests_guide`, `save_test_suite`, `run_tests`, `query_db`, `explore_api`, `coverage_analysis`, `generate_missing_tests`, `validate_tests`, `send_request`, `manage_environment`, `manage_server`. Full reference in [APITOOL.md](APITOOL.md).
+
+## YAML Test Format
+
+```yaml
+name: Users CRUD
+description: Full user lifecycle
+tags: [users, crud, smoke]
+base_url: "{{base_url}}"
+
+tests:
+  - name: Create user
+    POST: /users
+    json:
+      name: "{{$randomName}}"
+      email: "{{$randomEmail}}"
+    expect:
+      status: 201
+      body:
+        id: { capture: user_id, type: integer }
+
+  - name: Get user
+    GET: /users/{{user_id}}
+    expect:
+      status: 200
+
+  - name: Delete user
+    DELETE: /users/{{user_id}}
+    expect:
+      status: 204
 ```
 
-### Available MCP Tools
+## CLI
 
-| Tool | Description |
-|------|-------------|
-| `run_tests` | Run API tests from a YAML file or directory |
-| `validate_tests` | Validate YAML test files without running them |
-| `generate_tests` | Generate skeleton tests from an OpenAPI spec |
-| `list_collections` | List all test collections with run statistics |
-| `list_runs` | List recent test runs with summary statistics |
-| `get_run_results` | Get detailed results for a specific test run |
-| `list_environments` | List all saved environments (values hidden) |
-| `send_request` | Send an ad-hoc HTTP request with variable interpolation |
-| `explore_api` | Parse and summarize an OpenAPI spec |
-| `manage_environment` | Create, update, or delete environments |
-| `diagnose_failure` | Analyze a failed test run and suggest fixes |
-| `coverage_analysis` | Compare OpenAPI spec vs test files for coverage gaps |
+```
+apitool run <path>           Run tests (--env, --safe, --report json|junit)
+apitool add-api <name>       Register API (--spec <openapi>)
+apitool serve                Web dashboard (--port 8080)
+apitool mcp                  Start MCP server
+apitool coverage             API test coverage (--spec, --tests)
+apitool chat                 AI chat agent (--provider ollama|openai|anthropic)
+apitool doctor               Diagnostics
+```
 
-> **Note:** The database and test files are resolved relative to the working directory (`cwd`), not globally. Each project maintains its own test history.
+Full docs: [APITOOL.md](APITOOL.md)
 
 ## License
 
