@@ -2,7 +2,7 @@
 
 AI-native API testing tool. OpenAPI spec in, tests out. One binary, zero config.
 
-[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/install-mcp?name=apitool&config=eyJjb21tYW5kIjoiYXBpdG9vbCIsImFyZ3MiOlsibWNwIl19)
+[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=apitool&config=eyJjb21tYW5kIjoiYXBpdG9vbCIsImFyZ3MiOlsibWNwIl19)
 
 ## Install
 
