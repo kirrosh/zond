@@ -1,7 +1,7 @@
 import { resolve, join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
 import { getDb } from "../db/schema.ts";
-import { createCollection, upsertEnvironment, findCollectionByNameOrId, normalizePath } from "../db/queries.ts";
+import { createCollection, deleteCollection, upsertEnvironment, findCollectionByNameOrId, normalizePath } from "../db/queries.ts";
 import { readOpenApiSpec, extractEndpoints } from "./generator/index.ts";
 import { toYaml } from "../cli/commands/envs.ts";
 
@@ -11,6 +11,7 @@ export interface SetupApiOptions {
   dir?: string;
   envVars?: Record<string, string>;
   dbPath?: string;
+  force?: boolean;
 }
 
 export interface SetupApiResult {
@@ -26,10 +27,14 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
 
   getDb(dbPath);
 
-  // Validate name uniqueness
+  // Validate name uniqueness (or force-replace)
   const existing = findCollectionByNameOrId(name);
   if (existing) {
-    throw new Error(`API '${name}' already exists (id=${existing.id})`);
+    if (options.force) {
+      deleteCollection(existing.id, true);
+    } else {
+      throw new Error(`API '${name}' already exists (id=${existing.id})`);
+    }
   }
 
   // Sanitize name for directory use

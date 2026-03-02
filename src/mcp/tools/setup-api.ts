@@ -12,8 +12,9 @@ export function registerSetupApiTool(server: McpServer, dbPath?: string) {
       specPath: z.optional(z.string()).describe("Path or URL to OpenAPI spec"),
       dir: z.optional(z.string()).describe("Base directory (default: ./apis/<name>/)"),
       envVars: z.optional(z.string()).describe("Environment variables as JSON string (e.g. '{\"base_url\": \"...\", \"token\": \"...\"}')"),
+      force: z.optional(z.boolean()).describe("If true, delete existing API with same name and recreate from scratch"),
     },
-  }, async ({ name, specPath, dir, envVars }) => {
+  }, async ({ name, specPath, dir, envVars, force }) => {
     try {
       let parsedEnvVars: Record<string, string> | undefined;
       if (envVars) {
@@ -32,6 +33,7 @@ export function registerSetupApiTool(server: McpServer, dbPath?: string) {
         dir,
         envVars: parsedEnvVars,
         dbPath,
+        force,
       });
 
       return {
