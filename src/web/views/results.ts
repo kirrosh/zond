@@ -35,7 +35,7 @@ export function methodBadge(method: string): string {
 export function renderSuiteResults(
   results: StoredStepResult[],
   runId: number,
-  options?: { idPrefix?: string },
+  options?: { idPrefix?: string; suiteMetadata?: Map<string, { description?: string; tags?: string[] }> },
 ): string {
   const prefix = options?.idPrefix ?? `r${runId}`;
 
@@ -153,9 +153,19 @@ export function renderSuiteResults(
 
     const chainClass = isChainSuite ? " chain-suite" : "";
 
+    const meta = options?.suiteMetadata?.get(suiteName);
+    const descriptionHtml = meta?.description
+      ? `<p class="suite-description">${escapeHtml(meta.description)}</p>`
+      : "";
+    const tagsHtml = meta?.tags?.length
+      ? `<div class="suite-tags">${meta.tags.map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join(" ")}</div>`
+      : "";
+
     suitesHtml += `
       <div class="suite-section${chainClass}">
         <h3>${escapeHtml(suiteName)}</h3>
+        ${descriptionHtml}
+        ${tagsHtml}
         ${isChainSuite ? '<div class="chain-connector">' : ""}
         ${stepsHtml}
         ${isChainSuite ? "</div>" : ""}

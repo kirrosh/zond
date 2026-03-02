@@ -11,6 +11,7 @@ import { registerSaveTestSuiteTool } from "./tools/save-test-suite.ts";
 import { registerGenerateTestsGuideTool } from "./tools/generate-tests-guide.ts";
 import { registerSetupApiTool } from "./tools/setup-api.ts";
 import { registerGenerateMissingTestsTool } from "./tools/generate-missing-tests.ts";
+import { registerManageServerTool } from "./tools/manage-server.ts";
 
 export interface McpServerOptions {
   dbPath?: string;
@@ -32,10 +33,11 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
   registerExploreApiTool(server);
   registerManageEnvironmentTool(server, dbPath);
   registerCoverageAnalysisTool(server);
-  registerSaveTestSuiteTool(server);
+  registerSaveTestSuiteTool(server, dbPath);
   registerGenerateTestsGuideTool(server);
   registerSetupApiTool(server, dbPath);
   registerGenerateMissingTestsTool(server);
+  registerManageServerTool(server, dbPath);
 
   // Connect via stdio transport
   const transport = new StdioServerTransport();

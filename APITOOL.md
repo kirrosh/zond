@@ -62,7 +62,7 @@ apitool/
 │   ├── db/                   # SQLite storage (runs, collections, environments)
 │   ├── mcp/                  # MCP Server — AI agent integration
 │   │   ├── server.ts
-│   │   └── tools/            # 13 MCP tools
+│   │   └── tools/            # 14 MCP tools
 │   ├── web/                  # Hono + HTMX dashboard
 │   └── cli/                  # 15 CLI commands
 ```
@@ -87,12 +87,12 @@ apitool/
 
 ## MCP Tools
 
-The primary way AI agents interact with apitool. 13 tools available:
+The primary way AI agents interact with apitool. 14 tools available:
 
 | Tool | Description | When to use |
 |------|-------------|-------------|
 | `generate_tests_guide` | Full API spec with schemas + step-by-step generation algorithm | **Before** generating tests — gives everything needed |
-| `save_test_suite` | Validate and save YAML test file | **After** generating test content |
+| `save_test_suite` | Validate and save YAML test file; returns coverage hint if spec available | **After** generating test content |
 | `run_tests` | Execute tests, return summary with failures | **After** saving test suites |
 | `diagnose_failure` | Full request/response details for failed tests | **After** run_tests reports failures |
 | `explore_api` | Browse OpenAPI spec (endpoints, schemas, security) | Inspect specific endpoints (`includeSchemas=true` for full schemas) |
@@ -100,6 +100,7 @@ The primary way AI agents interact with apitool. 13 tools available:
 | `validate_tests` | Check YAML syntax without running | Quick validation |
 | `send_request` | Ad-hoc HTTP request with variable interpolation | Manual API exploration |
 | `manage_environment` | CRUD for environments (list/get/set/delete) | Configure base_url, tokens, credentials |
+| `manage_server` | Start/stop/restart/status the WebUI server | View results in browser without leaving MCP |
 | `list_collections` | List registered APIs with stats | Overview of registered APIs |
 | `list_runs` | Recent test run history | Review past results |
 | `get_run_results` | Detailed results for a specific run | Deep dive into a run |

@@ -46,7 +46,9 @@ YAML-файл с набором тестов. Содержит `name`, `base_url
 
 | Поле | Описание |
 |------|----------|
-| `name` | Имя сьюта (отображается в отчётах) |
+| `name` | Имя сьюта (отображается в отчётах и WebUI) |
+| `description` | Описание сьюта (отображается в WebUI под заголовком) |
+| `tags` | Массив строк-тегов (отображаются как pill-бейджи в WebUI) |
 | `base_url` | Базовый URL для всех тестов (поддерживает `{{base_url}}`) |
 | `headers` | Общие заголовки (e.g. `Authorization`) |
 | `config` | `timeout`, `retries`, `retry_delay`, `follow_redirects`, `verify_ssl` |

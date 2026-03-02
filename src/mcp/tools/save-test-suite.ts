@@ -5,7 +5,7 @@ import { join, dirname } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import YAML from "yaml";
 
-export function registerSaveTestSuiteTool(server: McpServer) {
+export function registerSaveTestSuiteTool(server: McpServer, dbPath?: string) {
   server.registerTool("save_test_suite", {
     description: "Save a YAML test suite file with validation. Parses and validates the YAML content " +
       "before writing. Returns structured errors if validation fails so you can fix and retry. " +
@@ -87,16 +87,46 @@ export function registerSaveTestSuiteTool(server: McpServer) {
       const suite = parsed as Record<string, unknown>;
       const tests = (suite.tests as unknown[]) ?? [];
 
+      const result: Record<string, unknown> = {
+        saved: true,
+        filePath: resolvedPath,
+        suite: {
+          name: suite.name,
+          tests: tests.length,
+          base_url: suite.base_url ?? null,
+        },
+      };
+
+      // Attempt to compute coverage hint
+      try {
+        const testDir = dirname(resolvedPath);
+        const { findCollectionByTestPath } = await import("../../db/queries.ts");
+        const { getDb } = await import("../../db/schema.ts");
+        getDb(dbPath);
+        const collection = findCollectionByTestPath(testDir);
+        if (collection?.openapi_spec) {
+          const { readOpenApiSpec, extractEndpoints } = await import("../../core/generator/openapi-reader.ts");
+          const { scanCoveredEndpoints, filterUncoveredEndpoints } = await import("../../core/generator/coverage-scanner.ts");
+
+          const doc = await readOpenApiSpec(collection.openapi_spec);
+          const allEndpoints = extractEndpoints(doc);
+          const covered = await scanCoveredEndpoints(testDir);
+          const uncovered = filterUncoveredEndpoints(allEndpoints, covered);
+
+          const total = allEndpoints.length;
+          const coveredCount = total - uncovered.length;
+          const percentage = total > 0 ? Math.round((coveredCount / total) * 100) : 0;
+
+          const coverage: Record<string, unknown> = { percentage, covered: coveredCount, total, uncoveredCount: uncovered.length };
+          if (percentage < 80 && uncovered.length > 0) {
+            coverage.suggestion = `Use generate_missing_tests to cover ${uncovered.length} remaining endpoint${uncovered.length > 1 ? "s" : ""}`;
+          }
+          result.coverage = coverage;
+        }
+      } catch { /* silently skip coverage if unavailable */ }
+
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({
-          saved: true,
-          filePath: resolvedPath,
-          suite: {
-            name: suite.name,
-            tests: tests.length,
-            base_url: suite.base_url ?? null,
-          },
-        }, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
       };
     } catch (err) {
       return {

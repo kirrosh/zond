@@ -59,14 +59,14 @@ dashboard.get("/panels/results", async (c) => {
   const runId = parseInt(c.req.query("run_id") ?? "", 10);
 
   if (!isNaN(runId)) {
-    return c.html(renderRunResults(runId));
+    return c.html(await renderRunResults(runId));
   }
 
   if (!isNaN(collectionId)) {
     // Get latest run for this collection
     const runs = listRunsByCollection(collectionId, 1, 0);
     if (runs.length === 0) return c.html(`<p style="color:var(--text-dim);">No runs yet. Click <strong>Run Tests</strong> to get started.</p>`);
-    return c.html(renderRunResults(runs[0]!.id));
+    return c.html(await renderRunResults(runs[0]!.id));
   }
 
   return c.html("");
@@ -185,7 +185,17 @@ function renderCollectionContent(collection: CollectionSummary, envRecords: { id
     </div>`;
 }
 
-function renderRunResults(runId: number): string {
+async function loadSuiteMetadata(testPath: string): Promise<Map<string, { description?: string; tags?: string[] }>> {
+  const { parseDirectory } = await import("../../core/parser/yaml-parser.ts");
+  const suites = await parseDirectory(testPath);
+  const map = new Map<string, { description?: string; tags?: string[] }>();
+  for (const s of suites) {
+    map.set(s.name, { description: s.description, tags: s.tags });
+  }
+  return map;
+}
+
+async function renderRunResults(runId: number): Promise<string> {
   const run = getRunById(runId);
   if (!run) return `<p>Run not found</p>`;
 
@@ -200,6 +210,15 @@ function renderRunResults(runId: number): string {
   const timeAgo = formatTimeAgo(run.started_at);
   const duration = run.duration_ms != null ? formatDuration(run.duration_ms) : "-";
 
+  // Load suite metadata from YAML files if we can find the collection
+  let suiteMetadata: Map<string, { description?: string; tags?: string[] }> | undefined;
+  try {
+    const collection = run.collection_id != null ? getCollectionById(run.collection_id) : null;
+    if (collection?.test_path) {
+      suiteMetadata = await loadSuiteMetadata(collection.test_path);
+    }
+  } catch { /* skip metadata if unavailable */ }
+
   const header = `
     <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);">
       <strong>Run #${run.id}</strong>
@@ -213,7 +232,7 @@ function renderRunResults(runId: number): string {
       ${failedFilterToggle()}
     </div>`;
 
-  const suitesHtml = renderSuiteResults(results, runId);
+  const suitesHtml = renderSuiteResults(results, runId, { suiteMetadata });
 
   return header + suitesHtml + autoExpandFailedScript();
 }
