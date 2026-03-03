@@ -40,11 +40,13 @@ Click the badge above, or add manually:
   "mcpServers": {
     "apitool": {
       "command": "npx",
-      "args": ["-y", "@kirrosh/apitool", "mcp", "--dir", "${workspaceFolder}"]
+      "args": ["-y", "@kirrosh/apitool@latest", "mcp", "--dir", "${workspaceFolder}"]
     }
   }
 }
 ```
+
+> `@latest` ensures npx always pulls the newest version on each restart — no manual update needed.
 
 **Where to put this:**
 
@@ -54,7 +56,7 @@ Click the badge above, or add manually:
 | Claude Code | `.mcp.json` in project root |
 | Windsurf | `.windsurfrules/mcp.json` or settings |
 
-14 MCP tools: `setup_api`, `generate_tests_guide`, `save_test_suite`, `run_tests`, `query_db`, `explore_api`, `coverage_analysis`, `generate_missing_tests`, `validate_tests`, `send_request`, `manage_environment`, `manage_server`. Full reference in [APITOOL.md](APITOOL.md).
+17 MCP tools: `setup_api`, `generate_tests_guide`, `save_test_suite`, `run_tests`, `query_db`, `explore_api`, `describe_endpoint`, `coverage_analysis`, `generate_missing_tests`, `validate_tests`, `send_request`, `manage_environment`, `manage_server`, `set_work_dir`, and more. Full reference in [APITOOL.md](APITOOL.md).
 
 ## YAML Test Format
 
