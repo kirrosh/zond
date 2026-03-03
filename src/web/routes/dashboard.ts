@@ -11,7 +11,7 @@ import {
   getRunById,
   getCollectionById,
 } from "../../db/queries.ts";
-import type { CollectionSummary } from "../../db/queries.ts";
+import type { CollectionRecord, CollectionSummary } from "../../db/queries.ts";
 
 const dashboard = new Hono();
 
@@ -79,7 +79,7 @@ dashboard.get("/panels/coverage", async (c) => {
   const collection = getCollectionById(collectionId);
   if (!collection?.openapi_spec) return c.html("");
 
-  return c.html(await renderCoveragePanel(collection));
+  return c.html(await renderCoveragePanel(collection as CollectionRecord & { openapi_spec: string }));
 });
 
 dashboard.get("/panels/history", (c) => {
@@ -134,7 +134,7 @@ function renderPage(collections: CollectionSummary[], selectedId: number | null)
     </div>`;
 }
 
-function renderCollectionContent(collection: CollectionSummary, envRecords: { id: number; name: string; collection_id: number | null }[]): string {
+function renderCollectionContent(collection: CollectionRecord, envRecords: { id: number; name: string; collection_id: number | null }[]): string {
   // Auto-select: prefer first scoped env, then first env if only one
   const defaultEnv = envRecords.find(e => e.collection_id !== null)?.name
     ?? (envRecords.length === 1 ? envRecords[0]!.name : null);
@@ -237,7 +237,7 @@ async function renderRunResults(runId: number): Promise<string> {
   return header + suitesHtml + autoExpandFailedScript();
 }
 
-async function renderCoveragePanel(collection: CollectionSummary & { openapi_spec: string }): Promise<string> {
+async function renderCoveragePanel(collection: CollectionRecord & { openapi_spec: string }): Promise<string> {
   try {
     const { readOpenApiSpec, extractEndpoints } = await import("../../core/generator/openapi-reader.ts");
     const { scanCoveredEndpoints, filterUncoveredEndpoints } = await import("../../core/generator/coverage-scanner.ts");

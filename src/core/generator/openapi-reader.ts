@@ -10,7 +10,7 @@ export async function readOpenApiSpec(specPath: string): Promise<OpenAPIV3.Docum
     const resp = await fetch(specPath);
     if (!resp.ok) throw new Error(`Failed to fetch spec: ${resp.status} ${resp.statusText}`);
     const spec = await resp.json();
-    const api = await dereference(spec);
+    const api = await dereference(spec as string);
     return api as OpenAPIV3.Document;
   }
   const api = await dereference(specPath);
