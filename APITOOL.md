@@ -39,7 +39,7 @@ src/
 │   ├── reporter/     Console, JSON, JUnit XML
 │   └── agent/        AI Chat (AI SDK v6, tool calling)
 ├── db/               SQLite (runs, collections, environments)
-├── mcp/              MCP Server (15 tools)
+├── mcp/              MCP Server (16 tools)
 ├── web/              Hono + HTMX dashboard
 └── cli/              16 CLI commands
 ```
@@ -74,11 +74,55 @@ SQLite auto-created. Tables: `collections`, `runs`, `results`, `environments`, `
 Single-page dashboard: API selector → env selector → Run Tests → results + coverage + history. JUnit/JSON export. Hono + HTMX.
 
 ### MCP Server
-15 tools for AI agent integration. Primary test generation flow:
+16 tools for AI agent integration. Primary test generation flow:
 
 ```
 generate_tests_guide → [agent writes YAML] → save_test_suite → run_tests → diagnose_failure → ci_init
 ```
+
+### Safe Test Coverage Workflow
+
+**When the user asks to "safely cover", "test without breaking anything", or "start with read-only tests" — follow this 4-phase approach:**
+
+**Step 0 (required for npx MCP — single shared server):**
+```
+set_work_dir(workDir: "<absolute path to project root>")
+```
+Call this once at the start of the session so `apitool.db` and all relative paths resolve to your project directory.
+
+**Phase 0 — Register + static analysis (zero requests)**
+```
+setup_api(...)
+coverage_analysis(specPath, testsDir)   ← baseline, no HTTP
+```
+
+**Phase 1 — Smoke tests (GET-only, safe for production)**
+```
+generate_tests_guide(specPath, methodFilter: ["GET"])   ← GET endpoints only
+save_test_suite(...)                                    ← tags: [smoke]
+run_tests(testPath, safe: true)                         ← --safe enforces GET-only
+```
+Stop here if the user hasn't explicitly confirmed a staging/test environment.
+
+**Phase 2 — CRUD tests (only with explicit user confirmation + staging env)**
+```
+run_tests(testPath, tag: ["crud"], dryRun: true)        ← show requests first, no sending
+[show user what would be sent, ask confirmation]
+run_tests(testPath, tag: ["crud"], envName: "staging")  ← only after confirmation
+```
+
+**Phase 3 — Regression tracking**
+```
+query_db(action: "compare_runs", runId: prev, runIdB: curr)
+ci_init()
+```
+
+**Key safety rules:**
+- `safe: true` on `run_tests` → only GET requests execute, write ops are skipped
+- `dryRun: true` on `run_tests` → shows all requests without sending any
+- `methodFilter: ["GET"]` on `generate_tests_guide` → only generates GET test stubs
+- Always use `tags: [smoke]` for GET-only suites, `tags: [crud]` for write operations
+- Never run CRUD tests unless user confirmed environment is safe (staging/test)
 
 ### CI/CD
 `apitool ci init` scaffolds GitHub Actions or GitLab CI workflow. Supports schedule, repository_dispatch, manual triggers. See [docs/ci.md](docs/ci.md).
@@ -102,6 +146,7 @@ generate_tests_guide → [agent writes YAML] → save_test_suite → run_tests �
 | `manage_environment` | CRUD for environments |
 | `manage_server` | Start/stop WebUI server |
 | `ci_init` | Generate CI/CD workflow (GitHub Actions / GitLab CI) |
+| `set_work_dir` | Set project root for the session (call FIRST with npx MCP) |
 
 ## CLI Commands
 

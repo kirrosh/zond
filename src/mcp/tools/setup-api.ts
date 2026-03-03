@@ -1,6 +1,21 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
 import { setupApi } from "../../core/setup-api.ts";
+import { resetDb } from "../../db/schema.ts";
+
+function findProjectRoot(fromPath: string): string | null {
+  let current = existsSync(fromPath) ? fromPath : dirname(fromPath);
+  while (true) {
+    if (existsSync(join(current, ".git")) || existsSync(join(current, "package.json"))) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
 
 export function registerSetupApiTool(server: McpServer, dbPath?: string) {
   server.registerTool("setup_api", {
@@ -27,6 +42,17 @@ export function registerSetupApiTool(server: McpServer, dbPath?: string) {
           };
         }
       }
+
+      // Auto-chdir to project root when dir is an absolute path
+      if (dir && isAbsolute(resolve(dir))) {
+        const resolvedDir = resolve(dir);
+        const root = findProjectRoot(resolvedDir);
+        if (root && root !== process.cwd()) {
+          process.chdir(root);
+          resetDb();
+        }
+      }
+
       const result = await setupApi({
         name,
         spec: specPath,
