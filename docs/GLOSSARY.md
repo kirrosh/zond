@@ -96,26 +96,33 @@ YAML-файл с набором тестов. Содержит `name`, `base_url
 
 ## Environment (Окружение)
 
-Именованный набор переменных (`{{base_url}}`, `{{token}}`).
+Именованный набор переменных (`{{base_url}}`, `{{token}}`). Единственный источник истины — файлы на диске. DB-слой для окружений отсутствует.
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `id` | INTEGER PK | Автоинкремент |
-| `name` | TEXT | Имя окружения (e.g. `staging`, `default`) |
-| `collection_id` | INTEGER? | FK → collections. NULL = глобальное |
-| `variables` | TEXT (JSON) | `{ "base_url": "...", "token": "..." }` |
+**Файловая модель:**
+- `.env.yaml` — дефолтное окружение (имя `""`)
+- `.env.<name>.yaml` — именованное окружение (e.g. `.env.staging.yaml`)
 
-**Scoping:**
-- `collection_id = NULL` → глобальный env (доступен всем коллекциям)
-- `collection_id = <id>` → скоупленный env (только для этой коллекции)
+Файлы живут рядом с тестами или в родительской директории.
 
-**Приоритет резолва `--env staging` для коллекции X:**
-1. Файл `.env.staging.yaml` в директории тестов → если есть, перезаписывает всё
-2. DB: env `staging` с `collection_id = X.id` → scoped
-3. DB: env `staging` с `collection_id = NULL` → global
-4. Мерж: (3) база + (2) оверрайд + (1) оверрайд всего
+**`loadEnvironment(envName?, searchDir)`** — загружает переменные из файла:
+- без `envName` → ищет `.env.yaml`
+- с `envName` → ищет `.env.<envName>.yaml`
+- поиск в `searchDir`, затем в родительской директории
 
-**CLI:** `apitool envs set staging base_url=... --api petstore` → scoped env.
+**`listEnvFiles(dir)`** — сканирует директорию, возвращает найденные имена env:
+- `.env.yaml` → `""`
+- `.env.staging.yaml` → `"staging"`
+
+**`setup_api`** создаёт `.gitignore` с `.env*.yaml` в `baseDir`, чтобы секреты не попадали в git.
+
+**Пример:**
+```yaml
+# apis/petstore/.env.staging.yaml
+base_url: https://staging.example.com/api
+token: staging-token
+```
+
+`apitool run apis/petstore/tests/ --env staging`
 
 ---
 
@@ -124,7 +131,7 @@ YAML-файл с набором тестов. Содержит `name`, `base_url
 Механизм передачи данных между шагами и окружениями.
 
 **Источники переменных:**
-- Environment (файл `.env.yaml` или DB)
+- Environment (файл `.env.yaml` или `.env.<name>.yaml`)
 - Captures из ответов предыдущих шагов
 - Встроенные генераторы: `$uuid`, `$timestamp`, `$randomName`, `$randomEmail`, `$randomInt`, `$randomString`
 

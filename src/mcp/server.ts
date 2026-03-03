@@ -5,7 +5,6 @@ import { registerValidateTestsTool } from "./tools/validate-tests.ts";
 import { registerQueryDbTool } from "./tools/query-db.ts";
 import { registerSendRequestTool } from "./tools/send-request.ts";
 import { registerExploreApiTool } from "./tools/explore-api.ts";
-import { registerManageEnvironmentTool } from "./tools/manage-environment.ts";
 import { registerCoverageAnalysisTool } from "./tools/coverage-analysis.ts";
 import { registerSaveTestSuiteTool, registerSaveTestSuitesTool } from "./tools/save-test-suite.ts";
 import { registerGenerateTestsGuideTool } from "./tools/generate-tests-guide.ts";
@@ -32,9 +31,8 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
   registerRunTestsTool(server, dbPath);
   registerValidateTestsTool(server);
   registerQueryDbTool(server, dbPath);
-  registerSendRequestTool(server);
+  registerSendRequestTool(server, dbPath);
   registerExploreApiTool(server);
-  registerManageEnvironmentTool(server, dbPath);
   registerCoverageAnalysisTool(server);
   registerSaveTestSuiteTool(server, dbPath);
   registerSaveTestSuitesTool(server, dbPath);

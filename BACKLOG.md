@@ -26,9 +26,6 @@ Compare two test runs — regression detection in CI.
 ### Timestamp capture pattern
 When a `timestamp` field is detected in a request body schema (common in OAuth, AWS Sig, Ably tokens), add a hint in the guide: "consider GET /time before this step to capture the server timestamp".
 
-### Per-suite env resolution
-When running `apitool run apis/` (directory with subdirs), resolve `.env.<name>.yaml` from each suite's directory, not from `dirname(path)`.
-
 ---
 
 ## Low Priority
@@ -49,6 +46,13 @@ Generate markdown documentation from YAML tests: descriptions + examples.
 Runner support for file upload endpoints.
 
 ---
+
+## Done (recently completed)
+
+| Item | Notes |
+|------|-------|
+| Env refactoring: file-only model | Removed DB `environments` table (schema V7), removed `manage_environment` MCP tool and `envs` CLI command. Single source of truth: `.env.yaml` / `.env.<name>.yaml` files. `loadEnvironment` reads files only. `listEnvFiles` scans dirs. `setup_api` creates `.gitignore` for env files. |
+| Per-suite env resolution | `.env.<name>.yaml` resolved from each suite's directory when running a directory |
 
 ## Not Doing
 

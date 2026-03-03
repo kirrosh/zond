@@ -9,7 +9,6 @@ import { mcpCommand } from "./commands/mcp.ts";
 import { initCommand } from "./commands/init.ts";
 import { updateCommand } from "./commands/update.ts";
 import { chatCommand } from "./commands/chat.ts";
-import { envsCommand } from "./commands/envs.ts";
 import { runsCommand } from "./commands/runs.ts";
 import { coverageCommand } from "./commands/coverage.ts";
 import { doctorCommand } from "./commands/doctor.ts";
@@ -79,7 +78,6 @@ Usage:
   apitool run <path>       Run API tests
   apitool validate <path>  Validate test files without running
   apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
-  apitool envs [list|get|set|delete]  Manage environments
   apitool runs [id]        View test run history
   apitool coverage --spec <path> --tests <dir>  Analyze API test coverage
   apitool collections      List test collections
@@ -104,15 +102,6 @@ Options for 'chat':
   --api-key <key>      API key (or set APITOOL_AI_KEY env var)
   --base-url <url>     Provider base URL override
   --safe               Only allow running GET tests (read-only mode)
-
-Options for 'envs':
-  envs                 List all environments
-  envs get <name>      Show variables in an environment
-  envs set <name> K=V  Set variables (multiple KEY=VALUE pairs)
-  envs delete <name>   Delete an environment
-  envs import <name> <file>  Import environment from YAML file
-  envs export <name>   Export environment as YAML to stdout
-  --api <name>         Scope operation to a specific API collection
 
 Options for 'runs':
   runs                 List recent test runs
@@ -394,24 +383,6 @@ async function main(): Promise<number> {
 
     case "update": {
       return updateCommand({ force: flags["force"] === true });
-    }
-
-    case "envs": {
-      const sub = positional[0] as string | undefined;
-      const validActions = ["get", "set", "delete", "import", "export"] as const;
-      const action = validActions.includes(sub as any) ? (sub as typeof validActions[number]) : "list";
-      const name = action === "list" ? undefined : positional[1];
-      const pairs = action === "set" ? positional.slice(2) : undefined;
-      const file = action === "import" ? positional[2] : undefined;
-
-      return envsCommand({
-        action,
-        name,
-        pairs,
-        file,
-        api: typeof flags["api"] === "string" ? flags["api"] : undefined,
-        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
-      });
     }
 
     case "runs": {

@@ -77,7 +77,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
 
   let env: Record<string, string> = {};
   try {
-    env = await loadEnvironment(options.env, searchDir, collectionForEnv?.id);
+    env = await loadEnvironment(options.env, searchDir);
   } catch (err) {
     printError(`Failed to load environment: ${(err as Error).message}`);
     return 2;

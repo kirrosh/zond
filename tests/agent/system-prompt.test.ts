@@ -17,7 +17,6 @@ describe("AGENT_SYSTEM_PROMPT", () => {
       "validate_tests",
       "generate_tests",
       "query_results",
-      "manage_environment",
       "diagnose_failure",
     ];
     for (const name of toolNames) {

@@ -50,11 +50,11 @@ describe("getDb / schema", () => {
     expect(rows).toHaveLength(1);
   });
 
-  test("creates environments table", () => {
+  test("does not create environments table (removed in V7)", () => {
     dbPath = tmpDb();
     const db = getDb(dbPath);
     const rows = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='environments'").all();
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(0);
   });
 
   test("creates collections table", () => {
@@ -97,7 +97,7 @@ describe("getDb / schema", () => {
     dbPath = tmpDb();
     const db = getDb(dbPath);
     const row = db.query("PRAGMA user_version").get() as { user_version: number };
-    expect(row.user_version).toBe(6);
+    expect(row.user_version).toBe(7);
   });
 
   test("closeDb resets singleton so next call opens fresh db", () => {

@@ -1,18 +1,16 @@
 import { describe, test, expect, mock, afterAll, beforeEach } from "bun:test";
-import { mkdirSync, existsSync, readFileSync, rmSync } from "fs";
+import { existsSync, readFileSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { tmpdir } from "os";
 
 // Mock the DB layer
 const mockFindCollectionByNameOrId = mock(() => null);
 const mockCreateCollection = mock(() => 42);
-const mockUpsertEnvironment = mock(() => {});
 const mockNormalizePath = mock((p: string) => p.replace(/\\/g, "/"));
 
 mock.module("../../src/db/queries.ts", () => ({
   findCollectionByNameOrId: mockFindCollectionByNameOrId,
   createCollection: mockCreateCollection,
-  upsertEnvironment: mockUpsertEnvironment,
   normalizePath: mockNormalizePath,
 }));
 
@@ -30,15 +28,11 @@ mock.module("../../src/core/generator/index.ts", () => ({
   ]),
 }));
 
-mock.module("../../src/cli/commands/envs.ts", () => ({
-  toYaml: mock((vars: Record<string, string>) =>
-    Object.entries(vars).map(([k, v]) => `${k}: ${v}`).join("\n")
-  ),
-}));
 
 afterAll(() => { mock.restore(); });
 
 import { setupApi } from "../../src/core/setup-api.ts";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 describe("setupApi", () => {
   let tempDir: string;
@@ -61,8 +55,11 @@ describe("setupApi", () => {
     expect(result.collectionId).toBe(42);
     expect(result.baseUrl).toBe("https://petstore.io/v2");
     expect(result.specEndpoints).toBe(2);
+    expect(result.baseDir).toBeTruthy();
     expect(existsSync(join(dir, "tests"))).toBe(true);
     expect(existsSync(join(dir, ".env.yaml"))).toBe(true);
+    expect(existsSync(join(dir, ".gitignore"))).toBe(true);
+    expect(readFileSync(join(dir, ".gitignore"), "utf-8")).toContain(".env*.yaml");
 
     // Cleanup
     rmSync(dir, { recursive: true, force: true });
@@ -91,7 +88,7 @@ describe("setupApi", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("custom envVars are passed through", async () => {
+  test("custom envVars are written to .env.yaml", async () => {
     const dir = join(tempDir, "withenv");
     await setupApi({
       name: "myapi",
@@ -99,7 +96,39 @@ describe("setupApi", () => {
       envVars: { token: "abc123" },
     });
 
-    expect(mockUpsertEnvironment).toHaveBeenCalled();
+    expect(existsSync(join(dir, ".env.yaml"))).toBe(true);
+    expect(readFileSync(join(dir, ".env.yaml"), "utf-8")).toContain("token");
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("setup_api MCP tool", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = join(tmpdir(), `apitool-mcp-setup-${Date.now()}`);
+    mockFindCollectionByNameOrId.mockImplementation(() => null);
+    mockCreateCollection.mockImplementation(() => 99);
+  });
+
+  test("response includes nextSteps with .env.yaml path", async () => {
+    const { registerSetupApiTool } = await import("../../src/mcp/tools/setup-api.ts");
+
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerSetupApiTool(server);
+
+    const tool = (server as any)._registeredTools["setup_api"];
+    const dir = join(tempDir, "myapi");
+    const result = await tool.handler({ name: "myapi", dir });
+
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.created).toBe(true);
+    expect(parsed.nextSteps).toBeDefined();
+    expect(Array.isArray(parsed.nextSteps)).toBe(true);
+    expect(parsed.nextSteps.length).toBeGreaterThan(0);
+    expect(parsed.nextSteps[0]).toContain(".env.yaml");
+    expect(parsed.nextSteps[1]).toContain("git-ignored");
 
     rmSync(dir, { recursive: true, force: true });
   });

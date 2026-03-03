@@ -65,7 +65,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
 
   // Helper: load env with optional --env-var overrides merged on top
   async function loadEnvWithOverrides(dir: string): Promise<Record<string, string>> {
-    const env = await loadEnvironment(effectiveEnvName, dir, collection?.id);
+    const env = await loadEnvironment(effectiveEnvName, dir);
     if (options.envVars && Object.keys(options.envVars).length > 0) {
       Object.assign(env, options.envVars);
     }

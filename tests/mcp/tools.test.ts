@@ -245,4 +245,100 @@ describe("query_db", () => {
 
     expect(result.isError).toBe(true);
   });
+
+  test("diagnose_failure includes hint for 5xx failures", async () => {
+    const suiteResult = makeSuiteResult();
+    const runId = createRun({ started_at: suiteResult.started_at, trigger: "mcp" });
+    finalizeRun(runId, [suiteResult]);
+    saveResults(runId, [suiteResult]);
+
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
+
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerQueryDbTool(server, dbFile);
+
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "diagnose_failure", runId });
+
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.failures.length).toBeGreaterThan(0);
+    // The failing step has response status 500
+    const failWith500 = parsed.failures.find((f: any) => f.response_status === 500);
+    expect(failWith500).toBeDefined();
+    expect(failWith500.hint).toContain("Server-side error");
+  });
+
+  test("diagnose_failure includes hint for 401 failures", async () => {
+    const suiteResult = makeSuiteResult({
+      steps: [{
+        name: "Unauthorized call",
+        status: "fail",
+        duration_ms: 50,
+        request: { method: "GET", url: "http://localhost/secure", headers: {} },
+        response: { status: 401, headers: {}, body: "Unauthorized", duration_ms: 50 },
+        assertions: [{ field: "status", rule: "equals", passed: false, actual: 401, expected: 200 }],
+        captures: {},
+        error: "Expected 200 but got 401",
+      }],
+      total: 1,
+      passed: 0,
+      failed: 1,
+    });
+    const runId = createRun({ started_at: suiteResult.started_at, trigger: "mcp" });
+    finalizeRun(runId, [suiteResult]);
+    saveResults(runId, [suiteResult]);
+
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
+
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerQueryDbTool(server, dbFile);
+
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "diagnose_failure", runId });
+
+    const parsed = JSON.parse(result.content[0].text);
+    const failWith401 = parsed.failures.find((f: any) => f.response_status === 401);
+    expect(failWith401).toBeDefined();
+    expect(failWith401.hint).toContain("Auth failure");
+  });
+});
+
+// ──────────────────────────────────────────────
+// describe_endpoint — testSnippet
+// ──────────────────────────────────────────────
+
+describe("describe_endpoint testSnippet", () => {
+  test("returns testSnippet with {{base_url}} and correct method", async () => {
+    const { registerDescribeEndpointTool } = await import("../../src/mcp/tools/describe-endpoint.ts");
+
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerDescribeEndpointTool(server);
+
+    const tool = (server as any)._registeredTools["describe_endpoint"];
+    const specPath = resolve("tests/fixtures/petstore-simple.json");
+    const result = await tool.handler({ specPath, method: "GET", path: "/pets" });
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.testSnippet).toBeDefined();
+    expect(typeof parsed.testSnippet).toBe("string");
+    expect(parsed.testSnippet).toContain("{{base_url}}");
+    expect(parsed.testSnippet).toContain("GET:");
+    expect(parsed.testSnippet).toContain("status:");
+  });
+
+  test("testSnippet includes Authorization header when security is defined", async () => {
+    const { registerDescribeEndpointTool } = await import("../../src/mcp/tools/describe-endpoint.ts");
+
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerDescribeEndpointTool(server);
+
+    const tool = (server as any)._registeredTools["describe_endpoint"];
+    const specPath = resolve("tests/fixtures/petstore-auth.json");
+    const result = await tool.handler({ specPath, method: "GET", path: "/pets" });
+
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.testSnippet).toContain("Authorization");
+    expect(parsed.testSnippet).toContain("auth_token");
+  });
 });

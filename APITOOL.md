@@ -38,10 +38,10 @@ src/
 │   ├── generator/    OpenAPI reader, coverage scanner, AI generation
 │   ├── reporter/     Console, JSON, JUnit XML
 │   └── agent/        AI Chat (AI SDK v6, tool calling)
-├── db/               SQLite (runs, collections, environments)
-├── mcp/              MCP Server (17 tools)
+├── db/               SQLite (runs, collections, ai_generations)
+├── mcp/              MCP Server (16 tools)
 ├── web/              Hono + HTMX dashboard
-└── cli/              16 CLI commands
+└── cli/              15 CLI commands
 ```
 
 ### Stack
@@ -68,13 +68,13 @@ Console (colored, tags display), JSON, JUnit XML (CI-compatible).
 Interactive AI chat (`apitool chat`). AI SDK v6, tool calling, multi-provider (Ollama, OpenAI, Anthropic). Safe mode (GET-only).
 
 ### DB
-SQLite auto-created. Tables: `collections`, `runs`, `results`, `environments`, `ai_generations`. Schema version 5.
+SQLite auto-created. Tables: `collections`, `runs`, `results`, `ai_generations`. Schema version 7.
 
 ### WebUI
-Single-page dashboard: API selector → env selector → Run Tests → results + coverage + history. JUnit/JSON export. Hono + HTMX.
+Single-page dashboard: API selector → env selector → Run Tests → results + coverage + history. JUnit/JSON export. Hono + HTMX. The env selector is populated by scanning `collection.base_dir` via `listEnvFiles()` — no DB involved.
 
 ### MCP Server
-17 tools for AI agent integration. Primary test generation flow:
+16 tools for AI agent integration. Primary test generation flow:
 
 ```
 generate_tests_guide → [agent writes YAML] → save_test_suite → run_tests → diagnose_failure → ci_init
@@ -142,8 +142,7 @@ ci_init()
 | `coverage_analysis` | Compare spec vs existing tests |
 | `validate_tests` | Check YAML syntax without running |
 | `send_request` | Ad-hoc HTTP request with variable interpolation |
-| `setup_api` | Register API (dirs + spec + env + collection) |
-| `manage_environment` | CRUD for environments |
+| `setup_api` | Register API (dirs + spec + env + collection). Creates `.gitignore` with `.env*.yaml` in `baseDir` |
 | `manage_server` | Start/stop WebUI server |
 | `ci_init` | Generate CI/CD workflow (GitHub Actions / GitLab CI) |
 | `set_work_dir` | Set project root for the session (call FIRST with npx MCP) |
@@ -157,7 +156,6 @@ ci_init()
 | `run <path>` | Run tests | `--api`, `--env`, `--report`, `--safe`, `--tag`, `--bail` |
 | `ai-generate` | AI test generation | `--api`, `--from`, `--prompt`, `--provider`, `--model` |
 | `validate` | Validate YAML tests | |
-| `envs` | Environment management | `list\|get\|set\|delete\|import\|export`, `--api` |
 | `runs [id]` | Run history | `--limit` |
 | `coverage` | API test coverage | `--api`, `--spec`, `--tests` |
 | `collections` | List collections | |
@@ -215,6 +213,16 @@ tests:
 
 ### Environments
 
+Environments are file-only — no DB layer. `loadEnvironment(envName?, searchDir)` looks for:
+- `.env.yaml` (when no `envName` given)
+- `.env.<envName>.yaml` (when `envName` given)
+
+Search order: `searchDir`, then parent directory.
+
+`listEnvFiles(dir)` scans a directory and returns discovered env names:
+- `.env.yaml` → `""` (default)
+- `.env.staging.yaml` → `"staging"`
+
 ```yaml
 # .env.staging.yaml
 base_url: https://staging.example.com/api
@@ -222,6 +230,8 @@ token: staging-token
 ```
 
 `apitool run tests/ --env staging`
+
+`setup_api` creates a `.gitignore` with `.env*.yaml` in `baseDir` to prevent secrets from being committed.
 
 ---
 

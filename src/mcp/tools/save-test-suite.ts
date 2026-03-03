@@ -67,7 +67,7 @@ export async function validateAndSave(
       result: {
         saved: false,
         error: "Hardcoded credentials detected in Authorization header(s)",
-        hint: "Never put literal API keys or tokens in YAML files. Store them in the environment instead: use manage_environment(action: \"set\", name: \"default\", collectionName: \"...\", variables: {\"api_key\": \"...\"}) and reference as {{api_key}} in headers.",
+        hint: "Never put literal API keys or tokens in YAML files. Store them in the .env.yaml file in the API directory and reference as {{api_key}} in headers.",
         detected: suspiciousCredentials.map(m => `${m[1]} <redacted>`),
       },
       isError: true,
