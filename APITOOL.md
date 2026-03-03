@@ -39,7 +39,7 @@ src/
 │   ├── reporter/     Console, JSON, JUnit XML
 │   └── agent/        AI Chat (AI SDK v6, tool calling)
 ├── db/               SQLite (runs, collections, environments)
-├── mcp/              MCP Server (16 tools)
+├── mcp/              MCP Server (17 tools)
 ├── web/              Hono + HTMX dashboard
 └── cli/              16 CLI commands
 ```
@@ -74,7 +74,7 @@ SQLite auto-created. Tables: `collections`, `runs`, `results`, `environments`, `
 Single-page dashboard: API selector → env selector → Run Tests → results + coverage + history. JUnit/JSON export. Hono + HTMX.
 
 ### MCP Server
-16 tools for AI agent integration. Primary test generation flow:
+17 tools for AI agent integration. Primary test generation flow:
 
 ```
 generate_tests_guide → [agent writes YAML] → save_test_suite → run_tests → diagnose_failure → ci_init
@@ -147,6 +147,7 @@ ci_init()
 | `manage_server` | Start/stop WebUI server |
 | `ci_init` | Generate CI/CD workflow (GitHub Actions / GitLab CI) |
 | `set_work_dir` | Set project root for the session (call FIRST with npx MCP) |
+| `describe_endpoint` | Full details for one endpoint: params, schemas, response headers, security |
 
 ## CLI Commands
 

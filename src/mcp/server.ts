@@ -14,6 +14,7 @@ import { registerGenerateMissingTestsTool } from "./tools/generate-missing-tests
 import { registerManageServerTool } from "./tools/manage-server.ts";
 import { registerCiInitTool } from "./tools/ci-init.ts";
 import { registerSetWorkDirTool } from "./tools/set-work-dir.ts";
+import { registerDescribeEndpointTool } from "./tools/describe-endpoint.ts";
 
 export interface McpServerOptions {
   dbPath?: string;
@@ -43,6 +44,7 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
   registerManageServerTool(server, dbPath);
   registerCiInitTool(server);
   registerSetWorkDirTool(server);
+  registerDescribeEndpointTool(server);
 
   // Connect via stdio transport
   const transport = new StdioServerTransport();
