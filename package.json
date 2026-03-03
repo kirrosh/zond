@@ -1,6 +1,6 @@
 {
   "name": "@kirrosh/apitool",
-  "version": "0.4.0",
+  "version": "0.4.3",
   "description": "API testing platform — define tests in YAML, run from CLI or WebUI, generate from OpenAPI specs",
   "license": "MIT",
   "module": "index.ts",
