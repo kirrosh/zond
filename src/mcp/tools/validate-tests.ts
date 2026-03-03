@@ -1,10 +1,11 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { parse } from "../../core/parser/yaml-parser.ts";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export function registerValidateTestsTool(server: McpServer) {
   server.registerTool("validate_tests", {
-    description: "Validate YAML test files without running them. Returns parsed suite info or validation errors.",
+    description: TOOL_DESCRIPTIONS.validate_tests,
     inputSchema: {
       testPath: z.string().describe("Path to test YAML file or directory"),
     },

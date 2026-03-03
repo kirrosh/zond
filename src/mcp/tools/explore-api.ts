@@ -2,11 +2,11 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "../../core/generator/index.ts";
 import { compressSchema, formatParam } from "../../core/generator/schema-utils.ts";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export function registerExploreApiTool(server: McpServer) {
   server.registerTool("explore_api", {
-    description: "Explore an OpenAPI spec — list endpoints, servers, and security schemes. " +
-      "Use with includeSchemas=true when generating tests to get full request/response body schemas.",
+    description: TOOL_DESCRIPTIONS.explore_api,
     inputSchema: {
       specPath: z.string().describe("Path to OpenAPI spec file (JSON or YAML)"),
       tag: z.optional(z.string()).describe("Filter endpoints by tag"),

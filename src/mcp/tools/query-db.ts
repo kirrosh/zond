@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId } from "../../db/queries.ts";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 function parseBodySafe(raw: string | null | undefined): unknown {
   if (!raw) return undefined;
@@ -24,11 +25,7 @@ function statusHint(status: number | null | undefined): string | null {
 
 export function registerQueryDbTool(server: McpServer, dbPath?: string) {
   server.registerTool("query_db", {
-    description:
-      "Query the apitool database. Actions: list_collections (all APIs with run stats), " +
-      "list_runs (recent test runs), get_run_results (full detail for a run), " +
-      "diagnose_failure (only failed/errored steps for a run), " +
-      "compare_runs (regressions and fixes between two runs).",
+    description: TOOL_DESCRIPTIONS.query_db,
     inputSchema: {
       action: z.enum(["list_collections", "list_runs", "get_run_results", "diagnose_failure", "compare_runs"])
         .describe("Query action to perform"),

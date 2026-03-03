@@ -3,14 +3,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "../../core/generator/index.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../core/generator/types.ts";
 import { compressSchema, formatParam, isAnySchema } from "../../core/generator/schema-utils.ts";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export function registerGenerateTestsGuideTool(server: McpServer) {
   server.registerTool("generate_tests_guide", {
-    description: "Get a comprehensive guide for generating API test suites. " +
-      "Returns the full API specification (with request/response schemas) and a step-by-step algorithm " +
-      "for creating YAML test files. Use this BEFORE generating tests — it gives you " +
-      "everything you need to write high-quality test suites. " +
-      "After generating, use save_test_suite to save, run_tests to execute, and query_db(action: 'diagnose_failure') to debug.",
+    description: TOOL_DESCRIPTIONS.generate_tests_guide,
     inputSchema: {
       specPath: z.string().describe("Path or URL to OpenAPI spec file"),
       outputDir: z.optional(z.string()).describe("Directory for saving test files (default: ./tests/)"),

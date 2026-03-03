@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { OpenAPIV3 } from "openapi-types";
 import { readOpenApiSpec } from "../../core/generator/index.ts";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 function generateTestSnippet(params: {
   method: string;
@@ -62,10 +63,7 @@ function generateTestSnippet(params: {
 
 export function registerDescribeEndpointTool(server: McpServer) {
   server.registerTool("describe_endpoint", {
-    description:
-      "Full details for one endpoint: params grouped by type, request body schema, " +
-      "all response schemas + response headers, security, deprecated flag. " +
-      "Use when a test fails and you need complete endpoint spec without reading the whole file.",
+    description: TOOL_DESCRIPTIONS.describe_endpoint,
     inputSchema: {
       specPath: z.string().describe("Path to OpenAPI spec file (JSON or YAML) or HTTP URL"),
       method: z.string().describe('HTTP method, e.g. "GET", "POST", "PUT"'),

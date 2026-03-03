@@ -8,81 +8,9 @@
 
 ---
 
-## Quick Start
+## Safe Test Coverage Workflow
 
-```bash
-apitool update                    # install / update
-apitool add-api myapi --spec openapi.json   # register API
-apitool ai-generate --api myapi --prompt "test all CRUD endpoints"
-apitool run --api myapi --env staging
-apitool serve --port 4000         # web dashboard
-```
-
-### MCP Setup
-
-```json
-{ "mcpServers": { "apitool": { "command": "apitool", "args": ["mcp"] } } }
-```
-
-Then ask your AI agent: *"Test the API from openapi.json"*
-
----
-
-## Architecture
-
-```
-src/
-├── core/
-│   ├── parser/       YAML → TestSuite (schema, variables, generators)
-│   ├── runner/       HTTP execution, captures, assertions
-│   ├── generator/    OpenAPI reader, coverage scanner, AI generation
-│   ├── reporter/     Console, JSON, JUnit XML
-│   └── agent/        AI Chat (AI SDK v6, tool calling)
-├── db/               SQLite (runs, collections, ai_generations)
-├── mcp/              MCP Server (15 tools)
-├── web/              Hono + HTMX dashboard
-└── cli/              15 CLI commands
-```
-
-### Stack
-
-Bun runtime, TypeScript, SQLite (`bun:sqlite`), Hono + HTMX, `bun build --compile` → single binary.
-
----
-
-## Modules
-
-### Parser
-Reads YAML test files → `TestSuite[]`. Schema validation (Zod), variable interpolation (`{{base_url}}`), built-in generators (`{{$randomEmail}}`, `{{$uuid}}`, etc.), nested body assertion flattening.
-
-### Runner
-Executes test steps sequentially within a suite. Native `fetch`, captures (`{ capture: "token" }`), assertions (equals, type, contains, matches, gt/lt, exists), nested body paths (`category.name`), root body checks (`_body: { type: "array" }`).
-
-### Generator
-Reads OpenAPI specs (`@readme/openapi-parser`), compresses schemas for LLM context, scans test coverage, AI-based test generation (Ollama/OpenAI/Anthropic).
-
-### Reporter
-Console (colored, tags display), JSON, JUnit XML (CI-compatible).
-
-### Agent
-Interactive AI chat (`apitool chat`). AI SDK v6, tool calling, multi-provider (Ollama, OpenAI, Anthropic). Safe mode (GET-only).
-
-### DB
-SQLite auto-created. Tables: `collections`, `runs`, `results`, `ai_generations`. Schema version 7.
-
-### WebUI
-Single-page dashboard: API selector → env selector → Run Tests → results + coverage + history. JUnit/JSON export. Hono + HTMX. The env selector is populated by scanning `collection.base_dir` via `listEnvFiles()` — no DB involved.
-
-### MCP Server
-15 tools for AI agent integration. Primary test generation flow:
-
-```
-generate_tests_guide → [agent writes YAML] → save_test_suite → run_tests → diagnose_failure → ci_init
-```
-
-### Safe Test Coverage Workflow
-
-**When the user asks to "safely cover", "test without breaking anything", or "start with read-only tests" — follow this 4-phase approach:**
+**When asked to "safely cover", "test without breaking anything", or "start with read-only tests" — follow this 4-phase approach:**
 
 **Step 0 (required for npx MCP — single shared server):**
 ```
@@ -124,41 +52,50 @@ ci_init()
 - Always use `tags: [smoke]` for GET-only suites, `tags: [crud]` for write operations
 - Never run CRUD tests unless user confirmed environment is safe (staging/test)
 
-### CI/CD
-`apitool ci init` scaffolds GitHub Actions or GitLab CI workflow. Supports schedule, repository_dispatch, manual triggers. See [docs/ci.md](docs/ci.md).
-
 ---
 
 ## MCP Tools
 
 | Tool | Description |
 |------|-------------|
+| `set_work_dir` | Set project root for the session (call **first** with npx MCP) |
+| `setup_api` | Register API (dirs + spec + env + collection). Creates `.gitignore` with `.env*.yaml` |
 | `generate_tests_guide` | Full API spec + generation algorithm. Use **before** writing tests |
 | `generate_missing_tests` | Guide for only uncovered endpoints |
-| `save_test_suite` | Validate YAML + save file. Returns coverage hint |
-| `run_tests` | Execute tests, return summary with failures |
-| `query_db` | List collections, runs, results; `diagnose_failure` includes `response_body` |
+| `save_test_suite` | Validate YAML + save single file. Returns structured errors if validation fails |
+| `save_test_suites` | Batch save multiple YAML suites in one call |
+| `run_tests` | Execute tests, return summary with failures. Use `diagnose_failure` for per-step details |
+| `query_db` | List collections/runs; `diagnose_failure` includes `response_body`; `compare_runs` for regression |
 | `explore_api` | Browse OpenAPI spec (`includeSchemas=true` for schemas) |
-| `coverage_analysis` | Compare spec vs existing tests |
+| `describe_endpoint` | Full details for one endpoint: params, schemas, response headers, security |
+| `coverage_analysis` | Compare spec vs existing tests. `failThreshold` for pass/fail gate |
 | `validate_tests` | Check YAML syntax without running |
 | `send_request` | Ad-hoc HTTP request with variable interpolation |
-| `setup_api` | Register API (dirs + spec + env + collection). Creates `.gitignore` with `.env*.yaml` in `baseDir` |
 | `manage_server` | Start/stop WebUI server |
 | `ci_init` | Generate CI/CD workflow (GitHub Actions / GitLab CI) |
-| `set_work_dir` | Set project root for the session (call FIRST with npx MCP) |
-| `describe_endpoint` | Full details for one endpoint: params, schemas, response headers, security |
-| `save_test_suites` | Batch save multiple YAML suites in one call |
+
+### query_db actions
+
+| Action | Description |
+|--------|-------------|
+| `list_collections` | All registered APIs with run stats |
+| `list_runs` | Recent test runs (use `limit` to control count) |
+| `get_run_results` | Full detail for a run (requires `runId`) |
+| `diagnose_failure` | Only failed/errored steps with `response_body` (requires `runId`) |
+| `compare_runs` | Diff two runs — new failures, fixed tests, performance delta (requires `runId` + `runIdB`) |
+
+---
 
 ## CLI Commands
 
 | Command | Description | Key flags |
 |---------|-------------|-----------|
 | `add-api <name>` | Register new API | `--spec`, `--dir`, `--env key=value` |
-| `run <path>` | Run tests | `--api`, `--env`, `--report`, `--safe`, `--tag`, `--bail` |
-| `ai-generate` | AI test generation | `--api`, `--from`, `--prompt`, `--provider`, `--model` |
+| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--report json\|junit` |
+| `compare <runA> <runB>` | Compare two test runs | |
+| `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
 | `validate` | Validate YAML tests | |
 | `runs [id]` | Run history | `--limit` |
-| `coverage` | API test coverage | `--api`, `--spec`, `--tests` |
 | `collections` | List collections | |
 | `serve` | Web dashboard | `--port`, `--watch` |
 | `chat` | Interactive AI agent | `--provider`, `--model`, `--safe` |
@@ -216,15 +153,11 @@ tests:
 
 ### Environments
 
-Environments are file-only — no DB layer. `loadEnvironment(envName?, searchDir)` looks for:
+Environments are file-only. `loadEnvironment(envName?, searchDir)` looks for:
 - `.env.yaml` (when no `envName` given)
 - `.env.<envName>.yaml` (when `envName` given)
 
 Search order: `searchDir`, then parent directory.
-
-`listEnvFiles(dir)` scans a directory and returns discovered env names:
-- `.env.yaml` → `""` (default)
-- `.env.staging.yaml` → `"staging"`
 
 ```yaml
 # .env.staging.yaml
@@ -232,18 +165,19 @@ base_url: https://staging.example.com/api
 token: staging-token
 ```
 
-`apitool run tests/ --env staging`
+```bash
+apitool run tests/ --env staging
+```
 
 `setup_api` creates a `.gitignore` with `.env*.yaml` in `baseDir` to prevent secrets from being committed.
 
 ---
 
-## Build
+## CI/CD
 
-```bash
-bun run build    # → apitool binary (standalone)
-bun test         # run test suite
-```
+`apitool ci init` scaffolds GitHub Actions or GitLab CI workflow. Supports schedule, repository_dispatch, manual triggers. See [docs/ci.md](docs/ci.md).
+
+---
 
 ## Principles
 
