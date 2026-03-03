@@ -69,7 +69,7 @@ describe("setupApi", () => {
   });
 
   test("duplicate name throws error", async () => {
-    mockFindCollectionByNameOrId.mockImplementation(() => ({ id: 1, name: "petstore" }));
+    mockFindCollectionByNameOrId.mockImplementation(() => ({ id: 1, name: "petstore" }) as any);
 
     await expect(setupApi({
       name: "petstore",

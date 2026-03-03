@@ -123,10 +123,10 @@ function writeIfMissing(filePath: string, content: string, force: boolean): bool
   return true;
 }
 
-function detectPlatform(cwd: string): "github" | "gitlab" | null {
+function detectPlatform(cwd: string): "github" | "gitlab" | undefined {
   if (existsSync(resolve(cwd, ".github"))) return "github";
   if (existsSync(resolve(cwd, ".gitlab-ci.yml"))) return "gitlab";
-  return null;
+  return undefined;
 }
 
 export async function ciInitCommand(options: CiInitOptions): Promise<number> {

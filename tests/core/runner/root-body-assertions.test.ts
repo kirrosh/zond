@@ -6,7 +6,7 @@ function makeResponse(body: unknown, status = 200): HttpResponse {
   return {
     status,
     headers: { "content-type": "application/json" },
-    body_raw: JSON.stringify(body),
+    body: JSON.stringify(body),
     body_parsed: body,
     duration_ms: 50,
   };

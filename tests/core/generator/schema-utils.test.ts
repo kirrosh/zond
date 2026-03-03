@@ -70,7 +70,7 @@ describe("compressSchema", () => {
   });
 
   test("handles array without items", () => {
-    expect(compressSchema({ type: "array" })).toBe("[]");
+    expect(compressSchema({ type: "array" } as any)).toBe("[]");
   });
 
   test("handles schema without type", () => {

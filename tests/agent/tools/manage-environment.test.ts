@@ -1,7 +1,7 @@
 import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
 
 const mockListEnvRecords = mock(() => [
-  { id: 1, name: "staging", variables: { base_url: "https://staging.api.com" } },
+  { id: 1, name: "staging", collection_id: null, variables: { base_url: "https://staging.api.com" } },
 ]);
 const mockGetEnv = mock((): unknown => ({ base_url: "https://staging.api.com", api_key: "sk-123" }));
 const mockUpsertEnv = mock(() => {});
@@ -37,7 +37,7 @@ describe("manageEnvironmentTool", () => {
   test("list action returns environments", async () => {
     const result = await manageEnvironmentTool.execute!({ action: "list" }, toolOpts);
     expect(result).toEqual({
-      environments: [{ id: 1, name: "staging", variables: { base_url: "https://staging.api.com" } }],
+      environments: [{ id: 1, name: "staging", collection_id: null, variables: { base_url: "https://staging.api.com" } }],
     });
   });
 

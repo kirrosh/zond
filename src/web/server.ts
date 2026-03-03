@@ -58,7 +58,7 @@ export function createApp(options?: { dev?: boolean }) {
       return c.body(content);
     }
     if (file === "htmx.min.js") {
-      const content = await Bun.file(htmxJsPath).text();
+      const content = await Bun.file(htmxJsPath as unknown as string).text();
       c.header("Content-Type", "application/javascript; charset=utf-8");
       c.header("Cache-Control", "public, max-age=86400");
       return c.body(content);
