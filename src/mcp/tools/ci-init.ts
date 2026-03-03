@@ -1,14 +1,11 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ciInitCommand } from "../../cli/commands/ci-init.ts";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export function registerCiInitTool(server: McpServer) {
   server.registerTool("ci_init", {
-    description:
-      "Generate a CI/CD workflow file for running API tests automatically on push, PR, and schedule. " +
-      "Supports GitHub Actions and GitLab CI. Auto-detects platform from project structure " +
-      "(.github/ → GitHub, .gitlab-ci.yml → GitLab). " +
-      "Use after tests are generated and passing. After generating the workflow, help the user commit and push to activate CI.",
+    description: TOOL_DESCRIPTIONS.ci_init,
     inputSchema: {
       platform: z.optional(z.enum(["github", "gitlab"]))
         .describe("CI platform. If omitted, auto-detects from project structure (defaults to GitHub)"),

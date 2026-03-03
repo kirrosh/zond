@@ -4,6 +4,7 @@ import { validateSuite } from "../../core/parser/schema.ts";
 import { join, dirname } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import YAML from "yaml";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export interface SaveResult {
   saved: boolean;
@@ -148,9 +149,7 @@ export async function validateAndSave(
 
 export function registerSaveTestSuiteTool(server: McpServer, dbPath?: string) {
   server.registerTool("save_test_suite", {
-    description: "Save a YAML test suite file with validation. Parses and validates the YAML content " +
-      "before writing. Returns structured errors if validation fails so you can fix and retry. " +
-      "Use after generating test content with generate_tests_guide.",
+    description: TOOL_DESCRIPTIONS.save_test_suite,
     inputSchema: {
       filePath: z.string().describe("Path for saving the YAML test file (e.g. apis/petstore/tests/pets-crud.yaml)"),
       content: z.string().describe("YAML content of the test suite"),
@@ -177,8 +176,7 @@ export function registerSaveTestSuiteTool(server: McpServer, dbPath?: string) {
 
 export function registerSaveTestSuitesTool(server: McpServer, dbPath?: string) {
   server.registerTool("save_test_suites", {
-    description: "Save multiple YAML test suite files in a single call. Each file is validated before writing. " +
-      "Returns per-file results. Use when you have generated multiple suites at once.",
+    description: TOOL_DESCRIPTIONS.save_test_suites,
     inputSchema: {
       files: z.array(z.object({
         filePath: z.string().describe("Path for saving the YAML test file"),

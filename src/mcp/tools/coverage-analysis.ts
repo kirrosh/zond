@@ -1,11 +1,11 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { readOpenApiSpec, extractEndpoints, scanCoveredEndpoints, filterUncoveredEndpoints } from "../../core/generator/index.ts";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export function registerCoverageAnalysisTool(server: McpServer) {
   server.registerTool("coverage_analysis", {
-    description: "Compare an OpenAPI spec against existing test files to find untested endpoints. " +
-      "Use to identify gaps and prioritize which endpoints to generate tests for next.",
+    description: TOOL_DESCRIPTIONS.coverage_analysis,
     inputSchema: {
       specPath: z.string().describe("Path to OpenAPI spec file (JSON or YAML)"),
       testsDir: z.string().describe("Path to directory with test YAML files"),

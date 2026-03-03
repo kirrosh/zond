@@ -4,10 +4,11 @@ import { executeRequest } from "../../core/runner/http-client.ts";
 import { loadEnvironment, substituteString, substituteDeep } from "../../core/parser/variables.ts";
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export function registerSendRequestTool(server: McpServer, dbPath?: string) {
   server.registerTool("send_request", {
-    description: "Send an ad-hoc HTTP request. Supports variable interpolation from environments (e.g. {{base_url}}).",
+    description: TOOL_DESCRIPTIONS.send_request,
     inputSchema: {
       method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]).describe("HTTP method"),
       url: z.string().describe("Request URL (supports {{variable}} interpolation)"),

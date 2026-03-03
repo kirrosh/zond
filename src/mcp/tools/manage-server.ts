@@ -1,13 +1,12 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 let serverInstance: ReturnType<typeof Bun.serve> | null = null;
 let serverPort: number = 0;
 
 export function registerManageServerTool(server: McpServer, dbPath?: string) {
   server.registerTool("manage_server", {
-    description:
-      "Start, stop, restart, or check status of the apitool WebUI server. " +
-      "Useful for viewing test results in a browser without leaving the MCP session.",
+    description: TOOL_DESCRIPTIONS.manage_server,
     inputSchema: {
       action: z.enum(["start", "stop", "restart", "status"]).describe("Action to perform"),
       port: z.optional(z.number().int().min(1).max(65535)).describe("Port number (default: 8080, only for start/restart)"),

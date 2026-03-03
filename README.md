@@ -20,17 +20,6 @@ iwr https://raw.githubusercontent.com/kirrosh/apitool/master/install.ps1 | iex
 
 [All releases](https://github.com/kirrosh/apitool/releases) (Linux x64, macOS ARM, Windows x64)
 
-## Quick Start
-
-```bash
-# Register API + generate + run — all in one flow via MCP or CLI
-apitool add-api petstore --spec https://petstore.swagger.io/v2/swagger.json
-apitool run apis/petstore/tests/ --env default
-apitool serve   # web dashboard at http://localhost:8080
-```
-
-Or let your AI agent do it — just say: *"Test the API from openapi.json"*
-
 ## MCP Setup (Cursor / Claude Code / Windsurf)
 
 Click the badge above, or add manually:
@@ -56,51 +45,55 @@ Click the badge above, or add manually:
 | Claude Code | `.mcp.json` in project root |
 | Windsurf | `.windsurfrules/mcp.json` or settings |
 
-17 MCP tools: `setup_api`, `generate_tests_guide`, `save_test_suite`, `run_tests`, `query_db`, `explore_api`, `describe_endpoint`, `coverage_analysis`, `generate_missing_tests`, `validate_tests`, `send_request`, `manage_environment`, `manage_server`, `set_work_dir`, and more. Full reference in [APITOOL.md](APITOOL.md).
+## Main Flow (5 steps)
 
-## YAML Test Format
+Once MCP is connected, ask your AI agent to cover your API with tests:
 
-```yaml
-name: Users CRUD
-description: Full user lifecycle
-tags: [users, crud, smoke]
-base_url: "{{base_url}}"
-
-tests:
-  - name: Create user
-    POST: /users
-    json:
-      name: "{{$randomName}}"
-      email: "{{$randomEmail}}"
-    expect:
-      status: 201
-      body:
-        id: { capture: user_id, type: integer }
-
-  - name: Get user
-    GET: /users/{{user_id}}
-    expect:
-      status: 200
-
-  - name: Delete user
-    DELETE: /users/{{user_id}}
-    expect:
-      status: 204
+**1. Register your API**
 ```
+setup_api(name: "myapi", specPath: "openapi.json")
+```
+
+**2. Generate a test guide** (agent reads OpenAPI + gets instructions)
+```
+generate_tests_guide(specPath: "openapi.json")
+```
+
+**3. Save test suites** (agent writes YAML based on the guide)
+```
+save_test_suite(filePath: "apis/myapi/tests/smoke.yaml", content: "...")
+```
+
+**4. Run tests**
+```
+run_tests(testPath: "apis/myapi/tests/", safe: true)
+```
+
+**5. Diagnose failures**
+```
+query_db(action: "diagnose_failure", runId: 42)
+```
+
+Or just say: *"Safely cover the API from openapi.json with tests"* — the agent will do all 5 steps.
 
 ## CLI
 
 ```
-apitool run <path>           Run tests (--env, --safe, --report json|junit)
+apitool run <path>           Run tests (--env, --safe, --tag, --dry-run, --env-var, --report)
 apitool add-api <name>       Register API (--spec <openapi>)
+apitool coverage             API test coverage (--spec, --tests, --fail-on-coverage)
+apitool compare <runA> <runB> Compare two test runs
 apitool serve                Web dashboard (--port 8080)
 apitool mcp                  Start MCP server
-apitool coverage             API test coverage (--spec, --tests)
 apitool chat                 AI chat agent (--provider ollama|openai|anthropic)
 apitool doctor               Diagnostics
 ```
 
-Full docs: [APITOOL.md](APITOOL.md)
+## Documentation
+
+- [APITOOL.md](APITOOL.md) — full CLI and MCP tools reference
+- [docs/mcp-guide.md](docs/mcp-guide.md) — MCP agent workflow guide
+- [docs/ci.md](docs/ci.md) — CI/CD integration
 
 ## License
 

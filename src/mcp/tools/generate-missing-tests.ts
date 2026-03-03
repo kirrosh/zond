@@ -8,12 +8,11 @@ import {
   filterUncoveredEndpoints,
 } from "../../core/generator/index.ts";
 import { compressEndpointsWithSchemas, buildGenerationGuide } from "./generate-tests-guide.ts";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export function registerGenerateMissingTestsTool(server: McpServer) {
   server.registerTool("generate_missing_tests", {
-    description: "Analyze test coverage and generate a test guide for only the uncovered endpoints. " +
-      "Combines coverage_analysis + generate_tests_guide — returns a focused guide for missing tests. " +
-      "Use this for incremental test generation to avoid duplicating existing tests.",
+    description: TOOL_DESCRIPTIONS.generate_missing_tests,
     inputSchema: {
       specPath: z.string().describe("Path or URL to OpenAPI spec file"),
       testsDir: z.string().describe("Path to directory with existing test YAML files"),

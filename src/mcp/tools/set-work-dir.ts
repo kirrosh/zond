@@ -3,14 +3,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { resolve, join } from "node:path";
 import { existsSync } from "node:fs";
 import { resetDb } from "../../db/schema.ts";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export function registerSetWorkDirTool(server: McpServer) {
   server.registerTool("set_work_dir", {
-    description:
-      "Set the working directory for this MCP session. " +
-      "Call this FIRST before any other tool when using a shared MCP server (npx). " +
-      "Determines where apitool.db and relative test paths resolve to. " +
-      "Pass the absolute path to your project root (same as workspace root in your editor).",
+    description: TOOL_DESCRIPTIONS.set_work_dir,
     inputSchema: {
       workDir: z.string().describe(
         "Absolute path to project root (e.g. /home/user/myproject or C:/Users/user/myproject)"

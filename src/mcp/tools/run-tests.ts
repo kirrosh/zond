@@ -1,11 +1,11 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { executeRun } from "../../core/runner/execute-run.ts";
+import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export function registerRunTestsTool(server: McpServer, dbPath?: string) {
   server.registerTool("run_tests", {
-    description: "Execute API tests from a YAML file or directory and return results summary with failures. " +
-      "Use after saving test suites with save_test_suite. Check query_db(action: 'diagnose_failure') for detailed failure analysis.",
+    description: TOOL_DESCRIPTIONS.run_tests,
     inputSchema: {
       testPath: z.string().describe("Path to test YAML file or directory"),
       envName: z.optional(z.string()).describe("Environment name (loads .env.<name>.yaml)"),
