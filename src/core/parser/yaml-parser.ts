@@ -19,7 +19,7 @@ export async function parseFile(filePath: string): Promise<TestSuite> {
 
   try {
     const suite = validateSuite(raw);
-    (suite as any)._source = filePath;
+    suite.filePath = filePath;
     return suite;
   } catch (err) {
     throw new Error(`Validation error in ${filePath}: ${(err as Error).message}`);

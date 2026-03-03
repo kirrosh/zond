@@ -11,8 +11,10 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
       envName: z.optional(z.string()).describe("Environment name (loads .env.<name>.yaml)"),
       safe: z.optional(z.boolean()).describe("Run only GET tests (read-only, safe mode)"),
       tag: z.optional(z.array(z.string())).describe("Filter suites by tag (OR logic)"),
+      envVars: z.optional(z.record(z.string())).describe("Environment variables to inject (override env file, e.g. {\"TOKEN\": \"xxx\"})"),
+      dryRun: z.optional(z.boolean()).describe("Show requests without sending them (always exits 0)"),
     },
-  }, async ({ testPath, envName, safe, tag }) => {
+  }, async ({ testPath, envName, safe, tag, envVars, dryRun }) => {
     const { runId, results } = await executeRun({
       testPath,
       envName,
@@ -20,6 +22,8 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
       dbPath,
       safe,
       tag,
+      envVars,
+      dryRun,
     });
 
     const total = results.reduce((s, r) => s + r.total, 0);

@@ -15,6 +15,8 @@ export interface ExecuteRunOptions {
   dbPath?: string;
   safe?: boolean;
   tag?: string[];
+  envVars?: Record<string, string>;
+  dryRun?: boolean;
 }
 
 export interface ExecuteRunResult {
@@ -50,7 +52,8 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
   }
 
   const fileStat = await stat(testPath).catch(() => null);
-  const envDir = fileStat?.isDirectory() ? testPath : dirname(testPath);
+  const isDirectory = fileStat?.isDirectory() ?? false;
+  const envDir = isDirectory ? testPath : dirname(testPath);
 
   getDb(dbPath);
   const resolvedPath = resolve(testPath);
@@ -59,8 +62,28 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
 
   // If no envName given but a collection exists, fall back to "default" for DB lookup
   const effectiveEnvName = envName ?? (collection ? "default" : undefined);
-  const env = await loadEnvironment(effectiveEnvName, envDir, collection?.id);
-  const results = await Promise.all(suites.map((s) => runSuite(s, env)));
+
+  // Helper: load env with optional --env-var overrides merged on top
+  async function loadEnvWithOverrides(dir: string): Promise<Record<string, string>> {
+    const env = await loadEnvironment(effectiveEnvName, dir, collection?.id);
+    if (options.envVars && Object.keys(options.envVars).length > 0) {
+      Object.assign(env, options.envVars);
+    }
+    return env;
+  }
+
+  let results: Awaited<ReturnType<typeof runSuite>>[];
+  if (isDirectory) {
+    // Per-suite env: load env from each suite's own directory
+    results = await Promise.all(suites.map(async (s) => {
+      const suiteDir = s.filePath ? dirname(s.filePath) : envDir;
+      const env = await loadEnvWithOverrides(suiteDir);
+      return runSuite(s, env, options.dryRun);
+    }));
+  } else {
+    const env = await loadEnvWithOverrides(envDir);
+    results = await Promise.all(suites.map((s) => runSuite(s, env, options.dryRun)));
+  }
 
   const runId = createRun({
     started_at: results[0]?.started_at ?? new Date().toISOString(),

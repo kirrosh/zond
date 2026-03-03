@@ -14,11 +14,16 @@ export function registerGenerateTestsGuideTool(server: McpServer) {
     inputSchema: {
       specPath: z.string().describe("Path or URL to OpenAPI spec file"),
       outputDir: z.optional(z.string()).describe("Directory for saving test files (default: ./tests/)"),
+      methodFilter: z.optional(z.array(z.string())).describe("Only include endpoints with these HTTP methods (e.g. [\"GET\"] for smoke tests)"),
     },
-  }, async ({ specPath, outputDir }) => {
+  }, async ({ specPath, outputDir, methodFilter }) => {
     try {
       const doc = await readOpenApiSpec(specPath);
-      const endpoints = extractEndpoints(doc);
+      let endpoints = extractEndpoints(doc);
+      if (methodFilter && methodFilter.length > 0) {
+        const methods = methodFilter.map(m => m.toUpperCase());
+        endpoints = endpoints.filter(ep => methods.includes(ep.method.toUpperCase()));
+      }
       const securitySchemes = extractSecuritySchemes(doc);
       const baseUrl = ((doc as any).servers?.[0]?.url) as string | undefined;
       const title = (doc as any).info?.title as string | undefined;
@@ -302,6 +307,21 @@ ${hasAuth ? `**Auth suite** (\`auth.yaml\`):
 
 ---
 
+## Tag Conventions
+
+Use standard tags to enable safe filtering:
+
+| Tag | HTTP Methods | Safe for |
+|-----|-------------|---------|
+| \`smoke\` | GET only | Production (read-only, zero risk) |
+| \`crud\` | POST/PUT/PATCH | Staging only (state-changing) |
+| \`destructive\` | DELETE | Explicit opt-in, run last |
+| \`auth\` | Any (auth flows) | Run first to capture tokens |
+
+Example: \`apitool run --tag smoke --safe\` → reads-only, safe against production.
+
+---
+
 ## Practical Tips
 
 - **int64 IDs**: For APIs returning large auto-generated IDs (int64), prefer setting fixed IDs in request bodies rather than capturing auto-generated ones, as JSON number precision may cause mismatches.
@@ -312,6 +332,26 @@ ${hasAuth ? `**Auth suite** (\`auth.yaml\`):
 - **Error responses**: Assert that error bodies contain useful info (\`message: { exists: true }\`), not just status codes.
 - **Bulk operations**: After bulk create (createWithArray, createWithList), add GET steps to verify resources were actually created.
 - **204 No Content**: When an endpoint returns 204, omit \`body:\` assertions entirely — an empty response IS the correct behavior. Adding body assertions on 204 will always fail.
+- **Cleanup pattern**: Always delete test data in the same suite. Use a create → read → delete lifecycle so tests are idempotent:
+  \`\`\`yaml
+  tests:
+    - name: Create test resource
+      POST: /users
+      json: { name: "apitool-test-{{$randomString}}" }
+      expect:
+        status: 201
+        body:
+          id: { capture: user_id }
+    - name: Read created resource
+      GET: /users/{{user_id}}
+      expect:
+        status: 200
+    - name: Cleanup - delete test resource
+      DELETE: /users/{{user_id}}
+      expect:
+        status: 204
+  \`\`\`
+- **Identifiable test data**: Prefix test data with \`apitool-test-\` or use \`{{$uuid}}\` / \`apitool-test-{{$randomString}}\` so you can identify and clean up leftover test data if needed.
 
 ---
 
