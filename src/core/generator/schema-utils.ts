@@ -1,6 +1,15 @@
 import type { OpenAPIV3 } from "openapi-types";
 
 /**
+ * Returns true if the schema is effectively `any` — no type, no properties, no constraints.
+ */
+export function isAnySchema(schema: OpenAPIV3.SchemaObject | undefined): boolean {
+  if (!schema) return false;
+  return Object.keys(schema).length === 0 ||
+    (!schema.type && !schema.properties && !schema.enum && !schema.oneOf && !schema.allOf && !schema.anyOf);
+}
+
+/**
  * Compress an OpenAPI schema into a concise human-readable string.
  * E.g. { name: string (req), age: integer, tags: [string] }
  */

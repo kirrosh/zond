@@ -25,7 +25,7 @@ function makeSkippedResult(stepName: string, reason: string): StepResult {
   };
 }
 
-export async function runSuite(suite: TestSuite, env: Environment = {}): Promise<TestRunResult> {
+export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun = false): Promise<TestRunResult> {
   const startedAt = new Date().toISOString();
   const steps: StepResult[] = [];
   const variables: Record<string, unknown> = { ...env };
@@ -70,6 +70,20 @@ export async function runSuite(suite: TestSuite, env: Environment = {}): Promise
     }
 
     const request: HttpRequest = { method: resolved.method, url, headers, body };
+
+    if (dryRun) {
+      const bodyPreview = body ? ` ${body.slice(0, 200)}` : "";
+      steps.push({
+        name: step.name,
+        status: "pass",
+        duration_ms: 0,
+        request,
+        assertions: [],
+        captures: {},
+        error: `[DRY RUN] ${resolved.method} ${url}${bodyPreview}`,
+      });
+      continue;
+    }
 
     try {
       const response = await executeRequest(request, fetchOptions);
@@ -145,6 +159,6 @@ export async function runSuite(suite: TestSuite, env: Environment = {}): Promise
   };
 }
 
-export async function runSuites(suites: TestSuite[], env: Environment = {}): Promise<TestRunResult[]> {
-  return Promise.all(suites.map((suite) => runSuite(suite, env)));
+export async function runSuites(suites: TestSuite[], env: Environment = {}, dryRun = false): Promise<TestRunResult[]> {
+  return Promise.all(suites.map((suite) => runSuite(suite, env, dryRun)));
 }

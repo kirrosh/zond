@@ -4,6 +4,7 @@ import { printError, printSuccess } from "../output.ts";
 export interface CoverageOptions {
   spec: string;
   tests: string;
+  failOnCoverage?: number;
 }
 
 const RESET = "\x1b[0m";
@@ -57,6 +58,9 @@ export async function coverageCommand(options: CoverageOptions): Promise<number>
       }
     }
 
+    if (options.failOnCoverage !== undefined) {
+      return percentage < options.failOnCoverage ? 1 : 0;
+    }
     return uncovered.length > 0 ? 1 : 0;
   } catch (err) {
     printError(err instanceof Error ? err.message : String(err));

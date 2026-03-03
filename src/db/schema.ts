@@ -42,7 +42,7 @@ export function closeDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 const SCHEMA_V1 = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -173,6 +173,10 @@ const SCHEMA_V5 = `
   CREATE UNIQUE INDEX idx_env_name_global ON environments(name) WHERE collection_id IS NULL;
 `;
 
+const SCHEMA_V6 = `
+  ALTER TABLE results ADD COLUMN response_headers TEXT;
+`;
+
 function runMigrations(db: Database): void {
   const currentVersion = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 
@@ -202,6 +206,9 @@ function runMigrations(db: Database): void {
         const baseDir = lastSlash > 0 ? row.test_path.slice(0, lastSlash) : row.test_path;
         updateStmt.run(baseDir, row.id);
       }
+    }
+    if (currentVersion < 6) {
+      db.exec(SCHEMA_V6);
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

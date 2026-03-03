@@ -1,3 +1,4 @@
+import { dirname } from "path";
 import type { TestStep } from "./types.ts";
 
 const NAMES = ["John Smith", "Jane Doe", "Alice Brown", "Bob Wilson", "Emma Davis", "James Miller"];
@@ -105,24 +106,30 @@ export function extractVariableReferences(step: TestStep): string[] {
   return [...refs];
 }
 
-export async function loadEnvironment(envName?: string, searchDir: string = ".", collectionId?: number): Promise<Record<string, string>> {
-  const fileName = envName ? `.env.${envName}.yaml` : ".env.yaml";
-  const filePath = `${searchDir}/${fileName}`;
-  let fileVars: Record<string, string> | null = null;
-
+async function loadEnvFile(filePath: string): Promise<Record<string, string> | null> {
   try {
     const text = await Bun.file(filePath).text();
     const parsed = Bun.YAML.parse(text);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       throw new Error(`Environment file ${filePath} must contain a YAML object`);
     }
-    fileVars = {};
+    const result: Record<string, string> = {};
     for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-      fileVars[k] = String(v);
+      result[k] = String(v);
     }
+    return result;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    return null;
   }
+}
+
+export async function loadEnvironment(envName?: string, searchDir: string = ".", collectionId?: number): Promise<Record<string, string>> {
+  const fileName = envName ? `.env.${envName}.yaml` : ".env.yaml";
+
+  // Try both searchDir and parent dir — env file may be in collection root while tests are in tests/ subdir
+  const fileVars = await loadEnvFile(`${searchDir}/${fileName}`);
+  const parentFileVars = await loadEnvFile(`${dirname(searchDir)}/${fileName}`);
 
   // DB fallback/merge: resolve scoped + global env from DB
   let dbVars: Record<string, string> | null = null;
@@ -133,9 +140,7 @@ export async function loadEnvironment(envName?: string, searchDir: string = ".",
     } catch { /* DB not initialized — OK */ }
   }
 
-  // Merge priority: dbGlobal < dbScoped < file (resolveEnvironment already merges global+scoped)
-  if (!dbVars && !fileVars) return {};
-  if (!dbVars) return fileVars!;
-  if (!fileVars) return dbVars;
-  return { ...dbVars, ...fileVars };
+  // Merge priority: dbGlobal < dbScoped < parentFile < file (local file beats everything)
+  const merged: Record<string, string> = { ...dbVars, ...parentFileVars, ...fileVars };
+  return merged;
 }

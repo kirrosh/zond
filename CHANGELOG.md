@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **MCP feedback improvements**
+  - `diagnose_failure` now includes `response_headers` in failure output (e.g. `X-Ably-ErrorMessage`)
+  - `generate_tests_guide`: annotates `any`-typed request bodies with a warning comment
+  - `generate_tests_guide`: added 204 No Content tips in Practical Tips and Common Mistakes sections
+  - `schema-utils.ts`: added `isAnySchema()` helper
+  - DB schema v6: `results.response_headers TEXT` column
+
 - **M22: MCP-first smart test generation**
   - `generate_tests_guide` MCP tool — returns full API spec with schemas + step-by-step generation algorithm
   - `save_test_suite` MCP tool — validates YAML and saves test files with structured error reporting

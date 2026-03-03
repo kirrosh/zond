@@ -14,13 +14,15 @@ import { runsCommand } from "./commands/runs.ts";
 import { coverageCommand } from "./commands/coverage.ts";
 import { doctorCommand } from "./commands/doctor.ts";
 import { addApiCommand } from "./commands/add-api.ts";
+import { ciInitCommand } from "./commands/ci-init.ts";
+import { compareCommand } from "./commands/compare.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { getDb } from "../db/schema.ts";
 import { findCollectionByNameOrId } from "../db/queries.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.5.0";
 
 export interface ParsedArgs {
   command: string | undefined;
@@ -83,8 +85,11 @@ Usage:
   apitool collections      List test collections
   apitool serve            Start web dashboard
   apitool init             Initialize a new apitool project
+  apitool ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
   apitool mcp              Start MCP server (stdio transport for AI agents)
+                           --dir <path>  Set working directory (relative paths resolve here)
   apitool chat             Start interactive AI chat for API testing
+  apitool compare <runA> <runB>  Compare two test runs (regressions/fixes)
   apitool doctor           Run diagnostic checks
   apitool update           Update to latest version
 
@@ -114,12 +119,19 @@ Options for 'runs':
   runs <id>            Show run details with step results
   --limit <n>          Number of runs to show (default: 20)
 
+Options for 'compare':
+  compare <runA> <runB>   Compare two run IDs
+  Exit code 1 if regressions found, 0 otherwise
+
 Options for 'coverage':
   --api <name>         Use API collection (auto-resolves spec and tests dir)
   --spec <path>        Path to OpenAPI spec (required unless --api used)
   --tests <dir>        Path to test files directory (required unless --api used)
+  --fail-on-coverage N Exit 1 when coverage percentage is below N (0–100)
 
 Options for 'run':
+  --dry-run            Show requests without sending them (exit code always 0)
+  --env-var KEY=VALUE  Inject env variable (repeatable, overrides env file)
   --api <name>         Use API collection (resolves test path automatically)
   --env <name>         Use environment file (.env.<name>.yaml)
   --report <format>    Output format: console, json, junit (default: console)
@@ -147,6 +159,12 @@ Options for 'serve':
   --openapi <spec>     Path to OpenAPI spec for Explorer
   --db <path>          Path to SQLite database file (default: apitool.db)
   --watch              Enable dev mode with hot reload (auto-refresh browser on file changes)
+
+Options for 'ci init':
+  --github             Generate GitHub Actions workflow
+  --gitlab             Generate GitLab CI config
+  --dir <path>         Project root directory (default: current directory)
+  --force              Overwrite existing CI config
 
 General:
   --help, -h           Show this help
@@ -239,15 +257,22 @@ async function main(): Promise<number> {
         }
       }
 
-      // Collect all --tag flags (parseArgs only stores last one, so re-parse)
+      // Collect all --tag and --env-var flags (parseArgs only stores last one, so re-parse)
       const tagValues: string[] = [];
+      const envVarValues: string[] = [];
       const rawRunArgs = process.argv.slice(2);
       for (let i = 0; i < rawRunArgs.length; i++) {
-        if (rawRunArgs[i] === "--tag" && rawRunArgs[i + 1]) {
+        const arg = rawRunArgs[i]!;
+        if (arg === "--tag" && rawRunArgs[i + 1]) {
           tagValues.push(rawRunArgs[i + 1]!);
           i++;
-        } else if (rawRunArgs[i]?.startsWith("--tag=")) {
-          tagValues.push(rawRunArgs[i]!.slice("--tag=".length));
+        } else if (arg.startsWith("--tag=")) {
+          tagValues.push(arg.slice("--tag=".length));
+        } else if (arg === "--env-var" && rawRunArgs[i + 1]) {
+          envVarValues.push(rawRunArgs[i + 1]!);
+          i++;
+        } else if (arg.startsWith("--env-var=")) {
+          envVarValues.push(arg.slice("--env-var=".length));
         }
       }
       // Support comma-separated: --tag smoke,crud → ["smoke", "crud"]
@@ -264,6 +289,8 @@ async function main(): Promise<number> {
         authToken: typeof flags["auth-token"] === "string" ? flags["auth-token"] : undefined,
         safe: flags["safe"] === true,
         tag: tags.length > 0 ? tags : undefined,
+        envVars: envVarValues.length > 0 ? envVarValues : undefined,
+        dryRun: flags["dry-run"] === true,
       });
     }
 
@@ -350,6 +377,7 @@ async function main(): Promise<number> {
     case "mcp": {
       return mcpCommand({
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+        dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
       });
     }
 
@@ -414,6 +442,42 @@ async function main(): Promise<number> {
       });
     }
 
+    case "ci": {
+      const ciSub = positional[0];
+      if (ciSub !== "init") {
+        printError("Usage: apitool ci init [--github|--gitlab] [--force]");
+        return 2;
+      }
+      let platform: "github" | "gitlab" | undefined;
+      if (flags["github"] === true) platform = "github";
+      else if (flags["gitlab"] === true) platform = "gitlab";
+      return ciInitCommand({
+        platform,
+        force: flags["force"] === true,
+        dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
+      });
+    }
+
+    case "compare": {
+      const rawA = positional[0];
+      const rawB = positional[1];
+      if (!rawA || !rawB) {
+        printError("Usage: apitool compare <runA> <runB>");
+        return 2;
+      }
+      const runA = parseInt(rawA, 10);
+      const runB = parseInt(rawB, 10);
+      if (isNaN(runA) || isNaN(runB)) {
+        printError("Run IDs must be integers");
+        return 2;
+      }
+      return compareCommand({
+        runA,
+        runB,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+      });
+    }
+
     case "doctor": {
       return doctorCommand({
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
@@ -446,7 +510,16 @@ async function main(): Promise<number> {
         printError("Missing --tests <dir>. Usage: apitool coverage --spec <path> --tests <dir>");
         return 2;
       }
-      return coverageCommand({ spec, tests });
+      const failOnCoverageRaw = flags["fail-on-coverage"];
+      let failOnCoverage: number | undefined;
+      if (typeof failOnCoverageRaw === "string") {
+        failOnCoverage = parseInt(failOnCoverageRaw, 10);
+        if (isNaN(failOnCoverage) || failOnCoverage < 0 || failOnCoverage > 100) {
+          printError(`Invalid --fail-on-coverage value: ${failOnCoverageRaw} (must be 0–100)`);
+          return 2;
+        }
+      }
+      return coverageCommand({ spec, tests, failOnCoverage });
     }
 
     default: {
