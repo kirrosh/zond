@@ -3,6 +3,15 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId } from "../../db/queries.ts";
 
+function statusHint(status: number | null | undefined): string | null {
+  if (!status) return null;
+  if (status >= 500) return "Server-side error — inspect response_body for errorMessage/errorDetail; likely a backend bug";
+  if (status === 401 || status === 403) return "Auth failure — check auth_token/api_key in .env.yaml";
+  if (status === 404) return "Resource not found — verify the path and ID";
+  if (status === 400 || status === 422) return "Validation error — check request body fields match the schema";
+  return null;
+}
+
 export function registerQueryDbTool(server: McpServer, dbPath?: string) {
   server.registerTool("query_db", {
     description:
@@ -101,20 +110,24 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
           const allResults = getResultsByRunId(runId);
           const failures = allResults
             .filter(r => r.status === "fail" || r.status === "error")
-            .map(r => ({
-              suite_name: r.suite_name,
-              test_name: r.test_name,
-              status: r.status,
-              error_message: r.error_message,
-              request_method: r.request_method,
-              request_url: r.request_url,
-              response_status: r.response_status,
-              response_headers: r.response_headers
-                ? JSON.parse(r.response_headers)
-                : undefined,
-              assertions: r.assertions,
-              duration_ms: r.duration_ms,
-            }));
+            .map(r => {
+              const hint = statusHint(r.response_status);
+              return {
+                suite_name: r.suite_name,
+                test_name: r.test_name,
+                status: r.status,
+                error_message: r.error_message,
+                request_method: r.request_method,
+                request_url: r.request_url,
+                response_status: r.response_status,
+                ...(hint ? { hint } : {}),
+                response_headers: r.response_headers
+                  ? JSON.parse(r.response_headers)
+                  : undefined,
+                assertions: r.assertions,
+                duration_ms: r.duration_ms,
+              };
+            });
           const result = {
             run: {
               id: diagRun.id,

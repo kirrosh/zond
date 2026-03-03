@@ -62,8 +62,18 @@ export function registerSetupApiTool(server: McpServer, dbPath?: string) {
         force,
       });
 
+      const envFilePath = join(result.baseDir, ".env.yaml");
+      const response = {
+        ...result,
+        nextSteps: [
+          `Edit ${envFilePath} to add credentials (auth_token, api_key, base_url, etc.)`,
+          `File is already git-ignored via .gitignore`,
+          `Then run: run_tests(testPath: "${result.testPath}")`,
+        ],
+      };
+
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(response, null, 2) }],
       };
     } catch (err) {
       return {

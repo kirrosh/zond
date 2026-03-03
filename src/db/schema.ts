@@ -48,7 +48,7 @@ export function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 const SCHEMA_V1 = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -183,6 +183,10 @@ const SCHEMA_V6 = `
   ALTER TABLE results ADD COLUMN response_headers TEXT;
 `;
 
+const SCHEMA_V7 = `
+  DROP TABLE IF EXISTS environments;
+`;
+
 function runMigrations(db: Database): void {
   const currentVersion = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
 
@@ -215,6 +219,9 @@ function runMigrations(db: Database): void {
     }
     if (currentVersion < 6) {
       db.exec(SCHEMA_V6);
+    }
+    if (currentVersion < 7) {
+      db.exec(SCHEMA_V7);
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

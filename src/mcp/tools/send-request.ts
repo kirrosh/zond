@@ -2,8 +2,10 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { executeRequest } from "../../core/runner/http-client.ts";
 import { loadEnvironment, substituteString, substituteDeep } from "../../core/parser/variables.ts";
+import { getDb } from "../../db/schema.ts";
+import { findCollectionByNameOrId } from "../../db/queries.ts";
 
-export function registerSendRequestTool(server: McpServer) {
+export function registerSendRequestTool(server: McpServer, dbPath?: string) {
   server.registerTool("send_request", {
     description: "Send an ad-hoc HTTP request. Supports variable interpolation from environments (e.g. {{base_url}}).",
     inputSchema: {
@@ -13,10 +15,17 @@ export function registerSendRequestTool(server: McpServer) {
       body: z.optional(z.string()).describe("Request body (JSON string)"),
       timeout: z.optional(z.number().int().positive()).describe("Request timeout in ms"),
       envName: z.optional(z.string()).describe("Environment name for variable interpolation"),
+      collectionName: z.optional(z.string()).describe("Collection name to load env from its base_dir (e.g. 'petstore'). Required for {{variable}} interpolation."),
     },
-  }, async ({ method, url, headers, body, timeout, envName }) => {
+  }, async ({ method, url, headers, body, timeout, envName, collectionName }) => {
     try {
-      const vars = await loadEnvironment(envName);
+      let searchDir = process.cwd();
+      if (collectionName) {
+        getDb(dbPath);
+        const col = findCollectionByNameOrId(collectionName);
+        if (col?.base_dir) searchDir = col.base_dir;
+      }
+      const vars = await loadEnvironment(envName, searchDir);
 
       const resolvedUrl = substituteString(url, vars) as string;
       const parsedHeaders = headers ? JSON.parse(headers) as Record<string, string> : {};

@@ -11,9 +11,6 @@ import {
   getResultsByRunId,
   listRuns,
   deleteRun,
-  upsertEnvironment,
-  getEnvironment,
-  listEnvironments,
   getDashboardStats,
   getPassRateTrend,
   getSlowestTests,
@@ -280,38 +277,6 @@ describe("deleteRun", () => {
       .query("SELECT COUNT(*) as n FROM results WHERE run_id = ?")
       .get(id) as { n: number };
     expect(count.n).toBe(0);
-  });
-});
-
-// ──────────────────────────────────────────────
-// Environments
-// ──────────────────────────────────────────────
-
-describe("environments", () => {
-  test("upsertEnvironment and getEnvironment round-trip", () => {
-    upsertEnvironment("staging", { BASE_URL: "https://staging.example.com", TOKEN: "abc" });
-    expect(getEnvironment("staging")).toEqual({ BASE_URL: "https://staging.example.com", TOKEN: "abc" });
-  });
-
-  test("upsert overwrites existing environment", () => {
-    upsertEnvironment("prod", { BASE_URL: "https://old.example.com" });
-    upsertEnvironment("prod", { BASE_URL: "https://new.example.com" });
-    expect(getEnvironment("prod")?.BASE_URL).toBe("https://new.example.com");
-  });
-
-  test("getEnvironment returns null for unknown name", () => {
-    expect(getEnvironment("nonexistent")).toBeNull();
-  });
-
-  test("listEnvironments returns all environment names sorted", () => {
-    upsertEnvironment("staging", {});
-    upsertEnvironment("prod", {});
-    upsertEnvironment("dev", {});
-    expect(listEnvironments()).toEqual(["dev", "prod", "staging"]);
-  });
-
-  test("listEnvironments returns empty array when none exist", () => {
-    expect(listEnvironments()).toEqual([]);
   });
 });
 

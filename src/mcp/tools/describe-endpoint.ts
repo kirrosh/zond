@@ -3,6 +3,63 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { OpenAPIV3 } from "openapi-types";
 import { readOpenApiSpec } from "../../core/generator/index.ts";
 
+function generateTestSnippet(params: {
+  method: string;
+  path: string;
+  operationId?: string;
+  pathParams: string[];
+  queryParams: Array<{ name: string; required?: boolean }>;
+  requestBody?: { required?: boolean; schema?: OpenAPIV3.SchemaObject };
+  hasSecurity: boolean;
+  successStatus: string;
+}): string {
+  const { method, path, operationId, pathParams, queryParams, requestBody, hasSecurity, successStatus } = params;
+
+  // Build URL with path params as {{paramName}}
+  const urlPath = path.replace(/\{([^}]+)\}/g, (_, name) => `{{${name}}}`);
+  const url = `{{base_url}}${urlPath}`;
+
+  const lines: string[] = [];
+  const testName = operationId ?? `${method} ${path}`;
+  lines.push(`- name: "${testName}"`);
+  lines.push(`  ${method}: "${url}"`);
+
+  if (hasSecurity) {
+    lines.push(`  headers:`);
+    lines.push(`    Authorization: "Bearer {{auth_token}}"`);
+  }
+
+  // Required query params
+  const requiredQuery = queryParams.filter(p => p.required);
+  if (requiredQuery.length > 0) {
+    lines.push(`  query:`);
+    for (const p of requiredQuery) {
+      lines.push(`    ${p.name}: "{{${p.name}}}"`);
+    }
+  }
+
+  // Request body for POST/PUT/PATCH
+  if (requestBody && ["POST", "PUT", "PATCH"].includes(method)) {
+    const schema = requestBody.schema as OpenAPIV3.SchemaObject | undefined;
+    const required = Array.isArray(schema?.required) ? schema.required : [];
+    const properties = schema?.properties as Record<string, OpenAPIV3.SchemaObject> | undefined;
+    if (properties && Object.keys(properties).length > 0) {
+      lines.push(`  json:`);
+      for (const [propName, propSchema] of Object.entries(properties)) {
+        if (!required.includes(propName)) continue;
+        const type = (propSchema as OpenAPIV3.SchemaObject).type ?? "string";
+        const placeholder = type === "integer" || type === "number" ? 0 : type === "boolean" ? false : `"{{${propName}}}"`;
+        lines.push(`    ${propName}: ${placeholder}`);
+      }
+    }
+  }
+
+  lines.push(`  expect:`);
+  lines.push(`    status: ${successStatus}`);
+
+  return lines.join("\n");
+}
+
 export function registerDescribeEndpointTool(server: McpServer) {
   server.registerTool("describe_endpoint", {
     description:
@@ -132,6 +189,32 @@ export function registerDescribeEndpointTool(server: McpServer) {
       const opSecurity = (operation.security ?? docSecurity) as OpenAPIV3.SecurityRequirementObject[];
       const securityNames = [...new Set(opSecurity.flatMap(req => Object.keys(req)))];
 
+      // Derive success status (first 2xx, or first response code)
+      const responseCodes = Object.keys(operation.responses ?? {});
+      const successStatus = responseCodes.find(c => c.startsWith("2")) ?? responseCodes[0] ?? "200";
+
+      // Build testSnippet
+      const pathParamNames = [...paramMap.values()]
+        .filter(p => p.in === "path")
+        .map(p => p.name);
+      const queryParamsList = [...paramMap.values()]
+        .filter(p => p.in === "query")
+        .map(p => ({ name: p.name, required: p.required }));
+      const reqBodyForSnippet = requestBody
+        ? { required: (operation.requestBody as OpenAPIV3.RequestBodyObject)?.required, schema: (requestBody as any).schema }
+        : undefined;
+
+      const testSnippet = generateTestSnippet({
+        method: method.toUpperCase(),
+        path: resolvedPath,
+        operationId: operation.operationId,
+        pathParams: pathParamNames,
+        queryParams: queryParamsList,
+        requestBody: reqBodyForSnippet,
+        hasSecurity: securityNames.length > 0,
+        successStatus,
+      });
+
       const result = {
         method: method.toUpperCase(),
         path: resolvedPath,
@@ -144,6 +227,7 @@ export function registerDescribeEndpointTool(server: McpServer) {
         parameters: grouped,
         ...(requestBody ? { requestBody } : {}),
         responses,
+        testSnippet,
       };
 
       return {

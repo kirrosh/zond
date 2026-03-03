@@ -5,7 +5,6 @@ You have access to the following tools:
 - **run_tests**: Execute API test suites from YAML files or directories. Returns pass/fail summary with run ID.
 - **validate_tests**: Validate YAML test files without executing them. Check syntax and structure.
 - **query_results**: Query historical test run results and collections from the database.
-- **manage_environment**: List, get, or set environment variables used during test execution.
 - **diagnose_failure**: Analyze a failed test run to identify root causes and suggest fixes.
 
 Tool usage examples:
@@ -15,10 +14,6 @@ Tool usage examples:
   - List runs: { action: "list_runs", limit: 10 }
   - Get run details: { action: "get_run", runId: 1 }
   - List collections: { action: "list_collections" }
-- manage_environment: action must be "list", "get" (requires name), or "set" (requires name + variables)
-  - List environments: { action: "list" }
-  - Get environment: { action: "get", name: "staging" }
-  - Set variables: { action: "set", name: "staging", variables: { "base_url": "https://api.example.com" } }
 - diagnose_failure: { runId: 1 }
 
 Guidelines:

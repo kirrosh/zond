@@ -11,8 +11,10 @@ mock.module("../../src/core/runner/http-client.ts", () => ({
   DEFAULT_FETCH_OPTIONS: { timeout: 30000, retries: 0, retry_delay: 1000, follow_redirects: true },
 }));
 
+const mockLoadEnvironment = mock((_envName?: string, _searchDir?: string) => Promise.resolve({ base_url: "https://api.test.com" }));
+
 mock.module("../../src/core/parser/variables.ts", () => ({
-  loadEnvironment: mock(() => Promise.resolve({ base_url: "https://api.test.com" })),
+  loadEnvironment: mockLoadEnvironment,
   substituteString: mock((template: string, vars: Record<string, unknown>) => {
     if (typeof template !== "string") return template;
     return template.replace(/\{\{(.+?)\}\}/g, (_, key: string) => String(vars[key] ?? `{{${key}}}`));
@@ -30,6 +32,23 @@ mock.module("../../src/core/parser/variables.ts", () => ({
     return value;
   }),
   GENERATORS: {},
+}));
+
+const mockFindCollectionByNameOrId = mock((_nameOrId: string | number) => ({
+  id: 1,
+  name: "myapi",
+  base_dir: "/projects/myapi",
+  test_path: "/projects/myapi/tests",
+  openapi_spec: null,
+  created_at: "2024-01-01T00:00:00.000Z",
+}));
+
+mock.module("../../src/db/queries.ts", () => ({
+  findCollectionByNameOrId: mockFindCollectionByNameOrId,
+}));
+
+mock.module("../../src/db/schema.ts", () => ({
+  getDb: mock(() => ({})),
 }));
 
 afterAll(() => { mock.restore(); });
@@ -63,6 +82,20 @@ describe("MCP send_request", () => {
     const tool = (server as any)._registeredTools["send_request"];
     await tool.handler({ method: "GET", url: "{{base_url}}/users", envName: "dev" });
     expect(executeRequest).toHaveBeenCalledTimes(1);
+  });
+
+  test("uses collection base_dir as searchDir when collectionName is given", async () => {
+    mockLoadEnvironment.mockClear();
+    mockFindCollectionByNameOrId.mockClear();
+
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerSendRequestTool(server);
+
+    const tool = (server as any)._registeredTools["send_request"];
+    await tool.handler({ method: "GET", url: "{{base_url}}/health", collectionName: "myapi" });
+
+    expect(mockFindCollectionByNameOrId).toHaveBeenCalledWith("myapi");
+    expect(mockLoadEnvironment).toHaveBeenCalledWith(undefined, "/projects/myapi");
   });
 
   test("returns error on failure", async () => {

@@ -1,9 +1,17 @@
 import { resolve, join } from "path";
-import { mkdirSync, writeFileSync } from "fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync } from "fs";
 import { getDb } from "../db/schema.ts";
-import { createCollection, deleteCollection, upsertEnvironment, findCollectionByNameOrId, normalizePath } from "../db/queries.ts";
+import { createCollection, deleteCollection, findCollectionByNameOrId, normalizePath } from "../db/queries.ts";
 import { readOpenApiSpec, extractEndpoints } from "./generator/index.ts";
-import { toYaml } from "../cli/commands/envs.ts";
+
+function toYaml(vars: Record<string, string>): string {
+  const lines: string[] = [];
+  for (const [k, v] of Object.entries(vars)) {
+    const needsQuote = /[:#\[\]{}&*!|>'"@`,%]/.test(v) || v.includes(" ") || v === "";
+    lines.push(`${k}: ${needsQuote ? `"${v.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"` : v}`);
+  }
+  return lines.join("\n");
+}
 
 export interface SetupApiOptions {
   name: string;
@@ -17,6 +25,7 @@ export interface SetupApiOptions {
 export interface SetupApiResult {
   created: true;
   collectionId: number;
+  baseDir: string;
   testPath: string;
   baseUrl: string;
   specEndpoints: number;
@@ -71,6 +80,17 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     writeFileSync(envFilePath, toYaml(envVars) + "\n", "utf-8");
   }
 
+  // Create/update .gitignore to exclude env files
+  const gitignorePath = join(baseDir, ".gitignore");
+  const gitignoreContent = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
+  if (!gitignoreContent.includes(".env*.yaml")) {
+    writeFileSync(
+      gitignorePath,
+      gitignoreContent + (gitignoreContent.endsWith("\n") || !gitignoreContent ? "" : "\n") + ".env*.yaml\n",
+      "utf-8",
+    );
+  }
+
   const normalizedTestPath = normalizePath(testPath);
   const normalizedBaseDir = normalizePath(baseDir);
 
@@ -82,14 +102,10 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     openapi_spec: openapiSpec ?? undefined,
   });
 
-  // Create a scoped "default" environment in DB
-  if (Object.keys(envVars).length > 0) {
-    upsertEnvironment("default", envVars, collectionId);
-  }
-
   return {
     created: true,
     collectionId,
+    baseDir: normalizedBaseDir,
     testPath: normalizedTestPath,
     baseUrl,
     specEndpoints: endpointCount,
