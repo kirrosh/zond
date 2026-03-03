@@ -199,4 +199,14 @@ describe("loadEnvironment", () => {
     const env = await loadEnvironment("nonexistent-env-xyz", "/nonexistent/path");
     expect(env).toEqual({});
   });
+
+  test("finds .env.yaml from subdirectory (regression: effectiveEnvName must not default to 'default')", async () => {
+    // fixturesDir has .env.yaml, but not .env.default.yaml
+    // When envName is undefined, should find .env.yaml; when "default", should return {}
+    const envWithUndefined = await loadEnvironment(undefined, fixturesDir);
+    expect(envWithUndefined["base"]).toBe("http://localhost:3000/api");
+
+    const envWithDefault = await loadEnvironment("default", fixturesDir);
+    expect(envWithDefault["base"]).toBeUndefined();
+  });
 });

@@ -28,12 +28,15 @@ export const TOOL_DESCRIPTIONS = {
     "Returns the full API specification (with request/response schemas) and a step-by-step algorithm " +
     "for creating YAML test files. Use this BEFORE generating tests — it gives you " +
     "everything you need to write high-quality test suites. " +
-    "After generating, use save_test_suite to save, run_tests to execute, and query_db(action: 'diagnose_failure') to debug.",
+    "After generating, use save_test_suite to save, run_tests to execute, " +
+    "manage_server(action: 'start') to view results in the Web UI, " +
+    "and query_db(action: 'diagnose_failure') to debug failures.",
 
   generate_missing_tests:
     "Analyze test coverage and generate a test guide for only the uncovered endpoints. " +
     "Combines coverage_analysis + generate_tests_guide — returns a focused guide for missing tests. " +
-    "Use this for incremental test generation to avoid duplicating existing tests.",
+    "Use this for incremental test generation to avoid duplicating existing tests. " +
+    "After saving and running new tests, use manage_server(action: 'start') to view results in the Web UI.",
 
   save_test_suite:
     "Save a YAML test suite file with validation. Parses and validates the YAML content " +

@@ -71,6 +71,25 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
 
     const request: HttpRequest = { method: resolved.method, url, headers, body };
 
+    // Validate absolute URL before attempting fetch
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      steps.push({
+        name: step.name,
+        status: "error",
+        duration_ms: 0,
+        request,
+        assertions: [],
+        captures: {},
+        error: `base_url is not configured — URL resolved to a relative path: "${url}". Set base_url in .env.yaml`,
+      });
+      if (step.expect.body) {
+        for (const rule of Object.values(step.expect.body)) {
+          if (rule.capture) failedCaptures.add(rule.capture);
+        }
+      }
+      continue;
+    }
+
     if (dryRun) {
       const bodyPreview = body ? ` ${body.slice(0, 200)}` : "";
       steps.push({

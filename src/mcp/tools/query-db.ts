@@ -1,7 +1,8 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getDb } from "../../db/schema.ts";
-import { listCollections, listRuns, getRunById, getResultsByRunId } from "../../db/queries.ts";
+import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
+import { join } from "node:path";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 function parseBodySafe(raw: string | null | undefined): unknown {
@@ -20,6 +21,24 @@ function statusHint(status: number | null | undefined): string | null {
   if (status === 401 || status === 403) return "Auth failure — check auth_token/api_key in .env.yaml";
   if (status === 404) return "Resource not found — verify the path and ID";
   if (status === 400 || status === 422) return "Validation error — check request body fields match the schema";
+  return null;
+}
+
+function envHint(url: string | null, errorMessage: string | null, envFilePath?: string): string | null {
+  const envFile = envFilePath ? envFilePath : ".env.yaml in your API directory";
+
+  if (url && /\{\{[^}]+\}\}/.test(url)) {
+    return `URL contains unresolved variable: "${url}" — variable name may not match the key in ${envFile}`;
+  }
+  if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
+    return `base_url is not set or empty — URL resolved to "${url}". Add base_url to ${envFile}`;
+  }
+  if (errorMessage?.includes("base_url is not configured")) {
+    return `base_url is missing or empty. Add base_url: https://your-api.com to ${envFile}`;
+  }
+  if (errorMessage?.includes("URL is invalid") || errorMessage?.includes("Failed to parse URL")) {
+    return `URL is malformed — likely base_url is empty or invalid. Check base_url in ${envFile}`;
+  }
   return null;
 }
 
@@ -114,11 +133,22 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
               isError: true,
             };
           }
+
+          // Resolve env file path from collection for actionable hints
+          let envFilePath: string | undefined;
+          if (diagRun.collection_id) {
+            const collection = getCollectionById(diagRun.collection_id);
+            if (collection?.base_dir) {
+              envFilePath = join(collection.base_dir, ".env.yaml").replace(/\\/g, "/");
+            }
+          }
+
           const allResults = getResultsByRunId(runId);
           const failures = allResults
             .filter(r => r.status === "fail" || r.status === "error")
             .map(r => {
-              const hint = statusHint(r.response_status);
+              // env issues take priority over generic status hints
+              const hint = envHint(r.request_url, r.error_message, envFilePath) ?? statusHint(r.response_status);
               return {
                 suite_name: r.suite_name,
                 test_name: r.test_name,
@@ -136,6 +166,24 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
                 duration_ms: r.duration_ms,
               };
             });
+
+          // Top-level env_issue when all failures have the same env problem category
+          function envCategory(hint: string | undefined): string | null {
+            if (!hint) return null;
+            if (hint.includes("base_url is not set") || hint.includes("base_url is missing") || hint.includes("base_url is not configured")) return "base_url_missing";
+            if (hint.includes("unresolved variable")) return "unresolved_variable";
+            if (hint.includes("URL is malformed")) return "url_malformed";
+            return null;
+          }
+          const categories = new Set(failures.map(f => envCategory(f.hint)).filter(Boolean));
+          const sharedEnvHint = categories.size === 1
+            ? categories.has("base_url_missing")
+              ? `All failures: base_url is not set — add base_url to ${envFilePath ?? ".env.yaml"}`
+              : categories.has("unresolved_variable")
+              ? `All failures: some variables are not substituted — check variable names in ${envFilePath ?? ".env.yaml"}`
+              : [...failures.map(f => f.hint).filter(Boolean)][0]
+            : undefined;
+
           const result = {
             run: {
               id: diagRun.id,
@@ -148,6 +196,7 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
               passed: diagRun.passed,
               failed: diagRun.failed,
             },
+            ...(sharedEnvHint ? { env_issue: sharedEnvHint } : {}),
             failures,
           };
           return {

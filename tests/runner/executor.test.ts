@@ -308,3 +308,93 @@ describe("runSuites", () => {
     expect(callCount).toBe(2);
   });
 });
+
+describe("URL validation", () => {
+  test("relative URL (no base_url) produces error with actionable message", async () => {
+    const suite: TestSuite = {
+      name: "No base_url",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Get users",
+        method: "GET",
+        path: "/users",
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite); // no env, no base_url
+    expect(result.total).toBe(1);
+    expect(result.steps[0]!.status).toBe("error");
+    expect(result.steps[0]!.error).toContain("base_url is not configured");
+    expect(result.steps[0]!.error).toContain("/users");
+    expect(result.steps[0]!.error).toContain(".env.yaml");
+    // fetch must NOT have been called
+    expect(globalThis.fetch).toBe(originalFetch); // original fetch, not a mock
+  });
+
+  test("empty base_url substituted from env produces error with actionable message", async () => {
+    const suite: TestSuite = {
+      name: "Empty base_url",
+      base_url: "{{base_url}}",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Get items",
+        method: "GET",
+        path: "/items",
+        expect: { status: 200 },
+      }],
+    };
+
+    // env has base_url = "" (empty string — falsy)
+    const result = await runSuite(suite, { base_url: "" });
+    expect(result.steps[0]!.status).toBe("error");
+    expect(result.steps[0]!.error).toContain("base_url is not configured");
+  });
+
+  test("absolute URL works normally", async () => {
+    mockFetchResponses([{ status: 200, body: { ok: true } }]);
+
+    const suite: TestSuite = {
+      name: "Has base_url",
+      base_url: "https://api.example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Get",
+        method: "GET",
+        path: "/users",
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("pass");
+    expect(result.steps[0]!.request.url).toBe("https://api.example.com/users");
+  });
+
+  test("subsequent steps skip when prior step with capture had bad URL", async () => {
+    const suite: TestSuite = {
+      name: "Cascade skip",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "Create",
+          method: "POST",
+          path: "/items",         // relative — will error
+          json: { name: "foo" },
+          expect: { status: 201, body: { id: { capture: "item_id" } } },
+        },
+        {
+          name: "Get",
+          method: "GET",
+          path: "/items/{{item_id}}",
+          expect: { status: 200 },
+        },
+      ],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("error");
+    expect(result.steps[1]!.status).toBe("skip");
+    expect(result.steps[1]!.error).toContain("item_id");
+  });
+});

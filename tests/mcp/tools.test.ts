@@ -301,6 +301,131 @@ describe("query_db", () => {
     expect(failWith401).toBeDefined();
     expect(failWith401.hint).toContain("Auth failure");
   });
+
+  test("diagnose_failure shows env hint when URL is relative (base_url not configured)", async () => {
+    const suiteResult = makeSuiteResult({
+      total: 1, passed: 0, failed: 0,
+      steps: [{
+        name: "Get balance",
+        status: "error",
+        duration_ms: 0,
+        request: { method: "POST", url: "/accountHolderBalance", headers: {} },
+        assertions: [],
+        captures: {},
+        error: "base_url is not configured — URL resolved to a relative path: \"/accountHolderBalance\". Set base_url in .env.yaml",
+      }],
+    });
+    const runId = createRun({ started_at: suiteResult.started_at, trigger: "mcp" });
+    finalizeRun(runId, [suiteResult]);
+    saveResults(runId, [suiteResult]);
+
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerQueryDbTool(server, dbFile);
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "diagnose_failure", runId });
+
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.failures[0].hint).toContain("base_url");
+    expect(parsed.failures[0].hint).toContain(".env.yaml");
+  });
+
+  test("diagnose_failure shows env hint when URL contains unresolved variable", async () => {
+    const suiteResult = makeSuiteResult({
+      total: 1, passed: 0, failed: 0,
+      steps: [{
+        name: "Get user",
+        status: "error",
+        duration_ms: 0,
+        request: { method: "GET", url: "https://api.example.com/users/{{user_id}}", headers: {} },
+        assertions: [],
+        captures: {},
+        error: "some fetch error",
+      }],
+    });
+    const runId = createRun({ started_at: suiteResult.started_at, trigger: "mcp" });
+    finalizeRun(runId, [suiteResult]);
+    saveResults(runId, [suiteResult]);
+
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerQueryDbTool(server, dbFile);
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "diagnose_failure", runId });
+
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.failures[0].hint).toContain("unresolved variable");
+    expect(parsed.failures[0].hint).toContain("{{user_id}}");
+  });
+
+  test("diagnose_failure env hint takes priority over statusHint", async () => {
+    // URL is relative AND response_status would normally trigger statusHint(404)
+    const suiteResult = makeSuiteResult({
+      total: 1, passed: 0, failed: 0,
+      steps: [{
+        name: "Call without base_url",
+        status: "fail",
+        duration_ms: 10,
+        request: { method: "GET", url: "/resource", headers: {} },
+        response: { status: 404, headers: {}, body: "not found", duration_ms: 10 },
+        assertions: [],
+        captures: {},
+      }],
+    });
+    const runId = createRun({ started_at: suiteResult.started_at, trigger: "mcp" });
+    finalizeRun(runId, [suiteResult]);
+    saveResults(runId, [suiteResult]);
+
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerQueryDbTool(server, dbFile);
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "diagnose_failure", runId });
+
+    const parsed = JSON.parse(result.content[0].text);
+    // env hint should win over "Resource not found" from statusHint
+    expect(parsed.failures[0].hint).toContain("base_url");
+    expect(parsed.failures[0].hint).not.toContain("Resource not found");
+  });
+
+  test("diagnose_failure surfaces env_issue at top level when all failures share same problem", async () => {
+    const suiteResult = makeSuiteResult({
+      total: 2, passed: 0, failed: 2,
+      steps: [
+        {
+          name: "Step 1",
+          status: "error",
+          duration_ms: 0,
+          request: { method: "POST", url: "/endpoint1", headers: {} },
+          assertions: [],
+          captures: {},
+          error: "base_url is not configured — URL resolved to a relative path: \"/endpoint1\". Set base_url in .env.yaml",
+        },
+        {
+          name: "Step 2",
+          status: "error",
+          duration_ms: 0,
+          request: { method: "POST", url: "/endpoint2", headers: {} },
+          assertions: [],
+          captures: {},
+          error: "base_url is not configured — URL resolved to a relative path: \"/endpoint2\". Set base_url in .env.yaml",
+        },
+      ],
+    });
+    const runId = createRun({ started_at: suiteResult.started_at, trigger: "mcp" });
+    finalizeRun(runId, [suiteResult]);
+    saveResults(runId, [suiteResult]);
+
+    const { registerQueryDbTool } = await import("../../src/mcp/tools/query-db.ts");
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerQueryDbTool(server, dbFile);
+    const tool = (server as any)._registeredTools["query_db"];
+    const result = await tool.handler({ action: "diagnose_failure", runId });
+
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.env_issue).toBeDefined();
+    expect(parsed.env_issue).toContain("base_url");
+  });
 });
 
 // ──────────────────────────────────────────────

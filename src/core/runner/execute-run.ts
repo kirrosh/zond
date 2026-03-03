@@ -60,8 +60,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
   const collection = findCollectionByTestPath(resolvedPath)
     ?? (fileStat?.isFile() ? findCollectionByTestPath(resolve(dirname(testPath))) : null);
 
-  // If no envName given but a collection exists, fall back to "default" for DB lookup
-  const effectiveEnvName = envName ?? (collection ? "default" : undefined);
+  const effectiveEnvName = envName;
 
   // Helper: load env with optional --env-var overrides merged on top
   async function loadEnvWithOverrides(dir: string): Promise<Record<string, string>> {

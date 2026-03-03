@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.4] - 2026-03-03
+
+### Fixed
+
+- **`execute-run.ts`**: removed stale `"default"` fallback for `effectiveEnvName` — when no `envName` was passed but a collection existed, the runner looked for `.env.default.yaml` instead of `.env.yaml`, causing all variables (including `base_url`) to be empty and every request to fail with `"URL is invalid"`
+
+### Added
+
+- **`executor.ts`**: early URL validation before `fetch()` — if `base_url` is missing or empty the step now fails immediately with a descriptive error `"base_url is not configured — URL resolved to a relative path: …"` instead of the cryptic `TypeError: URL is invalid`; subsequent steps that depend on captures from the failed step are automatically skipped
+- **`diagnose_failure`**: `envHint()` detector — surfaces actionable `.env.yaml` hints per failure:
+  - relative URL → `"base_url is not set or empty — add base_url to <path>/.env.yaml"`
+  - URL contains `{{variable}}` → `"URL contains unresolved variable — check variable names in .env.yaml"`
+  - error message contains `"URL is invalid"` → `"URL is malformed — likely base_url is empty or invalid"`
+  - env hints take priority over generic `statusHint` (401/404/5xx)
+  - new top-level `env_issue` field when ALL failures share the same env problem category
+  - env file path resolved from `collection.base_dir` — agent sees the exact file to edit
+- **`run_tests` MCP**: always suggests `manage_server(action: 'start')` in `hints` after a run
+- **`generate_tests_guide` / `generate_missing_tests` descriptions**: mention `manage_server` as the next step after saving and running tests
+
 ## [Unreleased]
 
 ### Added
