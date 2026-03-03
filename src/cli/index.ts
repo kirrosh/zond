@@ -86,6 +86,7 @@ Usage:
   apitool init             Initialize a new apitool project
   apitool ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
   apitool mcp              Start MCP server (stdio transport for AI agents)
+                           --dir <path>  Set working directory (relative paths resolve here)
   apitool chat             Start interactive AI chat for API testing
   apitool doctor           Run diagnostic checks
   apitool update           Update to latest version
@@ -358,6 +359,7 @@ async function main(): Promise<number> {
     case "mcp": {
       return mcpCommand({
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+        dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
       });
     }
 

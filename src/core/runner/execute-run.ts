@@ -57,12 +57,14 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
   const collection = findCollectionByTestPath(resolvedPath)
     ?? (fileStat?.isFile() ? findCollectionByTestPath(resolve(dirname(testPath))) : null);
 
-  const env = await loadEnvironment(envName, envDir, collection?.id);
+  // If no envName given but a collection exists, fall back to "default" for DB lookup
+  const effectiveEnvName = envName ?? (collection ? "default" : undefined);
+  const env = await loadEnvironment(effectiveEnvName, envDir, collection?.id);
   const results = await Promise.all(suites.map((s) => runSuite(s, env)));
 
   const runId = createRun({
     started_at: results[0]?.started_at ?? new Date().toISOString(),
-    environment: envName,
+    environment: effectiveEnvName,
     trigger,
     collection_id: collection?.id,
   });

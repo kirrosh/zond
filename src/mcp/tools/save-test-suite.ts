@@ -57,6 +57,26 @@ export function registerSaveTestSuiteTool(server: McpServer, dbPath?: string) {
         };
       }
 
+      // Detect hardcoded credentials — long opaque strings in auth headers
+      const credentialPattern = /Authorization\s*:\s*["']?(Basic|Bearer)\s+([A-Za-z0-9+/=_\-]{20,})["']?/g;
+      const credMatches = [...content.matchAll(credentialPattern)];
+      const suspiciousCredentials = credMatches.filter(m => {
+        const value = m[2]!;
+        // Allow {{variable}} references — flag only literal tokens
+        return !value.startsWith("{{") && !value.endsWith("}}");
+      });
+      if (suspiciousCredentials.length > 0) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({
+            saved: false,
+            error: "Hardcoded credentials detected in Authorization header(s)",
+            hint: "Never put literal API keys or tokens in YAML files. Store them in the environment instead: use manage_environment(action: \"set\", name: \"default\", collectionName: \"...\", variables: {\"api_key\": \"...\"}) and reference as {{api_key}} in headers.",
+            detected: suspiciousCredentials.map(m => `${m[1]} <redacted>`),
+          }, null, 2) }],
+          isError: true,
+        };
+      }
+
       // Resolve path
       const resolvedPath = filePath.startsWith("/") || /^[a-zA-Z]:/.test(filePath)
         ? filePath
