@@ -8,16 +8,19 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
     description:
       "Query the apitool database. Actions: list_collections (all APIs with run stats), " +
       "list_runs (recent test runs), get_run_results (full detail for a run), " +
-      "diagnose_failure (only failed/errored steps for a run).",
+      "diagnose_failure (only failed/errored steps for a run), " +
+      "compare_runs (regressions and fixes between two runs).",
     inputSchema: {
-      action: z.enum(["list_collections", "list_runs", "get_run_results", "diagnose_failure"])
+      action: z.enum(["list_collections", "list_runs", "get_run_results", "diagnose_failure", "compare_runs"])
         .describe("Query action to perform"),
       runId: z.optional(z.number().int())
         .describe("Run ID (required for get_run_results and diagnose_failure)"),
+      runIdB: z.optional(z.number().int())
+        .describe("Second run ID (required for compare_runs — this is the newer run)"),
       limit: z.optional(z.number().int().min(1).max(100))
         .describe("Max number of runs to return (default: 20, only for list_runs)"),
     },
-  }, async ({ action, runId, limit }) => {
+  }, async ({ action, runId, runIdB, limit }) => {
     try {
       getDb(dbPath);
 
@@ -128,6 +131,71 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
           };
           return {
             content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+          };
+        }
+
+        case "compare_runs": {
+          if (runId == null || runIdB == null) {
+            return {
+              content: [{ type: "text" as const, text: JSON.stringify({ error: "Both runId (run A) and runIdB (run B) are required for compare_runs" }, null, 2) }],
+              isError: true,
+            };
+          }
+          const runARecord = getRunById(runId);
+          const runBRecord = getRunById(runIdB);
+          if (!runARecord) {
+            return {
+              content: [{ type: "text" as const, text: JSON.stringify({ error: `Run #${runId} not found` }, null, 2) }],
+              isError: true,
+            };
+          }
+          if (!runBRecord) {
+            return {
+              content: [{ type: "text" as const, text: JSON.stringify({ error: `Run #${runIdB} not found` }, null, 2) }],
+              isError: true,
+            };
+          }
+
+          const resultsA = getResultsByRunId(runId);
+          const resultsB = getResultsByRunId(runIdB);
+
+          const mapA = new Map<string, string>();
+          const mapB = new Map<string, string>();
+          for (const r of resultsA) mapA.set(`${r.suite_name}::${r.test_name}`, r.status);
+          for (const r of resultsB) mapB.set(`${r.suite_name}::${r.test_name}`, r.status);
+
+          const regressions: Array<{ suite: string; test: string; before: string; after: string }> = [];
+          const fixes: Array<{ suite: string; test: string; before: string; after: string }> = [];
+          let unchanged = 0;
+          let newTests = 0;
+          let removedTests = 0;
+
+          for (const [key, statusB] of mapB) {
+            const statusA = mapA.get(key);
+            if (statusA === undefined) { newTests++; continue; }
+            const [suite, test] = key.split("::") as [string, string];
+            const wasPass = statusA === "pass";
+            const isPass = statusB === "pass";
+            const wasFail = statusA === "fail" || statusA === "error";
+            const isFail = statusB === "fail" || statusB === "error";
+            if (wasPass && isFail) regressions.push({ suite, test, before: statusA, after: statusB });
+            else if (wasFail && isPass) fixes.push({ suite, test, before: statusA, after: statusB });
+            else unchanged++;
+          }
+          for (const key of mapA.keys()) {
+            if (!mapB.has(key)) removedTests++;
+          }
+
+          const compareResult = {
+            runA: { id: runId, started_at: runARecord.started_at },
+            runB: { id: runIdB, started_at: runBRecord.started_at },
+            summary: { regressions: regressions.length, fixes: fixes.length, unchanged, newTests, removedTests },
+            regressions,
+            fixes,
+            hasRegressions: regressions.length > 0,
+          };
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(compareResult, null, 2) }],
           };
         }
       }

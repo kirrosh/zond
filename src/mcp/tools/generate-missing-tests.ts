@@ -18,14 +18,21 @@ export function registerGenerateMissingTestsTool(server: McpServer) {
       specPath: z.string().describe("Path or URL to OpenAPI spec file"),
       testsDir: z.string().describe("Path to directory with existing test YAML files"),
       outputDir: z.optional(z.string()).describe("Directory for saving new test files (default: same as testsDir)"),
+      methodFilter: z.optional(z.array(z.string())).describe("Only include endpoints with these HTTP methods (e.g. [\"GET\"] for smoke tests)"),
     },
-  }, async ({ specPath, testsDir, outputDir }) => {
+  }, async ({ specPath, testsDir, outputDir, methodFilter }) => {
     try {
       const doc = await readOpenApiSpec(specPath);
-      const allEndpoints = extractEndpoints(doc);
+      let allEndpoints = extractEndpoints(doc);
       const securitySchemes = extractSecuritySchemes(doc);
       const baseUrl = ((doc as any).servers?.[0]?.url) as string | undefined;
       const title = (doc as any).info?.title as string | undefined;
+
+      // Apply method filter before coverage check
+      if (methodFilter && methodFilter.length > 0) {
+        const methods = methodFilter.map(m => m.toUpperCase());
+        allEndpoints = allEndpoints.filter(ep => methods.includes(ep.method.toUpperCase()));
+      }
 
       if (allEndpoints.length === 0) {
         return {
