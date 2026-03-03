@@ -21,7 +21,8 @@ import { getDb } from "../db/schema.ts";
 import { findCollectionByNameOrId } from "../db/queries.ts";
 import type { ReporterName } from "../core/reporter/types.ts";
 
-export const VERSION = "0.5.0";
+import { version as pkgVersion } from "../../package.json";
+export const VERSION = pkgVersion;
 
 export interface ParsedArgs {
   command: string | undefined;
