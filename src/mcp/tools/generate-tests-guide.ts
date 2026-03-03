@@ -134,17 +134,12 @@ ${hasAuth ? `---
 
 This API uses authentication. Before running tests, set up your credentials:
 
-### Option A — Edit the env file directly
-After \`setup_api\`, the collection directory contains \`.env.default.yaml\`. Edit it to add your credentials:
+### Edit the env file
+After \`setup_api\`, the collection directory contains \`.env.yaml\`. Edit it to add your credentials:
 \`\`\`yaml
 base_url: "https://api.example.com"
 api_key: "your-actual-api-key-here"
 auth_token: "your-token-here"
-\`\`\`
-
-### Option B — Use \`manage_environment\`
-\`\`\`
-manage_environment(action: "set", name: "default", collectionName: "your-api", variables: {"api_key": "your-key"})
 \`\`\`
 
 ### How it works
@@ -250,11 +245,12 @@ setup_api(name: "myapi", specPath: "/path/to/openapi.json", dir: "/path/to/proje
 \`\`\`
 If you skip this step, WebUI will show "No API collections registered yet" and env variables won't auto-load.
 
-${hasAuth ? `**Then set credentials immediately after setup_api** — use \`manage_environment\` to store the API key before touching any YAML files:
+${hasAuth ? `**Then set credentials immediately after setup_api** — edit the \`.env.yaml\` file in the API directory to add your credentials:
+\`\`\`yaml
+api_key: "<actual-key>"
+base_url: "https://..."
 \`\`\`
-manage_environment(action: "set", name: "default", collectionName: "myapi", variables: {"api_key": "<actual-key>", "base_url": "https://..."})
-\`\`\`
-Never put actual key values in YAML files.
+Never put actual key values directly in YAML test files.
 
 ` : ""}\
 ### Step 1: Analyze the API

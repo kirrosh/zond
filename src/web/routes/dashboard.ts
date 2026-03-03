@@ -4,7 +4,6 @@ import { statusBadge, renderSuiteResults, failedFilterToggle, autoExpandFailedSc
 import { formatDuration } from "../../core/reporter/console.ts";
 import {
   listCollections,
-  listEnvironmentRecords,
   listRunsByCollection,
   countRunsByCollection,
   getResultsByRunId,
@@ -12,6 +11,7 @@ import {
   getCollectionById,
 } from "../../db/queries.ts";
 import type { CollectionRecord, CollectionSummary } from "../../db/queries.ts";
+import { listEnvFiles } from "../../core/parser/variables.ts";
 
 const dashboard = new Hono();
 
@@ -21,7 +21,7 @@ const HISTORY_PAGE_SIZE = 10;
 // GET / — Single-page dashboard
 // ──────────────────────────────────────────────
 
-dashboard.get("/", (c) => {
+dashboard.get("/", async (c) => {
   const collections = listCollections();
 
   // Auto-select the only collection, or use query param
@@ -33,7 +33,7 @@ dashboard.get("/", (c) => {
     selectedId = collections[0]!.id;
   }
 
-  const content = renderPage(collections, selectedId);
+  const content = await renderPage(collections, selectedId);
   const isHtmx = c.req.header("HX-Request") === "true";
   if (isHtmx) return c.html(content);
   return c.html(layout("apitool", content));
@@ -43,15 +43,14 @@ dashboard.get("/", (c) => {
 // HTMX panel endpoints
 // ──────────────────────────────────────────────
 
-dashboard.get("/panels/content", (c) => {
+dashboard.get("/panels/content", async (c) => {
   const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
   if (isNaN(collectionId)) return c.html("");
 
   const collection = getCollectionById(collectionId);
   if (!collection) return c.html("<p>Collection not found</p>");
 
-  const envRecords = listEnvironmentRecords(collectionId);
-  return c.html(renderCollectionContent(collection, envRecords));
+  return c.html(await renderCollectionContent(collection));
 });
 
 dashboard.get("/panels/results", async (c) => {
@@ -94,7 +93,7 @@ dashboard.get("/panels/history", (c) => {
 // Rendering functions
 // ──────────────────────────────────────────────
 
-function renderPage(collections: CollectionSummary[], selectedId: number | null): string {
+async function renderPage(collections: CollectionSummary[], selectedId: number | null): Promise<string> {
   if (collections.length === 0) {
     return `
       <div style="text-align:center;padding:3rem 1rem;">
@@ -105,7 +104,6 @@ function renderPage(collections: CollectionSummary[], selectedId: number | null)
   }
 
   const selected = selectedId ? collections.find(col => col.id === selectedId) ?? null : null;
-  const envRecords = selected ? listEnvironmentRecords(selected.id) : [];
 
   // API selector
   const collectionOptions = collections.map(col =>
@@ -130,23 +128,17 @@ function renderPage(collections: CollectionSummary[], selectedId: number | null)
       ${selectorHtml}
     </div>
     <div id="collection-content">
-      ${selected ? renderCollectionContent(selected, envRecords) : ""}
+      ${selected ? await renderCollectionContent(selected) : ""}
     </div>`;
 }
 
-function renderCollectionContent(collection: CollectionRecord, envRecords: { id: number; name: string; collection_id: number | null }[]): string {
-  // Auto-select: prefer first scoped env, then first env if only one
-  const defaultEnv = envRecords.find(e => e.collection_id !== null)?.name
-    ?? (envRecords.length === 1 ? envRecords[0]!.name : null);
+async function renderCollectionContent(collection: CollectionRecord): Promise<string> {
+  const baseDir = collection.base_dir ?? collection.test_path;
+  const envNames = await listEnvFiles(baseDir);
 
-  const envOptions = envRecords.map(e =>
-    `<option value="${escapeHtml(e.name)}"${e.name === defaultEnv ? " selected" : ""}>${escapeHtml(e.name)}${e.collection_id ? "" : " (global)"}</option>`,
-  ).join("");
-
-  const envSelect = envRecords.length > 0
+  const envSelect = envNames.length > 0
     ? `<select name="env" form="run-form" style="padding:0.35rem 0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.85rem;">
-        <option value="">No environment</option>
-        ${envOptions}
+        ${envNames.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n || "default")}</option>`).join("")}
       </select>`
     : "";
 

@@ -28,11 +28,10 @@
 │         │                                         │
 │         ▼                                         │
 │  ┌──────────────────────────────────────┐        │
-│  │           7 Agent Tools              │        │
+│  │           6 Agent Tools              │        │
 │  │  run_tests    validate_tests         │        │
-│  │  query_results  manage_environment   │        │
-│  │  diagnose_failure  send_request      │        │
-│  │  explore_api                         │        │
+│  │  query_results  diagnose_failure     │        │
+│  │  send_request  explore_api           │        │
 │  └──────────────────────────────────────┘        │
 └───────────────────────────────────────────────────┘
        │
@@ -90,7 +89,6 @@ apitool chat --safe
 | `run_tests` | Запуск тестов | `testPath`, `envName?`, `safe?` |
 | `validate_tests` | Валидация YAML | `testPath` |
 | `query_results` | Запрос к БД | `action`: `list_runs` / `get_run` / `list_collections` |
-| `manage_environment` | Управление окружениями | `action`: `list` / `get` / `set`, `collectionName?` |
 | `diagnose_failure` | Анализ падений | `runId` |
 | `send_request` | Ad-hoc HTTP запрос | `method`, `url`, `headers?`, `body?`, `timeout?`, `envName?` |
 | `explore_api` | Просмотр OpenAPI спеки | `specPath`, `tag?` |
@@ -119,7 +117,6 @@ src/core/agent/
     ├── run-tests.ts      # tool() — запуск тестов
     ├── validate-tests.ts # tool() — валидация YAML
     ├── query-results.ts  # tool() — запросы к БД
-    ├── manage-environment.ts # tool() — управление окружениями
     ├── diagnose-failure.ts   # tool() — анализ падений
     ├── send-request.ts       # tool() — ad-hoc HTTP запросы
     └── explore-api.ts        # tool() — просмотр OpenAPI спеки

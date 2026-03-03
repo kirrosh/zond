@@ -124,23 +124,31 @@ async function loadEnvFile(filePath: string): Promise<Record<string, string> | n
   }
 }
 
-export async function loadEnvironment(envName?: string, searchDir: string = ".", collectionId?: number): Promise<Record<string, string>> {
+export async function listEnvFiles(dir: string): Promise<string[]> {
+  try {
+    const { readdir } = await import("node:fs/promises");
+    const files = await readdir(dir);
+    const names: string[] = [];
+    for (const f of files) {
+      if (f === ".env.yaml") {
+        names.push("");                           // default env — empty string = no envName
+      } else {
+        const m = f.match(/^\.env\.(.+)\.yaml$/);
+        if (m) names.push(m[1]!);
+      }
+    }
+    return names.sort();
+  } catch {
+    return [];
+  }
+}
+
+export async function loadEnvironment(envName?: string, searchDir: string = "."): Promise<Record<string, string>> {
   const fileName = envName ? `.env.${envName}.yaml` : ".env.yaml";
 
   // Try both searchDir and parent dir — env file may be in collection root while tests are in tests/ subdir
   const fileVars = await loadEnvFile(`${searchDir}/${fileName}`);
   const parentFileVars = await loadEnvFile(`${dirname(searchDir)}/${fileName}`);
 
-  // DB fallback/merge: resolve scoped + global env from DB
-  let dbVars: Record<string, string> | null = null;
-  if (envName) {
-    try {
-      const { resolveEnvironment } = await import("../../db/queries.ts");
-      dbVars = resolveEnvironment(envName, collectionId);
-    } catch { /* DB not initialized — OK */ }
-  }
-
-  // Merge priority: dbGlobal < dbScoped < parentFile < file (local file beats everything)
-  const merged: Record<string, string> = { ...dbVars, ...parentFileVars, ...fileVars };
-  return merged;
+  return { ...parentFileVars, ...fileVars };
 }
