@@ -97,10 +97,11 @@ export function checkAssertions(expect: TestStepExpect, response: HttpResponse):
   const results: AssertionResult[] = [];
 
   if (expect.status !== undefined) {
+    const allowed = Array.isArray(expect.status) ? expect.status : [expect.status];
     results.push({
       field: "status",
-      rule: `equals ${expect.status}`,
-      passed: response.status === expect.status,
+      rule: allowed.length === 1 ? `equals ${allowed[0]}` : `one of [${allowed.join(", ")}]`,
+      passed: allowed.includes(response.status),
       actual: response.status,
       expected: expect.status,
     });

@@ -110,7 +110,7 @@ const TestStepExpectSchema: z.ZodType<TestStepExpect> = z.preprocess(
     return obj;
   },
   z.object({
-    status: z.number().int().optional(),
+    status: z.union([z.number().int(), z.array(z.number().int())]).optional(),
     body: z.record(z.string(), AssertionRuleSchema).optional(),
     headers: z.record(z.string(), z.string()).optional(),
     duration: z.number().optional(),

@@ -28,6 +28,29 @@ describe("checkAssertions", () => {
       expect(results[0]!.actual).toBe(200);
       expect(results[0]!.expected).toBe(201);
     });
+
+    test("passes when status is in allowed array", () => {
+      const results = checkAssertions({ status: [200, 204] }, makeResponse({ status: 204 }));
+      expect(results[0]!.passed).toBe(true);
+      expect(results[0]!.rule).toBe("one of [200, 204]");
+    });
+
+    test("passes when status matches first element of array", () => {
+      const results = checkAssertions({ status: [200, 201] }, makeResponse({ status: 200 }));
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("fails when status is not in allowed array", () => {
+      const results = checkAssertions({ status: [200, 204] }, makeResponse({ status: 404 }));
+      expect(results[0]!.passed).toBe(false);
+      expect(results[0]!.actual).toBe(404);
+    });
+
+    test("single-element array uses equals rule format", () => {
+      const results = checkAssertions({ status: [200] }, makeResponse({ status: 200 }));
+      expect(results[0]!.passed).toBe(true);
+      expect(results[0]!.rule).toBe("equals 200");
+    });
   });
 
   describe("duration", () => {

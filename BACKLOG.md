@@ -2,26 +2,33 @@
 
 ## High Priority
 
-### CI/CD Improvements
-- **`--fail-on-coverage` flag** — fail CI if coverage below threshold: `apitool run --fail-on-coverage 80`
-- **`--env-var` flag** — pass secrets from CI without env files: `apitool run --env-var "token=$API_TOKEN"`
-- **GitHub Action** — `uses: kirrosh/apitool-action@v1` composite action (separate repo)
-
 ### One-shot test generation (`generate_and_save`)
 New MCP tool that accepts spec path + optional endpoint filter and produces ready-to-save YAML test suites in one call. Eliminates the 3-step chain: `generate_tests_guide` → agent assembles YAML → `save_test_suite`.
+
+### Conditional logic in suites (`skip_if` / `on_failure`)
+Allow steps to be skipped based on captured variable values or previous step results:
+```yaml
+- name: "Delete item"
+  DELETE: /items/{{item_id}}
+  skip_if: "{{item_id}} == ''"
+  on_failure: skip_remaining
+  expect:
+    status: [200, 204]
+```
+Requires mini-condition engine, changes to YAML schema, parser, and executor.
+
+### Export to Postman Collection / pytest
+Convert apitool YAML suites to Postman Collection v2.1 JSON or pytest files. Useful for teams that mix tooling.
 
 ---
 
 ## Medium Priority
 
-### Batch `save_test_suite`
-Accept an array of `{filePath, content}` pairs in a single call. Reduces token usage and round-trips for bulk generation.
-
 ### Split format guide from endpoint data
 `generate_tests_guide` returns the full YAML format reference every call. Split into static format + dynamic endpoints, or cache format after first call.
 
-### `apitool compare` command
-Compare two test runs — regression detection in CI.
+### GitHub Action
+`uses: kirrosh/apitool-action@v1` composite action (separate repo).
 
 ### Timestamp capture pattern
 When a `timestamp` field is detected in a request body schema (common in OAuth, AWS Sig, Ably tokens), add a hint in the guide: "consider GET /time before this step to capture the server timestamp".
@@ -51,8 +58,17 @@ Runner support for file upload endpoints.
 
 | Item | Notes |
 |------|-------|
-| Env refactoring: file-only model | Removed DB `environments` table (schema V7), removed `manage_environment` MCP tool and `envs` CLI command. Single source of truth: `.env.yaml` / `.env.<name>.yaml` files. `loadEnvironment` reads files only. `listEnvFiles` scans dirs. `setup_api` creates `.gitignore` for env files. |
+| `response_body` in `diagnose_failure` | `query_db(action:"diagnose_failure")` now includes parsed response body for each failed step (JSON object or truncated string, max 2000 chars) |
+| Array statuses `status: [200, 204]` | `expect.status` now accepts `number \| number[]`. Assertion rule shows `"one of [200, 204]"`. Schema, types, assertions, and guide updated. |
+| `--fail-on-coverage` flag | Fail CI if coverage below threshold: `apitool coverage --fail-on-coverage 80` |
+| `--env-var` flag | Pass secrets from CI without env files: `apitool run --env-var "token=$API_TOKEN"` |
+| `--dry-run` flag | Show requests without sending: `apitool run --dry-run` |
+| `methodFilter` in generate guides | Filter by HTTP method: `generate_tests_guide(methodFilter: ["GET"])` |
+| `save_test_suites` (plural) MCP tool | Batch save multiple YAML suites in one call |
+| `apitool compare` command | Compare two runs, regression detection: `apitool compare <runA> <runB>` |
+| `compare_runs` action in `query_db` | MCP equivalent of `apitool compare` |
 | Per-suite env resolution | `.env.<name>.yaml` resolved from each suite's directory when running a directory |
+| Env refactoring: file-only model | Removed DB `environments` table (schema V7), removed `manage_environment` MCP tool and `envs` CLI command. Single source of truth: `.env.yaml` / `.env.<name>.yaml` files. |
 
 ## Not Doing
 

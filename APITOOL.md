@@ -39,7 +39,7 @@ src/
 │   ├── reporter/     Console, JSON, JUnit XML
 │   └── agent/        AI Chat (AI SDK v6, tool calling)
 ├── db/               SQLite (runs, collections, ai_generations)
-├── mcp/              MCP Server (16 tools)
+├── mcp/              MCP Server (15 tools)
 ├── web/              Hono + HTMX dashboard
 └── cli/              15 CLI commands
 ```
@@ -74,7 +74,7 @@ SQLite auto-created. Tables: `collections`, `runs`, `results`, `ai_generations`.
 Single-page dashboard: API selector → env selector → Run Tests → results + coverage + history. JUnit/JSON export. Hono + HTMX. The env selector is populated by scanning `collection.base_dir` via `listEnvFiles()` — no DB involved.
 
 ### MCP Server
-16 tools for AI agent integration. Primary test generation flow:
+15 tools for AI agent integration. Primary test generation flow:
 
 ```
 generate_tests_guide → [agent writes YAML] → save_test_suite → run_tests → diagnose_failure → ci_init
@@ -137,7 +137,7 @@ ci_init()
 | `generate_missing_tests` | Guide for only uncovered endpoints |
 | `save_test_suite` | Validate YAML + save file. Returns coverage hint |
 | `run_tests` | Execute tests, return summary with failures |
-| `query_db` | List collections, runs, results, diagnose failures |
+| `query_db` | List collections, runs, results; `diagnose_failure` includes `response_body` |
 | `explore_api` | Browse OpenAPI spec (`includeSchemas=true` for schemas) |
 | `coverage_analysis` | Compare spec vs existing tests |
 | `validate_tests` | Check YAML syntax without running |
@@ -147,6 +147,7 @@ ci_init()
 | `ci_init` | Generate CI/CD workflow (GitHub Actions / GitLab CI) |
 | `set_work_dir` | Set project root for the session (call FIRST with npx MCP) |
 | `describe_endpoint` | Full details for one endpoint: params, schemas, response headers, security |
+| `save_test_suites` | Batch save multiple YAML suites in one call |
 
 ## CLI Commands
 
@@ -200,12 +201,14 @@ tests:
   - name: "Delete user"
     DELETE: /users/{{user_id}}
     expect:
-      status: 204
+      status: [200, 204]    # single value or array of allowed statuses
 ```
 
 ### Assertions
 
 `equals`, `type`, `capture`, `contains`, `matches`, `gt`, `lt`, `exists` (boolean). Nested: `category.name: { equals: "Dogs" }`. Root body: `_body: { type: "array" }`.
+
+`status` accepts a single integer (`200`) or an array of allowed codes (`[200, 204]`).
 
 ### Generators
 

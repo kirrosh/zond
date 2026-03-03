@@ -174,7 +174,7 @@ tests:
     headers:                      # step-level headers (override suite)
       X-Custom: "value"
     expect:
-      status: 200                 # expected HTTP status (integer)
+      status: 200                 # expected HTTP status: integer OR array [200, 204]
       body:                       # field-level assertions
         id: { type: "integer", capture: "item_id" }
         name: { equals: "expected" }
@@ -355,7 +355,7 @@ Example: \`apitool run --tag smoke --safe\` → reads-only, safe against product
 
 1. **equals vs capture**: \`capture\` SAVES a value, \`equals\` COMPARES. To extract a token: \`{ capture: "token" }\` NOT \`{ equals: "{{token}}" }\`
 2. **exists must be boolean**: \`exists: true\` NOT \`exists: "true"\`
-3. **Status must be integer**: \`status: 200\` NOT \`status: "200"\`
+3. **Status must be integer or array**: \`status: 200\` or \`status: [200, 204]\` NOT \`status: "200"\`
 4. **One method per step**: Each test step has exactly ONE of GET/POST/PUT/PATCH/DELETE
 5. **Don't hardcode base URL**: Use \`{{base_url}}\` — set it in environment or suite base_url
 6. **Auth credentials**: Use environment variables \`{{auth_username}}\`, \`{{auth_password}}\` — NOT generators

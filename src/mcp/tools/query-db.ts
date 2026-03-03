@@ -3,6 +3,16 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId } from "../../db/queries.ts";
 
+function parseBodySafe(raw: string | null | undefined): unknown {
+  if (!raw) return undefined;
+  const truncated = raw.length > 2000 ? raw.slice(0, 2000) + "…[truncated]" : raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return truncated;
+  }
+}
+
 function statusHint(status: number | null | undefined): string | null {
   if (!status) return null;
   if (status >= 500) return "Server-side error — inspect response_body for errorMessage/errorDetail; likely a backend bug";
@@ -121,6 +131,7 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
                 request_url: r.request_url,
                 response_status: r.response_status,
                 ...(hint ? { hint } : {}),
+                response_body: parseBodySafe(r.response_body),
                 response_headers: r.response_headers
                   ? JSON.parse(r.response_headers)
                   : undefined,

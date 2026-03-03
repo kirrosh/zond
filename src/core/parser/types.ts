@@ -12,7 +12,7 @@ export interface AssertionRule {
 }
 
 export interface TestStepExpect {
-  status?: number;
+  status?: number | number[];
   body?: Record<string, AssertionRule>;
   headers?: Record<string, string>;
   duration?: number;

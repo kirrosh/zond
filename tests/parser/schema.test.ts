@@ -121,6 +121,22 @@ describe("validateSuite", () => {
     })).toThrow();
   });
 
+  test("parses status as array", () => {
+    const suite = validateSuite({
+      name: "Test",
+      tests: [{ DELETE: "/items/1", name: "Delete", expect: { status: [200, 204] } }],
+    });
+    expect(suite.tests[0]!.expect.status).toEqual([200, 204]);
+  });
+
+  test("parses status as single integer", () => {
+    const suite = validateSuite({
+      name: "Test",
+      tests: [{ GET: "/health", name: "Health", expect: { status: 200 } }],
+    });
+    expect(suite.tests[0]!.expect.status).toBe(200);
+  });
+
   test("parses base_url and suite headers", () => {
     const suite = validateSuite({
       name: "Test",
