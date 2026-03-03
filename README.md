@@ -1,14 +1,14 @@
-# apitool
+# @kirrosh/apitool
 
 AI-native API testing tool. OpenAPI spec in, tests out. One binary, zero config.
 
-[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=apitool&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImFwaXRvb2wiLCJtY3AiXX0=)
+[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=apitool&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBraXJyb3NoL2FwaXRvb2wiLCJtY3AiXX0=)
 
 ## Install
 
 ```bash
 # Option 1: via npx (recommended — works everywhere with Node.js)
-npx -y apitool --version
+npx -y @kirrosh/apitool --version
 
 # Option 2: Binary (no Node.js required)
 # macOS / Linux
@@ -40,7 +40,7 @@ Click the badge above, or add manually:
   "mcpServers": {
     "apitool": {
       "command": "npx",
-      "args": ["-y", "apitool", "mcp", "--dir", "${workspaceFolder}"]
+      "args": ["-y", "@kirrosh/apitool", "mcp", "--dir", "${workspaceFolder}"]
     }
   }
 }
