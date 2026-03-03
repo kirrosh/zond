@@ -68,10 +68,12 @@ export async function runCommand(options: RunOptions): Promise<number> {
   const pathStat = await stat(options.path).catch(() => null);
   const searchDir = pathStat?.isDirectory() ? options.path : dirname(options.path);
   let collectionForEnv: { id: number } | null = null;
-  try {
-    getDb(options.dbPath);
-    collectionForEnv = findCollectionByTestPath(options.path);
-  } catch { /* DB not available — OK */ }
+  if (!options.noDb) {
+    try {
+      getDb(options.dbPath);
+      collectionForEnv = findCollectionByTestPath(options.path);
+    } catch { /* DB not available — OK */ }
+  }
 
   let env: Record<string, string> = {};
   try {
