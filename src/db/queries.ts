@@ -99,6 +99,7 @@ export interface StoredStepResult {
   request_body: string | null;
   response_status: number | null;
   response_body: string | null;
+  response_headers: string | null;
   error_message: string | null;
   assertions: import("../core/runner/types.ts").AssertionResult[];
   captures: Record<string, unknown>;
@@ -243,11 +244,11 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
     INSERT INTO results
       (run_id, suite_name, test_name, status, duration_ms,
        request_method, request_url, request_body,
-       response_status, response_body, error_message, assertions, captures)
+       response_status, response_body, response_headers, error_message, assertions, captures)
     VALUES
       ($run_id, $suite_name, $test_name, $status, $duration_ms,
        $request_method, $request_url, $request_body,
-       $response_status, $response_body, $error_message, $assertions, $captures)
+       $response_status, $response_body, $response_headers, $error_message, $assertions, $captures)
   `);
 
   db.transaction(() => {
@@ -265,6 +266,9 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
           $request_body: step.request.body ?? null,
           $response_status: step.response?.status ?? null,
           $response_body: keepBody ? (step.response?.body ?? null) : null,
+          $response_headers: keepBody && step.response?.headers
+            ? JSON.stringify(step.response.headers)
+            : null,
           $error_message: step.error ?? null,
           $assertions: step.assertions.length > 0 ? JSON.stringify(step.assertions) : null,
           $captures: Object.keys(step.captures).length > 0 ? JSON.stringify(step.captures) : null,

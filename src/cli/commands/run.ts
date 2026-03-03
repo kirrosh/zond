@@ -1,4 +1,5 @@
 import { dirname } from "path";
+import { stat } from "node:fs/promises";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
 import { filterSuitesByTags } from "../../core/parser/filter.ts";
@@ -22,6 +23,8 @@ export interface RunOptions {
   authToken?: string;
   safe?: boolean;
   tag?: string[];
+  envVars?: string[];
+  dryRun?: boolean;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -61,7 +64,9 @@ export async function runCommand(options: RunOptions): Promise<number> {
   }
 
   // 2. Load environment (resolve collection for scoped envs)
-  const searchDir = dirname(options.path);
+  // Use path itself as searchDir if it's a directory; dirname() on a dir path gives the parent
+  const pathStat = await stat(options.path).catch(() => null);
+  const searchDir = pathStat?.isDirectory() ? options.path : dirname(options.path);
   let collectionForEnv: { id: number } | null = null;
   try {
     getDb(options.dbPath);
@@ -81,6 +86,16 @@ export async function runCommand(options: RunOptions): Promise<number> {
     env.auth_token = options.authToken;
   }
 
+  // Inject --env-var KEY=VALUE overrides (highest priority)
+  if (options.envVars && options.envVars.length > 0) {
+    for (const pair of options.envVars) {
+      const eqIdx = pair.indexOf("=");
+      if (eqIdx > 0) {
+        env[pair.slice(0, eqIdx)] = pair.slice(eqIdx + 1);
+      }
+    }
+  }
+
   // Warn if --env was explicitly set but file was not found (empty env)
   if (options.env && Object.keys(env).length === 0) {
     printWarning(`Environment file .env.${options.env}.yaml not found in ${searchDir}`);
@@ -95,18 +110,19 @@ export async function runCommand(options: RunOptions): Promise<number> {
 
   // 4. Run suites
   const results: TestRunResult[] = [];
+  const dryRun = options.dryRun === true;
   if (options.bail) {
     // Sequential with bail at suite level
     for (const suite of suites) {
-      const result = await runSuite(suite, env);
+      const result = await runSuite(suite, env, dryRun);
       results.push(result);
-      if (result.failed > 0 || result.steps.some((s) => s.status === "error")) {
+      if (!dryRun && (result.failed > 0 || result.steps.some((s) => s.status === "error"))) {
         break;
       }
     }
   } else {
     // Parallel
-    const all = await Promise.all(suites.map((suite) => runSuite(suite, env)));
+    const all = await Promise.all(suites.map((suite) => runSuite(suite, env, dryRun)));
     results.push(...all);
   }
 
@@ -131,7 +147,8 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
-  // 7. Exit code
+  // 7. Exit code (always 0 in dry-run mode)
+  if (dryRun) return 0;
   const hasFailures = results.some((r) => r.failed > 0 || r.steps.some((s) => s.status === "error"));
   return hasFailures ? 1 : 0;
 }

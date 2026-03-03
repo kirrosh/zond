@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "../../core/generator/index.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../core/generator/types.ts";
-import { compressSchema, formatParam } from "../../core/generator/schema-utils.ts";
+import { compressSchema, formatParam, isAnySchema } from "../../core/generator/schema-utils.ts";
 
 export function registerGenerateTestsGuideTool(server: McpServer) {
   server.registerTool("generate_tests_guide", {
@@ -14,11 +14,16 @@ export function registerGenerateTestsGuideTool(server: McpServer) {
     inputSchema: {
       specPath: z.string().describe("Path or URL to OpenAPI spec file"),
       outputDir: z.optional(z.string()).describe("Directory for saving test files (default: ./tests/)"),
+      methodFilter: z.optional(z.array(z.string())).describe("Only include endpoints with these HTTP methods (e.g. [\"GET\"] for smoke tests)"),
     },
-  }, async ({ specPath, outputDir }) => {
+  }, async ({ specPath, outputDir, methodFilter }) => {
     try {
       const doc = await readOpenApiSpec(specPath);
-      const endpoints = extractEndpoints(doc);
+      let endpoints = extractEndpoints(doc);
+      if (methodFilter && methodFilter.length > 0) {
+        const methods = methodFilter.map(m => m.toUpperCase());
+        endpoints = endpoints.filter(ep => methods.includes(ep.method.toUpperCase()));
+      }
       const securitySchemes = extractSecuritySchemes(doc);
       const baseUrl = ((doc as any).servers?.[0]?.url) as string | undefined;
       const title = (doc as any).info?.title as string | undefined;
@@ -86,7 +91,11 @@ export function compressEndpointsWithSchemas(
     // Request body with full schema
     if (ep.requestBodySchema) {
       const contentType = ep.requestBodyContentType ?? "application/json";
-      lines.push(`  Request body (${contentType}): ${compressSchema(ep.requestBodySchema)}`);
+      const anyBody = isAnySchema(ep.requestBodySchema);
+      const bodyLine = anyBody
+        ? `any  # ⚠️ spec defines body as 'any' — actual required fields unknown, test may need manual adjustment`
+        : compressSchema(ep.requestBodySchema);
+      lines.push(`  Request body (${contentType}): ${bodyLine}`);
     }
 
     // Responses with schemas
@@ -119,7 +128,32 @@ ${opts.baseUrl ? `Base URL: ${opts.baseUrl}` : "Base URL: use {{base_url}} envir
 
 ${opts.apiContext}
 
----
+${hasAuth ? `---
+
+## Environment Setup (Required for Authentication)
+
+This API uses authentication. Before running tests, set up your credentials:
+
+### Option A — Edit the env file directly
+After \`setup_api\`, the collection directory contains \`.env.default.yaml\`. Edit it to add your credentials:
+\`\`\`yaml
+base_url: "https://api.example.com"
+api_key: "your-actual-api-key-here"
+auth_token: "your-token-here"
+\`\`\`
+
+### Option B — Use \`manage_environment\`
+\`\`\`
+manage_environment(action: "set", name: "default", collectionName: "your-api", variables: {"api_key": "your-key"})
+\`\`\`
+
+### How it works
+- Tests **automatically** load the \`"default"\` environment — no need to pass \`envName\` to \`run_tests\`
+- If the env file is in the collection root and tests are in a \`tests/\` subdirectory, the file is still found automatically
+- Use \`{{api_key}}\`, \`{{auth_token}}\`, \`{{base_url}}\` etc. in test headers/bodies
+- **Never hardcode credentials** in YAML files — always use \`{{variable}}\` references
+
+` : ""}---
 
 ## YAML Test Suite Format Reference
 
@@ -209,6 +243,20 @@ These are the ONLY generators — do NOT invent others.
 
 ## Step-by-Step Generation Algorithm
 
+### Step 0: Register the API (REQUIRED FIRST)
+**Always call \`setup_api\` before generating any tests.** This registers the collection in the database so WebUI, coverage tracking, and env loading all work.
+\`\`\`
+setup_api(name: "myapi", specPath: "/path/to/openapi.json", dir: "/path/to/project/apis/myapi")
+\`\`\`
+If you skip this step, WebUI will show "No API collections registered yet" and env variables won't auto-load.
+
+${hasAuth ? `**Then set credentials immediately after setup_api** — use \`manage_environment\` to store the API key before touching any YAML files:
+\`\`\`
+manage_environment(action: "set", name: "default", collectionName: "myapi", variables: {"api_key": "<actual-key>", "base_url": "https://..."})
+\`\`\`
+Never put actual key values in YAML files.
+
+` : ""}\
 ### Step 1: Analyze the API
 - Identify authentication method (${hasAuth ? opts.securitySchemes.map(s => `${s.name}: ${s.type}${s.scheme ? `/${s.scheme}` : ""}`).join(", ") : "none detected"})
 - Group endpoints by resource (e.g., /users/*, /pets/*, /orders/*)
@@ -217,6 +265,8 @@ These are the ONLY generators — do NOT invent others.
 
 ### Step 2: Plan Test Suites
 Before generating, check coverage with \`coverage_analysis\` to avoid duplicating existing tests. Use \`generate_missing_tests\` for incremental generation.
+
+> **Coverage note**: coverage is a static scan of YAML files — an endpoint is "covered" if a test file contains a matching METHOD + path line, regardless of whether tests pass or actually run.
 
 Create separate files for each concern:
 ${hasAuth ? `- \`${opts.outputDir}auth.yaml\` — Authentication flow\n` : ""}\
@@ -257,6 +307,21 @@ ${hasAuth ? `**Auth suite** (\`auth.yaml\`):
 
 ---
 
+## Tag Conventions
+
+Use standard tags to enable safe filtering:
+
+| Tag | HTTP Methods | Safe for |
+|-----|-------------|---------|
+| \`smoke\` | GET only | Production (read-only, zero risk) |
+| \`crud\` | POST/PUT/PATCH | Staging only (state-changing) |
+| \`destructive\` | DELETE | Explicit opt-in, run last |
+| \`auth\` | Any (auth flows) | Run first to capture tokens |
+
+Example: \`apitool run --tag smoke --safe\` → reads-only, safe against production.
+
+---
+
 ## Practical Tips
 
 - **int64 IDs**: For APIs returning large auto-generated IDs (int64), prefer setting fixed IDs in request bodies rather than capturing auto-generated ones, as JSON number precision may cause mismatches.
@@ -266,6 +331,27 @@ ${hasAuth ? `**Auth suite** (\`auth.yaml\`):
 - **Create responses**: Always verify at least the key identifying fields (id, name) in the response body — don't just check status.
 - **Error responses**: Assert that error bodies contain useful info (\`message: { exists: true }\`), not just status codes.
 - **Bulk operations**: After bulk create (createWithArray, createWithList), add GET steps to verify resources were actually created.
+- **204 No Content**: When an endpoint returns 204, omit \`body:\` assertions entirely — an empty response IS the correct behavior. Adding body assertions on 204 will always fail.
+- **Cleanup pattern**: Always delete test data in the same suite. Use a create → read → delete lifecycle so tests are idempotent:
+  \`\`\`yaml
+  tests:
+    - name: Create test resource
+      POST: /users
+      json: { name: "apitool-test-{{$randomString}}" }
+      expect:
+        status: 201
+        body:
+          id: { capture: user_id }
+    - name: Read created resource
+      GET: /users/{{user_id}}
+      expect:
+        status: 200
+    - name: Cleanup - delete test resource
+      DELETE: /users/{{user_id}}
+      expect:
+        status: 204
+  \`\`\`
+- **Identifiable test data**: Prefix test data with \`apitool-test-\` or use \`{{$uuid}}\` / \`apitool-test-{{$randomString}}\` so you can identify and clean up leftover test data if needed.
 
 ---
 
@@ -278,6 +364,8 @@ ${hasAuth ? `**Auth suite** (\`auth.yaml\`):
 5. **Don't hardcode base URL**: Use \`{{base_url}}\` — set it in environment or suite base_url
 6. **Auth credentials**: Use environment variables \`{{auth_username}}\`, \`{{auth_password}}\` — NOT generators
 7. **String query params**: Query parameter values must be strings: \`limit: "10"\` not \`limit: 10\`
+8. **Hardcoded credentials**: NEVER put actual API keys/tokens in YAML — use \`{{api_key}}\` from env instead
+9. **Body assertions on 204**: Don't add \`body:\` checks for DELETE or other endpoints that return 204 No Content — the body is empty by design.
 
 ---
 
@@ -293,5 +381,13 @@ ${hasAuth ? `**Auth suite** (\`auth.yaml\`):
 | \`query_db\` | Query runs, collections, results, diagnose failures |
 | \`coverage_analysis\` | Find untested endpoints for incremental generation |
 | \`explore_api\` | Re-check specific endpoints (use includeSchemas=true) |
+| \`ci_init\` | Generate CI/CD workflow (GitHub Actions / GitLab CI) to run tests on push |
+
+## Workflow After Tests Pass
+
+After tests are saved and running successfully, ask the user if they want to set up CI/CD:
+1. Use \`ci_init\` to generate a CI workflow (auto-detects platform or use platform param)
+2. Help them commit and push to their repository
+3. Tests will run automatically on push, PR, and on schedule
 `;
 }

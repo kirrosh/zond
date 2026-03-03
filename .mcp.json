@@ -2,7 +2,7 @@
   "mcpServers": {
     "apitool": {
       "command": "bun",
-      "args": ["run", "C:/projects/apitool/src/cli/index.ts", "mcp"],
+      "args": ["run", "C:/projects/apitool/src/cli/index.ts", "mcp", "--dir", "C:/projects/apitool"],
       "cwd": "C:/projects/apitool"
     }
   }

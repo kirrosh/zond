@@ -180,7 +180,7 @@ function renderCollectionContent(collection: CollectionSummary, envRecords: { id
     </div>
     <div id="history-panel"
       hx-get="/panels/history?collection_id=${collection.id}"
-      hx-trigger="load"
+      hx-trigger="load, every 5s"
       hx-swap="innerHTML">
     </div>`;
 }

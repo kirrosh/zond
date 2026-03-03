@@ -45,6 +45,8 @@ export interface TestSuite {
   headers?: Record<string, string>;
   config: SuiteConfig;
   tests: TestStep[];
+  /** Absolute path to the source file, set by yaml-parser */
+  filePath?: string;
 }
 
 export type Environment = Record<string, string>;

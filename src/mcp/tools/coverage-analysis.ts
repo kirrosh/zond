@@ -9,8 +9,9 @@ export function registerCoverageAnalysisTool(server: McpServer) {
     inputSchema: {
       specPath: z.string().describe("Path to OpenAPI spec file (JSON or YAML)"),
       testsDir: z.string().describe("Path to directory with test YAML files"),
+      failThreshold: z.optional(z.number().min(0).max(100)).describe("Return isError when coverage % is below this threshold (0–100)"),
     },
-  }, async ({ specPath, testsDir }) => {
+  }, async ({ specPath, testsDir, failThreshold }) => {
     try {
       const doc = await readOpenApiSpec(specPath);
       const allEndpoints = extractEndpoints(doc);
@@ -45,8 +46,10 @@ export function registerCoverageAnalysisTool(server: McpServer) {
         })),
       };
 
+      const belowThreshold = failThreshold !== undefined && percentage < failThreshold;
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        ...(belowThreshold ? { isError: true } : {}),
       };
     } catch (err) {
       return {
