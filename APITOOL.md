@@ -4,7 +4,7 @@
 
 - **MCP** — primary interface for AI agents (Claude Code, Cursor, Windsurf)
 - **CLI** — for humans and CI/CD
-- **WebUI** — dashboard for viewing results
+- **WebUI** — dashboard with health strip, endpoints/suites/runs tabs, step-level details
 
 ---
 
@@ -72,7 +72,7 @@ ci_init()
 | `coverage_analysis` | Compare spec vs existing tests. `failThreshold` for pass/fail gate |
 | `validate_tests` | Check YAML syntax without running |
 | `send_request` | Ad-hoc HTTP request with variable interpolation |
-| `manage_server` | Start/stop WebUI server |
+| `manage_server` | Start/stop WebUI server (health strip, endpoints/suites/runs tabs) |
 | `ci_init` | Generate CI/CD workflow (GitHub Actions / GitLab CI) |
 
 ### query_db actions
@@ -98,7 +98,7 @@ ci_init()
 | `validate` | Validate YAML tests | |
 | `runs [id]` | Run history | `--limit` |
 | `collections` | List collections | |
-| `serve` | Web dashboard | `--port`, `--watch` |
+| `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch` |
 | `chat` | Interactive AI agent | `--provider`, `--model`, `--safe` |
 | `mcp` | Start MCP server | `--db` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |

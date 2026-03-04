@@ -2,6 +2,7 @@
 
 | Документ | Описание |
 |----------|----------|
+| [quickstart.md](quickstart.md) | **Быстрый старт** — пошаговая инструкция: установка, настройка, первые тесты |
 | [APITOOL.md](../APITOOL.md) | Полный справочник — MCP tools, CLI команды, YAML формат, окружения |
 | [mcp-guide.md](mcp-guide.md) | Руководство для MCP-агента — флоу, примеры, советы, troubleshooting |
 | [BACKLOG.md](../BACKLOG.md) | Актуальный бэклог задач |
@@ -17,7 +18,7 @@
 | Hints/nextSteps в ответах | `src/mcp/tools/<tool>.ts` |
 | Справочник команд и флагов | `APITOOL.md` |
 | User flow и troubleshooting | `docs/mcp-guide.md` |
-| Быстрый старт | `README.md` |
+| Быстрый старт | `docs/quickstart.md`, `README.md` |
 
 ## Архив
 

@@ -40,7 +40,7 @@
 |------------|-------------------|
 | `coverage_analysis` | Сколько эндпоинтов покрыто тестами |
 | `ci_init` | Создать GitHub Actions / GitLab CI конфиг |
-| `manage_server` | Запустить/остановить WebUI дашборд |
+| `manage_server` | Запустить/остановить WebUI дашборд (coverage donut, endpoints/suites/runs вкладки, детали шагов) |
 
 ---
 

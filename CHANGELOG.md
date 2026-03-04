@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1] - 2026-03-04
+
+### Changed
+
+- **Web UI redesign** — single-page dashboard with three tabs:
+  - **Endpoints** — all OpenAPI spec endpoints with coverage status (passing/failing/no tests/not run), filters by status and method, expandable details with covering test steps, assertions, and response status
+  - **Suites** — all YAML test files on disk with run results, expandable step details showing assertions, captures, error messages, and response body for failed steps
+  - **Runs** — paginated run history with progress bars, drill-down into run details with JUnit/JSON export
+- **Health strip** — top-of-page overview: coverage donut chart, pass/fail/skip stats, progress bar, environment alert banner
+- **Broken endpoint marking** — `deprecated`, `no_response_schema`, `no_responses_defined`, `required_params_no_examples` warnings shown as badges on endpoints
+- **diagnose_failure** enriched with `failure_type` (api_error / assertion_failed / network_error) and summary counts
+
+### Fixed
+
+- Slim npm package — non-essential files excluded via `files` field in package.json
+
 ## [0.5.4] - 2026-03-03
 
 ### Fixed
@@ -90,12 +106,10 @@ Initial public release.
 - **Reporters** — console (colored), JSON, JUnit XML output formats
 - **SQLite storage** — persist test runs, results, and collections in `apitool.db`
 - **WebUI dashboard** — Hono + HTMX web interface with:
-  - Run history with filters and trend charts
-  - Suite detail view with per-step results
-  - API Explorer with request builder and authorization panel
-  - Collection management with drill-down
-  - AI test generation UI
-  - Result export (JSON, JUnit)
+  - Health strip: coverage donut, pass/fail/skip stats, progress bar
+  - Endpoints tab: spec endpoints with coverage status and warning badges
+  - Suites tab: test files with step-level results, assertions, captures
+  - Runs tab: paginated history with drill-down and JUnit/JSON export
 - **CLI commands**:
   - `apitool run <path>` — execute tests with env, reporter, timeout, bail options
   - `apitool validate <path>` — validate YAML test files
