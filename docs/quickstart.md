@@ -58,17 +58,13 @@ claude --dangerously-skip-permissions
 Плагин даёт MCP-инструменты + скиллы + slash-команды (`/apitool:api-test`, `/apitool:api-coverage`):
 
 ```
-/install-plugin https://github.com/kirrosh/apitool
+/plugin marketplace add kirrosh/apitool
 ```
 
-Перезапустите Claude Code после установки:
+Затем установите плагин:
 
 ```
-/exit
-```
-
-```bash
-claude --dangerously-skip-permissions
+/plugin install apitool@apitool-marketplace
 ```
 
 ### Способ Б: Только MCP-сервер

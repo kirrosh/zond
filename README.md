@@ -6,10 +6,11 @@ Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config,
 
 ## Claude Code Plugin
 
-Install directly in Claude Code:
+Install in Claude Code:
 
 ```
-/install-plugin https://github.com/kirrosh/apitool
+/plugin marketplace add kirrosh/apitool
+/plugin install apitool@apitool-marketplace
 ```
 
 This gives you:

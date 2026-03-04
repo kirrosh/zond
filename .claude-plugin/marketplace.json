@@ -1,0 +1,24 @@
+{
+  "name": "apitool-marketplace",
+  "owner": {
+    "name": "kirrosh"
+  },
+  "metadata": {
+    "description": "AI-native API testing plugin marketplace"
+  },
+  "plugins": [
+    {
+      "name": "apitool",
+      "source": "./",
+      "description": "AI-native API testing — generate, run, and diagnose tests from OpenAPI specs",
+      "version": "0.6.1",
+      "author": {
+        "name": "kirrosh",
+        "url": "https://github.com/kirrosh"
+      },
+      "repository": "https://github.com/kirrosh/apitool",
+      "license": "MIT",
+      "keywords": ["api", "testing", "openapi", "yaml", "mcp"]
+    }
+  ]
+}
