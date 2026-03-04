@@ -1,8 +1,8 @@
 /**
- * Suites tab: all YAML files on disk with run status.
+ * Suites tab: all YAML files on disk with run status and step details.
  */
 
-import type { CollectionState, SuiteViewState } from "../data/collection-state.ts";
+import type { CollectionState, SuiteViewState, StepViewState } from "../data/collection-state.ts";
 import { escapeHtml } from "./layout.ts";
 import { basename } from "node:path";
 
@@ -17,13 +17,12 @@ export function renderSuitesTab(state: CollectionState): string {
 
 function renderSuiteRow(suite: SuiteViewState, index: number): string {
   const detailId = `suite-detail-${index}`;
-  const fileName = basename(suite.filePath || suite.name);
 
   if (suite.status === "parse_error") {
     return `
       <div class="suite-row suite-error-row">
         <div class="suite-info">
-          <div class="suite-name">${escapeHtml(fileName)}</div>
+          <div class="suite-name">${escapeHtml(basename(suite.filePath || suite.name))}</div>
           <div class="suite-desc" style="color:var(--fail);">${escapeHtml(suite.parseError ?? "Parse error")}</div>
         </div>
         <div class="suite-tags"></div>
@@ -50,6 +49,11 @@ function renderSuiteRow(suite: SuiteViewState, index: number): string {
     resultHtml = `<div class="suite-result not-run">not run</div>`;
   }
 
+  // Step detail rows
+  const stepsHtml = suite.steps.length > 0
+    ? suite.steps.map((step, si) => renderStepRow(step, index, si)).join("")
+    : `<div style="font-size:0.75rem;color:var(--text-dim);padding:0.5rem;">No run results yet</div>`;
+
   return `
     <div class="suite-row"
       onclick="var d=document.getElementById('${detailId}');d.style.display=d.style.display==='none'?'block':'none'">
@@ -62,6 +66,88 @@ function renderSuiteRow(suite: SuiteViewState, index: number): string {
       ${resultHtml}
     </div>
     <div class="suite-detail" id="${detailId}" style="display:none">
-      <div style="font-size:0.75rem;color:var(--text-dim);font-family:var(--font-mono);">${escapeHtml(fileName)}</div>
+      ${stepsHtml}
     </div>`;
+}
+
+function renderStepRow(step: StepViewState, suiteIdx: number, stepIdx: number): string {
+  const icon = step.status === "pass"
+    ? '<span class="step-icon pass">&#10003;</span>'
+    : step.status === "fail" || step.status === "error"
+      ? '<span class="step-icon fail">&#10007;</span>'
+      : '<span class="step-icon skip">&#9675;</span>';
+
+  const labelStyle = step.status === "fail" || step.status === "error"
+    ? ' style="color:var(--fail);"'
+    : step.status === "skip"
+      ? ' style="color:var(--skip);"'
+      : "";
+
+  const duration = step.durationMs != null
+    ? `<span class="step-duration">${step.durationMs}ms</span>`
+    : `<span class="step-duration">-</span>`;
+
+  // Captures
+  const captureHtml = step.captures && Object.keys(step.captures).length > 0
+    ? `<span class="step-captures">${Object.entries(step.captures).map(([k, v]) =>
+        `<span class="capture-pill">${escapeHtml(k)} = ${escapeHtml(String(v))}</span>`
+      ).join("")}</span>`
+    : `<span class="step-captures"></span>`;
+
+  const detailId = `s-${suiteIdx}-step-${stepIdx}`;
+  const hasDetail = (step.status === "fail" || step.status === "error") &&
+    ((step.assertions && step.assertions.length > 0) || step.hint || step.responseBody);
+
+  const clickHandler = hasDetail
+    ? ` onclick="event.stopPropagation();var d=document.getElementById('${detailId}');d.style.display=d.style.display==='none'?'block':'none'"`
+    : "";
+
+  let detailPanel = "";
+  if (hasDetail) {
+    let detailContent = "";
+
+    // Request info
+    if (step.requestMethod && step.requestUrl) {
+      detailContent += `<div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim);margin-bottom:0.4rem;">
+        ${escapeHtml(step.requestMethod)} ${escapeHtml(step.requestUrl)}</div>`;
+    }
+
+    // Assertions
+    if (step.assertions && step.assertions.length > 0) {
+      detailContent += step.assertions.map(a => {
+        const aIcon = a.passed
+          ? '<span class="assertion-icon pass">&#10003;</span>'
+          : '<span class="assertion-icon fail">&#10007;</span>';
+        const actual = !a.passed && a.actual !== undefined
+          ? ` <span class="assertion-actual">(got ${escapeHtml(JSON.stringify(a.actual))})</span>` : "";
+        return `<div class="assertion-row">${aIcon} <span class="assertion-field">${escapeHtml(a.field)}:</span> <span class="assertion-rule">${escapeHtml(a.rule)}</span>${actual}</div>`;
+      }).join("");
+    }
+
+    // Error message
+    if (step.errorMessage) {
+      detailContent += `<div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--fail);margin-top:0.25rem;">${escapeHtml(step.errorMessage)}</div>`;
+    }
+
+    // Failure hint
+    if (step.hint) {
+      detailContent += `<div class="failure-hint"><span>&#9888;</span> ${escapeHtml(step.hint)}</div>`;
+    }
+
+    // Response body toggle
+    if (step.responseBody) {
+      const truncated = step.responseBody.length > 2000 ? step.responseBody.slice(0, 2000) + "..." : step.responseBody;
+      detailContent += `<div class="req-res-toggle" onclick="event.stopPropagation();var b=this.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none'">&#9660; Response Body</div>
+        <div class="req-res-body" style="display:none;"><pre style="font-size:0.7rem;margin:0.25rem 0;">${escapeHtml(truncated)}</pre></div>`;
+    }
+
+    detailPanel = `<div class="step-detail-panel" id="${detailId}" style="display:none">${detailContent}</div>`;
+  }
+
+  return `<div class="step-row"${clickHandler}>
+    ${icon}
+    <span class="step-label"${labelStyle}>${escapeHtml(step.name)}</span>
+    ${captureHtml}
+    ${duration}
+  </div>${detailPanel}`;
 }

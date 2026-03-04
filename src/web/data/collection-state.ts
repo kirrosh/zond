@@ -34,6 +34,20 @@ export interface EndpointViewState {
   coveringSteps: CoveringStep[];
 }
 
+export interface StepViewState {
+  name: string;
+  status: "pass" | "fail" | "error" | "skip";
+  durationMs?: number;
+  requestMethod?: string;
+  requestUrl?: string;
+  responseStatus?: number;
+  responseBody?: string;
+  assertions?: { field: string; rule: string; passed: boolean; actual?: unknown; expected?: unknown }[];
+  captures?: Record<string, unknown>;
+  hint?: string;
+  errorMessage?: string;
+}
+
 export interface SuiteViewState {
   name: string;
   description?: string;
@@ -43,6 +57,7 @@ export interface SuiteViewState {
   status: "passed" | "failed" | "not_run" | "parse_error";
   runResult?: { passed: number; failed: number; skipped: number };
   parseError?: string;
+  steps: StepViewState[];
 }
 
 export interface CollectionState {
@@ -247,6 +262,7 @@ export async function buildCollectionState(collection: CollectionRecord): Promis
     const results = suiteResultMap.get(s.name);
     let status: SuiteViewState["status"] = "not_run";
     let runResult: SuiteViewState["runResult"] | undefined;
+    const steps: StepViewState[] = [];
 
     if (results) {
       const passed = results.filter(r => r.status === "pass").length;
@@ -254,6 +270,25 @@ export async function buildCollectionState(collection: CollectionRecord): Promis
       const skipped = results.filter(r => r.status === "skip").length;
       runResult = { passed, failed, skipped };
       status = failed > 0 ? "failed" : "passed";
+
+      for (const r of results) {
+        const hint = (r.status === "fail" || r.status === "error")
+          ? (envHint(r.request_url, r.error_message, envFilePath) ?? statusHint(r.response_status) ?? undefined)
+          : undefined;
+        steps.push({
+          name: r.test_name,
+          status: r.status as StepViewState["status"],
+          durationMs: r.duration_ms ?? undefined,
+          requestMethod: r.request_method ?? undefined,
+          requestUrl: r.request_url ?? undefined,
+          responseStatus: r.response_status ?? undefined,
+          responseBody: r.response_body ?? undefined,
+          assertions: Array.isArray(r.assertions) ? r.assertions : undefined,
+          captures: r.captures && typeof r.captures === "object" ? r.captures as Record<string, unknown> : undefined,
+          hint,
+          errorMessage: r.error_message ?? undefined,
+        });
+      }
     }
 
     return {
@@ -264,6 +299,7 @@ export async function buildCollectionState(collection: CollectionRecord): Promis
       filePath: s.filePath ?? "",
       status,
       runResult,
+      steps,
     };
   });
 
@@ -276,6 +312,7 @@ export async function buildCollectionState(collection: CollectionRecord): Promis
       filePath: err.file,
       status: "parse_error",
       parseError: err.error,
+      steps: [],
     });
   }
 
