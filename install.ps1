@@ -1,11 +1,11 @@
-# apitool installer for Windows - downloads the latest release binary
-# Usage: iwr https://raw.githubusercontent.com/kirrosh/apitool/master/install.ps1 | iex
+# zond installer for Windows - downloads the latest release binary
+# Usage: iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
-$REPO = "kirrosh/apitool"
+$REPO = "kirrosh/zond"
 $TARGET = "win-x64"
-$ARTIFACT = "apitool-$TARGET.zip"
+$ARTIFACT = "zond-$TARGET.zip"
 
 Write-Host "Detected platform: $TARGET" -ForegroundColor Cyan
 
@@ -36,7 +36,7 @@ try {
 }
 
 # Extract
-$EXTRACT_DIR = Join-Path $TEMP_DIR "apitool-install"
+$EXTRACT_DIR = Join-Path $TEMP_DIR "zond-install"
 if (Test-Path $EXTRACT_DIR) {
     Remove-Item $EXTRACT_DIR -Recurse -Force
 }
@@ -45,20 +45,20 @@ New-Item -ItemType Directory -Path $EXTRACT_DIR | Out-Null
 Write-Host "Extracting..." -ForegroundColor Yellow
 Expand-Archive -Path $DOWNLOAD_PATH -DestinationPath $EXTRACT_DIR -Force
 
-$BINARY = Join-Path $EXTRACT_DIR "apitool.exe"
+$BINARY = Join-Path $EXTRACT_DIR "zond.exe"
 if (-not (Test-Path $BINARY)) {
     Write-Host "Error: Binary not found in archive" -ForegroundColor Red
     exit 1
 }
 
 # Install binary
-$INSTALL_DIR = "$env:LOCALAPPDATA\apitool"
+$INSTALL_DIR = "$env:LOCALAPPDATA\zond"
 if (-not (Test-Path $INSTALL_DIR)) {
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
 }
 
 Copy-Item $BINARY $INSTALL_DIR -Force
-$FINAL_PATH = Join-Path $INSTALL_DIR "apitool.exe"
+$FINAL_PATH = Join-Path $INSTALL_DIR "zond.exe"
 
 Write-Host "Installed to $FINAL_PATH" -ForegroundColor Green
 
@@ -77,4 +77,4 @@ if ($currentPath -notlike "*$PATH_ENTRY*") {
 # Verify
 & $FINAL_PATH --version
 Write-Host "Done!" -ForegroundColor Green
-Write-Host "Run 'apitool init' to set up a new project." -ForegroundColor Cyan
+Write-Host "Run 'zond init' to set up a new project." -ForegroundColor Cyan

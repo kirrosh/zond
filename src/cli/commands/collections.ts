@@ -8,7 +8,7 @@ export function collectionsCommand(dbPath?: string): number {
 
   if (collections.length === 0) {
     console.log("No collections found.");
-    console.log("Hint: use `apitool generate --from <spec>` to create a collection automatically.");
+    console.log("Hint: use `zond generate --from <spec>` to create a collection automatically.");
     return 0;
   }
 

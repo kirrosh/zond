@@ -1,22 +1,22 @@
-# @kirrosh/apitool
+# @kirrosh/zond
 
 Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config, no cloud, no Postman.
 
-[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=apitool&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBraXJyb3NoL2FwaXRvb2wiLCJtY3AiXX0=)
+[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=zond&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBraXJyb3NoL2FwaXRvb2wiLCJtY3AiXX0=)
 
 ## Claude Code Plugin
 
 Install in Claude Code:
 
 ```
-/plugin marketplace add kirrosh/apitool
-/plugin install apitool@apitool-marketplace
+/plugin marketplace add kirrosh/zond
+/plugin install zond@zond-marketplace
 ```
 
 This gives you:
 - **17 MCP tools** for API testing (test generation, execution, diagnostics, coverage)
 - **Skills** for test generation, debugging failures, and CI setup
-- **Slash commands**: `/apitool:api-test`, `/apitool:api-coverage`
+- **Slash commands**: `/zond:api-test`, `/zond:api-coverage`
 
 After installation, just say: _"Safely cover the API from openapi.json with tests"_ — the agent handles everything.
 
@@ -24,17 +24,17 @@ After installation, just say: _"Safely cover the API from openapi.json with test
 
 ```bash
 # Option 1: via npx (recommended — works everywhere with Node.js)
-npx -y @kirrosh/apitool --version
+npx -y @kirrosh/zond --version
 
 # Option 2: Binary (no Node.js required)
 # macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/kirrosh/apitool/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
 
 # Windows
-iwr https://raw.githubusercontent.com/kirrosh/apitool/master/install.ps1 | iex
+iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex
 ```
 
-[All releases](https://github.com/kirrosh/apitool/releases) (Linux x64, macOS ARM, Windows x64)
+[All releases](https://github.com/kirrosh/zond/releases) (Linux x64, macOS ARM, Windows x64)
 
 ## MCP Setup (Cursor / Claude Code / Windsurf)
 
@@ -43,11 +43,11 @@ Click the badge above, or add manually:
 ```json
 {
   "mcpServers": {
-    "apitool": {
+    "zond": {
       "command": "npx",
       "args": [
         "-y",
-        "@kirrosh/apitool@latest",
+        "@kirrosh/zond@latest",
         "mcp",
         "--dir",
         "${workspaceFolder}"
@@ -108,20 +108,20 @@ Or just say: _"Safely cover the API from openapi.json with tests"_ — the agent
 ## CLI
 
 ```
-apitool run <path>           Run tests (--env, --safe, --tag, --dry-run, --env-var, --report)
-apitool add-api <name>       Register API (--spec <openapi>)
-apitool coverage             API test coverage (--spec, --tests, --fail-on-coverage)
-apitool compare <runA> <runB> Compare two test runs
-apitool serve                Web dashboard with health strip + endpoints/suites/runs tabs (--port 8080)
-apitool mcp                  Start MCP server
-apitool chat                 AI chat agent (--provider ollama|openai|anthropic)
-apitool doctor               Diagnostics
+zond run <path>           Run tests (--env, --safe, --tag, --dry-run, --env-var, --report)
+zond add-api <name>       Register API (--spec <openapi>)
+zond coverage             API test coverage (--spec, --tests, --fail-on-coverage)
+zond compare <runA> <runB> Compare two test runs
+zond serve                Web dashboard with health strip + endpoints/suites/runs tabs (--port 8080)
+zond mcp                  Start MCP server
+zond chat                 AI chat agent (--provider ollama|openai|anthropic)
+zond doctor               Diagnostics
 ```
 
 ## Documentation
 
 - [docs/quickstart.md](docs/quickstart.md) — step-by-step quickstart guide (RU)
-- [APITOOL.md](APITOOL.md) — full CLI and MCP tools reference
+- [ZOND.md](ZOND.md) — full CLI and MCP tools reference
 - [docs/mcp-guide.md](docs/mcp-guide.md) — MCP agent workflow guide
 - [docs/ci.md](docs/ci.md) — CI/CD integration
 

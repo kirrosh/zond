@@ -26,7 +26,7 @@ export async function aiGenerateCommand(options: AIGenerateCommandOptions): Prom
       provider: providerName,
       model: options.model,
       baseUrl: options.baseUrl,
-      apiKey: options.apiKey ?? process.env.APITOOL_AI_KEY,
+      apiKey: options.apiKey ?? process.env.ZOND_AI_KEY,
     });
 
     console.log(`Provider: ${provider.provider} (${provider.model})`);

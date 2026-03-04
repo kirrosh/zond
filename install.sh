@@ -1,10 +1,10 @@
 #!/bin/sh
-# apitool installer — downloads the latest release binary for your platform
-# Usage: curl -fsSL https://raw.githubusercontent.com/kirrosh/apitool/master/install.sh | sh
+# zond installer — downloads the latest release binary for your platform
+# Usage: curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
 
 set -e
 
-REPO="kirrosh/apitool"
+REPO="kirrosh/zond"
 
 # Detect OS
 OS=$(uname -s)
@@ -44,7 +44,7 @@ fi
 echo "Latest release: $TAG"
 
 # Download binary
-ARTIFACT="apitool-${TARGET}.tar.gz"
+ARTIFACT="zond-${TARGET}.tar.gz"
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG/$ARTIFACT"
 echo "Downloading $DOWNLOAD_URL ..."
 
@@ -55,7 +55,7 @@ curl -fsSL "$DOWNLOAD_URL" -o "$TMPDIR/$ARTIFACT"
 tar -xzf "$TMPDIR/$ARTIFACT" -C "$TMPDIR"
 
 # Install binary
-BINARY="$TMPDIR/apitool"
+BINARY="$TMPDIR/zond"
 if [ ! -f "$BINARY" ]; then
   echo "Error: Binary not found in archive"
   exit 1
@@ -68,12 +68,12 @@ if [ ! -w "$INSTALL_DIR" ]; then
   # Try with sudo first
   if command -v sudo >/dev/null 2>&1; then
     echo "Need sudo to install to $INSTALL_DIR"
-    sudo cp "$BINARY" "$INSTALL_DIR/apitool"
-    sudo chmod +x "$INSTALL_DIR/apitool"
+    sudo cp "$BINARY" "$INSTALL_DIR/zond"
+    sudo chmod +x "$INSTALL_DIR/zond"
   else
     INSTALL_DIR="$HOME/.local/bin"
     mkdir -p "$INSTALL_DIR"
-    cp "$BINARY" "$INSTALL_DIR/apitool"
+    cp "$BINARY" "$INSTALL_DIR/zond"
     echo "Installed to $INSTALL_DIR"
 
     # Add to PATH in shell profile if not already there
@@ -91,7 +91,7 @@ if [ ! -w "$INSTALL_DIR" ]; then
 
         if [ -n "$PROFILE" ]; then
           echo "" >> "$PROFILE"
-          echo "# apitool" >> "$PROFILE"
+          echo "# zond" >> "$PROFILE"
           echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "$PROFILE"
           echo "Added $INSTALL_DIR to PATH in $PROFILE"
           echo "Run: source $PROFILE   (or open a new terminal)"
@@ -103,11 +103,11 @@ if [ ! -w "$INSTALL_DIR" ]; then
     esac
   fi
 else
-  cp "$BINARY" "$INSTALL_DIR/apitool"
+  cp "$BINARY" "$INSTALL_DIR/zond"
 fi
 
-echo "Installed to $INSTALL_DIR/apitool"
+echo "Installed to $INSTALL_DIR/zond"
 
 # Verify
-"$INSTALL_DIR/apitool" --version
-echo "Done! Run 'apitool init' to set up a new project."
+"$INSTALL_DIR/zond" --version
+echo "Done! Run 'zond init' to set up a new project."

@@ -1,6 +1,6 @@
 # Быстрый старт: покрытие API тестами через AI-агента
 
-AI-агент (Claude Code) + apitool = автоматическое покрытие вашего API тестами по OpenAPI-спецификации. Вы даёте задание на естественном языке, агент сам генерирует тесты, запускает их и показывает результаты.
+AI-агент (Claude Code) + zond = автоматическое покрытие вашего API тестами по OpenAPI-спецификации. Вы даёте задание на естественном языке, агент сам генерирует тесты, запускает их и показывает результаты.
 
 ---
 
@@ -49,22 +49,22 @@ claude --dangerously-skip-permissions
 
 ---
 
-## Шаг 3. Подключить apitool
+## Шаг 3. Подключить zond
 
 Есть два способа — выберите один.
 
 ### Способ А: Claude Code плагин (рекомендуется)
 
-Плагин даёт MCP-инструменты + скиллы + slash-команды (`/apitool:api-test`, `/apitool:api-coverage`):
+Плагин даёт MCP-инструменты + скиллы + slash-команды (`/zond:api-test`, `/zond:api-coverage`):
 
 ```
-/plugin marketplace add kirrosh/apitool
+/plugin marketplace add kirrosh/zond
 ```
 
 Затем установите плагин:
 
 ```
-/plugin install apitool@apitool-marketplace
+/plugin install zond@zond-marketplace
 ```
 
 ### Способ Б: Только MCP-сервер
@@ -72,10 +72,10 @@ claude --dangerously-skip-permissions
 Если нужны только MCP-инструменты без скиллов и команд:
 
 ```
-/mcp add apitool -- npx -y @kirrosh/apitool@latest mcp
+/mcp add zond -- npx -y @kirrosh/zond@latest mcp
 ```
 
-> **Что произойдёт?** Claude Code сохранит конфигурацию MCP-сервера в файл `.mcp.json` в текущей папке. При следующем запуске агент получит доступ к инструментам apitool.
+> **Что произойдёт?** Claude Code сохранит конфигурацию MCP-сервера в файл `.mcp.json` в текущей папке. При следующем запуске агент получит доступ к инструментам zond.
 
 Перезапустите Claude Code:
 
@@ -89,7 +89,7 @@ claude --dangerously-skip-permissions
 
 ---
 
-Проверьте, что подключение работает — в приветственном сообщении должен появиться `apitool` в списке MCP-серверов, или выполните `/mcp` для диагностики.
+Проверьте, что подключение работает — в приветственном сообщении должен появиться `zond` в списке MCP-серверов, или выполните `/mcp` для диагностики.
 
 ---
 
@@ -98,14 +98,14 @@ claude --dangerously-skip-permissions
 Теперь дайте агенту первое задание. Если установлен плагин (Способ А), можно использовать slash-команду:
 
 ```
-/apitool:api-test openapi.json
+/zond:api-test openapi.json
 ```
 
 Или дайте задание на естественном языке — сгенерировать безопасные smoke-тесты (только GET-запросы, которые не меняют данные):
 
 ```
 Покрой API из файла openapi.json безопасными smoke-тестами.
-Используй apitool MCP. Начни только с GET-запросов (safe: true).
+Используй zond MCP. Начни только с GET-запросов (safe: true).
 Запусти тесты и покажи результаты.
 ```
 
@@ -156,7 +156,7 @@ auth_token: Bearer sk-your-token-here
 Попросите агента запустить веб-дашборд:
 
 ```
-Запусти веб-интерфейс apitool чтобы я мог посмотреть результаты.
+Запусти веб-интерфейс zond чтобы я мог посмотреть результаты.
 ```
 
 > **Что произойдёт?** Агент вызовет `manage_server(action: 'start')` и покажет ссылку — обычно `http://localhost:8080`.
@@ -183,7 +183,7 @@ auth_token: Bearer sk-your-token-here
 Если установлен плагин:
 
 ```
-/apitool:api-coverage openapi.json
+/zond:api-coverage openapi.json
 ```
 
 ### Починить сломанные тесты
@@ -230,7 +230,7 @@ auth_token: Bearer sk-your-token-here
 Сгенерируй GitHub Actions конфиг для автоматического запуска smoke-тестов.
 ```
 
-> Агент вызовет `ci_init` и создаст `.github/workflows/apitool.yml` с расписанием, ручным триггером и отчётами.
+> Агент вызовет `ci_init` и создаст `.github/workflows/zond.yml` с расписанием, ручным триггером и отчётами.
 
 ---
 
@@ -239,7 +239,7 @@ auth_token: Bearer sk-your-token-here
 ```
 my-api-tests/
 ├── .mcp.json              ← конфигурация MCP для Claude Code
-├── apitool.db             ← база данных с результатами запусков
+├── zond.db             ← база данных с результатами запусков
 └── apis/
     └── myapi/
         ├── openapi.json   ← ваша OpenAPI-спецификация

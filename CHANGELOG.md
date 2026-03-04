@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] — Renamed to zond
+
+- Renamed package from `@kirrosh/apitool` to `zond`
+- CLI binary: `apitool` → `zond`
+- Database: `apitool.db` → `zond.db`
+- Environment variable: `APITOOL_AI_KEY` → `ZOND_AI_KEY`
+- MCP server name: `apitool` → `zond`
+- Fresh DB schema (no migrations)
+
 ## [0.6.1] - 2026-03-04
 
 ### Changed

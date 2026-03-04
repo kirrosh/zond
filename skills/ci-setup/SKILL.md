@@ -1,6 +1,6 @@
 ---
 name: ci-setup
-description: This skill should be used when the user asks to "add API tests to CI", "create GitHub Actions workflow for API tests", "set up GitLab CI for apitool", "automate API test execution in CI/CD pipeline", or "add continuous testing".
+description: This skill should be used when the user asks to "add API tests to CI", "create GitHub Actions workflow for API tests", "set up GitLab CI for zond", "automate API test execution in CI/CD pipeline", or "add continuous testing".
 ---
 
 # CI/CD Setup for API Tests
@@ -52,8 +52,8 @@ The generated workflow expects these environment variables as CI secrets:
 
 | Secret | Description | Required |
 |--------|-------------|----------|
-| `APITOOL_BASE_URL` | Base URL of the API to test | Yes |
-| `APITOOL_AUTH_TOKEN` | Authentication token | If API requires auth |
+| `ZOND_BASE_URL` | Base URL of the API to test | Yes |
+| `ZOND_AUTH_TOKEN` | Authentication token | If API requires auth |
 
 **GitHub Actions:** Go to repo Settings > Secrets and variables > Actions > New repository secret.
 
@@ -74,18 +74,18 @@ The workflow includes:
 
 1. **Smoke tests** (runs on every trigger):
    ```bash
-   apitool run tests/ --safe --tag smoke
+   zond run tests/ --safe --tag smoke
    ```
    GET-only, safe for production APIs.
 
 2. **Full test suite** (runs on schedule and manual trigger):
    ```bash
-   apitool run tests/ --tag crud --env-var BASE_URL=$APITOOL_BASE_URL
+   zond run tests/ --tag crud --env-var BASE_URL=$ZOND_BASE_URL
    ```
 
 3. **Coverage gate**:
    ```bash
-   apitool coverage --spec openapi.json --tests tests/ --fail-on-coverage 60
+   zond coverage --spec openapi.json --tests tests/ --fail-on-coverage 60
    ```
    Fails the pipeline if coverage drops below 60%.
 

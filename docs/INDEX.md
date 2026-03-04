@@ -1,9 +1,9 @@
-# Документация APITOOL
+# Документация ZOND
 
 | Документ | Описание |
 |----------|----------|
 | [quickstart.md](quickstart.md) | **Быстрый старт** — пошаговая инструкция: установка, настройка, первые тесты |
-| [APITOOL.md](../APITOOL.md) | Полный справочник — MCP tools, CLI команды, YAML формат, окружения |
+| [ZOND.md](../ZOND.md) | Полный справочник — MCP tools, CLI команды, YAML формат, окружения |
 | [mcp-guide.md](mcp-guide.md) | Руководство для MCP-агента — флоу, примеры, советы, troubleshooting |
 | [BACKLOG.md](../BACKLOG.md) | Актуальный бэклог задач |
 | [GLOSSARY.md](GLOSSARY.md) | Тезаурус сущностей — Collection, Suite, Run, Environment и др. |
@@ -16,13 +16,13 @@
 |----------------|-------------|
 | Описание MCP-инструмента | `src/mcp/descriptions.ts` |
 | Hints/nextSteps в ответах | `src/mcp/tools/<tool>.ts` |
-| Справочник команд и флагов | `APITOOL.md` |
+| Справочник команд и флагов | `ZOND.md` |
 | User flow и troubleshooting | `docs/mcp-guide.md` |
 | Быстрый старт | `docs/quickstart.md`, `README.md` |
 
 ## Архив
 
-Исторические snapshot'ы. Актуальная информация — в [APITOOL.md](../APITOOL.md).
+Исторические snapshot'ы. Актуальная информация — в [ZOND.md](../ZOND.md).
 
 - [generation-issues.md](archive/generation-issues.md) — исторические фиксы багов при первичной генерации
 - [BACKLOG-AI-NATIVE.md](archive/BACKLOG-AI-NATIVE.md) — завершённые milestone'ы M22-M27, стратегия

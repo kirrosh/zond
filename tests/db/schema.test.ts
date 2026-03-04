@@ -5,7 +5,7 @@ import { existsSync, unlinkSync } from "fs";
 import { getDb, closeDb } from "../../src/db/schema.ts";
 
 function tmpDb(): string {
-  return join(tmpdir(), `apitool-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+  return join(tmpdir(), `zond-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function tryUnlink(path: string): void {
@@ -97,7 +97,7 @@ describe("getDb / schema", () => {
     dbPath = tmpDb();
     const db = getDb(dbPath);
     const row = db.query("PRAGMA user_version").get() as { user_version: number };
-    expect(row.user_version).toBe(7);
+    expect(row.user_version).toBe(1);
   });
 
   test("closeDb resets singleton so next call opens fresh db", () => {

@@ -45,7 +45,7 @@ function suppressOutput() {
 }
 
 function tmpDb(): string {
-  return join(tmpdir(), `apitool-cmd-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+  return join(tmpdir(), `zond-cmd-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 describe("runCommand", () => {

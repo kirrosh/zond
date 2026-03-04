@@ -3,7 +3,7 @@ description: Check API test coverage and generate tests for uncovered endpoints
 argument-hint: "[path-to-openapi-spec]"
 ---
 
-You are checking API test coverage and helping fill gaps using apitool MCP tools.
+You are checking API test coverage and helping fill gaps using zond MCP tools.
 
 ## Instructions
 
@@ -19,7 +19,7 @@ You are checking API test coverage and helping fill gaps using apitool MCP tools
 
 3. **Find existing tests directory:**
    - Look for `apis/*/tests/` directories or `tests/` in project root
-   - If no tests found, inform the user and suggest using `/apitool:api-test` first
+   - If no tests found, inform the user and suggest using `/zond:api-test` first
 
 4. **Run coverage analysis:**
    ```

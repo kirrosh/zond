@@ -1,4 +1,4 @@
-# APITOOL
+# ZOND
 
 **AI-native API testing tool** — OpenAPI spec → test generation → execution → diagnostics. One binary. Zero config.
 
@@ -16,27 +16,27 @@
 ```
 set_work_dir(workDir: "<absolute path to project root>")
 ```
-Call this once at the start of the session so `apitool.db` and all relative paths resolve to your project directory.
+Call this once at the start of the session so `zond.db` and all relative paths resolve to your project directory.
 
 **Phase 0 — Register + static analysis (zero requests)**
 ```
 setup_api(...)
-coverage_analysis(specPath, testsDir)   ← baseline, no HTTP
+coverage_analysis(specPath, testsDir)   <- baseline, no HTTP
 ```
 
 **Phase 1 — Smoke tests (GET-only, safe for production)**
 ```
-generate_and_save(specPath, methodFilter: ["GET"])      ← GET endpoints only
-save_test_suite(...)                                    ← tags: [smoke]
-run_tests(testPath, safe: true)                         ← --safe enforces GET-only
+generate_and_save(specPath, methodFilter: ["GET"])      <- GET endpoints only
+save_test_suite(...)                                    <- tags: [smoke]
+run_tests(testPath, safe: true)                         <- --safe enforces GET-only
 ```
 Stop here if the user hasn't explicitly confirmed a staging/test environment.
 
 **Phase 2 — CRUD tests (only with explicit user confirmation + staging env)**
 ```
-run_tests(testPath, tag: ["crud"], dryRun: true)        ← show requests first, no sending
+run_tests(testPath, tag: ["crud"], dryRun: true)        <- show requests first, no sending
 [show user what would be sent, ask confirmation]
-run_tests(testPath, tag: ["crud"], envName: "staging")  ← only after confirmation
+run_tests(testPath, tag: ["crud"], envName: "staging")  <- only after confirmation
 ```
 
 **Phase 3 — Regression tracking**
@@ -46,9 +46,9 @@ ci_init()
 ```
 
 **Key safety rules:**
-- `safe: true` on `run_tests` → only GET requests execute, write ops are skipped
-- `dryRun: true` on `run_tests` → shows all requests without sending any
-- `methodFilter: ["GET"]` on `generate_tests_guide` → only generates GET test stubs
+- `safe: true` on `run_tests` -> only GET requests execute, write ops are skipped
+- `dryRun: true` on `run_tests` -> shows all requests without sending any
+- `methodFilter: ["GET"]` on `generate_tests_guide` -> only generates GET test stubs
 - Always use `tags: [smoke]` for GET-only suites, `tags: [crud]` for write operations
 - Never run CRUD tests unless user confirmed environment is safe (staging/test)
 
@@ -167,7 +167,7 @@ token: staging-token
 ```
 
 ```bash
-apitool run tests/ --env staging
+zond run tests/ --env staging
 ```
 
 `setup_api` creates a `.gitignore` with `.env*.yaml` in `baseDir` to prevent secrets from being committed.
@@ -176,7 +176,7 @@ apitool run tests/ --env staging
 
 ## CI/CD
 
-`apitool ci init` scaffolds GitHub Actions or GitLab CI workflow. Supports schedule, repository_dispatch, manual triggers. See [docs/ci.md](docs/ci.md).
+`zond ci init` scaffolds GitHub Actions or GitLab CI workflow. Supports schedule, repository_dispatch, manual triggers. See [docs/ci.md](docs/ci.md).
 
 ---
 

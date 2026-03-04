@@ -5,7 +5,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { rm, mkdir } from "fs/promises";
 
-const tmpDir = join(tmpdir(), `apitool-coverage-${Date.now()}`);
+const tmpDir = join(tmpdir(), `zond-coverage-${Date.now()}`);
 
 beforeAll(async () => {
   await mkdir(tmpDir, { recursive: true });

@@ -23,12 +23,12 @@ export function registerSetWorkDirTool(server: McpServer) {
     }
     process.chdir(resolved);
     resetDb();
-    const dbPath = join(resolved, "apitool.db");
+    const dbPath = join(resolved, "zond.db");
     return {
       content: [{ type: "text" as const, text: JSON.stringify({
         workDir: resolved,
-        apitool_db: dbPath,
-        hint: "Working directory set. All relative paths and apitool.db will now resolve from this directory.",
+        zond_db: dbPath,
+        hint: "Working directory set. All relative paths and zond.db will now resolve from this directory.",
       }, null, 2) }],
     };
   });

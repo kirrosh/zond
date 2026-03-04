@@ -7,8 +7,8 @@ dist
 *.tgz
 
 # compiled binary
-apitool
-apitool.exe
+zond
+zond.exe
 
 # code coverage
 coverage

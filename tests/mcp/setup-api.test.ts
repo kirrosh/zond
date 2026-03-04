@@ -38,7 +38,7 @@ describe("setupApi", () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = join(tmpdir(), `apitool-test-${Date.now()}`);
+    tempDir = join(tmpdir(), `zond-test-${Date.now()}`);
     mockFindCollectionByNameOrId.mockImplementation(() => null);
     mockCreateCollection.mockImplementation(() => 42);
   });
@@ -107,7 +107,7 @@ describe("setup_api MCP tool", () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = join(tmpdir(), `apitool-mcp-setup-${Date.now()}`);
+    tempDir = join(tmpdir(), `zond-mcp-setup-${Date.now()}`);
     mockFindCollectionByNameOrId.mockImplementation(() => null);
     mockCreateCollection.mockImplementation(() => 99);
   });

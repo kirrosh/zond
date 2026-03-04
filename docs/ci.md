@@ -1,14 +1,14 @@
 # CI/CD Integration
 
-Run apitool API tests automatically in your CI/CD pipeline.
+Run zond API tests automatically in your CI/CD pipeline.
 
 ## Quick Start
 
 ```bash
 # Generate CI workflow for your project
-apitool ci init            # auto-detect platform
-apitool ci init --github   # GitHub Actions
-apitool ci init --gitlab   # GitLab CI
+zond ci init            # auto-detect platform
+zond ci init --github   # GitHub Actions
+zond ci init --gitlab   # GitLab CI
 ```
 
 ## GitHub Actions
@@ -34,13 +34,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install apitool
-        run: curl -fsSL https://raw.githubusercontent.com/kirrosh/apitool/master/install.sh | sh
+      - name: Install zond
+        run: curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
 
       - name: Run tests
         run: |
           mkdir -p test-results
-          apitool run apis/ --report junit --no-db > test-results/junit.xml
+          zond run apis/ --report junit --no-db > test-results/junit.xml
         continue-on-error: true
 
       - name: Publish test results
@@ -65,10 +65,10 @@ api-tests:
   image: ubuntu:latest
   before_script:
     - apt-get update -qq && apt-get install -y -qq curl
-    - curl -fsSL https://raw.githubusercontent.com/kirrosh/apitool/master/install.sh | sh
+    - curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
   script:
     - mkdir -p test-results
-    - apitool run apis/ --report junit --no-db > test-results/junit.xml
+    - zond run apis/ --report junit --no-db > test-results/junit.xml
   allow_failure:
     exit_codes: 1
   artifacts:
@@ -86,13 +86,13 @@ pipeline {
     stages {
         stage('Install') {
             steps {
-                sh 'curl -fsSL https://raw.githubusercontent.com/kirrosh/apitool/master/install.sh | sh'
+                sh 'curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh'
             }
         }
         stage('Test') {
             steps {
                 sh 'mkdir -p test-results'
-                sh 'apitool run apis/ --report junit --no-db > test-results/junit.xml || true'
+                sh 'zond run apis/ --report junit --no-db > test-results/junit.xml || true'
             }
             post {
                 always {
@@ -112,12 +112,12 @@ Works with any CI system (CircleCI, Travis, Drone, etc.):
 #!/bin/bash
 set -uo pipefail
 
-# Install apitool
-curl -fsSL https://raw.githubusercontent.com/kirrosh/apitool/master/install.sh | sh
+# Install zond
+curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
 
 # Run tests with JUnit output
 mkdir -p test-results
-apitool run apis/ --report junit --no-db > test-results/junit.xml
+zond run apis/ --report junit --no-db > test-results/junit.xml
 EXIT_CODE=$?
 
 # Exit code: 0 = all passed, 1 = failures, 2 = error
@@ -126,16 +126,16 @@ exit $EXIT_CODE
 
 ## Environment Variables
 
-`--env <name>` loads `.env.<name>.yaml` from the **test path directory** (`dirname` of the path passed to `apitool run`).
+`--env <name>` loads `.env.<name>.yaml` from the **test path directory** (`dirname` of the path passed to `zond run`).
 
 For example:
-- `apitool run apis/petstore/tests/ --env ci` → looks for `apis/petstore/tests/.env.ci.yaml`
-- `apitool run apis/ --env ci` → looks for `.env.ci.yaml` in current directory (parent of `apis/`)
+- `zond run apis/petstore/tests/ --env ci` → looks for `apis/petstore/tests/.env.ci.yaml`
+- `zond run apis/ --env ci` → looks for `.env.ci.yaml` in current directory (parent of `apis/`)
 
 If your env files live next to test files in subdirectories, run each API separately:
 
 ```bash
-apitool run apis/petstore/tests/ --env default --report junit --no-db
+zond run apis/petstore/tests/ --env default --report junit --no-db
 ```
 
 Or place a `.env.yaml` (no name) in the repo root for shared variables.
@@ -158,7 +158,7 @@ auth_token: ${{ AUTH_TOKEN }}
   env:
     API_KEY: ${{ secrets.API_KEY }}
     AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
-  run: apitool run apis/ --env ci --report junit --no-db > test-results/junit.xml
+  run: zond run apis/ --env ci --report junit --no-db > test-results/junit.xml
 ```
 
 #### GitLab CI
@@ -168,7 +168,7 @@ api-tests:
   variables:
     API_KEY: $API_KEY  # Set in GitLab CI/CD settings
   script:
-    - apitool run apis/ --env ci --report junit --no-db > test-results/junit.xml
+    - zond run apis/ --env ci --report junit --no-db > test-results/junit.xml
 ```
 
 ### Auth token shortcut
@@ -176,7 +176,7 @@ api-tests:
 For simple bearer token auth, use `--auth-token` instead of an env file:
 
 ```bash
-apitool run apis/ --auth-token "$AUTH_TOKEN" --report junit --no-db
+zond run apis/ --auth-token "$AUTH_TOKEN" --report junit --no-db
 ```
 
 ## Triggers
@@ -213,13 +213,13 @@ on:
     curl -X POST \
       -H "Authorization: token ${{ secrets.TEST_REPO_PAT }}" \
       -H "Accept: application/vnd.github.v3+json" \
-      https://api.github.com/repos/OWNER/apitool-tests/dispatches \
+      https://api.github.com/repos/OWNER/zond-tests/dispatches \
       -d '{"event_type": "api-updated", "client_payload": {"env": "staging"}}'
 ```
 
 Or with `gh` CLI:
 ```bash
-gh api repos/OWNER/apitool-tests/dispatches \
+gh api repos/OWNER/zond-tests/dispatches \
   -f event_type=api-updated \
   -f 'client_payload[env]=staging'
 ```
@@ -250,7 +250,7 @@ Any service that can send HTTP POST requests can trigger tests:
 **Generic (any CI):** Use the CI platform's API to trigger a build. Example with GitHub CLI:
 
 ```bash
-gh workflow run api-tests.yml --repo OWNER/apitool-tests
+gh workflow run api-tests.yml --repo OWNER/zond-tests
 ```
 
 ## Exit Codes
