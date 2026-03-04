@@ -1,4 +1,4 @@
-# @kirrosh/zond
+# zond
 
 Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config, no cloud, no Postman.
 

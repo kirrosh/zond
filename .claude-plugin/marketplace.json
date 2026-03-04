@@ -4,14 +4,14 @@
     "name": "kirrosh"
   },
   "metadata": {
-    "description": "AI-native API testing plugin marketplace"
+    "description": "Point your AI agent at an OpenAPI spec. Get working tests in minutes."
   },
   "plugins": [
     {
       "name": "zond",
       "source": "./",
-      "description": "AI-native API testing — generate, run, and diagnose tests from OpenAPI specs",
-      "version": "0.6.1",
+      "description": "Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config, no cloud, no Postman.",
+      "version": "0.7.1",
       "author": {
         "name": "kirrosh",
         "url": "https://github.com/kirrosh"

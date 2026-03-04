@@ -25,7 +25,7 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
 
   const server = new McpServer({
     name: "zond",
-    version: "0.4.0",
+    version: "0.7.1",
   });
 
   // Register all tools
