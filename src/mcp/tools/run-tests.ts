@@ -48,6 +48,12 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
     const hints: string[] = [];
     if (failedSteps.length > 0) {
       hints.push("Use query_db(action: 'diagnose_failure', runId: " + runId + ") for detailed failure analysis");
+      const hasAssertionFailures = failedSteps.some(s => s.assertions.length > 0);
+      if (hasAssertionFailures) {
+        hints.push(
+          "Some tests have assertion failures — use describe_endpoint(specPath, method, path) to verify expected schemas"
+        );
+      }
     }
     hints.push("Use manage_server(action: 'start') to launch the Web UI and view results visually in a browser at http://localhost:8080");
     hints.push("Ask the user if they want to set up CI/CD to run these tests automatically on push. If yes, use ci_init to generate a workflow and help them push to GitHub/GitLab.");

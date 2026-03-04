@@ -44,6 +44,16 @@ export function envCategory(hint: string | undefined): string | null {
   return null;
 }
 
+export function schemaHint(
+  failureType: string,
+  responseStatus: number | null | undefined,
+): string | null {
+  if (failureType === "assertion_failed" || responseStatus === 400 || responseStatus === 422) {
+    return "Use describe_endpoint(specPath, method, path) to verify expected request/response schema";
+  }
+  return null;
+}
+
 export function computeSharedEnvIssue(
   failures: Array<{ hint?: string }>,
   envFilePath?: string,

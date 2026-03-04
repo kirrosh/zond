@@ -106,6 +106,7 @@ export function registerGenerateAndSaveTool(server: McpServer) {
         securitySchemes,
         endpointCount: endpoints.length,
         coverageHeader,
+        compact: !!tag,
       });
 
       const saveInstructions = `

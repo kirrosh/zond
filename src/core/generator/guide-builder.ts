@@ -67,10 +67,29 @@ export interface GuideOptions {
   securitySchemes: SecuritySchemeInfo[];
   endpointCount: number;
   coverageHeader?: string;
+  compact?: boolean;
 }
 
 export function buildGenerationGuide(opts: GuideOptions): string {
   const hasAuth = opts.securitySchemes.length > 0;
+
+  if (opts.compact) {
+    const securitySummary = hasAuth
+      ? `Security: ${opts.securitySchemes.map(s => `${s.name} (${s.type}${s.scheme ? `/${s.scheme}` : ""})`).join(", ")}`
+      : "Security: none";
+
+    return `# Test Generation Guide for ${opts.title}
+${opts.coverageHeader ? `\n${opts.coverageHeader}\n` : ""}
+## API Specification (${opts.endpointCount} endpoints)
+${opts.baseUrl ? `Base URL: ${opts.baseUrl}` : "Base URL: use {{base_url}} environment variable"}
+${securitySummary}
+
+${opts.apiContext}
+
+---
+
+> **Note:** Refer to the full YAML format reference, generation algorithm, tag conventions, and practical tips from the initial \`generate_and_save\` call (without \`tag\`). Only the API endpoints above are unique to this chunk.`;
+  }
 
   return `# Test Generation Guide for ${opts.title}
 ${opts.coverageHeader ? `\n${opts.coverageHeader}\n` : ""}

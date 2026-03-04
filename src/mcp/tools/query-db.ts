@@ -4,7 +4,7 @@ import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
-import { statusHint, classifyFailure, envHint, envCategory } from "../../core/diagnostics/failure-hints.ts";
+import { statusHint, classifyFailure, envHint, envCategory, schemaHint } from "../../core/diagnostics/failure-hints.ts";
 
 function parseBodySafe(raw: string | null | undefined): unknown {
   if (!raw) return undefined;
@@ -124,6 +124,7 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
               // env issues take priority over generic status hints
               const hint = envHint(r.request_url, r.error_message, envFilePath) ?? statusHint(r.response_status);
               const failure_type = classifyFailure(r.status, r.response_status);
+              const sHint = schemaHint(failure_type, r.response_status);
               return {
                 suite_name: r.suite_name,
                 test_name: r.test_name,
@@ -134,6 +135,7 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
                 request_url: r.request_url,
                 response_status: r.response_status,
                 ...(hint ? { hint } : {}),
+                ...(sHint ? { schema_hint: sHint } : {}),
                 response_body: parseBodySafe(r.response_body),
                 response_headers: r.response_headers
                   ? JSON.parse(r.response_headers)
