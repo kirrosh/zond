@@ -48,7 +48,7 @@ export async function scanCoveredEndpoints(outputDir: string): Promise<CoveredEn
  * - Replace {paramName} with {*}
  * - Remove trailing slashes
  */
-function normalizePath(path: string): string {
+export function normalizePath(path: string): string {
   return path
     .replace(/\{\{[^}]+\}\}/g, "{*}")  // {{var}} → {*}
     .replace(/\{[^}]+\}/g, "{*}")       // {id} → {*}
@@ -59,7 +59,7 @@ function normalizePath(path: string): string {
  * Convert a spec path to a regex that matches both parameterized and concrete paths.
  * e.g. /pet/{petId} matches /pet/100001 and /pet/{{pet_id}}
  */
-function specPathToRegex(specPath: string): RegExp {
+export function specPathToRegex(specPath: string): RegExp {
   const pattern = specPath
     .split("/")
     .map((seg) =>

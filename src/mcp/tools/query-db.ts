@@ -24,6 +24,12 @@ function statusHint(status: number | null | undefined): string | null {
   return null;
 }
 
+function classifyFailure(status: string, responseStatus: number | null): "api_error" | "assertion_failed" | "network_error" {
+  if (status === "error" && (responseStatus === null || responseStatus < 500)) return "network_error";
+  if (responseStatus !== null && responseStatus >= 500) return "api_error";
+  return "assertion_failed";
+}
+
 function envHint(url: string | null, errorMessage: string | null, envFilePath?: string): string | null {
   const envFile = envFilePath ? envFilePath : ".env.yaml in your API directory";
 
@@ -149,10 +155,12 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
             .map(r => {
               // env issues take priority over generic status hints
               const hint = envHint(r.request_url, r.error_message, envFilePath) ?? statusHint(r.response_status);
+              const failure_type = classifyFailure(r.status, r.response_status);
               return {
                 suite_name: r.suite_name,
                 test_name: r.test_name,
                 status: r.status,
+                failure_type,
                 error_message: r.error_message,
                 request_method: r.request_method,
                 request_url: r.request_url,
@@ -184,6 +192,10 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
               : [...failures.map(f => f.hint).filter(Boolean)][0]
             : undefined;
 
+          const apiErrors = failures.filter(f => f.failure_type === "api_error").length;
+          const assertionFailures = failures.filter(f => f.failure_type === "assertion_failed").length;
+          const networkErrors = failures.filter(f => f.failure_type === "network_error").length;
+
           const result = {
             run: {
               id: diagRun.id,
@@ -195,6 +207,9 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
               total: diagRun.total,
               passed: diagRun.passed,
               failed: diagRun.failed,
+              api_errors: apiErrors,
+              assertion_failures: assertionFailures,
+              network_errors: networkErrors,
             },
             ...(sharedEnvHint ? { env_issue: sharedEnvHint } : {}),
             failures,

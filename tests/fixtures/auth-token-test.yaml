@@ -1,4 +1,5 @@
 name: Auth Token Test
+base_url: http://localhost
 headers:
   Authorization: "Bearer {{auth_token}}"
 tests:

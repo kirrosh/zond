@@ -55,9 +55,9 @@ describe("apitool ci init", () => {
     expect(existsSync(filePath)).toBe(true);
 
     const content = readFileSync(filePath, "utf-8");
-    expect(content).toContain("api-tests:");
+    expect(content).toContain("api-smoke:");
     expect(content).toContain("apitool run");
-    expect(content).toContain("junit: test-results/junit.xml");
+    expect(content).toContain("junit: test-results/smoke.xml");
   });
 
   test("auto-detects GitHub when .github/ exists", async () => {
@@ -76,7 +76,7 @@ describe("apitool ci init", () => {
     expect(code).toBe(0);
 
     const content = readFileSync(join(tmpDir, ".gitlab-ci.yml"), "utf-8");
-    expect(content).toContain("api-tests:");
+    expect(content).toContain("api-smoke:");
   });
 
   test("defaults to GitHub when no platform detected", async () => {
