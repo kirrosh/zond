@@ -4,6 +4,7 @@ import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
+import { statusHint, classifyFailure, envHint, envCategory } from "../../core/diagnostics/failure-hints.ts";
 
 function parseBodySafe(raw: string | null | undefined): unknown {
   if (!raw) return undefined;
@@ -13,39 +14,6 @@ function parseBodySafe(raw: string | null | undefined): unknown {
   } catch {
     return truncated;
   }
-}
-
-function statusHint(status: number | null | undefined): string | null {
-  if (!status) return null;
-  if (status >= 500) return "Server-side error — inspect response_body for errorMessage/errorDetail; likely a backend bug";
-  if (status === 401 || status === 403) return "Auth failure — check auth_token/api_key in .env.yaml";
-  if (status === 404) return "Resource not found — verify the path and ID";
-  if (status === 400 || status === 422) return "Validation error — check request body fields match the schema";
-  return null;
-}
-
-function classifyFailure(status: string, responseStatus: number | null): "api_error" | "assertion_failed" | "network_error" {
-  if (status === "error" && (responseStatus === null || responseStatus < 500)) return "network_error";
-  if (responseStatus !== null && responseStatus >= 500) return "api_error";
-  return "assertion_failed";
-}
-
-function envHint(url: string | null, errorMessage: string | null, envFilePath?: string): string | null {
-  const envFile = envFilePath ? envFilePath : ".env.yaml in your API directory";
-
-  if (url && /\{\{[^}]+\}\}/.test(url)) {
-    return `URL contains unresolved variable: "${url}" — variable name may not match the key in ${envFile}`;
-  }
-  if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
-    return `base_url is not set or empty — URL resolved to "${url}". Add base_url to ${envFile}`;
-  }
-  if (errorMessage?.includes("base_url is not configured")) {
-    return `base_url is missing or empty. Add base_url: https://your-api.com to ${envFile}`;
-  }
-  if (errorMessage?.includes("URL is invalid") || errorMessage?.includes("Failed to parse URL")) {
-    return `URL is malformed — likely base_url is empty or invalid. Check base_url in ${envFile}`;
-  }
-  return null;
 }
 
 export function registerQueryDbTool(server: McpServer, dbPath?: string) {
@@ -176,13 +144,6 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
             });
 
           // Top-level env_issue when all failures have the same env problem category
-          function envCategory(hint: string | undefined): string | null {
-            if (!hint) return null;
-            if (hint.includes("base_url is not set") || hint.includes("base_url is missing") || hint.includes("base_url is not configured")) return "base_url_missing";
-            if (hint.includes("unresolved variable")) return "unresolved_variable";
-            if (hint.includes("URL is malformed")) return "url_malformed";
-            return null;
-          }
           const categories = new Set(failures.map(f => envCategory(f.hint)).filter(Boolean));
           const sharedEnvHint = categories.size === 1
             ? categories.has("base_url_missing")

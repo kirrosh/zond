@@ -1,30 +1,28 @@
 import { Hono } from "hono";
 import { layout, escapeHtml } from "../views/layout.ts";
-import { statusBadge, renderSuiteResults, failedFilterToggle, autoExpandFailedScript, methodBadge } from "../views/results.ts";
-import { formatDuration } from "../../core/reporter/console.ts";
+import { methodBadge } from "../views/results.ts";
+import { renderHealthStrip } from "../views/health-strip.ts";
+import { renderEndpointsTab } from "../views/endpoints-tab.ts";
+import { renderSuitesTab } from "../views/suites-tab.ts";
+import { renderRunsTab, renderRunDetail } from "../views/runs-tab.ts";
+import { buildCollectionState, invalidateCollectionCache } from "../data/collection-state.ts";
 import {
   listCollections,
-  listRunsByCollection,
-  countRunsByCollection,
-  getResultsByRunId,
-  getRunById,
   getCollectionById,
+  countRunsByCollection,
 } from "../../db/queries.ts";
 import type { CollectionRecord, CollectionSummary } from "../../db/queries.ts";
 import { listEnvFiles } from "../../core/parser/variables.ts";
 
 const dashboard = new Hono();
 
-const HISTORY_PAGE_SIZE = 10;
-
 // ──────────────────────────────────────────────
-// GET / — Single-page dashboard
+// GET / — Main dashboard
 // ──────────────────────────────────────────────
 
 dashboard.get("/", async (c) => {
   const collections = listCollections();
 
-  // Auto-select the only collection, or use query param
   let selectedId: number | null = null;
   const qId = c.req.query("collection");
   if (qId) {
@@ -33,10 +31,13 @@ dashboard.get("/", async (c) => {
     selectedId = collections[0]!.id;
   }
 
-  const content = await renderPage(collections, selectedId);
+  const selected = selectedId ? collections.find(col => col.id === selectedId) ?? null : null;
+  const selectedRecord = selected ? getCollectionById(selected.id) : null;
+
+  const { content, navExtra } = await renderPage(collections, selectedId, selectedRecord);
   const isHtmx = c.req.header("HX-Request") === "true";
   if (isHtmx) return c.html(content);
-  return c.html(layout("apitool", content));
+  return c.html(layout("apitool", content, navExtra));
 });
 
 // ──────────────────────────────────────────────
@@ -53,24 +54,80 @@ dashboard.get("/panels/content", async (c) => {
   return c.html(await renderCollectionContent(collection));
 });
 
+dashboard.get("/panels/health-strip", async (c) => {
+  const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
+  if (isNaN(collectionId)) return c.html("");
+
+  const collection = getCollectionById(collectionId);
+  if (!collection) return c.html("");
+
+  invalidateCollectionCache(collectionId);
+  const state = await buildCollectionState(collection);
+  return c.html(renderHealthStrip(state));
+});
+
+dashboard.get("/panels/endpoints", async (c) => {
+  const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
+  if (isNaN(collectionId)) return c.html("");
+
+  const collection = getCollectionById(collectionId);
+  if (!collection) return c.html("");
+
+  const state = await buildCollectionState(collection);
+  const filters = {
+    status: c.req.query("status") || undefined,
+    method: c.req.query("method") || undefined,
+  };
+  return c.html(renderEndpointsTab(state, filters));
+});
+
+dashboard.get("/panels/suites", async (c) => {
+  const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
+  if (isNaN(collectionId)) return c.html("");
+
+  const collection = getCollectionById(collectionId);
+  if (!collection) return c.html("");
+
+  const state = await buildCollectionState(collection);
+  return c.html(renderSuitesTab(state));
+});
+
+dashboard.get("/panels/runs-tab", (c) => {
+  const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
+  const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10));
+  if (isNaN(collectionId)) return c.html("");
+
+  return c.html(renderRunsTab(collectionId, page));
+});
+
+dashboard.get("/panels/run-detail", (c) => {
+  const runId = parseInt(c.req.query("run_id") ?? "", 10);
+  const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
+  if (isNaN(runId)) return c.html("");
+
+  return c.html(renderRunDetail(runId, collectionId));
+});
+
+// Legacy endpoints for backwards compat (runs.ts detail page uses /panels/results)
 dashboard.get("/panels/results", async (c) => {
   const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
   const runId = parseInt(c.req.query("run_id") ?? "", 10);
 
   if (!isNaN(runId)) {
-    return c.html(await renderRunResults(runId));
+    return c.html(renderRunDetail(runId, collectionId || 0));
   }
 
   if (!isNaN(collectionId)) {
-    // Get latest run for this collection
+    const { listRunsByCollection } = await import("../../db/queries.ts");
     const runs = listRunsByCollection(collectionId, 1, 0);
-    if (runs.length === 0) return c.html(`<p style="color:var(--text-dim);">No runs yet. Click <strong>Run Tests</strong> to get started.</p>`);
-    return c.html(await renderRunResults(runs[0]!.id));
+    if (runs.length === 0) return c.html(`<p style="color:var(--text-dim);">No runs yet.</p>`);
+    return c.html(renderRunDetail(runs[0]!.id, collectionId));
   }
 
   return c.html("");
 });
 
+// Legacy coverage panel (kept for /runs/:id page)
 dashboard.get("/panels/coverage", async (c) => {
   const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
   if (isNaN(collectionId)) return c.html("");
@@ -81,153 +138,131 @@ dashboard.get("/panels/coverage", async (c) => {
   return c.html(await renderCoveragePanel(collection as CollectionRecord & { openapi_spec: string }));
 });
 
+// Legacy history panel (kept for /runs/:id page)
 dashboard.get("/panels/history", (c) => {
   const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
   const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10));
   if (isNaN(collectionId)) return c.html("");
 
-  return c.html(renderHistoryPanel(collectionId, page));
+  return c.html(renderRunsTab(collectionId, page));
 });
 
 // ──────────────────────────────────────────────
 // Rendering functions
 // ──────────────────────────────────────────────
 
-async function renderPage(collections: CollectionSummary[], selectedId: number | null): Promise<string> {
+async function renderPage(
+  collections: CollectionSummary[],
+  selectedId: number | null,
+  selectedRecord: CollectionRecord | null,
+): Promise<{ content: string; navExtra: string }> {
   if (collections.length === 0) {
-    return `
-      <div style="text-align:center;padding:3rem 1rem;">
-        <h1>apitool</h1>
-        <p style="color:var(--text-dim);margin:1rem 0;">No API collections registered yet.</p>
-        <p style="color:var(--text-dim);">Use <code>setup_api</code> via CLI or MCP to register your first API.</p>
-      </div>`;
+    return {
+      navExtra: "",
+      content: `
+        <div style="text-align:center;padding:3rem 1rem;">
+          <h1>apitool</h1>
+          <p style="color:var(--text-dim);margin:1rem 0;">No API collections registered yet.</p>
+          <p style="color:var(--text-dim);">Use <code>setup_api</code> via CLI or MCP to register your first API.</p>
+        </div>`,
+    };
   }
 
-  const selected = selectedId ? collections.find(col => col.id === selectedId) ?? null : null;
-
-  // API selector
+  // Navbar: separator + collection selector + action bar
   const collectionOptions = collections.map(col =>
     `<option value="${col.id}"${col.id === selectedId ? " selected" : ""}>${escapeHtml(col.name)}${col.last_run_total > 0 ? ` (${col.pass_rate}%)` : ""}</option>`,
   ).join("");
 
   const selectorHtml = collections.length === 1
-    ? `<span style="font-weight:600;font-size:1.1rem;">${escapeHtml(collections[0]!.name)}</span>
+    ? `<span class="nav-separator"></span>
+       <span class="collection-selector" style="border:none;background:none;">${escapeHtml(collections[0]!.name)}</span>
        <input type="hidden" id="collection-select" value="${collections[0]!.id}">`
-    : `<select id="collection-select"
-        hx-get="/panels/content"
-        hx-target="#collection-content"
-        hx-swap="innerHTML"
-        name="collection_id"
-        style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:1rem;font-weight:600;">
-        <option value="">Select an API...</option>
-        ${collectionOptions}
-      </select>`;
+    : `<span class="nav-separator"></span>
+       <select id="collection-select" class="collection-selector"
+         hx-get="/panels/content"
+         hx-target="#main-content"
+         hx-swap="innerHTML"
+         name="collection_id">
+         <option value="">Select an API...</option>
+         ${collectionOptions}
+       </select>`;
 
-  return `
-    <div style="display:flex;align-items:center;gap:1rem;margin:1.5rem 0 1rem;">
-      ${selectorHtml}
-    </div>
-    <div id="collection-content">
-      ${selected ? await renderCollectionContent(selected) : ""}
+  // Action bar in navbar
+  let actionHtml = "";
+  if (selectedRecord) {
+    const baseDir = selectedRecord.base_dir ?? selectedRecord.test_path;
+    const envNames = await listEnvFiles(baseDir);
+    const envSelect = envNames.length > 0
+      ? `<select name="env" form="run-form" class="collection-selector" style="font-size:0.75rem;padding:0.25rem 0.5rem;">
+          ${envNames.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n || "default")}</option>`).join("")}
+        </select>`
+      : "";
+
+    actionHtml = `<div class="nav-actions">
+      ${envSelect}
+      <form id="run-form" style="display:contents;"
+        hx-post="/run"
+        hx-indicator="#run-spinner"
+        hx-swap="none">
+        <input type="hidden" name="path" value="${escapeHtml(selectedRecord.test_path)}">
+        <button type="submit" class="btn btn-run" hx-disabled-elt="this">&#9654; Run Tests</button>
+        <span id="run-spinner" class="htmx-indicator" style="color:var(--text-dim);font-size:0.85rem;">Running...</span>
+      </form>
     </div>`;
+  }
+
+  const navExtra = `${selectorHtml}${actionHtml}`;
+
+  const bodyContent = selectedRecord ? await renderCollectionContent(selectedRecord) : "";
+
+  return {
+    navExtra,
+    content: `<div id="main-content">${bodyContent}</div>`,
+  };
 }
 
 async function renderCollectionContent(collection: CollectionRecord): Promise<string> {
-  const baseDir = collection.base_dir ?? collection.test_path;
-  const envNames = await listEnvFiles(baseDir);
+  const state = await buildCollectionState(collection);
 
-  const envSelect = envNames.length > 0
-    ? `<select name="env" form="run-form" style="padding:0.35rem 0.5rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.85rem;">
-        ${envNames.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n || "default")}</option>`).join("")}
-      </select>`
-    : "";
+  // Health strip
+  const healthStrip = renderHealthStrip(state);
 
-  const actionBar = `
-    <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:1rem;">
-      ${envSelect}
-      <form id="run-form"
-        hx-post="/run"
-        hx-target="#results-panel"
-        hx-swap="innerHTML"
-        hx-indicator="#run-spinner"
-        style="display:inline;">
-        <input type="hidden" name="path" value="${escapeHtml(collection.test_path)}">
-        <button type="submit" class="btn btn-run" hx-disabled-elt="this">Run Tests</button>
-        <span id="run-spinner" class="htmx-indicator" style="color:var(--text-dim);font-size:0.85rem;margin-left:0.25rem;">Running...</span>
-      </form>
+  // Tab bar with counts
+  const runCount = countRunsByCollection(collection.id);
+  const tabBar = `
+    <div class="tab-bar" id="tab-bar">
+      <button class="tab-btn tab-active" data-tab="endpoints"
+        hx-get="/panels/endpoints?collection_id=${collection.id}"
+        hx-target="#tab-content" hx-swap="innerHTML"
+        onclick="activateTab(this)">Endpoints <span class="tab-count">${state.totalEndpoints}</span></button>
+      <button class="tab-btn" data-tab="suites"
+        hx-get="/panels/suites?collection_id=${collection.id}"
+        hx-target="#tab-content" hx-swap="innerHTML"
+        onclick="activateTab(this)">Suites <span class="tab-count">${state.suites.length}</span></button>
+      <button class="tab-btn" data-tab="runs"
+        hx-get="/panels/runs-tab?collection_id=${collection.id}"
+        hx-target="#tab-content" hx-swap="innerHTML"
+        onclick="activateTab(this)">Runs <span class="tab-count">${runCount}</span></button>
     </div>`;
+
+  // Default tab content (endpoints)
+  const defaultContent = renderEndpointsTab(state);
+
+  const tabScript = `<script>
+    function activateTab(el) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active'));
+      el.classList.add('tab-active');
+    }
+  </script>`;
 
   return `
-    ${actionBar}
-    <div id="coverage-panel"
-      hx-get="/panels/coverage?collection_id=${collection.id}"
-      hx-trigger="load"
-      hx-swap="innerHTML">
-    </div>
-    <div id="results-panel"
-      hx-get="/panels/results?collection_id=${collection.id}"
-      hx-trigger="load"
-      hx-swap="innerHTML">
-      <span class="htmx-indicator" style="color:var(--text-dim);">Loading results...</span>
-    </div>
-    <div id="history-panel"
-      hx-get="/panels/history?collection_id=${collection.id}"
-      hx-trigger="load, every 5s"
-      hx-swap="innerHTML">
-    </div>`;
+    <div id="health-strip-panel">${healthStrip}</div>
+    ${tabBar}
+    <div id="tab-content">${defaultContent}</div>
+    ${tabScript}`;
 }
 
-async function loadSuiteMetadata(testPath: string): Promise<Map<string, { description?: string; tags?: string[] }>> {
-  const { parseDirectory } = await import("../../core/parser/yaml-parser.ts");
-  const suites = await parseDirectory(testPath);
-  const map = new Map<string, { description?: string; tags?: string[] }>();
-  for (const s of suites) {
-    map.set(s.name, { description: s.description, tags: s.tags });
-  }
-  return map;
-}
-
-async function renderRunResults(runId: number): Promise<string> {
-  const run = getRunById(runId);
-  if (!run) return `<p>Run not found</p>`;
-
-  const results = getResultsByRunId(runId);
-  if (results.length === 0) return `<p style="color:var(--text-dim);">No results for run #${runId}.</p>`;
-
-  const passed = run.passed;
-  const failed = run.failed;
-  const skipped = run.skipped;
-  const total = run.total;
-
-  const timeAgo = formatTimeAgo(run.started_at);
-  const duration = run.duration_ms != null ? formatDuration(run.duration_ms) : "-";
-
-  // Load suite metadata from YAML files if we can find the collection
-  let suiteMetadata: Map<string, { description?: string; tags?: string[] }> | undefined;
-  try {
-    const collection = run.collection_id != null ? getCollectionById(run.collection_id) : null;
-    if (collection?.test_path) {
-      suiteMetadata = await loadSuiteMetadata(collection.test_path);
-    }
-  } catch { /* skip metadata if unavailable */ }
-
-  const header = `
-    <div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);">
-      <strong>Run #${run.id}</strong>
-      <span style="color:var(--text-dim);font-size:0.85rem;">${escapeHtml(timeAgo)}</span>
-      <span style="font-size:0.9rem;">${passed}&#10003; ${failed}&#10007; ${skipped}&#9675;</span>
-      <span style="color:var(--text-dim);font-size:0.85rem;">${duration}</span>
-      ${statusBadge(total, passed, failed)}
-      <span style="flex:1;"></span>
-      <a href="/api/export/${run.id}/junit" download class="btn btn-sm btn-outline">Export JUnit</a>
-      <a href="/api/export/${run.id}/json" download class="btn btn-sm btn-outline">Export JSON</a>
-      ${failedFilterToggle()}
-    </div>`;
-
-  const suitesHtml = renderSuiteResults(results, runId, { suiteMetadata });
-
-  return header + suitesHtml + autoExpandFailedScript();
-}
+// ── Legacy helpers (kept for /runs/:id page) ──
 
 async function renderCoveragePanel(collection: CollectionRecord & { openapi_spec: string }): Promise<string> {
   try {
@@ -245,10 +280,8 @@ async function renderCoveragePanel(collection: CollectionRecord & { openapi_spec
 
     const badgeClass = pct >= 80 ? "badge-pass" : pct >= 50 ? "badge-skip" : "badge-fail";
 
-    // Build set of uncovered keys for lookup
     const uncoveredSet = new Set(uncovered.map(ep => `${ep.method} ${ep.path}`));
 
-    // Show all endpoints: covered with checkmark, uncovered with X
     const allItems = allEndpoints.map(ep => {
       const isCovered = !uncoveredSet.has(`${ep.method} ${ep.path}`);
       const icon = isCovered
@@ -274,66 +307,6 @@ async function renderCoveragePanel(collection: CollectionRecord & { openapi_spec
       </div>`;
   } catch {
     return "";
-  }
-}
-
-function renderHistoryPanel(collectionId: number, page: number): string {
-  const offset = (page - 1) * HISTORY_PAGE_SIZE;
-  const runs = listRunsByCollection(collectionId, HISTORY_PAGE_SIZE, offset);
-  const total = countRunsByCollection(collectionId);
-  const hasMore = offset + runs.length < total;
-
-  if (runs.length === 0 && page === 1) return "";
-
-  const rows = runs.map(r => {
-    const timeAgo = formatTimeAgo(r.started_at);
-    return `
-      <div class="history-row"
-        style="display:flex;align-items:center;gap:0.75rem;padding:0.4rem 0.5rem;border-bottom:1px solid var(--border);cursor:pointer;font-size:0.85rem;"
-        hx-get="/panels/results?run_id=${r.id}"
-        hx-target="#results-panel"
-        hx-swap="innerHTML">
-        <span style="font-weight:600;">#${r.id}</span>
-        <span style="color:var(--text-dim);min-width:5rem;">${escapeHtml(timeAgo)}</span>
-        <span>${r.passed}/${r.total} pass</span>
-        ${statusBadge(r.total, r.passed, r.failed)}
-        ${r.duration_ms != null ? `<span style="color:var(--text-dim);">${formatDuration(r.duration_ms)}</span>` : ""}
-      </div>`;
-  }).join("");
-
-  const loadMore = hasMore
-    ? `<div style="text-align:center;padding:0.5rem;">
-        <button class="btn btn-sm btn-outline"
-          hx-get="/panels/history?collection_id=${collectionId}&page=${page + 1}"
-          hx-target="#history-panel"
-          hx-swap="innerHTML">Load more...</button>
-      </div>`
-    : "";
-
-  return `
-    <div style="margin-top:1.5rem;">
-      <div style="font-weight:600;font-size:0.95rem;margin-bottom:0.5rem;padding-bottom:0.25rem;border-bottom:1px solid var(--border);">Run History</div>
-      ${rows}
-      ${loadMore}
-    </div>`;
-}
-
-function formatTimeAgo(isoDate: string): string {
-  try {
-    const date = new Date(isoDate);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffSec = Math.floor(diffMs / 1000);
-    if (diffSec < 60) return "just now";
-    const diffMin = Math.floor(diffSec / 60);
-    if (diffMin < 60) return `${diffMin}m ago`;
-    const diffHr = Math.floor(diffMin / 60);
-    if (diffHr < 24) return `${diffHr}h ago`;
-    const diffDay = Math.floor(diffHr / 24);
-    if (diffDay < 7) return `${diffDay}d ago`;
-    return date.toLocaleDateString();
-  } catch {
-    return isoDate;
   }
 }
 

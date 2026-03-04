@@ -147,7 +147,7 @@ describe("Web routes", () => {
     const res = await app.request("/panels/history?collection_id=1");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Run History");
+    expect(html).toContain("run-row");
   });
 
   it("removed routes return 404", async () => {
