@@ -8,6 +8,7 @@
         "@ai-sdk/anthropic": "^2",
         "@ai-sdk/openai": "^2",
         "@hono/zod-openapi": "^1.2.2",
+        "@humanwhocodes/momoa": "^2.0.3",
         "@modelcontextprotocol/sdk": "^1.27.1",
         "@readme/openapi-parser": "^5.5.0",
         "ai": "^6",

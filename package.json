@@ -39,6 +39,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@humanwhocodes/momoa": "^2.0.3",
     "@ai-sdk/anthropic": "^2",
     "@ai-sdk/openai": "^2",
     "@hono/zod-openapi": "^1.2.2",
