@@ -4,6 +4,21 @@ Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config,
 
 [![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=apitool&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBraXJyb3NoL2FwaXRvb2wiLCJtY3AiXX0=)
 
+## Claude Code Plugin
+
+Install directly in Claude Code:
+
+```
+/install-plugin https://github.com/kirrosh/apitool
+```
+
+This gives you:
+- **17 MCP tools** for API testing (test generation, execution, diagnostics, coverage)
+- **Skills** for test generation, debugging failures, and CI setup
+- **Slash commands**: `/apitool:api-test`, `/apitool:api-coverage`
+
+After installation, just say: _"Safely cover the API from openapi.json with tests"_ — the agent handles everything.
+
 ## Install
 
 ```bash
@@ -96,7 +111,7 @@ apitool run <path>           Run tests (--env, --safe, --tag, --dry-run, --env-v
 apitool add-api <name>       Register API (--spec <openapi>)
 apitool coverage             API test coverage (--spec, --tests, --fail-on-coverage)
 apitool compare <runA> <runB> Compare two test runs
-apitool serve                Web dashboard (--port 8080)
+apitool serve                Web dashboard with health strip + endpoints/suites/runs tabs (--port 8080)
 apitool mcp                  Start MCP server
 apitool chat                 AI chat agent (--provider ollama|openai|anthropic)
 apitool doctor               Diagnostics
@@ -104,6 +119,7 @@ apitool doctor               Diagnostics
 
 ## Documentation
 
+- [docs/quickstart.md](docs/quickstart.md) — step-by-step quickstart guide (RU)
 - [APITOOL.md](APITOOL.md) — full CLI and MCP tools reference
 - [docs/mcp-guide.md](docs/mcp-guide.md) — MCP agent workflow guide
 - [docs/ci.md](docs/ci.md) — CI/CD integration
