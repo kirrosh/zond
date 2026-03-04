@@ -18,8 +18,9 @@ export function registerGenerateMissingTestsTool(server: McpServer) {
       testsDir: z.string().describe("Path to directory with existing test YAML files"),
       outputDir: z.optional(z.string()).describe("Directory for saving new test files (default: same as testsDir)"),
       methodFilter: z.optional(z.array(z.string())).describe("Only include endpoints with these HTTP methods (e.g. [\"GET\"] for smoke tests)"),
+      tag: z.optional(z.string()).describe("Filter endpoints by tag"),
     },
-  }, async ({ specPath, testsDir, outputDir, methodFilter }) => {
+  }, async ({ specPath, testsDir, outputDir, methodFilter, tag }) => {
     try {
       const doc = await readOpenApiSpec(specPath);
       let allEndpoints = extractEndpoints(doc);
@@ -31,6 +32,10 @@ export function registerGenerateMissingTestsTool(server: McpServer) {
       if (methodFilter && methodFilter.length > 0) {
         const methods = methodFilter.map(m => m.toUpperCase());
         allEndpoints = allEndpoints.filter(ep => methods.includes(ep.method.toUpperCase()));
+      }
+      if (tag) {
+        const lower = tag.toLowerCase();
+        allEndpoints = allEndpoints.filter(ep => ep.tags.some(t => t.toLowerCase() === lower));
       }
 
       if (allEndpoints.length === 0) {

@@ -1,6 +1,6 @@
 # @kirrosh/apitool
 
-AI-native API testing tool. OpenAPI spec in, tests out. One binary, zero config.
+Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config, no cloud, no Postman.
 
 [![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=apitool&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBraXJyb3NoL2FwaXRvb2wiLCJtY3AiXX0=)
 
@@ -29,7 +29,13 @@ Click the badge above, or add manually:
   "mcpServers": {
     "apitool": {
       "command": "npx",
-      "args": ["-y", "@kirrosh/apitool@latest", "mcp", "--dir", "${workspaceFolder}"]
+      "args": [
+        "-y",
+        "@kirrosh/apitool@latest",
+        "mcp",
+        "--dir",
+        "${workspaceFolder}"
+      ]
     }
   }
 }
@@ -39,42 +45,49 @@ Click the badge above, or add manually:
 
 **Where to put this:**
 
-| Editor | Config file |
-|--------|-------------|
-| Cursor | Settings > MCP, or `.cursor/mcp.json` in project root |
-| Claude Code | `.mcp.json` in project root |
-| Windsurf | `.windsurfrules/mcp.json` or settings |
+| Editor      | Config file                                           |
+| ----------- | ----------------------------------------------------- |
+| Cursor      | Settings > MCP, or `.cursor/mcp.json` in project root |
+| Claude Code | `.mcp.json` in project root                           |
+| Windsurf    | `.windsurfrules/mcp.json` or settings                 |
 
 ## Main Flow (5 steps)
 
 Once MCP is connected, ask your AI agent to cover your API with tests:
 
 **1. Register your API**
+
 ```
 setup_api(name: "myapi", specPath: "openapi.json")
 ```
 
 **2. Generate a test guide** (agent reads OpenAPI + gets instructions)
+
 ```
-generate_tests_guide(specPath: "openapi.json")
+generate_and_save(specPath: "openapi.json")
 ```
 
+For large APIs (>30 endpoints), auto-chunks by tags and returns a plan. Call with `tag` for each chunk.
+
 **3. Save test suites** (agent writes YAML based on the guide)
+
 ```
 save_test_suite(filePath: "apis/myapi/tests/smoke.yaml", content: "...")
 ```
 
 **4. Run tests**
+
 ```
 run_tests(testPath: "apis/myapi/tests/", safe: true)
 ```
 
 **5. Diagnose failures**
+
 ```
 query_db(action: "diagnose_failure", runId: 42)
 ```
 
-Or just say: *"Safely cover the API from openapi.json with tests"* — the agent will do all 5 steps.
+Or just say: _"Safely cover the API from openapi.json with tests"_ — the agent will do all 5 steps.
 
 ## CLI
 

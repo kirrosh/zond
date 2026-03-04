@@ -12,14 +12,19 @@ export function registerGenerateTestsGuideTool(server: McpServer) {
       specPath: z.string().describe("Path or URL to OpenAPI spec file"),
       outputDir: z.optional(z.string()).describe("Directory for saving test files (default: ./tests/)"),
       methodFilter: z.optional(z.array(z.string())).describe("Only include endpoints with these HTTP methods (e.g. [\"GET\"] for smoke tests)"),
+      tag: z.optional(z.string()).describe("Filter endpoints by tag"),
     },
-  }, async ({ specPath, outputDir, methodFilter }) => {
+  }, async ({ specPath, outputDir, methodFilter, tag }) => {
     try {
       const doc = await readOpenApiSpec(specPath);
       let endpoints = extractEndpoints(doc);
       if (methodFilter && methodFilter.length > 0) {
         const methods = methodFilter.map(m => m.toUpperCase());
         endpoints = endpoints.filter(ep => methods.includes(ep.method.toUpperCase()));
+      }
+      if (tag) {
+        const lower = tag.toLowerCase();
+        endpoints = endpoints.filter(ep => ep.tags.some(t => t.toLowerCase() === lower));
       }
       const securitySchemes = extractSecuritySchemes(doc);
       const baseUrl = ((doc as any).servers?.[0]?.url) as string | undefined;

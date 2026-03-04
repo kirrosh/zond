@@ -17,8 +17,9 @@
 |------------|-------------------|
 | `explore_api` | Быстрый обзор всех эндпоинтов (без схем) |
 | `describe_endpoint` | Детали одного эндпоинта: параметры, схема запроса/ответа, security |
-| `generate_tests_guide` | Полный гайд по генерации: spec + алгоритм написания тестов |
-| `generate_missing_tests` | Гайд только для непокрытых эндпоинтов |
+| `generate_and_save` | **Рекомендуемый.** Авто-чанкинг по тегам для больших API (>30 эндпоинтов). Поддерживает `tag`, `methodFilter`, `testsDir` |
+| `generate_tests_guide` | Полный гайд по генерации: spec + алгоритм написания тестов. Поддерживает `tag` фильтр |
+| `generate_missing_tests` | Гайд только для непокрытых эндпоинтов. Поддерживает `tag` фильтр |
 
 ### Написание и валидация тестов
 | Инструмент | Когда использовать |
@@ -78,29 +79,37 @@ apis/petstore/
 
 ### Шаг 2. Генерация тестов
 
-**Всегда вызывайте `generate_tests_guide` перед написанием тестов.** Он возвращает полный spec + пошаговый алгоритм генерации YAML:
+**Используйте `generate_and_save`** — он автоматически разбивает большие API по тегам:
 
 ```
-generate_tests_guide(specPath: "apis/petstore/openapi.json")
+generate_and_save(specPath: "apis/petstore/openapi.json")
 ```
 
-Для начала — только GET-эндпоинты (безопасно для продакшена):
+Для большого API (>30 эндпоинтов) вернёт план с разбивкой по тегам. Вызывайте с `tag` для каждого чанка:
 
 ```
-generate_tests_guide(
+generate_and_save(specPath: "apis/petstore/openapi.json", tag: "pets")
+```
+
+Только GET-эндпоинты (безопасно для продакшена):
+
+```
+generate_and_save(
   specPath: "apis/petstore/openapi.json",
   methodFilter: ["GET"]
 )
 ```
 
-Для непокрытых эндпоинтов:
+Только непокрытые эндпоинты:
 
 ```
-generate_missing_tests(
+generate_and_save(
   specPath: "apis/petstore/openapi.json",
   testsDir: "apis/petstore/tests/"
 )
 ```
+
+> Альтернативы: `generate_tests_guide` (полный гайд без чанкинга), `generate_missing_tests` (только непокрытые, без чанкинга). Оба поддерживают `tag` фильтр.
 
 ---
 
@@ -180,12 +189,12 @@ ci_init()
 
 ## Как улучшить результат
 
-### Используйте `generate_tests_guide` перед тестами
-Никогда не пишите тесты по памяти или по частичному знанию API. Инструмент возвращает сжатый spec и точный алгоритм — агент пишет тесты правильно с первого раза.
+### Используйте `generate_and_save` перед тестами
+Никогда не пишите тесты по памяти или по частичному знанию API. Инструмент возвращает сжатый spec и точный алгоритм — агент пишет тесты правильно с первого раза. Для больших API автоматически разбивает по тегам.
 
 ### Начинайте с GET-запросов
 ```
-generate_tests_guide(specPath: "...", methodFilter: ["GET"])
+generate_and_save(specPath: "...", methodFilter: ["GET"])
 ```
 Smoke-тесты безопасны для продакшена. После их прохождения переходите к CRUD только с подтверждением пользователя.
 

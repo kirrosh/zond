@@ -26,7 +26,7 @@ coverage_analysis(specPath, testsDir)   ← baseline, no HTTP
 
 **Phase 1 — Smoke tests (GET-only, safe for production)**
 ```
-generate_tests_guide(specPath, methodFilter: ["GET"])   ← GET endpoints only
+generate_and_save(specPath, methodFilter: ["GET"])      ← GET endpoints only
 save_test_suite(...)                                    ← tags: [smoke]
 run_tests(testPath, safe: true)                         ← --safe enforces GET-only
 ```
@@ -60,8 +60,9 @@ ci_init()
 |------|-------------|
 | `set_work_dir` | Set project root for the session (call **first** with npx MCP) |
 | `setup_api` | Register API (dirs + spec + env + collection). Creates `.gitignore` with `.env*.yaml` |
-| `generate_tests_guide` | Full API spec + generation algorithm. Use **before** writing tests |
-| `generate_missing_tests` | Guide for only uncovered endpoints |
+| `generate_and_save` | **Recommended entry point.** Auto-chunks large APIs by tag (>30 endpoints). Returns plan or focused guide. Supports `tag`, `methodFilter`, `testsDir` for coverage mode |
+| `generate_tests_guide` | Full API spec + generation algorithm. Supports `tag` and `methodFilter` filters |
+| `generate_missing_tests` | Guide for only uncovered endpoints. Supports `tag` filter |
 | `save_test_suite` | Validate YAML + save single file. Returns structured errors if validation fails |
 | `save_test_suites` | Batch save multiple YAML suites in one call |
 | `run_tests` | Execute tests, return summary with failures. Use `diagnose_failure` for per-step details |

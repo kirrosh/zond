@@ -14,6 +14,7 @@ import { registerManageServerTool } from "./tools/manage-server.ts";
 import { registerCiInitTool } from "./tools/ci-init.ts";
 import { registerSetWorkDirTool } from "./tools/set-work-dir.ts";
 import { registerDescribeEndpointTool } from "./tools/describe-endpoint.ts";
+import { registerGenerateAndSaveTool } from "./tools/generate-and-save.ts";
 
 export interface McpServerOptions {
   dbPath?: string;
@@ -43,6 +44,7 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
   registerCiInitTool(server);
   registerSetWorkDirTool(server);
   registerDescribeEndpointTool(server);
+  registerGenerateAndSaveTool(server);
 
   // Connect via stdio transport
   const transport = new StdioServerTransport();
