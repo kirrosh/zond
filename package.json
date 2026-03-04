@@ -14,6 +14,12 @@
     "rest",
     "http"
   ],
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "bin": {
     "apitool": "src/cli/index.ts"
   },
