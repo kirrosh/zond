@@ -57,12 +57,15 @@ export const TOOL_DESCRIPTIONS = {
   query_db:
     "Query the apitool database. Actions: list_collections (all APIs with run stats), " +
     "list_runs (recent test runs), get_run_results (full detail for a run), " +
-    "diagnose_failure (only failed/errored steps for a run), " +
+    "diagnose_failure (only failed/errored steps for a run — each failure includes failure_type: api_error/assertion_failed/network_error, " +
+    "and summary includes api_errors/assertion_failures/network_errors counts), " +
     "compare_runs (regressions and fixes between two runs).",
 
   coverage_analysis:
     "Compare an OpenAPI spec against existing test files to find untested endpoints. " +
-    "Use to identify gaps and prioritize which endpoints to generate tests for next.",
+    "Use to identify gaps and prioritize which endpoints to generate tests for next. " +
+    "Pass runId to get enriched pass/fail/5xx breakdown per endpoint. " +
+    "Always includes static spec warnings (deprecated, missing response schemas, required params without examples).",
 
   send_request:
     "Send an ad-hoc HTTP request. Supports variable interpolation from environments (e.g. {{base_url}}).",

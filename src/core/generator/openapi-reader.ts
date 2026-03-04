@@ -134,6 +134,7 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
         responseContentTypes: [...responseContentTypesSet],
         responses,
         security,
+        deprecated: operation.deprecated ?? false,
       });
     }
   }

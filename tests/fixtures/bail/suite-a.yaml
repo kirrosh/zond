@@ -1,4 +1,5 @@
 name: Suite A
+base_url: http://localhost
 tests:
   - name: "Test A"
     GET: /a

@@ -12,6 +12,8 @@ const MOCKED_FILES = [
   "tests/agent/tools/validate-tests.test.ts",
   "tests/mcp/coverage-analysis.test.ts",
   "tests/mcp/explore-api.test.ts",
+  "tests/mcp/explore-api-schemas.test.ts",
+  "tests/mcp/generate-missing-tests.test.ts",
   "tests/mcp/send-request.test.ts",
   "tests/mcp/setup-api.test.ts",
   "tests/cli/coverage.test.ts",

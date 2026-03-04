@@ -18,6 +18,7 @@ export interface EndpointInfo {
   responseContentTypes: string[];
   responses: ResponseInfo[];
   security: string[];
+  deprecated?: boolean;
 }
 
 export interface SecuritySchemeInfo {

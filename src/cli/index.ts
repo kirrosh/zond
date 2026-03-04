@@ -118,6 +118,7 @@ Options for 'coverage':
   --spec <path>        Path to OpenAPI spec (required unless --api used)
   --tests <dir>        Path to test files directory (required unless --api used)
   --fail-on-coverage N Exit 1 when coverage percentage is below N (0–100)
+  --run-id <number>    Cross-reference with a test run for pass/fail/5xx breakdown
 
 Options for 'run':
   --dry-run            Show requests without sending them (exit code always 0)
@@ -491,7 +492,16 @@ async function main(): Promise<number> {
           return 2;
         }
       }
-      return coverageCommand({ spec, tests, failOnCoverage });
+      const runIdRaw = flags["run-id"];
+      let runId: number | undefined;
+      if (typeof runIdRaw === "string") {
+        runId = parseInt(runIdRaw, 10);
+        if (isNaN(runId)) {
+          printError(`Invalid --run-id value: ${runIdRaw} (must be a number)`);
+          return 2;
+        }
+      }
+      return coverageCommand({ spec, tests, failOnCoverage, runId });
     }
 
     default: {

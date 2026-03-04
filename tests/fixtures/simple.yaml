@@ -1,4 +1,5 @@
 name: Health Check
+base_url: http://localhost
 tests:
   - name: "API is alive"
     GET: /health

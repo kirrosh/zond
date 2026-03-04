@@ -20,7 +20,7 @@
   "scripts": {
     "apitool": "bun run src/cli/index.ts",
     "test": "bun run test:unit && bun run test:mocked",
-    "test:unit": "bun test tests/db/ tests/parser/ tests/runner/ tests/generator/ tests/cli/args.test.ts tests/cli/chat.test.ts tests/cli/commands.test.ts tests/cli/doctor.test.ts tests/cli/init.test.ts tests/cli/runs.test.ts tests/cli/safe-run.test.ts tests/cli/update.test.ts tests/integration/ tests/web/ tests/mcp/tools.test.ts tests/mcp/save-test-suite.test.ts",
+    "test:unit": "bun test tests/db/ tests/parser/ tests/runner/ tests/generator/ tests/core/ tests/cli/args.test.ts tests/cli/chat.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/doctor.test.ts tests/cli/init.test.ts tests/cli/runs.test.ts tests/cli/safe-run.test.ts tests/cli/update.test.ts tests/integration/ tests/web/ tests/mcp/tools.test.ts tests/mcp/save-test-suite.test.ts tests/agent/agent-loop.test.ts tests/agent/context-manager.test.ts tests/agent/system-prompt.test.ts tests/reporter/",
     "test:mocked": "bun run scripts/run-mocked-tests.ts",
     "test:ai": "bun test tests/ai/",
     "check": "tsc --noEmit --project tsconfig.json",

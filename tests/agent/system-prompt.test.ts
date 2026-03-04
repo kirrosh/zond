@@ -15,7 +15,6 @@ describe("AGENT_SYSTEM_PROMPT", () => {
     const toolNames = [
       "run_tests",
       "validate_tests",
-      "generate_tests",
       "query_results",
       "diagnose_failure",
     ];

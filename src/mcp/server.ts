@@ -34,7 +34,7 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
   registerQueryDbTool(server, dbPath);
   registerSendRequestTool(server, dbPath);
   registerExploreApiTool(server);
-  registerCoverageAnalysisTool(server);
+  registerCoverageAnalysisTool(server, dbPath);
   registerSaveTestSuiteTool(server, dbPath);
   registerSaveTestSuitesTool(server, dbPath);
   registerGenerateTestsGuideTool(server);
