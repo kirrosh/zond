@@ -129,7 +129,7 @@ function createPetServer() {
 describe("Auth flow integration", () => {
   let server: ReturnType<typeof Bun.serve>;
   let TEST_BASE: string;
-  const tmpDir = join(tmpdir(), `apitool-auth-integration-${Date.now()}`);
+  const tmpDir = join(tmpdir(), `zond-auth-integration-${Date.now()}`);
 
   beforeAll(async () => {
     globalThis.fetch = realFetch;

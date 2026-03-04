@@ -1,5 +1,5 @@
 {
-  "name": "apitool-marketplace",
+  "name": "zond-marketplace",
   "owner": {
     "name": "kirrosh"
   },
@@ -8,7 +8,7 @@
   },
   "plugins": [
     {
-      "name": "apitool",
+      "name": "zond",
       "source": "./",
       "description": "AI-native API testing — generate, run, and diagnose tests from OpenAPI specs",
       "version": "0.6.1",
@@ -16,7 +16,7 @@
         "name": "kirrosh",
         "url": "https://github.com/kirrosh"
       },
-      "repository": "https://github.com/kirrosh/apitool",
+      "repository": "https://github.com/kirrosh/zond",
       "license": "MIT",
       "keywords": ["api", "testing", "openapi", "yaml", "mcp"]
     }

@@ -44,19 +44,19 @@
 
 ```bash
 # Ollama (default: qwen3:4b)
-apitool chat
+zond chat
 
 # Другая модель
-apitool chat --model llama3.2:3b
+zond chat --model llama3.2:3b
 
 # OpenAI
-apitool chat --provider openai --model gpt-4o --api-key sk-...
+zond chat --provider openai --model gpt-4o --api-key sk-...
 
 # Anthropic
-apitool chat --provider anthropic --api-key sk-ant-...
+zond chat --provider anthropic --api-key sk-ant-...
 
 # Safe mode — только GET тесты
-apitool chat --safe
+zond chat --safe
 ```
 
 ## Зависимости

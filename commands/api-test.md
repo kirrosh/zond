@@ -3,7 +3,7 @@ description: Start testing an API — register, generate tests, run, and diagnos
 argument-hint: "[path-to-openapi-spec]"
 ---
 
-You are orchestrating a full API test generation workflow using the apitool MCP tools.
+You are orchestrating a full API test generation workflow using the zond MCP tools.
 
 ## Instructions
 
@@ -50,4 +50,4 @@ You are orchestrating a full API test generation workflow using the apitool MCP 
    - Show coverage percentage
    - Recommend Phase 2 (CRUD tests) if the user has a staging environment
    - Recommend `manage_server(action: "start")` for visual review
-   - Recommend `/apitool:api-coverage` to check and fill coverage gaps
+   - Recommend `/zond:api-coverage` to check and fill coverage gaps

@@ -1,4 +1,4 @@
-# Тезаурус сущностей APITOOL
+# Тезаурус сущностей ZOND
 
 Определения всех доменных сущностей системы.
 
@@ -17,7 +17,7 @@
 | `openapi_spec` | TEXT? | Путь или URL к OpenAPI спеке |
 | `created_at` | TEXT | ISO 8601 |
 
-**Создание:** `apitool add-api <name> [--spec <path>] [--dir <dir>]`
+**Создание:** `zond add-api <name> [--spec <path>] [--dir <dir>]`
 
 **Структура директорий (конвенция):**
 
@@ -122,7 +122,7 @@ base_url: https://staging.example.com/api
 token: staging-token
 ```
 
-`apitool run apis/petstore/tests/ --env staging`
+`zond run apis/petstore/tests/ --env staging`
 
 ---
 
@@ -184,6 +184,6 @@ token: staging-token
 
 ## Chat Session (Сессия чата)
 
-Контекст AI-чата (`apitool chat`). Хранит историю сообщений, провайдер и модель.
+Контекст AI-чата (`zond chat`). Хранит историю сообщений, провайдер и модель.
 
 Таблицы: `chat_sessions`, `chat_messages`. Автосжатие через `context-manager.ts` при >20 сообщений.

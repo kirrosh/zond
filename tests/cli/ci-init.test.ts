@@ -15,13 +15,13 @@ function suppressOutput() {
   };
 }
 
-describe("apitool ci init", () => {
+describe("zond ci init", () => {
   let tmpDir: string;
   let origCwd: string;
   let restoreOutput: () => void;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "apitool-ci-init-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "zond-ci-init-"));
     origCwd = process.cwd();
     process.chdir(tmpDir);
     restoreOutput = suppressOutput();
@@ -42,7 +42,7 @@ describe("apitool ci init", () => {
 
     const content = readFileSync(filePath, "utf-8");
     expect(content).toContain("actions/checkout@v4");
-    expect(content).toContain("apitool run");
+    expect(content).toContain("zond run");
     expect(content).toContain("--report junit");
     expect(content).toContain("install.sh");
   });
@@ -56,7 +56,7 @@ describe("apitool ci init", () => {
 
     const content = readFileSync(filePath, "utf-8");
     expect(content).toContain("api-smoke:");
-    expect(content).toContain("apitool run");
+    expect(content).toContain("zond run");
     expect(content).toContain("junit: test-results/smoke.xml");
   });
 

@@ -2,10 +2,10 @@ import { describe, test, expect } from "bun:test";
 import { getDb } from "../../src/db/schema.ts";
 
 describe("DB schema v3 — chat tables", () => {
-  test("migration sets user_version to 3", () => {
+  test("migration sets user_version to 1", () => {
     const db = getDb();
     const row = db.query("PRAGMA user_version").get() as { user_version: number };
-    expect(row.user_version).toBe(7);
+    expect(row.user_version).toBe(1);
   });
 
   test("chat_sessions table exists", () => {

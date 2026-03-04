@@ -7,7 +7,7 @@ import { unlinkSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
-const TEST_DB = join(tmpdir(), `apitool-web-routes-${Date.now()}.db`);
+const TEST_DB = join(tmpdir(), `zond-web-routes-${Date.now()}.db`);
 
 function seedData() {
   // Create a collection first
@@ -81,7 +81,7 @@ describe("Web routes", () => {
     const res = await app.request("/");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("apitool");
+    expect(html).toContain("zond");
     expect(html).toContain("Test API");
   });
 

@@ -24,7 +24,7 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
   const { dbPath } = options;
 
   const server = new McpServer({
-    name: "apitool",
+    name: "zond",
     version: "0.4.0",
   });
 

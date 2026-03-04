@@ -24,7 +24,7 @@ import type { TestRunResult } from "../../src/core/runner/types.ts";
 // ──────────────────────────────────────────────
 
 function tmpDb(): string {
-  return join(tmpdir(), `apitool-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+  return join(tmpdir(), `zond-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function tryUnlink(path: string): void {

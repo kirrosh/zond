@@ -31,8 +31,8 @@ const ENV_DEV = `base_url: https://jsonplaceholder.typicode.com
 
 const MCP_CONFIG = `{
   "mcpServers": {
-    "apitool": {
-      "command": "apitool",
+    "zond": {
+      "command": "zond",
       "args": ["mcp"]
     }
   }
@@ -68,7 +68,7 @@ function isClaudeCodeAvailable(): boolean {
 export async function initCommand(options: InitCommandOptions): Promise<number> {
   const cwd = process.cwd();
 
-  console.log("Initializing apitool project...\n");
+  console.log("Initializing zond project...\n");
 
   writeIfMissing(resolve(cwd, "tests/example.yaml"), EXAMPLE_TEST, options.force);
   writeIfMissing(resolve(cwd, ".env.dev.yaml"), ENV_DEV, options.force);
@@ -79,6 +79,6 @@ export async function initCommand(options: InitCommandOptions): Promise<number> 
     printSuccess("Claude Code detected — .mcp.json created");
   }
 
-  console.log("\nReady! Run: apitool run tests/");
+  console.log("\nReady! Run: zond run tests/");
   return 0;
 }

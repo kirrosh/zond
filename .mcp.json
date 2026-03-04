@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "apitool": {
+    "zond": {
       "command": "bun",
       "args": ["run", "C:/projects/apitool/src/cli/index.ts", "mcp"]
     }

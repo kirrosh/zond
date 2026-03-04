@@ -1,6 +1,6 @@
 ---
 name: debug-test-failures
-description: This skill should be used when API tests fail, when the user asks to "fix broken tests", "debug API errors", "diagnose test failures", "interpret test results", or "why did my tests fail" from apitool.
+description: This skill should be used when API tests fail, when the user asks to "fix broken tests", "debug API errors", "diagnose test failures", "interpret test results", or "why did my tests fail" from zond.
 ---
 
 # Debug Test Failures

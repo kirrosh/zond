@@ -44,8 +44,8 @@ export async function updateCommand(options: UpdateCommandOptions): Promise<numb
   console.log("Checking for updates...");
 
   // Fetch latest release
-  const res = await fetch("https://api.github.com/repos/kirrosh/apitool/releases/latest", {
-    headers: { "User-Agent": "apitool-updater" },
+  const res = await fetch("https://api.github.com/repos/kirrosh/zond/releases/latest", {
+    headers: { "User-Agent": "zond-updater" },
   });
 
   if (!res.ok) {
@@ -65,8 +65,8 @@ export async function updateCommand(options: UpdateCommandOptions): Promise<numb
   console.log(`Updating v${currentVersion} → v${latestVersion}...`);
 
   const { target, archive } = detectTarget();
-  const assetName = `apitool-${target}.${archive}`;
-  const downloadUrl = `https://github.com/kirrosh/apitool/releases/download/${release.tag_name}/${assetName}`;
+  const assetName = `zond-${target}.${archive}`;
+  const downloadUrl = `https://github.com/kirrosh/zond/releases/download/${release.tag_name}/${assetName}`;
 
   // Download artifact
   const dlRes = await fetch(downloadUrl);
@@ -81,7 +81,7 @@ export async function updateCommand(options: UpdateCommandOptions): Promise<numb
   await Bun.write(archivePath, archiveBytes);
 
   // Extract
-  const extractDir = join(tempDir, `apitool-update-${Date.now()}`);
+  const extractDir = join(tempDir, `zond-update-${Date.now()}`);
   const mkdirResult = Bun.spawnSync(["mkdir", "-p", extractDir]);
   if (mkdirResult.exitCode !== 0) {
     // Fallback for Windows
@@ -105,7 +105,7 @@ export async function updateCommand(options: UpdateCommandOptions): Promise<numb
   }
 
   // Find extracted binary
-  const binaryName = process.platform === "win32" ? "apitool.exe" : "apitool";
+  const binaryName = process.platform === "win32" ? "zond.exe" : "zond";
   const newBinary = join(extractDir, binaryName);
 
   if (!existsSync(newBinary)) {

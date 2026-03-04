@@ -6,7 +6,7 @@ export const TOOL_DESCRIPTIONS = {
   set_work_dir:
     "Set the working directory for this MCP session. " +
     "Call this FIRST before any other tool when using a shared MCP server (npx). " +
-    "Determines where apitool.db and relative test paths resolve to. " +
+    "Determines where zond.db and relative test paths resolve to. " +
     "Pass the absolute path to your project root (same as workspace root in your editor).",
 
   setup_api:
@@ -55,7 +55,7 @@ export const TOOL_DESCRIPTIONS = {
     "Use after saving test suites with save_test_suite. Check query_db(action: 'diagnose_failure') for detailed failure analysis.",
 
   query_db:
-    "Query the apitool database. Actions: list_collections (all APIs with run stats), " +
+    "Query the zond database. Actions: list_collections (all APIs with run stats), " +
     "list_runs (recent test runs), get_run_results (full detail for a run), " +
     "diagnose_failure (only failed/errored steps for a run — each failure includes failure_type: api_error/assertion_failed/network_error, " +
     "and summary includes api_errors/assertion_failures/network_errors counts), " +
@@ -71,7 +71,7 @@ export const TOOL_DESCRIPTIONS = {
     "Send an ad-hoc HTTP request. Supports variable interpolation from environments (e.g. {{base_url}}).",
 
   manage_server:
-    "Start, stop, restart, or check status of the apitool WebUI server. " +
+    "Start, stop, restart, or check status of the zond WebUI server. " +
     "Useful for viewing test results in a browser without leaving the MCP session.",
 
   generate_and_save:

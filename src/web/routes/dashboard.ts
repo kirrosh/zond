@@ -37,7 +37,7 @@ dashboard.get("/", async (c) => {
   const { content, navExtra } = await renderPage(collections, selectedId, selectedRecord);
   const isHtmx = c.req.header("HX-Request") === "true";
   if (isHtmx) return c.html(content);
-  return c.html(layout("apitool", content, navExtra));
+  return c.html(layout("zond", content, navExtra));
 });
 
 // ──────────────────────────────────────────────
@@ -161,7 +161,7 @@ async function renderPage(
       navExtra: "",
       content: `
         <div style="text-align:center;padding:3rem 1rem;">
-          <h1>apitool</h1>
+          <h1>zond</h1>
           <p style="color:var(--text-dim);margin:1rem 0;">No API collections registered yet.</p>
           <p style="color:var(--text-dim);">Use <code>setup_api</code> via CLI or MCP to register your first API.</p>
         </div>`,

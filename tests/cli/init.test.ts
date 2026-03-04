@@ -16,13 +16,13 @@ function suppressOutput() {
   };
 }
 
-describe("apitool init", () => {
+describe("zond init", () => {
   let tmpDir: string;
   let origCwd: string;
   let restoreOutput: () => void;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "apitool-init-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "zond-init-"));
     origCwd = process.cwd();
     process.chdir(tmpDir);
     restoreOutput = suppressOutput();

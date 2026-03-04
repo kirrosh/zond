@@ -31,7 +31,7 @@ export async function doctorCommand(options: DoctorOptions): Promise<number> {
   checks.push(await checkOllama());
 
   // Print results
-  console.log("\napitool doctor\n");
+  console.log("\nzond doctor\n");
 
   let hasFailure = false;
   for (const check of checks) {
@@ -51,7 +51,7 @@ export async function doctorCommand(options: DoctorOptions): Promise<number> {
 }
 
 function checkDatabase(dbPath?: string): Check {
-  const path = dbPath ? resolve(dbPath) : resolve(process.cwd(), "apitool.db");
+  const path = dbPath ? resolve(dbPath) : resolve(process.cwd(), "zond.db");
   try {
     const db = getDb(path);
     const runs = (db.query("SELECT COUNT(*) as cnt FROM runs").get() as { cnt: number }).cnt;

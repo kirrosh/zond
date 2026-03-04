@@ -316,7 +316,7 @@ Use standard tags to enable safe filtering:
 | \`destructive\` | DELETE | Explicit opt-in, run last |
 | \`auth\` | Any (auth flows) | Run first to capture tokens |
 
-Example: \`apitool run --tag smoke --safe\` → reads-only, safe against production.
+Example: \`zond run --tag smoke --safe\` → reads-only, safe against production.
 
 ---
 
@@ -335,7 +335,7 @@ Example: \`apitool run --tag smoke --safe\` → reads-only, safe against product
   tests:
     - name: Create test resource
       POST: /users
-      json: { name: "apitool-test-{{$randomString}}" }
+      json: { name: "zond-test-{{$randomString}}" }
       expect:
         status: 201
         body:
@@ -349,7 +349,7 @@ Example: \`apitool run --tag smoke --safe\` → reads-only, safe against product
       expect:
         status: 204
   \`\`\`
-- **Identifiable test data**: Prefix test data with \`apitool-test-\` or use \`{{$uuid}}\` / \`apitool-test-{{$randomString}}\` so you can identify and clean up leftover test data if needed.
+- **Identifiable test data**: Prefix test data with \`zond-test-\` or use \`{{$uuid}}\` / \`zond-test-{{$randomString}}\` so you can identify and clean up leftover test data if needed.
 
 ---
 

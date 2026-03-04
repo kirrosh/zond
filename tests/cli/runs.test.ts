@@ -8,7 +8,7 @@ import { runsCommand } from "../../src/cli/commands/runs.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
 
 function tmpDb(): string {
-  return join(tmpdir(), `apitool-runs-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+  return join(tmpdir(), `zond-runs-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function tryUnlink(path: string): void {

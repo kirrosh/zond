@@ -1,6 +1,6 @@
 # MCP Agent Guide
 
-Пошаговое руководство для AI-агента, работающего с apitool через MCP.
+Пошаговое руководство для AI-агента, работающего с zond через MCP.
 
 ---
 
@@ -52,7 +52,7 @@
 set_work_dir(workDir: "/home/user/myproject")
 ```
 
-Без этого `apitool.db` создаётся в системной temp-директории и данные теряются между сессиями.
+Без этого `zond.db` создаётся в системной temp-директории и данные теряются между сессиями.
 
 ---
 
@@ -183,7 +183,7 @@ query_db(action: "compare_runs", runId: 41, runIdB: 42)
 ci_init()
 ```
 
-Создаёт `.github/workflows/apitool.yml` (или GitLab CI) с расписанием, ручным триггером и отчётами. Подробнее: [docs/ci.md](ci.md).
+Создаёт `.github/workflows/zond.yml` (или GitLab CI) с расписанием, ручным триггером и отчётами. Подробнее: [docs/ci.md](ci.md).
 
 ---
 

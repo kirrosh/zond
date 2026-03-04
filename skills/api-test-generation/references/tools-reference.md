@@ -1,6 +1,6 @@
-# apitool MCP Tools Reference
+# zond MCP Tools Reference
 
-Complete reference for all 17 MCP tools provided by the apitool server.
+Complete reference for all 17 MCP tools provided by the zond server.
 
 ## Tool Inventory
 
@@ -8,7 +8,7 @@ Complete reference for all 17 MCP tools provided by the apitool server.
 
 | Tool | Description |
 |------|-------------|
-| `set_work_dir` | Set project root for the session. **Call first** with npx MCP so `apitool.db` and relative paths resolve correctly. |
+| `set_work_dir` | Set project root for the session. **Call first** with npx MCP so `zond.db` and relative paths resolve correctly. |
 | `setup_api` | Register a new API — creates directory structure, reads OpenAPI spec, sets up `.env.yaml` with `.gitignore`, creates a collection in the database. |
 
 ### Test Generation

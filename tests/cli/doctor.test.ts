@@ -6,7 +6,7 @@ import { closeDb } from "../../src/db/schema.ts";
 import { doctorCommand } from "../../src/cli/commands/doctor.ts";
 
 function tmpDb(): string {
-  return join(tmpdir(), `apitool-doctor-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+  return join(tmpdir(), `zond-doctor-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function tryUnlink(path: string): void {

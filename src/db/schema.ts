@@ -6,7 +6,7 @@ let _db: Database | null = null;
 let _dbPath: string | null = null;
 
 export function getDb(dbPath?: string): Database {
-  const path = dbPath ? resolve(dbPath) : (_dbPath ?? resolve(process.cwd(), "apitool.db"));
+  const path = dbPath ? resolve(dbPath) : (_dbPath ?? resolve(process.cwd(), "zond.db"));
 
   // If cached connection exists, verify the file still exists
   if (_db && _dbPath === path && existsSync(path)) return _db;
@@ -48,9 +48,9 @@ export function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 1;
 
-const SCHEMA_V1 = `
+const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     started_at    TEXT NOT NULL,
@@ -68,26 +68,21 @@ const SCHEMA_V1 = `
   );
 
   CREATE TABLE IF NOT EXISTS results (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id          INTEGER NOT NULL REFERENCES runs(id),
-    suite_name      TEXT NOT NULL,
-    test_name       TEXT NOT NULL,
-    status          TEXT NOT NULL,
-    duration_ms     INTEGER NOT NULL,
-    request_method  TEXT,
-    request_url     TEXT,
-    request_body    TEXT,
-    response_status INTEGER,
-    response_body   TEXT,
-    error_message   TEXT,
-    assertions      TEXT,
-    captures        TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS environments (
-    id        INTEGER PRIMARY KEY AUTOINCREMENT,
-    name      TEXT NOT NULL UNIQUE,
-    variables TEXT NOT NULL
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id           INTEGER NOT NULL REFERENCES runs(id),
+    suite_name       TEXT NOT NULL,
+    test_name        TEXT NOT NULL,
+    status           TEXT NOT NULL,
+    duration_ms      INTEGER NOT NULL,
+    request_method   TEXT,
+    request_url      TEXT,
+    request_body     TEXT,
+    response_status  INTEGER,
+    response_body    TEXT,
+    error_message    TEXT,
+    assertions       TEXT,
+    captures         TEXT,
+    response_headers TEXT
   );
 
   CREATE TABLE IF NOT EXISTS collections (
@@ -95,18 +90,10 @@ const SCHEMA_V1 = `
     name         TEXT NOT NULL,
     test_path    TEXT NOT NULL,
     openapi_spec TEXT,
-    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    base_dir     TEXT
   );
 
-  CREATE INDEX IF NOT EXISTS idx_runs_started      ON runs(started_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_runs_collection    ON runs(collection_id);
-  CREATE INDEX IF NOT EXISTS idx_results_run        ON results(run_id);
-  CREATE INDEX IF NOT EXISTS idx_results_status     ON results(status);
-  CREATE INDEX IF NOT EXISTS idx_results_name       ON results(suite_name, test_name);
-  CREATE INDEX IF NOT EXISTS idx_collections_name   ON collections(name);
-`;
-
-const SCHEMA_V2 = `
   CREATE TABLE IF NOT EXISTS ai_generations (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
     collection_id     INTEGER REFERENCES collections(id),
@@ -122,10 +109,7 @@ const SCHEMA_V2 = `
     duration_ms       INTEGER,
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
   );
-  CREATE INDEX IF NOT EXISTS idx_ai_gen_collection ON ai_generations(collection_id);
-`;
 
-const SCHEMA_V3 = `
   CREATE TABLE IF NOT EXISTS chat_sessions (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     title       TEXT,
@@ -148,81 +132,28 @@ const SCHEMA_V3 = `
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
-  CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
-  CREATE INDEX IF NOT EXISTS idx_chat_sessions_active  ON chat_sessions(last_active DESC);
-`;
-
-const SCHEMA_V4 = `
   CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
-`;
 
-const SCHEMA_V5 = `
-  ALTER TABLE collections ADD COLUMN base_dir TEXT;
-
-  CREATE TABLE environments_new (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    name          TEXT NOT NULL,
-    collection_id INTEGER REFERENCES collections(id) ON DELETE CASCADE,
-    variables     TEXT NOT NULL
-  );
-
-  INSERT INTO environments_new (id, name, collection_id, variables)
-    SELECT id, name, NULL, variables FROM environments;
-
-  DROP TABLE environments;
-  ALTER TABLE environments_new RENAME TO environments;
-
-  CREATE UNIQUE INDEX idx_env_name_collection ON environments(name, collection_id);
-  CREATE UNIQUE INDEX idx_env_name_global ON environments(name) WHERE collection_id IS NULL;
-`;
-
-const SCHEMA_V6 = `
-  ALTER TABLE results ADD COLUMN response_headers TEXT;
-`;
-
-const SCHEMA_V7 = `
-  DROP TABLE IF EXISTS environments;
+  CREATE INDEX IF NOT EXISTS idx_runs_started      ON runs(started_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_runs_collection    ON runs(collection_id);
+  CREATE INDEX IF NOT EXISTS idx_results_run        ON results(run_id);
+  CREATE INDEX IF NOT EXISTS idx_results_status     ON results(status);
+  CREATE INDEX IF NOT EXISTS idx_results_name       ON results(suite_name, test_name);
+  CREATE INDEX IF NOT EXISTS idx_collections_name   ON collections(name);
+  CREATE INDEX IF NOT EXISTS idx_ai_gen_collection  ON ai_generations(collection_id);
+  CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
+  CREATE INDEX IF NOT EXISTS idx_chat_sessions_active  ON chat_sessions(last_active DESC);
 `;
 
 function runMigrations(db: Database): void {
-  const currentVersion = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-
-  if (currentVersion >= SCHEMA_VERSION) return;
+  const ver = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
+  if (ver >= SCHEMA_VERSION) return;
 
   db.transaction(() => {
-    if (currentVersion < 1) {
-      db.exec(SCHEMA_V1);
-    }
-    if (currentVersion < 2) {
-      db.exec(SCHEMA_V2);
-    }
-    if (currentVersion < 3) {
-      db.exec(SCHEMA_V3);
-    }
-    if (currentVersion < 4) {
-      db.exec(SCHEMA_V4);
-    }
-    if (currentVersion < 5) {
-      db.exec(SCHEMA_V5);
-      // Backfill base_dir from dirname(test_path) for existing collections
-      const rows = db.query("SELECT id, test_path FROM collections WHERE base_dir IS NULL").all() as { id: number; test_path: string }[];
-      const updateStmt = db.prepare("UPDATE collections SET base_dir = ? WHERE id = ?");
-      for (const row of rows) {
-        // test_path uses forward slashes (normalizePath); get parent dir
-        const lastSlash = row.test_path.lastIndexOf("/");
-        const baseDir = lastSlash > 0 ? row.test_path.slice(0, lastSlash) : row.test_path;
-        updateStmt.run(baseDir, row.id);
-      }
-    }
-    if (currentVersion < 6) {
-      db.exec(SCHEMA_V6);
-    }
-    if (currentVersion < 7) {
-      db.exec(SCHEMA_V7);
-    }
+    db.exec(SCHEMA);
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();
 }

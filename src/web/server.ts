@@ -75,7 +75,7 @@ export function createApp(options?: { dev?: boolean }) {
   app.doc("/api/openapi.json", (c) => ({
     openapi: "3.0.0",
     info: {
-      title: "apitool API",
+      title: "zond API",
       version: "0.1.0",
       description: "API testing platform — self-documented API",
     },
@@ -107,7 +107,7 @@ export async function startServer(options: ServerOptions = {}): Promise<void> {
 
   const { getRuntimeInfo } = await import("../cli/runtime.ts");
   const devLabel = options.dev ? " [dev]" : "";
-  console.log(`apitool server (${getRuntimeInfo()}) running at http://${host === "0.0.0.0" ? "localhost" : host}:${port}${devLabel}`);
+  console.log(`zond server (${getRuntimeInfo()}) running at http://${host === "0.0.0.0" ? "localhost" : host}:${port}${devLabel}`);
 
   Bun.serve({
     fetch: app.fetch,

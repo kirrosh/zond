@@ -15,7 +15,7 @@ import type { TestRunResult } from "../../src/core/runner/types.ts";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 function tmpDb(): string {
-  return join(tmpdir(), `apitool-mcp-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+  return join(tmpdir(), `zond-mcp-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 }
 
 function tryUnlink(path: string): void {

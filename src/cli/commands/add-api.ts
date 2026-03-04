@@ -40,8 +40,8 @@ export async function addApiCommand(options: AddApiOptions): Promise<number> {
     if (result.baseUrl) console.log(`  Base URL:  ${result.baseUrl}`);
     console.log();
     console.log("Next steps:");
-    console.log(`  apitool ai-generate --api ${name} --prompt "test the user endpoints"`);
-    console.log(`  apitool run --api ${name}`);
+    console.log(`  zond ai-generate --api ${name} --prompt "test the user endpoints"`);
+    console.log(`  zond run --api ${name}`);
 
     return 0;
   } catch (err) {

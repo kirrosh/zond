@@ -13,7 +13,7 @@ export function layout(title: string, content: string, navExtra = ""): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escapeHtml(title)} — apitool</title>
+  <title>${escapeHtml(title)} — zond</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -23,13 +23,13 @@ export function layout(title: string, content: string, navExtra = ""): string {
 </head>
 <body>
   <nav class="navbar">
-    <a href="/" class="nav-brand" style="text-decoration:none;color:inherit;"><span class="logo-dot"></span>apitool</a>
+    <a href="/" class="nav-brand" style="text-decoration:none;color:inherit;"><span class="logo-dot"></span>zond</a>
     ${navExtra}
   </nav>
   <main class="main-container">
     ${content}
   </main>
-  <footer class="footer"><div class="main-container">apitool</div></footer>
+  <footer class="footer"><div class="main-container">zond</div></footer>
   ${devScript}
 </body>
 </html>`;

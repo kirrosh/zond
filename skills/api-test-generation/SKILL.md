@@ -1,6 +1,6 @@
 ---
 name: api-test-generation
-description: This skill should be used when the user asks to "test an API", "cover endpoints with tests", "generate API tests", "create test suites from OpenAPI spec", "safely cover API", or mentions API testing workflow with apitool.
+description: This skill should be used when the user asks to "test an API", "cover endpoints with tests", "generate API tests", "create test suites from OpenAPI spec", "safely cover API", or mentions API testing workflow with zond.
 ---
 
 # API Test Generation Workflow
@@ -9,7 +9,7 @@ Generate comprehensive API tests from an OpenAPI spec using a safe, phased appro
 
 ## Prerequisites
 
-- The `apitool` MCP server must be connected (check with `/mcp`)
+- The `zond` MCP server must be connected (check with `/mcp`)
 - An OpenAPI spec file (JSON or YAML) must be available
 
 ## Workflow
@@ -22,7 +22,7 @@ Generate comprehensive API tests from an OpenAPI spec using a safe, phased appro
 set_work_dir(workDir: "<absolute path to project root>")
 ```
 
-This ensures `apitool.db` and all relative paths resolve correctly.
+This ensures `zond.db` and all relative paths resolve correctly.
 
 ### Phase 0 — Register + Static Analysis (zero HTTP requests)
 

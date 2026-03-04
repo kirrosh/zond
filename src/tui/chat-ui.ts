@@ -46,7 +46,7 @@ export async function startChatUI(config: AgentConfig): Promise<void> {
   // Disable mouse reporting that may be left over from other TUI apps
   process.stdout.write(DISABLE_MOUSE);
 
-  console.log(`\n${BOLD}${CYAN}apitool chat${RESET} — ${provider}/${model}${safeLabel}`);
+  console.log(`\n${BOLD}${CYAN}zond chat${RESET} — ${provider}/${model}${safeLabel}`);
   console.log(`${DIM}Commands: /clear, /tokens, /quit  |  Ctrl+C to exit${RESET}\n`);
 
   const messages: ModelMessage[] = [];

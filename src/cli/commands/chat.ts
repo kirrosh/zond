@@ -24,7 +24,7 @@ export async function chatCommand(options: ChatCommandOptions): Promise<number> 
   const providerConfig = resolveProviderConfig({
     provider: providerName as AIProviderConfig["provider"],
     model: options.model,
-    apiKey: options.apiKey ?? process.env["APITOOL_AI_KEY"],
+    apiKey: options.apiKey ?? process.env["ZOND_AI_KEY"],
     baseUrl: options.baseUrl,
   });
 

@@ -72,25 +72,25 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 function printUsage(): void {
-  console.log(`apitool - API Testing Platform
+  console.log(`zond - API Testing Platform
 
 Usage:
-  apitool add-api <name>   Register a new API (collection)
-  apitool run <path>       Run API tests
-  apitool validate <path>  Validate test files without running
-  apitool ai-generate --from <spec> --prompt "..."  Generate tests with AI
-  apitool runs [id]        View test run history
-  apitool coverage --spec <path> --tests <dir>  Analyze API test coverage
-  apitool collections      List test collections
-  apitool serve            Start web dashboard
-  apitool init             Initialize a new apitool project
-  apitool ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
-  apitool mcp              Start MCP server (stdio transport for AI agents)
+  zond add-api <name>   Register a new API (collection)
+  zond run <path>       Run API tests
+  zond validate <path>  Validate test files without running
+  zond ai-generate --from <spec> --prompt "..."  Generate tests with AI
+  zond runs [id]        View test run history
+  zond coverage --spec <path> --tests <dir>  Analyze API test coverage
+  zond collections      List test collections
+  zond serve            Start web dashboard
+  zond init             Initialize a new zond project
+  zond ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
+  zond mcp              Start MCP server (stdio transport for AI agents)
                            --dir <path>  Set working directory (relative paths resolve here)
-  apitool chat             Start interactive AI chat for API testing
-  apitool compare <runA> <runB>  Compare two test runs (regressions/fixes)
-  apitool doctor           Run diagnostic checks
-  apitool update           Update to latest version
+  zond chat             Start interactive AI chat for API testing
+  zond compare <runA> <runB>  Compare two test runs (regressions/fixes)
+  zond doctor           Run diagnostic checks
+  zond update           Update to latest version
 
 Options for 'add-api':
   --spec <path-or-url>   OpenAPI spec (extracts base_url from servers[0])
@@ -100,7 +100,7 @@ Options for 'add-api':
 Options for 'chat':
   --provider <name>    LLM provider: ollama, openai, anthropic, custom (default: ollama)
   --model <name>       Model name (default: provider-specific)
-  --api-key <key>      API key (or set APITOOL_AI_KEY env var)
+  --api-key <key>      API key (or set ZOND_AI_KEY env var)
   --base-url <url>     Provider base URL override
   --safe               Only allow running GET tests (read-only mode)
 
@@ -128,8 +128,8 @@ Options for 'run':
   --report <format>    Output format: console, json, junit (default: console)
   --timeout <ms>       Override request timeout
   --bail               Stop on first suite failure
-  --no-db              Do not save results to apitool.db
-  --db <path>          Path to SQLite database file (default: apitool.db)
+  --no-db              Do not save results to zond.db
+  --db <path>          Path to SQLite database file (default: zond.db)
   --auth-token <token> Auth token injected as {{auth_token}} variable
   --safe               Run only GET tests (read-only, safe mode)
   --tag <tag>          Filter suites by tag (repeatable, comma-separated, OR logic)
@@ -140,7 +140,7 @@ Options for 'ai-generate':
   --prompt <text>      Test scenario description (required)
   --provider <name>    LLM provider: ollama, openai, anthropic, custom (default: ollama)
   --model <name>       Model name (default: provider-specific)
-  --api-key <key>      API key (or set APITOOL_AI_KEY env var)
+  --api-key <key>      API key (or set ZOND_AI_KEY env var)
   --base-url <url>     Provider base URL override
   --output <dir>       Output directory (default: ./generated/ai/)
 
@@ -148,7 +148,7 @@ Options for 'serve':
   --port <port>        Server port (default: 8080)
   --host <host>        Server host (default: 0.0.0.0)
   --openapi <spec>     Path to OpenAPI spec for Explorer
-  --db <path>          Path to SQLite database file (default: apitool.db)
+  --db <path>          Path to SQLite database file (default: zond.db)
   --watch              Enable dev mode with hot reload (auto-refresh browser on file changes)
 
 Options for 'ci init':
@@ -175,7 +175,7 @@ async function main(): Promise<number> {
 
   // Version
   if (command === "--version" || flags["version"] === true || flags["v"] === true) {
-    console.log(`apitool ${VERSION} (${getRuntimeInfo()})`);
+    console.log(`zond ${VERSION} (${getRuntimeInfo()})`);
     return 0;
   }
 
@@ -188,7 +188,7 @@ async function main(): Promise<number> {
     case "add-api": {
       const name = positional[0];
       if (!name) {
-        printError("Missing name argument. Usage: apitool add-api <name> [--spec <path>] [--dir <dir>]");
+        printError("Missing name argument. Usage: zond add-api <name> [--spec <path>] [--dir <dir>]");
         return 2;
       }
 
@@ -228,7 +228,7 @@ async function main(): Promise<number> {
         }
       }
       if (!path) {
-        printError("Missing path argument. Usage: apitool run <path> or apitool run --api <name>");
+        printError("Missing path argument. Usage: zond run <path> or zond run --api <name>");
         return 2;
       }
 
@@ -288,7 +288,7 @@ async function main(): Promise<number> {
     case "validate": {
       const path = positional[0];
       if (!path) {
-        printError("Missing path argument. Usage: apitool validate <path>");
+        printError("Missing path argument. Usage: zond validate <path>");
         return 2;
       }
 
@@ -315,12 +315,12 @@ async function main(): Promise<number> {
       }
 
       if (typeof from !== "string") {
-        printError("Missing --from <spec>. Usage: apitool ai-generate --from <spec> --prompt \"...\"");
+        printError("Missing --from <spec>. Usage: zond ai-generate --from <spec> --prompt \"...\"");
         return 2;
       }
       const prompt = flags["prompt"];
       if (typeof prompt !== "string") {
-        printError("Missing --prompt <text>. Usage: apitool ai-generate --from <spec> --prompt \"...\"");
+        printError("Missing --prompt <text>. Usage: zond ai-generate --from <spec> --prompt \"...\"");
         return 2;
       }
       return aiGenerateCommand({
@@ -418,7 +418,7 @@ async function main(): Promise<number> {
     case "ci": {
       const ciSub = positional[0];
       if (ciSub !== "init") {
-        printError("Usage: apitool ci init [--github|--gitlab] [--force]");
+        printError("Usage: zond ci init [--github|--gitlab] [--force]");
         return 2;
       }
       let platform: "github" | "gitlab" | undefined;
@@ -435,7 +435,7 @@ async function main(): Promise<number> {
       const rawA = positional[0];
       const rawB = positional[1];
       if (!rawA || !rawB) {
-        printError("Usage: apitool compare <runA> <runB>");
+        printError("Usage: zond compare <runA> <runB>");
         return 2;
       }
       const runA = parseInt(rawA, 10);
@@ -476,11 +476,11 @@ async function main(): Promise<number> {
       }
 
       if (typeof spec !== "string") {
-        printError("Missing --spec <path>. Usage: apitool coverage --spec <path> --tests <dir>");
+        printError("Missing --spec <path>. Usage: zond coverage --spec <path> --tests <dir>");
         return 2;
       }
       if (typeof tests !== "string") {
-        printError("Missing --tests <dir>. Usage: apitool coverage --spec <path> --tests <dir>");
+        printError("Missing --tests <dir>. Usage: zond coverage --spec <path> --tests <dir>");
         return 2;
       }
       const failOnCoverageRaw = flags["fail-on-coverage"];

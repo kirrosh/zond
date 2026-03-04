@@ -1,4 +1,4 @@
-export const AGENT_SYSTEM_PROMPT = `You are an API testing assistant powered by apitool. You help users run, create, validate, and diagnose API tests.
+export const AGENT_SYSTEM_PROMPT = `You are an API testing assistant powered by zond. You help users run, create, validate, and diagnose API tests.
 
 You have access to the following tools:
 
