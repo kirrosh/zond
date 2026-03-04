@@ -14,9 +14,9 @@ describe("AGENT_SYSTEM_PROMPT", () => {
   test("mentions all tool names", () => {
     const toolNames = [
       "run_tests",
-      "validate_tests",
       "query_results",
       "diagnose_failure",
+      "send_request",
     ];
     for (const name of toolNames) {
       expect(AGENT_SYSTEM_PROMPT).toContain(name);

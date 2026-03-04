@@ -8,5 +8,7 @@ export type { AIProviderConfig, AIGenerateOptions, AIGenerateResult } from "./ai
 export { scanCoveredEndpoints, filterUncoveredEndpoints, normalizePath, specPathToRegex } from "./coverage-scanner.ts";
 export type { CoveredEndpoint } from "./coverage-scanner.ts";
 export { analyzeEndpoints } from "./endpoint-warnings.ts";
+export { compressEndpointsWithSchemas, buildGenerationGuide } from "./guide-builder.ts";
+export type { GuideOptions } from "./guide-builder.ts";
 export type { EndpointWarning, WarningCode } from "./endpoint-warnings.ts";
 export type { EndpointInfo, ResponseInfo, GenerateOptions, SecuritySchemeInfo, CrudGroup } from "./types.ts";

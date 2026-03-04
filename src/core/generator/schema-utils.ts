@@ -1,6 +1,36 @@
 import type { OpenAPIV3 } from "openapi-types";
 
 /**
+ * Deep-clone an object, replacing circular references with `{ "$ref": "[Circular]" }`.
+ * Uses WeakSet to track visited objects.
+ */
+export function decycleSchema(obj: unknown): unknown {
+  const seen = new WeakSet<object>();
+
+  function walk(value: unknown): unknown {
+    if (value === null || typeof value !== "object") return value;
+
+    if (Array.isArray(value)) {
+      return value.map(item => walk(item));
+    }
+
+    const obj = value as Record<string, unknown>;
+    if (seen.has(obj)) {
+      return { $ref: "[Circular]" };
+    }
+    seen.add(obj);
+
+    const result: Record<string, unknown> = {};
+    for (const key of Object.keys(obj)) {
+      result[key] = walk(obj[key]);
+    }
+    return result;
+  }
+
+  return walk(obj);
+}
+
+/**
  * Returns true if the schema is effectively `any` — no type, no properties, no constraints.
  */
 export function isAnySchema(schema: OpenAPIV3.SchemaObject | undefined): boolean {

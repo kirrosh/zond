@@ -1,15 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerRunTestsTool } from "./tools/run-tests.ts";
-import { registerValidateTestsTool } from "./tools/validate-tests.ts";
 import { registerQueryDbTool } from "./tools/query-db.ts";
 import { registerSendRequestTool } from "./tools/send-request.ts";
-import { registerExploreApiTool } from "./tools/explore-api.ts";
 import { registerCoverageAnalysisTool } from "./tools/coverage-analysis.ts";
 import { registerSaveTestSuiteTool, registerSaveTestSuitesTool } from "./tools/save-test-suite.ts";
-import { registerGenerateTestsGuideTool } from "./tools/generate-tests-guide.ts";
 import { registerSetupApiTool } from "./tools/setup-api.ts";
-import { registerGenerateMissingTestsTool } from "./tools/generate-missing-tests.ts";
 import { registerManageServerTool } from "./tools/manage-server.ts";
 import { registerCiInitTool } from "./tools/ci-init.ts";
 import { registerSetWorkDirTool } from "./tools/set-work-dir.ts";
@@ -25,21 +21,17 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
 
   const server = new McpServer({
     name: "zond",
-    version: "0.7.1",
+    version: "0.8.0",
   });
 
   // Register all tools
   registerRunTestsTool(server, dbPath);
-  registerValidateTestsTool(server);
   registerQueryDbTool(server, dbPath);
   registerSendRequestTool(server, dbPath);
-  registerExploreApiTool(server);
   registerCoverageAnalysisTool(server, dbPath);
   registerSaveTestSuiteTool(server, dbPath);
   registerSaveTestSuitesTool(server, dbPath);
-  registerGenerateTestsGuideTool(server);
   registerSetupApiTool(server, dbPath);
-  registerGenerateMissingTestsTool(server);
   registerManageServerTool(server, dbPath);
   registerCiInitTool(server);
   registerSetWorkDirTool(server);

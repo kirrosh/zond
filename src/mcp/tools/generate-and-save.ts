@@ -7,7 +7,7 @@ import {
   scanCoveredEndpoints,
   filterUncoveredEndpoints,
 } from "../../core/generator/index.ts";
-import { compressEndpointsWithSchemas, buildGenerationGuide } from "./generate-tests-guide.ts";
+import { compressEndpointsWithSchemas, buildGenerationGuide } from "../../core/generator/guide-builder.ts";
 import { planChunks, filterByTag } from "../../core/generator/chunker.ts";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 

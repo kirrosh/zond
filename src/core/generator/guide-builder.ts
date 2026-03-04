@@ -1,56 +1,5 @@
-import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "../../core/generator/index.ts";
-import type { EndpointInfo, SecuritySchemeInfo } from "../../core/generator/types.ts";
-import { compressSchema, formatParam, isAnySchema } from "../../core/generator/schema-utils.ts";
-import { TOOL_DESCRIPTIONS } from "../descriptions.js";
-
-export function registerGenerateTestsGuideTool(server: McpServer) {
-  server.registerTool("generate_tests_guide", {
-    description: TOOL_DESCRIPTIONS.generate_tests_guide,
-    inputSchema: {
-      specPath: z.string().describe("Path or URL to OpenAPI spec file"),
-      outputDir: z.optional(z.string()).describe("Directory for saving test files (default: ./tests/)"),
-      methodFilter: z.optional(z.array(z.string())).describe("Only include endpoints with these HTTP methods (e.g. [\"GET\"] for smoke tests)"),
-      tag: z.optional(z.string()).describe("Filter endpoints by tag"),
-    },
-  }, async ({ specPath, outputDir, methodFilter, tag }) => {
-    try {
-      const doc = await readOpenApiSpec(specPath);
-      let endpoints = extractEndpoints(doc);
-      if (methodFilter && methodFilter.length > 0) {
-        const methods = methodFilter.map(m => m.toUpperCase());
-        endpoints = endpoints.filter(ep => methods.includes(ep.method.toUpperCase()));
-      }
-      if (tag) {
-        const lower = tag.toLowerCase();
-        endpoints = endpoints.filter(ep => ep.tags.some(t => t.toLowerCase() === lower));
-      }
-      const securitySchemes = extractSecuritySchemes(doc);
-      const baseUrl = ((doc as any).servers?.[0]?.url) as string | undefined;
-      const title = (doc as any).info?.title as string | undefined;
-
-      const apiContext = compressEndpointsWithSchemas(endpoints, securitySchemes);
-      const guide = buildGenerationGuide({
-        title: title ?? "API",
-        baseUrl,
-        apiContext,
-        outputDir: outputDir ?? "./tests/",
-        securitySchemes,
-        endpointCount: endpoints.length,
-      });
-
-      return {
-        content: [{ type: "text" as const, text: guide }],
-      };
-    } catch (err) {
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify({ error: (err as Error).message }, null, 2) }],
-        isError: true,
-      };
-    }
-  });
-}
+import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
+import { compressSchema, formatParam, isAnySchema } from "./schema-utils.ts";
 
 export function compressEndpointsWithSchemas(
   endpoints: EndpointInfo[],
@@ -262,7 +211,7 @@ Never put actual key values directly in YAML test files.
 - Note required fields in request bodies
 
 ### Step 2: Plan Test Suites
-Before generating, check coverage with \`coverage_analysis\` to avoid duplicating existing tests. Use \`generate_missing_tests\` for incremental generation.
+Before generating, check coverage with \`coverage_analysis\` to avoid duplicating existing tests. Use \`generate_and_save(testsDir=...)\` for incremental generation of uncovered endpoints only.
 
 > **Coverage note**: coverage is a static scan of YAML files — an endpoint is "covered" if a test file contains a matching METHOD + path line, regardless of whether tests pass or actually run.
 
@@ -372,13 +321,13 @@ Example: \`zond run --tag smoke --safe\` → reads-only, safe against production
 | Tool | When |
 |------|------|
 | \`setup_api\` | Register a new API (creates dirs, reads spec, sets up env) |
-| \`generate_tests_guide\` | Get this guide for full API spec |
-| \`generate_missing_tests\` | Get guide for only uncovered endpoints |
+| \`generate_and_save\` | Get test generation guide (with auto-chunking for large APIs) |
 | \`save_test_suite\` | Save generated YAML (validates before writing) |
+| \`save_test_suites\` | Save multiple YAML files in one call |
 | \`run_tests\` | Execute saved test suites |
 | \`query_db\` | Query runs, collections, results, diagnose failures |
 | \`coverage_analysis\` | Find untested endpoints for incremental generation |
-| \`explore_api\` | Re-check specific endpoints (use includeSchemas=true) |
+| \`describe_endpoint\` | Get full details for one endpoint when debugging |
 | \`ci_init\` | Generate CI/CD workflow (GitHub Actions / GitLab CI) to run tests on push |
 
 ## Workflow After Tests Pass

@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { OpenAPIV3 } from "openapi-types";
 import { readOpenApiSpec } from "../../core/generator/index.ts";
+import { decycleSchema } from "../../core/generator/schema-utils.ts";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 function generateTestSnippet(params: {
@@ -229,7 +230,7 @@ export function registerDescribeEndpointTool(server: McpServer) {
       };
 
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(decycleSchema(result), null, 2) }],
       };
     } catch (err) {
       return {

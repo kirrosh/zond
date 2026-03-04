@@ -10,8 +10,6 @@ import {
 } from "../../src/db/queries.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
 
-// We test the tool handler logic directly by importing the registration functions
-// and calling the MCP server's tool handlers through a minimal test harness
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 function tmpDb(): string {
@@ -57,49 +55,6 @@ function makeSuiteResult(overrides?: Partial<TestRunResult>): TestRunResult {
     ...overrides,
   };
 }
-
-// ──────────────────────────────────────────────
-// validate_tests
-// ──────────────────────────────────────────────
-
-describe("validate_tests", () => {
-  test("validates a valid test file", async () => {
-    const { registerValidateTestsTool } = await import("../../src/mcp/tools/validate-tests.ts");
-
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    registerValidateTestsTool(server);
-
-    // Access the registered tool handler via the internal registry
-    const tool = (server as any)._registeredTools["validate_tests"];
-    expect(tool).toBeDefined();
-
-    const fixturePath = resolve("tests/fixtures/valid/a.yaml");
-    const result = await tool.handler({ testPath: fixturePath });
-
-    expect(result.content).toHaveLength(1);
-    expect(result.content[0].type).toBe("text");
-
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.valid).toBe(true);
-    expect(parsed.suites).toBe(1);
-    expect(parsed.tests).toBe(1);
-  });
-
-  test("returns error for invalid path", async () => {
-    const { registerValidateTestsTool } = await import("../../src/mcp/tools/validate-tests.ts");
-
-    const server = new McpServer({ name: "test", version: "0.0.1" });
-    registerValidateTestsTool(server);
-
-    const tool = (server as any)._registeredTools["validate_tests"];
-    const result = await tool.handler({ testPath: "/nonexistent/path.yaml" });
-
-    expect(result.isError).toBe(true);
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.valid).toBe(false);
-    expect(parsed.error).toBeDefined();
-  });
-});
 
 // ──────────────────────────────────────────────
 // query_db
@@ -450,6 +405,24 @@ describe("describe_endpoint testSnippet", () => {
     expect(parsed.testSnippet).toContain("{{base_url}}");
     expect(parsed.testSnippet).toContain("GET:");
     expect(parsed.testSnippet).toContain("status:");
+  });
+
+  test("does not crash on spec with circular $ref", async () => {
+    const { registerDescribeEndpointTool } = await import("../../src/mcp/tools/describe-endpoint.ts");
+
+    const server = new McpServer({ name: "test", version: "0.0.1" });
+    registerDescribeEndpointTool(server);
+
+    const tool = (server as any)._registeredTools["describe_endpoint"];
+    const specPath = resolve("tests/fixtures/circular-ref.json");
+    const result = await tool.handler({ specPath, method: "GET", path: "/nodes" });
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.method).toBe("GET");
+    expect(parsed.path).toBe("/nodes");
+    // Should contain [Circular] markers instead of crashing
+    expect(result.content[0].text).toContain("Circular");
   });
 
   test("testSnippet includes Authorization header when security is defined", async () => {

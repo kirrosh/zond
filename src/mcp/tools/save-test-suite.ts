@@ -138,7 +138,7 @@ export async function validateAndSave(
 
       const coverage: Record<string, unknown> = { percentage, covered: coveredCount, total, uncoveredCount: uncovered.length };
       if (percentage < 80 && uncovered.length > 0) {
-        coverage.suggestion = `Use generate_missing_tests to cover ${uncovered.length} remaining endpoint${uncovered.length > 1 ? "s" : ""}`;
+        coverage.suggestion = `Use generate_and_save with testsDir to cover ${uncovered.length} remaining endpoint${uncovered.length > 1 ? "s" : ""}`;
       }
       result.coverage = coverage;
     }

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { compressSchema, formatParam } from "../../../src/core/generator/schema-utils.ts";
+import { compressSchema, formatParam, decycleSchema } from "../../../src/core/generator/schema-utils.ts";
 import type { OpenAPIV3 } from "openapi-types";
 
 describe("compressSchema", () => {
@@ -75,6 +75,50 @@ describe("compressSchema", () => {
 
   test("handles schema without type", () => {
     expect(compressSchema({})).toBe("any");
+  });
+});
+
+describe("decycleSchema", () => {
+  test("returns primitives unchanged", () => {
+    expect(decycleSchema(42)).toBe(42);
+    expect(decycleSchema("hello")).toBe("hello");
+    expect(decycleSchema(null)).toBe(null);
+    expect(decycleSchema(true)).toBe(true);
+  });
+
+  test("deep-clones plain objects", () => {
+    const obj = { a: 1, b: { c: 2 } };
+    const result = decycleSchema(obj) as any;
+    expect(result).toEqual({ a: 1, b: { c: 2 } });
+    expect(result).not.toBe(obj);
+    expect(result.b).not.toBe(obj.b);
+  });
+
+  test("replaces circular references with $ref marker", () => {
+    const node: any = { name: "root" };
+    node.self = node;
+    const result = decycleSchema(node) as any;
+    expect(result.name).toBe("root");
+    expect(result.self).toEqual({ $ref: "[Circular]" });
+  });
+
+  test("handles deeply nested circular references", () => {
+    const parent: any = { name: "parent" };
+    const child: any = { name: "child", parent };
+    parent.children = [child];
+    const result = decycleSchema(parent) as any;
+    expect(result.children[0].name).toBe("child");
+    expect(result.children[0].parent).toEqual({ $ref: "[Circular]" });
+  });
+
+  test("handles arrays with circular refs", () => {
+    const arr: any[] = [1, 2];
+    const obj: any = { arr };
+    arr.push(obj);
+    const result = decycleSchema(obj) as any;
+    expect(result.arr[0]).toBe(1);
+    expect(result.arr[1]).toBe(2);
+    expect(result.arr[2]).toEqual({ $ref: "[Circular]" });
   });
 });
 

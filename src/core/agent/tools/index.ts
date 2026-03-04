@@ -1,10 +1,8 @@
 import { tool } from "ai";
 import { runTestsTool } from "./run-tests.ts";
-import { validateTestsTool } from "./validate-tests.ts";
 import { queryResultsTool } from "./query-results.ts";
 import { diagnoseFailureTool } from "./diagnose-failure.ts";
 import { sendRequestTool } from "./send-request.ts";
-import { exploreApiTool } from "./explore-api.ts";
 import type { AgentConfig } from "../types.ts";
 
 export function buildAgentTools(config: AgentConfig) {
@@ -35,12 +33,10 @@ export function buildAgentTools(config: AgentConfig) {
 
   return {
     run_tests,
-    validate_tests: validateTestsTool,
     query_results: queryResultsTool,
     diagnose_failure: diagnoseFailureTool,
     send_request,
-    explore_api: exploreApiTool,
   };
 }
 
-export { runTestsTool, validateTestsTool, queryResultsTool, diagnoseFailureTool, sendRequestTool, exploreApiTool };
+export { runTestsTool, queryResultsTool, diagnoseFailureTool, sendRequestTool };

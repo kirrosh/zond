@@ -14,41 +14,19 @@ export const TOOL_DESCRIPTIONS = {
     "sets up environment variables, and creates a collection in the database. " +
     "Use this before generating tests for a new API.",
 
-  explore_api:
-    "Explore an OpenAPI spec — list endpoints, servers, and security schemes. " +
-    "Use with includeSchemas=true when generating tests to get full request/response body schemas.",
-
   describe_endpoint:
     "Full details for one endpoint: params grouped by type, request body schema, " +
     "all response schemas + response headers, security, deprecated flag. " +
     "Use when a test fails and you need complete endpoint spec without reading the whole file.",
 
-  generate_tests_guide:
-    "Get a comprehensive guide for generating API test suites. " +
-    "Returns the full API specification (with request/response schemas) and a step-by-step algorithm " +
-    "for creating YAML test files. Use this BEFORE generating tests — it gives you " +
-    "everything you need to write high-quality test suites. " +
-    "After generating, use save_test_suite to save, run_tests to execute, " +
-    "manage_server(action: 'start') to view results in the Web UI, " +
-    "and query_db(action: 'diagnose_failure') to debug failures.",
-
-  generate_missing_tests:
-    "Analyze test coverage and generate a test guide for only the uncovered endpoints. " +
-    "Combines coverage_analysis + generate_tests_guide — returns a focused guide for missing tests. " +
-    "Use this for incremental test generation to avoid duplicating existing tests. " +
-    "After saving and running new tests, use manage_server(action: 'start') to view results in the Web UI.",
-
   save_test_suite:
     "Save a YAML test suite file with validation. Parses and validates the YAML content " +
     "before writing. Returns structured errors if validation fails so you can fix and retry. " +
-    "Use after generating test content with generate_tests_guide.",
+    "Use after generating test content with generate_and_save.",
 
   save_test_suites:
     "Save multiple YAML test suite files in a single call. Each file is validated before writing. " +
     "Returns per-file results. Use when you have generated multiple suites at once.",
-
-  validate_tests:
-    "Validate YAML test files without running them. Returns parsed suite info or validation errors.",
 
   run_tests:
     "Execute API tests from a YAML file or directory and return results summary with failures. " +

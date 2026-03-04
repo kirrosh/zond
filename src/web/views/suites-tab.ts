@@ -8,7 +8,7 @@ import { basename } from "node:path";
 
 export function renderSuitesTab(state: CollectionState): string {
   if (state.suites.length === 0) {
-    return `<div class="tab-empty">No test suites found on disk. Generate tests with <code>generate_tests_guide</code> or <code>generate_and_save</code>.</div>`;
+    return `<div class="tab-empty">No test suites found on disk. Generate tests with <code>generate_and_save</code>.</div>`;
   }
 
   const rows = state.suites.map((s, i) => renderSuiteRow(s, i)).join("");

@@ -48,7 +48,7 @@ ci_init()
 **Key safety rules:**
 - `safe: true` on `run_tests` -> only GET requests execute, write ops are skipped
 - `dryRun: true` on `run_tests` -> shows all requests without sending any
-- `methodFilter: ["GET"]` on `generate_tests_guide` -> only generates GET test stubs
+- `methodFilter: ["GET"]` on `generate_and_save` -> only generates GET test stubs
 - Always use `tags: [smoke]` for GET-only suites, `tags: [crud]` for write operations
 - Never run CRUD tests unless user confirmed environment is safe (staging/test)
 
@@ -61,16 +61,12 @@ ci_init()
 | `set_work_dir` | Set project root for the session (call **first** with npx MCP) |
 | `setup_api` | Register API (dirs + spec + env + collection). Creates `.gitignore` with `.env*.yaml` |
 | `generate_and_save` | **Recommended entry point.** Auto-chunks large APIs by tag (>30 endpoints). Returns plan or focused guide. Supports `tag`, `methodFilter`, `testsDir` for coverage mode |
-| `generate_tests_guide` | Full API spec + generation algorithm. Supports `tag` and `methodFilter` filters |
-| `generate_missing_tests` | Guide for only uncovered endpoints. Supports `tag` filter |
 | `save_test_suite` | Validate YAML + save single file. Returns structured errors if validation fails |
 | `save_test_suites` | Batch save multiple YAML suites in one call |
 | `run_tests` | Execute tests, return summary with failures. Use `diagnose_failure` for per-step details |
 | `query_db` | List collections/runs; `diagnose_failure` includes `response_body`; `compare_runs` for regression |
-| `explore_api` | Browse OpenAPI spec (`includeSchemas=true` for schemas) |
 | `describe_endpoint` | Full details for one endpoint: params, schemas, response headers, security |
 | `coverage_analysis` | Compare spec vs existing tests. `failThreshold` for pass/fail gate |
-| `validate_tests` | Check YAML syntax without running |
 | `send_request` | Ad-hoc HTTP request with variable interpolation |
 | `manage_server` | Start/stop WebUI server (health strip, endpoints/suites/runs tabs) |
 | `ci_init` | Generate CI/CD workflow (GitHub Actions / GitLab CI) |
