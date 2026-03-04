@@ -4,7 +4,7 @@ export function setDevMode(enabled: boolean): void {
   _devMode = enabled;
 }
 
-export function layout(title: string, content: string): string {
+export function layout(title: string, content: string, navExtra = ""): string {
   const devScript = _devMode
     ? `<script>new EventSource('/dev/reload').onmessage = (e) => { if (e.data === 'reload') location.reload() }</script>`
     : "";
@@ -14,20 +14,22 @@ export function layout(title: string, content: string): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(title)} — apitool</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v=${Date.now()}">
   <script src="/static/htmx.min.js"></script>
   <script>htmx.config.refreshOnHistoryMiss = true;</script>
 </head>
 <body>
   <nav class="navbar">
-    <a href="/" class="nav-brand" style="text-decoration:none;color:inherit;">apitool</a>
+    <a href="/" class="nav-brand" style="text-decoration:none;color:inherit;"><span class="logo-dot"></span>apitool</a>
+    ${navExtra}
   </nav>
-  <main class="container">
+  <main class="main-container">
     ${content}
   </main>
-  <footer class="footer">
-    <div class="container">apitool v0.1.0</div>
-  </footer>
+  <footer class="footer"><div class="main-container">apitool</div></footer>
   ${devScript}
 </body>
 </html>`;
