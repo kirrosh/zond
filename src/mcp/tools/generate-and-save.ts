@@ -9,6 +9,7 @@ import {
   filterUncoveredEndpoints,
   serializeSuite,
   generateSuites,
+  findUnresolvedVars,
 } from "../../core/generator/index.ts";
 import { compressEndpointsWithSchemas, buildGenerationGuide } from "../../core/generator/guide-builder.ts";
 import { planChunks, filterByTag } from "../../core/generator/chunker.ts";
@@ -130,10 +131,18 @@ export function registerGenerateAndSaveTool(server: McpServer) {
           });
         }
 
+        const warnings: string[] = [];
+        for (const suite of suites) {
+          const unresolved = findUnresolvedVars(suite);
+          if (unresolved.length > 0)
+            warnings.push(`${suite.fileStem ?? suite.name}.yaml: unresolved [${unresolved.join(", ")}]`);
+        }
+
         const response: Record<string, unknown> = {
           mode: "generate",
           suitesGenerated: suites.length,
           files,
+          ...(warnings.length > 0 ? { warnings } : {}),
           hint: files.some(f => !f.saved)
             ? "Some files were not saved (already exist?). Use overwrite: true to replace."
             : "Files saved. Run run_tests to verify. Use mode: 'guide' for LLM-crafted tests with more detail.",

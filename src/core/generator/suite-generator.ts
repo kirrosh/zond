@@ -292,6 +292,31 @@ export function generateCrudSuite(
   return suite;
 }
 
+/** Find unresolved template variables in a suite (excluding known globals and captured vars) */
+export function findUnresolvedVars(suite: RawSuite): string[] {
+  const KNOWN = new Set(["base_url", "auth_token", "api_key"]);
+  const captured = new Set<string>();
+  for (const step of suite.tests) {
+    if (step.expect?.body) {
+      for (const val of Object.values(step.expect.body)) {
+        if (val && typeof val === "object" && "capture" in val) captured.add((val as any).capture);
+      }
+    }
+  }
+  const vars = new Set<string>();
+  const scan = (obj: unknown) => {
+    if (typeof obj === "string") {
+      for (const m of obj.matchAll(/\{\{([^$}][^}]*)\}\}/g)) {
+        if (!KNOWN.has(m[1]) && !captured.has(m[1])) vars.add(m[1]);
+      }
+    } else if (obj && typeof obj === "object") {
+      for (const v of Object.values(obj)) scan(v);
+    }
+  };
+  scan(suite);
+  return [...vars];
+}
+
 /** Main entry point: generate all suites from endpoints */
 export function generateSuites(opts: {
   endpoints: EndpointInfo[];

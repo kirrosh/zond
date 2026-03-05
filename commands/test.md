@@ -19,8 +19,9 @@ You are orchestrating a full API test generation workflow using the zond MCP too
 
 3. **Register the API:**
    ```
-   setup_api(name: "<auto-detected from spec or directory name>", specPath: "<spec-path>")
+   setup_api(specPath: "<spec-path>")
    ```
+   Name is auto-detected from spec `info.title`. Path parameters are auto-added to `.env.yaml`.
 
 4. **Check existing coverage:**
    ```
@@ -32,7 +33,7 @@ You are orchestrating a full API test generation workflow using the zond MCP too
    ```
    generate_and_save(specPath: "<spec-path>", methodFilter: ["GET"])
    ```
-   Save the generated tests with `save_test_suites`. Tag all suites with `tags: [smoke]`.
+   In generate mode (default), files are saved automatically. Tag all suites with `tags: [smoke]`.
 
 6. **Run tests in safe mode:**
    ```
@@ -57,3 +58,7 @@ You are orchestrating a full API test generation workflow using the zond MCP too
 - Use Read + Edit for fixing individual test YAML files — NOT save_test_suites
 - save_test_suites is for initial bulk save only
 - Do NOT use Bash to parse OpenAPI specs — MCP tools handle this
+
+## Edge Cases
+- If generate_and_save returns `warnings` about unresolved variables, fix them with Read+Edit or add to `.env.yaml` before running tests
+- CRUD suites use capture chains — these are self-contained

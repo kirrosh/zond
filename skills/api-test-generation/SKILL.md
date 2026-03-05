@@ -28,9 +28,9 @@ This ensures `zond.db` and all relative paths resolve correctly.
 
 1. **Register the API:**
    ```
-   setup_api(name: "<api-name>", specPath: "<path-to-spec>")
+   setup_api(specPath: "<path-to-spec>")
    ```
-   This creates the directory structure, reads the spec, sets up `.env.yaml`, and registers a collection in the database.
+   Name is auto-detected from `info.title`. This creates the directory structure, reads the spec, sets up `.env.yaml` (including path parameter defaults like `id: 1`), and registers a collection in the database.
 
 2. **Analyze coverage baseline:**
    ```
@@ -53,11 +53,7 @@ This phase only generates and runs read-only tests. Safe to run against any envi
    ```
    The first call includes a YAML format reference. For large APIs (>30 endpoints), this auto-chunks by tags and returns a plan. Call again with `tag` parameter for each chunk, using `includeFormat: false` to save tokens.
 
-2. **Save generated test suites:**
-   ```
-   save_test_suites(files: [...])
-   ```
-   Tag all GET-only suites with `tags: [smoke]`.
+2. **Check warnings:** If generate_and_save returns `warnings` about unresolved variables, add them to `.env.yaml` or fix with Read+Edit before running.
 
 3. **Run tests in safe mode:**
    ```

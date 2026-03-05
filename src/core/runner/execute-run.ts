@@ -17,6 +17,7 @@ export interface ExecuteRunOptions {
   tag?: string[];
   envVars?: Record<string, string>;
   dryRun?: boolean;
+  rerunFilter?: Set<string>;  // "suite_name::test_name" keys to rerun
 }
 
 export interface ExecuteRunResult {
@@ -37,6 +38,17 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
     suites = filterSuitesByTags(suites, tag);
     if (suites.length === 0) {
       throw new Error("No suites match the specified tags");
+    }
+  }
+
+  // Rerun filter: keep only specific failed tests
+  if (options.rerunFilter && options.rerunFilter.size > 0) {
+    for (const suite of suites) {
+      suite.tests = suite.tests.filter(t => options.rerunFilter!.has(`${suite.name}::${t.name}`));
+    }
+    suites = suites.filter(s => s.tests.length > 0);
+    if (suites.length === 0) {
+      throw new Error("No matching tests found for rerun filter");
     }
   }
 

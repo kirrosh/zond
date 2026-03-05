@@ -22,7 +22,7 @@ export function registerSetupApiTool(server: McpServer, dbPath?: string) {
   server.registerTool("setup_api", {
     description: TOOL_DESCRIPTIONS.setup_api,
     inputSchema: {
-      name: z.string().describe("API name (e.g. 'petstore')"),
+      name: z.optional(z.string()).describe("API name (auto-detected from spec title if omitted)"),
       specPath: z.optional(z.string()).describe("Path or URL to OpenAPI spec"),
       dir: z.optional(z.string()).describe("Base directory (default: ./apis/<name>/)"),
       envVars: z.optional(z.string()).describe("Environment variables as JSON string (e.g. '{\"base_url\": \"...\", \"token\": \"...\"}')"),

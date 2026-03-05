@@ -16,6 +16,27 @@ function parseBodySafe(raw: string | null | undefined): unknown {
   }
 }
 
+const USEFUL_HEADERS = new Set([
+  "content-type", "content-length", "location", "retry-after",
+  "www-authenticate", "allow",
+]);
+const USEFUL_PREFIXES = ["x-", "ratelimit"];
+
+function filterHeaders(raw: string | null | undefined): Record<string, string> | undefined {
+  if (!raw) return undefined;
+  try {
+    const h = JSON.parse(raw) as Record<string, string>;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(h)) {
+      const l = k.toLowerCase();
+      if (USEFUL_HEADERS.has(l) || USEFUL_PREFIXES.some(p => l.startsWith(p))) {
+        out[k] = v;
+      }
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  } catch { return undefined; }
+}
+
 export function registerQueryDbTool(server: McpServer, dbPath?: string) {
   server.registerTool("query_db", {
     description: TOOL_DESCRIPTIONS.query_db,
@@ -137,9 +158,7 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
                 ...(hint ? { hint } : {}),
                 ...(sHint ? { schema_hint: sHint } : {}),
                 response_body: parseBodySafe(r.response_body),
-                response_headers: r.response_headers
-                  ? JSON.parse(r.response_headers)
-                  : undefined,
+                response_headers: filterHeaders(r.response_headers),
                 assertions: r.assertions,
                 duration_ms: r.duration_ms,
               };

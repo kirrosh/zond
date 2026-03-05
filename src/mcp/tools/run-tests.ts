@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { executeRun } from "../../core/runner/execute-run.ts";
+import { getDb } from "../../db/schema.ts";
+import { getResultsByRunId } from "../../db/queries.ts";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export function registerRunTestsTool(server: McpServer, dbPath?: string) {
@@ -13,8 +15,24 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
       tag: z.optional(z.array(z.string())).describe("Filter suites by tag (OR logic)"),
       envVars: z.optional(z.record(z.string(), z.string())).describe("Environment variables to inject (override env file, e.g. {\"TOKEN\": \"xxx\"})"),
       dryRun: z.optional(z.boolean()).describe("Show requests without sending them (always exits 0)"),
+      rerunFrom: z.optional(z.number().int()).describe("Re-run only tests that failed/errored in this run ID"),
     },
-  }, async ({ testPath, envName, safe, tag, envVars, dryRun }) => {
+  }, async ({ testPath, envName, safe, tag, envVars, dryRun, rerunFrom }) => {
+    // Build filter from previous failed run
+    let rerunFilter: Set<string> | undefined;
+    if (rerunFrom != null) {
+      getDb(dbPath);
+      const prevResults = getResultsByRunId(rerunFrom);
+      const failed = prevResults.filter(r => r.status === "fail" || r.status === "error");
+      if (failed.length === 0) {
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ error: `Run ${rerunFrom} has no failures to rerun` }, null, 2) }],
+          isError: true,
+        };
+      }
+      rerunFilter = new Set(failed.map(r => `${r.suite_name}::${r.test_name}`));
+    }
+
     const { runId, results } = await executeRun({
       testPath,
       envName,
@@ -24,6 +42,7 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
       tag,
       envVars,
       dryRun,
+      rerunFilter,
     });
 
     const total = results.reduce((s, r) => s + r.total, 0);
@@ -55,9 +74,6 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
         );
       }
     }
-    hints.push("Use manage_server(action: 'start') to launch the Web UI and view results visually in a browser at http://localhost:8080");
-    hints.push("Ask the user if they want to set up CI/CD to run these tests automatically on push. If yes, use ci_init to generate a workflow and help them push to GitHub/GitLab.");
-
     const summary = {
       runId,
       total,

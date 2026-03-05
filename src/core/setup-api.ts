@@ -14,7 +14,7 @@ function toYaml(vars: Record<string, string>): string {
 }
 
 export interface SetupApiOptions {
-  name: string;
+  name?: string;
   spec?: string;
   dir?: string;
   envVars?: Record<string, string>;
@@ -29,12 +29,48 @@ export interface SetupApiResult {
   testPath: string;
   baseUrl: string;
   specEndpoints: number;
+  pathParams?: Record<string, string>;
 }
 
 export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult> {
-  const { name, spec, dbPath } = options;
+  const { spec, dbPath } = options;
 
   getDb(dbPath);
+
+  // Try to load and validate spec, extract base_url
+  let openapiSpec: string | null = null;
+  let baseUrl = "";
+  let endpointCount = 0;
+  const pathParams = new Map<string, string>();
+  let specTitle: string | undefined;
+  if (spec) {
+    const doc = await readOpenApiSpec(spec);
+    openapiSpec = spec;
+    if ((doc as any).servers?.[0]?.url) {
+      baseUrl = (doc as any).servers[0].url;
+    }
+    specTitle = (doc as any).info?.title;
+    const endpoints = extractEndpoints(doc);
+    endpointCount = endpoints.length;
+
+    // Collect unique path parameters with default values
+    for (const ep of endpoints) {
+      for (const param of (ep.parameters ?? []).filter(p => p.in === "path")) {
+        if (pathParams.has(param.name)) continue;
+        const schema = param.schema as any;
+        if (param.example !== undefined) pathParams.set(param.name, String(param.example));
+        else if (schema?.example !== undefined) pathParams.set(param.name, String(schema.example));
+        else if (schema?.type === "integer" || schema?.type === "number") pathParams.set(param.name, "1");
+        else pathParams.set(param.name, "example");
+      }
+    }
+  }
+
+  // Derive name: explicit > spec title > filename
+  const name = options.name
+    ?? specTitle?.replace(/[^a-zA-Z0-9_\-\.]/g, "-").toLowerCase()
+    ?? spec?.split(/[/\\]/).pop()?.replace(/\.\w+$/, "")
+    ?? "api";
 
   // Validate name uniqueness (or force-replace)
   const existing = findCollectionByNameOrId(name);
@@ -54,22 +90,13 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   // Create directories
   mkdirSync(testPath, { recursive: true });
 
-  // Try to load and validate spec, extract base_url
-  let openapiSpec: string | null = null;
-  let baseUrl = "";
-  let endpointCount = 0;
-  if (spec) {
-    const doc = await readOpenApiSpec(spec);
-    openapiSpec = spec;
-    if ((doc as any).servers?.[0]?.url) {
-      baseUrl = (doc as any).servers[0].url;
-    }
-    endpointCount = extractEndpoints(doc).length;
-  }
-
   // Build environment variables
   const envVars: Record<string, string> = {};
   if (baseUrl) envVars.base_url = baseUrl;
+  // Add path parameter defaults (before user overrides)
+  for (const [k, v] of pathParams) {
+    if (!(k in envVars)) envVars[k] = v;
+  }
   if (options.envVars) {
     Object.assign(envVars, options.envVars);
   }
@@ -102,6 +129,8 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     openapi_spec: openapiSpec ?? undefined,
   });
 
+  const pathParamsObj = pathParams.size > 0 ? Object.fromEntries(pathParams) : undefined;
+
   return {
     created: true,
     collectionId,
@@ -109,5 +138,6 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     testPath: normalizedTestPath,
     baseUrl,
     specEndpoints: endpointCount,
+    ...(pathParamsObj ? { pathParams: pathParamsObj } : {}),
   };
 }
