@@ -13,6 +13,7 @@ import {
 } from "../../core/generator/index.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
 import { compressEndpointsWithSchemas, buildGenerationGuide } from "../../core/generator/guide-builder.ts";
+import { findCollectionBySpec } from "../../db/queries.ts";
 import { planChunks, filterByTag } from "../../core/generator/chunker.ts";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 import { validateAndSave } from "./save-test-suite.ts";
@@ -39,7 +40,11 @@ export function registerGenerateAndSaveTool(server: McpServer) {
       const securitySchemes = extractSecuritySchemes(doc);
       const baseUrl = ((doc as any).servers?.[0]?.url) as string | undefined;
       const title = (doc as any).info?.title as string | undefined;
-      const effectiveOutputDir = outputDir ?? "./tests/";
+      let effectiveOutputDir = outputDir;
+      if (!effectiveOutputDir) {
+        const collection = findCollectionBySpec(specPath);
+        effectiveOutputDir = collection?.test_path ?? "./tests/";
+      }
       const effectiveMode = mode ?? "generate";
 
       // Apply method filter
