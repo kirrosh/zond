@@ -38,9 +38,9 @@ This ensures `zond.db` and all relative paths resolve correctly.
    ```
    Shows total endpoints, covered/uncovered breakdown, and static warnings (deprecated endpoints, missing response schemas, required params without examples).
 
-3. **Explore the API** (optional, for large specs):
+3. **Explore endpoints** (optional, for complex endpoints):
    ```
-   explore_api(specPath: "<path-to-spec>", includeSchemas: true)
+   describe_endpoint(specPath: "<path-to-spec>", path: "/resource", method: "GET")
    ```
 
 ### Phase 1 — Smoke Tests (GET-only, safe for production)

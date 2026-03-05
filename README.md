@@ -1,128 +1,83 @@
 # zond
 
-Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config, no cloud, no Postman.
+AI-powered API testing for Claude Code, Cursor, and CI/CD.
 
-[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=zond&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBraXJyb3NoL3pvbmQiLCJtY3AiXX0K)
+Say "test my API" — get working tests, coverage dashboard, and CI config in minutes.
 
-## Claude Code Plugin
+<!-- TODO: add demo GIF (15 sec: plugin install → "cover openapi.json with tests" → 42/47 endpoints covered → dashboard) -->
 
-Install in Claude Code:
+Zond reads your OpenAPI spec and gives your AI agent everything it needs to test your API: structured tools, safety guardrails, coverage tracking, and run history. You don't need to learn anything new — just describe what you want and the agent handles the rest.
+
+## Quick Start
 
 ```
 /plugin marketplace add kirrosh/zond
 /plugin install zond@zond-marketplace
 ```
 
-This gives you:
-- **17 MCP tools** for API testing (test generation, execution, diagnostics, coverage)
-- **Skills** for test generation, debugging failures, and CI setup
-- **Slash commands**: `/zond:api-test`, `/zond:api-coverage`
+Then say: _"Safely cover the API from openapi.json with tests"_
 
-After installation, just say: _"Safely cover the API from openapi.json with tests"_ — the agent handles everything.
+You get skills, slash commands, and 12 MCP tools in one package.
 
-## Install
+<details>
+<summary>Other installation methods (MCP, CLI, binary)</summary>
+
+### MCP Server (Cursor, Windsurf, other editors)
+
+[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=zond&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBraXJyb3NoL3pvbmQiLCJtY3AiXX0K)
+
+Or add manually — see [MCP setup guide](docs/mcp-guide.md) for Cursor, Claude Code, and Windsurf config.
+
+### CLI / Binary
 
 ```bash
-# Option 1: via npx (recommended — works everywhere with Node.js)
 npx -y @kirrosh/zond --version
 
-# Option 2: Binary (no Node.js required)
-# macOS / Linux
-curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
-
-# Windows
-iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex
+# Standalone binary (no Node.js required)
+curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh   # macOS/Linux
+iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex        # Windows
 ```
 
-[All releases](https://github.com/kirrosh/zond/releases) (Linux x64, macOS ARM, Windows x64)
+See [ZOND.md](ZOND.md) for full CLI reference.
 
-## MCP Setup (Cursor / Claude Code / Windsurf)
+</details>
 
-Click the badge above, or add manually:
+## What Happens
 
-```json
-{
-  "mcpServers": {
-    "zond": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@kirrosh/zond@latest",
-        "mcp",
-        "--dir",
-        "${workspaceFolder}"
-      ]
-    }
-  }
-}
-```
+1. **Point** — you give the agent an OpenAPI spec
+2. **Generate** — zond reads the spec, produces YAML test suites (smoke + CRUD)
+3. **Run** — tests execute, failures are diagnosed, coverage is tracked
 
-> `@latest` ensures npx always pulls the newest version on each restart — no manual update needed.
+The agent does all three steps autonomously. It asks you only when it needs an auth token or permission to run write operations.
 
-**Where to put this:**
+## Why Not Just Ask Claude to Write pytest?
 
-| Editor      | Config file                                           |
-| ----------- | ----------------------------------------------------- |
-| Cursor      | Settings > MCP, or `.cursor/mcp.json` in project root |
-| Claude Code | `.mcp.json` in project root                           |
-| Windsurf    | `.windsurfrules/mcp.json` or settings                 |
+Claude Code can write pytest from scratch — but it takes 30-60 minutes per flow, has no safety guardrails, no coverage tracking, and no run history. Zond gives the agent structured tools to do it in 5 minutes with full visibility.
 
-## Main Flow (5 steps)
+## Key Capabilities
 
-Once MCP is connected, ask your AI agent to cover your API with tests:
+| | |
+|---|---|
+| **Safe by Default** | `--safe` runs only GET requests. `--dry-run` previews without sending. The agent never touches production data without your explicit approval. |
+| **Spec-Grounded** | Tests are derived from your OpenAPI schema, not invented from scratch. The spec is the source of truth. |
+| **Full Visibility** | Every run is stored in SQLite. Compare runs, track regressions, see exactly what the server returned. |
+| **Coverage Tracking** | See which endpoints are tested, which aren't, and what broke since last run. |
+| **CI-Ready** | One command generates GitHub Actions or GitLab CI workflow. Tests in YAML, in git, with code review. |
 
-**1. Register your API**
+## Try It
 
 ```
-setup_api(name: "myapi", specPath: "openapi.json")
-```
-
-**2. Generate a test guide** (agent reads OpenAPI + gets instructions)
-
-```
-generate_and_save(specPath: "openapi.json")
-```
-
-For large APIs (>30 endpoints), auto-chunks by tags and returns a plan. Call with `tag` for each chunk.
-
-**3. Save test suites** (agent writes YAML based on the guide)
-
-```
-save_test_suite(filePath: "apis/myapi/tests/smoke.yaml", content: "...")
-```
-
-**4. Run tests**
-
-```
-run_tests(testPath: "apis/myapi/tests/", safe: true)
-```
-
-**5. Diagnose failures**
-
-```
-query_db(action: "diagnose_failure", runId: 42)
-```
-
-Or just say: _"Safely cover the API from openapi.json with tests"_ — the agent will do all 5 steps.
-
-## CLI
-
-```
-zond run <path>           Run tests (--env, --safe, --tag, --dry-run, --env-var, --report)
-zond add-api <name>       Register API (--spec <openapi>)
-zond coverage             API test coverage (--spec, --tests, --fail-on-coverage)
-zond compare <runA> <runB> Compare two test runs
-zond serve                Web dashboard with health strip + endpoints/suites/runs tabs (--port 8080)
-zond mcp                  Start MCP server
-zond chat                 AI chat agent (--provider ollama|openai|anthropic)
-zond doctor               Diagnostics
+"Cover openapi.json with tests"
+"Run only smoke tests against staging"
+"What broke since last run?"
+"Set up CI for API tests"
 ```
 
 ## Documentation
 
-- [docs/quickstart.md](docs/quickstart.md) — step-by-step quickstart guide (RU)
 - [ZOND.md](ZOND.md) — full CLI and MCP tools reference
 - [docs/mcp-guide.md](docs/mcp-guide.md) — MCP agent workflow guide
+- [docs/quickstart.md](docs/quickstart.md) — step-by-step quickstart (RU)
 - [docs/ci.md](docs/ci.md) — CI/CD integration
 
 ## License

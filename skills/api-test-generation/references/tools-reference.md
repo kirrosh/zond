@@ -1,6 +1,6 @@
 # zond MCP Tools Reference
 
-Complete reference for all 17 MCP tools provided by the zond server.
+Complete reference for all 12 MCP tools provided by the zond server.
 
 ## Tool Inventory
 
@@ -25,7 +25,6 @@ Complete reference for all 17 MCP tools provided by the zond server.
 |------|-------------|
 | `save_test_suite` | Validate YAML content + save a single test file. Returns structured errors if validation fails. |
 | `save_test_suites` | Batch save multiple YAML test files in one call. Each file is validated before writing. |
-| `validate_tests` | Check YAML syntax and structure without running tests. |
 
 ### Test Execution
 
@@ -39,7 +38,6 @@ Complete reference for all 17 MCP tools provided by the zond server.
 |------|-------------|
 | `query_db` | Query the database with various actions (see below). |
 | `coverage_analysis` | Compare OpenAPI spec vs existing tests. Shows covered/uncovered endpoints. `failThreshold` for CI gates. `runId` for enriched pass/fail/5xx breakdown. |
-| `explore_api` | Browse OpenAPI spec — list endpoints, servers, security schemes. Use `includeSchemas: true` for request/response body schemas. |
 | `describe_endpoint` | Full details for one endpoint: params by type, request body schema, all response schemas + headers, security, deprecated flag. |
 | `send_request` | Ad-hoc HTTP request with variable interpolation from environments. |
 

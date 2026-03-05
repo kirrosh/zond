@@ -28,10 +28,9 @@
 │         │                                         │
 │         ▼                                         │
 │  ┌──────────────────────────────────────┐        │
-│  │           6 Agent Tools              │        │
-│  │  run_tests    validate_tests         │        │
-│  │  query_results  diagnose_failure     │        │
-│  │  send_request  explore_api           │        │
+│  │           4 Agent Tools              │        │
+│  │  run_tests    query_results          │        │
+│  │  diagnose_failure  send_request      │        │
 │  └──────────────────────────────────────┘        │
 └───────────────────────────────────────────────────┘
        │
@@ -87,11 +86,9 @@ zond chat --safe
 | Tool | Описание | Ключевые параметры |
 |------|----------|--------------------|
 | `run_tests` | Запуск тестов | `testPath`, `envName?`, `safe?` |
-| `validate_tests` | Валидация YAML | `testPath` |
 | `query_results` | Запрос к БД | `action`: `list_runs` / `get_run` / `list_collections` |
 | `diagnose_failure` | Анализ падений | `runId` |
 | `send_request` | Ad-hoc HTTP запрос | `method`, `url`, `headers?`, `body?`, `timeout?`, `envName?` |
-| `explore_api` | Просмотр OpenAPI спеки | `specPath`, `tag?` |
 
 ### Safe Mode
 
@@ -114,12 +111,10 @@ src/core/agent/
 ├── types.ts             # AgentConfig, ToolEvent, AgentTurnResult
 └── tools/
     ├── index.ts          # buildAgentTools — фабрика с safe mode wrapping
-    ├── run-tests.ts      # tool() — запуск тестов
-    ├── validate-tests.ts # tool() — валидация YAML
-    ├── query-results.ts  # tool() — запросы к БД
+    ├── run-tests.ts          # tool() — запуск тестов
+    ├── query-results.ts      # tool() — запросы к БД
     ├── diagnose-failure.ts   # tool() — анализ падений
-    ├── send-request.ts       # tool() — ad-hoc HTTP запросы
-    └── explore-api.ts        # tool() — просмотр OpenAPI спеки
+    └── send-request.ts       # tool() — ad-hoc HTTP запросы
 
 src/tui/
 └── chat-ui.ts           # readline TUI — ввод, вывод, tool events
