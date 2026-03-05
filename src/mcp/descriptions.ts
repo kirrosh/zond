@@ -56,7 +56,8 @@ export const TOOL_DESCRIPTIONS = {
     "Read an OpenAPI spec, auto-chunk by tags if large (>30 endpoints), " +
     "and return a focused test generation guide. For large APIs returns a chunking plan — " +
     "call again with tag parameter for each chunk. Use testsDir param to only generate for uncovered endpoints. " +
-    "After generating YAML, use save_test_suites to save files, then run_tests to verify.",
+    "After generating YAML, use save_test_suites to save files, then run_tests to verify. " +
+    "Includes YAML format cheatsheet by default; pass includeFormat: false for subsequent tag chunks to save tokens.",
 
   ci_init:
     "Generate a CI/CD workflow file for running API tests automatically on push, PR, and schedule. " +

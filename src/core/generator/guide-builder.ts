@@ -59,6 +59,66 @@ export function compressEndpointsWithSchemas(
   return lines.join("\n");
 }
 
+const YAML_FORMAT_CHEATSHEET = `
+## YAML Test Format Reference
+
+### Suite structure
+\`\`\`yaml
+name: Suite Name          # required
+base_url: "{{base_url}}"  # or hardcoded URL
+tags: [smoke]             # optional: smoke | crud | destructive | auth
+tests:
+  - GET /endpoint:        # method + path as YAML key
+      query: { limit: 10 }
+      expect:
+        status: 200
+        _body: { type: array }
+\`\`\`
+
+### Assertion operators
+| Operator | Example |
+|----------|---------|
+| equals (default) | \`status: 200\` |
+| not_equals | \`status: { not_equals: 500 }\` |
+| contains | \`name: { contains: "john" }\` |
+| not_contains | \`body: { not_contains: "error" }\` |
+| exists / not_exists | \`id: { exists: true }\` |
+| gt / gte / lt / lte | \`count: { gte: 1 }\` |
+| matches (regex) | \`email: { matches: "^.+@.+$" }\` |
+| type | \`items: { type: array }\` |
+| length | \`items: { length: 5 }\` |
+| length_gt/gte/lt/lte | \`items: { length_gt: 0 }\` |
+
+### Body assertions
+- \`_body\` — assert on entire response body: \`_body: { type: array }\`
+- Dot-notation for nested: \`data.user.id: { exists: true }\`
+- Array item access: \`items.0.name: { exists: true }\`
+
+### Request body (JSON)
+\`\`\`yaml
+  - POST /resource:
+      json: { name: "test", email: "a@b.com" }
+      expect:
+        status: 201
+\`\`\`
+
+### Built-in generators
+\`{{$uuid}}\`, \`{{$randomInt}}\`, \`{{$timestamp}}\`, \`{{$isoTimestamp}}\`, \`{{$randomEmail}}\`, \`{{$randomString}}\`
+
+### Variable capture & interpolation
+\`\`\`yaml
+  - POST /items:
+      json: { name: "test-{{$uuid}}" }
+      capture:
+        created_id: id    # saves response.id
+      expect:
+        status: 201
+  - GET /items/{{created_id}}:
+      expect:
+        status: 200
+\`\`\`
+`;
+
 export interface GuideOptions {
   title: string;
   baseUrl?: string;
@@ -67,6 +127,7 @@ export interface GuideOptions {
   securitySchemes: SecuritySchemeInfo[];
   endpointCount: number;
   coverageHeader?: string;
+  includeFormat?: boolean;
 }
 
 export function buildGenerationGuide(opts: GuideOptions): string {
@@ -76,11 +137,13 @@ export function buildGenerationGuide(opts: GuideOptions): string {
     ? `Security: ${opts.securitySchemes.map(s => `${s.name} (${s.type}${s.scheme ? `/${s.scheme}` : ""})`).join(", ")}`
     : "Security: none";
 
+  const formatSection = opts.includeFormat !== false ? YAML_FORMAT_CHEATSHEET : "";
+
   return `# Test Generation Guide for ${opts.title}
 ${opts.coverageHeader ? `\n${opts.coverageHeader}\n` : ""}
 ## API Specification (${opts.endpointCount} endpoints)
 ${opts.baseUrl ? `Base URL: ${opts.baseUrl}` : "Base URL: use {{base_url}} environment variable"}
 ${securitySummary}
 
-${opts.apiContext}`;
+${opts.apiContext}${formatSection}`;
 }

@@ -21,8 +21,9 @@ export function registerGenerateAndSaveTool(server: McpServer) {
       methodFilter: z.optional(z.array(z.string())).describe("Only include endpoints with these HTTP methods (e.g. [\"GET\"] for smoke tests)"),
       testsDir: z.optional(z.string()).describe("Path to existing tests directory — filters to uncovered endpoints only"),
       overwrite: z.optional(z.boolean()).describe("Hint for save_test_suites overwrite behavior (default: false)"),
+      includeFormat: z.optional(z.boolean()).describe("Include YAML format reference (default: true, set false for subsequent tag chunks)"),
     },
-  }, async ({ specPath, outputDir, tag, methodFilter, testsDir, overwrite }) => {
+  }, async ({ specPath, outputDir, tag, methodFilter, testsDir, overwrite, includeFormat }) => {
     try {
       const doc = await readOpenApiSpec(specPath);
       let endpoints = extractEndpoints(doc);
@@ -82,6 +83,7 @@ export function registerGenerateAndSaveTool(server: McpServer) {
           instruction:
             `This API has ${plan.totalEndpoints} endpoints across ${plan.chunks.length} tags. ` +
             `Call generate_and_save with tag parameter for each chunk sequentially. ` +
+            `Pass includeFormat: false for subsequent chunks to save tokens. ` +
             `Example: generate_and_save(specPath: '${specPath}', tag: '${plan.chunks[0].tag}')`,
         };
         if (coverageInfo) {
@@ -106,6 +108,7 @@ export function registerGenerateAndSaveTool(server: McpServer) {
         securitySchemes,
         endpointCount: endpoints.length,
         coverageHeader,
+        includeFormat: includeFormat ?? true,
       });
 
       const saveInstructions = `

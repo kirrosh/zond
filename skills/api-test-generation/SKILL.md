@@ -51,7 +51,7 @@ This phase only generates and runs read-only tests. Safe to run against any envi
    ```
    generate_and_save(specPath: "<path-to-spec>", methodFilter: ["GET"])
    ```
-   For large APIs (>30 endpoints), this auto-chunks by tags and returns a plan. Call again with `tag` parameter for each chunk.
+   The first call includes a YAML format reference. For large APIs (>30 endpoints), this auto-chunks by tags and returns a plan. Call again with `tag` parameter for each chunk, using `includeFormat: false` to save tokens.
 
 2. **Save generated test suites:**
    ```
@@ -80,6 +80,7 @@ Only proceed if the user has confirmed a safe (non-production) environment.
    ```
    generate_and_save(specPath: "<path-to-spec>", testsDir: "<tests-dir>")
    ```
+   The first call includes a YAML format reference; use `includeFormat: false` if format was already received in Phase 1.
    This generates tests for uncovered endpoints (POST, PUT, DELETE). Tag with `tags: [crud]`.
 
 2. **Dry-run first to preview:**
