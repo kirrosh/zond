@@ -11,6 +11,7 @@ import { registerCiInitTool } from "./tools/ci-init.ts";
 import { registerSetWorkDirTool } from "./tools/set-work-dir.ts";
 import { registerDescribeEndpointTool } from "./tools/describe-endpoint.ts";
 import { registerGenerateAndSaveTool } from "./tools/generate-and-save.ts";
+import { version } from "../../package.json";
 
 export interface McpServerOptions {
   dbPath?: string;
@@ -21,7 +22,7 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
 
   const server = new McpServer({
     name: "zond",
-    version: "0.8.0",
+    version,
   });
 
   // Register all tools
