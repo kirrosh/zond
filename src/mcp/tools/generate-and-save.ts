@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   readOpenApiSpec,
@@ -6,10 +7,13 @@ import {
   extractSecuritySchemes,
   scanCoveredEndpoints,
   filterUncoveredEndpoints,
+  serializeSuite,
+  generateSuites,
 } from "../../core/generator/index.ts";
 import { compressEndpointsWithSchemas, buildGenerationGuide } from "../../core/generator/guide-builder.ts";
 import { planChunks, filterByTag } from "../../core/generator/chunker.ts";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
+import { validateAndSave } from "./save-test-suite.ts";
 
 export function registerGenerateAndSaveTool(server: McpServer) {
   server.registerTool("generate_and_save", {
@@ -22,8 +26,11 @@ export function registerGenerateAndSaveTool(server: McpServer) {
       testsDir: z.optional(z.string()).describe("Path to existing tests directory — filters to uncovered endpoints only"),
       overwrite: z.optional(z.boolean()).describe("Hint for save_test_suites overwrite behavior (default: false)"),
       includeFormat: z.optional(z.boolean()).describe("Include YAML format reference (default: true, set false for subsequent tag chunks)"),
+      mode: z.optional(z.enum(["generate", "guide"])).describe(
+        "'generate' creates and saves YAML test files deterministically (default), 'guide' returns text for LLM-crafted tests"
+      ),
     },
-  }, async ({ specPath, outputDir, tag, methodFilter, testsDir, overwrite, includeFormat }) => {
+  }, async ({ specPath, outputDir, tag, methodFilter, testsDir, overwrite, includeFormat, mode }) => {
     try {
       const doc = await readOpenApiSpec(specPath);
       let endpoints = extractEndpoints(doc);
@@ -31,6 +38,7 @@ export function registerGenerateAndSaveTool(server: McpServer) {
       const baseUrl = ((doc as any).servers?.[0]?.url) as string | undefined;
       const title = (doc as any).info?.title as string | undefined;
       const effectiveOutputDir = outputDir ?? "./tests/";
+      const effectiveMode = mode ?? "generate";
 
       // Apply method filter
       if (methodFilter && methodFilter.length > 0) {
@@ -83,8 +91,11 @@ export function registerGenerateAndSaveTool(server: McpServer) {
           instruction:
             `This API has ${plan.totalEndpoints} endpoints across ${plan.chunks.length} tags. ` +
             `Call generate_and_save with tag parameter for each chunk sequentially. ` +
-            `Pass includeFormat: false for subsequent chunks to save tokens. ` +
-            `Example: generate_and_save(specPath: '${specPath}', tag: '${plan.chunks[0].tag}')`,
+            (effectiveMode === "guide"
+              ? `Pass includeFormat: false for subsequent chunks to save tokens. `
+              : "") +
+            `Example: generate_and_save(specPath: '${specPath}', tag: '${plan.chunks[0].tag}'` +
+            (effectiveMode === "guide" ? `, mode: 'guide'` : "") + `)`,
         };
         if (coverageInfo) {
           result.coverage = coverageInfo;
@@ -94,7 +105,49 @@ export function registerGenerateAndSaveTool(server: McpServer) {
         };
       }
 
-      // Guide mode: small API or specific tag
+      // ── Generate mode: deterministic YAML generation ──
+      if (effectiveMode === "generate") {
+        const suites = generateSuites({ endpoints, securitySchemes });
+
+        const files: Array<{
+          saved: boolean;
+          filePath: string;
+          tests: number;
+          error?: string;
+        }> = [];
+
+        for (const suite of suites) {
+          const yaml = serializeSuite(suite);
+          const fileName = (suite.fileStem ?? suite.name) + ".yaml";
+          const filePath = join(effectiveOutputDir, fileName);
+
+          const result = await validateAndSave(filePath, yaml, overwrite ?? false);
+          files.push({
+            saved: result.saved,
+            filePath: result.filePath ?? filePath,
+            tests: suite.tests.length,
+            ...(result.error ? { error: result.error } : {}),
+          });
+        }
+
+        const response: Record<string, unknown> = {
+          mode: "generate",
+          suitesGenerated: suites.length,
+          files,
+          hint: files.some(f => !f.saved)
+            ? "Some files were not saved (already exist?). Use overwrite: true to replace."
+            : "Files saved. Run run_tests to verify. Use mode: 'guide' for LLM-crafted tests with more detail.",
+        };
+        if (coverageInfo) {
+          response.coverage = coverageInfo;
+        }
+
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(response, null, 2) }],
+        };
+      }
+
+      // ── Guide mode: text-based generation guide ──
       const coverageHeader = coverageInfo
         ? `## Coverage: ${coverageInfo.covered}/${coverageInfo.total} endpoints covered (${coverageInfo.percentage}%). Generating tests for ${endpoints.length} uncovered endpoints:`
         : undefined;
