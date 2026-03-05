@@ -68,20 +68,30 @@ name: Suite Name          # required
 base_url: "{{base_url}}"  # or hardcoded URL
 tags: [smoke]             # optional: smoke | crud | destructive | auth
 tests:
-  - GET /endpoint:        # method + path as YAML key
-      query: { limit: 10 }
-      expect:
-        status: 200
-        _body: { type: array }
+  - name: Get all items   # required
+    GET: /items            # method as YAML key, path as value
+    query: { limit: 10 }
+    expect:
+      status: 200
+      _body: { type: array, length_gt: 0 }
 \`\`\`
 
-### Assertion operators
+### Path parameters
+Inline the value directly — there is NO \`params\` field:
+\`\`\`yaml
+  - name: Get item by ID
+    GET: /items/1              # hardcoded
+  - name: Get captured item
+    GET: /items/{{item_id}}    # from prior capture
+\`\`\`
+
+### Assertion operators (use inside expect)
 | Operator | Example |
 |----------|---------|
 | equals (default) | \`status: 200\` |
 | not_equals | \`status: { not_equals: 500 }\` |
 | contains | \`name: { contains: "john" }\` |
-| not_contains | \`body: { not_contains: "error" }\` |
+| not_contains | \`error: { not_contains: "fatal" }\` |
 | exists / not_exists | \`id: { exists: true }\` |
 | gt / gte / lt / lte | \`count: { gte: 1 }\` |
 | matches (regex) | \`email: { matches: "^.+@.+$" }\` |
@@ -90,33 +100,46 @@ tests:
 | length_gt/gte/lt/lte | \`items: { length_gt: 0 }\` |
 
 ### Body assertions
-- \`_body\` — assert on entire response body: \`_body: { type: array }\`
+- \`_body\` — assert on root response body: \`_body: { type: array }\`
+- Combine operators in one key: \`_body: { type: array, length_gt: 0 }\`
 - Dot-notation for nested: \`data.user.id: { exists: true }\`
-- Array item access: \`items.0.name: { exists: true }\`
+- Array element: \`items.0.name: { exists: true }\`
+- YAML keys must be unique — do NOT repeat \`_body\` twice
 
 ### Request body (JSON)
 \`\`\`yaml
-  - POST /resource:
-      json: { name: "test", email: "a@b.com" }
-      expect:
-        status: 201
+  - name: Create resource
+    POST: /resources
+    json: { name: "test", email: "a@b.com" }
+    expect:
+      status: 201
+      id: { exists: true }
 \`\`\`
 
 ### Built-in generators
-\`{{$uuid}}\`, \`{{$randomInt}}\`, \`{{$timestamp}}\`, \`{{$isoTimestamp}}\`, \`{{$randomEmail}}\`, \`{{$randomString}}\`
+\`{{$uuid}}\`, \`{{$randomInt}}\`, \`{{$timestamp}}\`, \`{{$randomName}}\`, \`{{$randomEmail}}\`, \`{{$randomString}}\`
 
 ### Variable capture & interpolation
 \`\`\`yaml
-  - POST /items:
-      json: { name: "test-{{$uuid}}" }
-      capture:
-        created_id: id    # saves response.id
-      expect:
-        status: 201
-  - GET /items/{{created_id}}:
-      expect:
-        status: 200
+  - name: Create item
+    POST: /items
+    json: { name: "test-{{$uuid}}" }
+    capture:
+      created_id: id        # saves response.id
+    expect:
+      status: 201
+
+  - name: Get created item
+    GET: /items/{{created_id}}
+    expect:
+      status: 200
+      id: { equals: "{{created_id}}" }
 \`\`\`
+
+### Coverage matching
+Use spec paths with \`{param}\` placeholders in the path for coverage to match:
+- Spec says \`GET /products/{id}\` → write \`GET: /products/1\` (hardcode the value)
+- Coverage scanner matches test paths against spec paths automatically
 `;
 
 export interface GuideOptions {

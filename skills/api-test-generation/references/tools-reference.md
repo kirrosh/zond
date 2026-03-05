@@ -83,17 +83,17 @@ tests:
     GET: /users
     expect:
       status: 200
-      body:
-        _body: { type: "array" }
+      _body: { type: array, length_gt: 0 }
 
   - name: "Get user by ID"
     GET: /users/1
     expect:
       status: 200
-      body:
-        id: { type: "integer" }
-        name: { type: "string" }
+      id: { type: integer }
+      name: { type: string }
 ```
+
+**Important**: assertions go directly inside `expect:`, NOT nested under `body:`. Use `_body` for root-level body assertions.
 
 ### Assertions
 
@@ -185,7 +185,7 @@ save_test_suites(files: [...])
 - **int64 IDs**: For APIs returning large auto-generated IDs (int64), prefer setting fixed IDs in request bodies rather than capturing auto-generated ones, as JSON number precision may cause mismatches.
 - **Nested assertions**: Use dot-notation or nested YAML — both work identically.
 - **Root body type**: Use `_body: { type: "array" }` to verify the response body type itself.
-- **List endpoints**: Always check both type AND non-emptiness: `_body: { type: "array" }` + `_body.length: { gt: 0 }`
+- **List endpoints**: Combine assertions in one key: `_body: { type: array, length_gt: 0 }` — do NOT repeat `_body` twice (YAML keys must be unique)
 - **Create responses**: Always verify at least the key identifying fields (id, name) in the response body — don't just check status.
 - **Error responses**: Assert that error bodies contain useful info (`message: { exists: true }`), not just status codes.
 - **Bulk operations**: After bulk create (createWithArray, createWithList), add GET steps to verify resources were actually created.
@@ -196,10 +196,10 @@ save_test_suites(files: [...])
     - name: Create test resource
       POST: /users
       json: { name: "zond-test-{{$randomString}}" }
+      capture:
+        user_id: id
       expect:
         status: 201
-        body:
-          id: { capture: user_id }
     - name: Read created resource
       GET: /users/{{user_id}}
       expect:
