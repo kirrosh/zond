@@ -91,6 +91,12 @@ send_request(method: "GET", url: "https://api.example.com/users/1",
              headers: '{"Authorization": "Bearer token"}')
 ```
 
+## Workflow Rules
+
+- **Read + Edit for fixes**: Read YAML test file, Edit specific lines. Do NOT use save_test_suites for point fixes.
+- **diagnose_failure is often sufficient**: Contains actual request/response/status. Load describe_endpoint only if context is insufficient.
+- **No Bash for spec parsing**: describe_endpoint and coverage_analysis already handle this.
+
 ## Step 5 — Verify the Fix
 
 1. **Re-run tests:**

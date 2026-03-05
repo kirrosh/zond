@@ -1,5 +1,5 @@
 ---
-description: Start or stop the zond WebUI server for viewing test results
+description: "Start or stop the zond WebUI dashboard"
 argument-hint: "[on|off]"
 ---
 

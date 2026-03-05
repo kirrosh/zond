@@ -1,5 +1,5 @@
 ---
-description: Check API test coverage and generate tests for uncovered endpoints
+description: "Analyze API test coverage and generate tests for gaps"
 argument-hint: "[path-to-openapi-spec]"
 ---
 
@@ -19,7 +19,7 @@ You are checking API test coverage and helping fill gaps using zond MCP tools.
 
 3. **Find existing tests directory:**
    - Look for `apis/*/tests/` directories or `tests/` in project root
-   - If no tests found, inform the user and suggest using `/zond:api-test` first
+   - If no tests found, inform the user and suggest using `/zond:test` first
 
 4. **Run coverage analysis:**
    ```
@@ -52,3 +52,9 @@ You are checking API test coverage and helping fill gaps using zond MCP tools.
    - If coverage < 60%: suggest generating more tests
    - If coverage >= 60%: suggest setting up CI with `ci_init()`
    - Recommend CRUD tests for full coverage (with staging env confirmation)
+
+## Important Rules
+- Use MCP tools for analysis (generate_and_save, coverage_analysis, describe_endpoint)
+- Use Read + Edit for fixing individual test YAML files — NOT save_test_suites
+- save_test_suites is for initial bulk save only
+- Do NOT use Bash to parse OpenAPI specs — MCP tools handle this
