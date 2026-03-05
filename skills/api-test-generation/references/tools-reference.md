@@ -179,3 +179,46 @@ save_test_suites(files: [...])
 generate_and_save(specPath: "spec.json", tag: "users")
 save_test_suites(files: [...])
 ```
+
+## Practical Tips
+
+- **int64 IDs**: For APIs returning large auto-generated IDs (int64), prefer setting fixed IDs in request bodies rather than capturing auto-generated ones, as JSON number precision may cause mismatches.
+- **Nested assertions**: Use dot-notation or nested YAML — both work identically.
+- **Root body type**: Use `_body: { type: "array" }` to verify the response body type itself.
+- **List endpoints**: Always check both type AND non-emptiness: `_body: { type: "array" }` + `_body.length: { gt: 0 }`
+- **Create responses**: Always verify at least the key identifying fields (id, name) in the response body — don't just check status.
+- **Error responses**: Assert that error bodies contain useful info (`message: { exists: true }`), not just status codes.
+- **Bulk operations**: After bulk create (createWithArray, createWithList), add GET steps to verify resources were actually created.
+- **204 No Content**: When an endpoint returns 204, omit `body:` assertions entirely — an empty response IS the correct behavior. Adding body assertions on 204 will always fail.
+- **Cleanup pattern**: Always delete test data in the same suite. Use a create → read → delete lifecycle so tests are idempotent:
+  ```yaml
+  tests:
+    - name: Create test resource
+      POST: /users
+      json: { name: "zond-test-{{$randomString}}" }
+      expect:
+        status: 201
+        body:
+          id: { capture: user_id }
+    - name: Read created resource
+      GET: /users/{{user_id}}
+      expect:
+        status: 200
+    - name: Cleanup - delete test resource
+      DELETE: /users/{{user_id}}
+      expect:
+        status: 204
+  ```
+- **Identifiable test data**: Prefix test data with `zond-test-` or use `{{$uuid}}` / `zond-test-{{$randomString}}` so you can identify and clean up leftover test data if needed.
+
+## Common Mistakes to Avoid
+
+1. **equals vs capture**: `capture` SAVES a value, `equals` COMPARES. To extract a token: `{ capture: "token" }` NOT `{ equals: "{{token}}" }`
+2. **exists must be boolean**: `exists: true` NOT `exists: "true"`
+3. **Status must be integer or array**: `status: 200` or `status: [200, 204]` NOT `status: "200"`
+4. **One method per step**: Each test step has exactly ONE of GET/POST/PUT/PATCH/DELETE
+5. **Don't hardcode base URL**: Use `{{base_url}}` — set it in environment or suite base_url
+6. **Auth credentials**: Use environment variables `{{auth_username}}`, `{{auth_password}}` — NOT generators
+7. **String query params**: Query parameter values must be strings: `limit: "10"` not `limit: 10`
+8. **Hardcoded credentials**: NEVER put actual API keys/tokens in YAML — use `{{api_key}}` from env instead
+9. **Body assertions on 204**: Don't add `body:` checks for DELETE or other endpoints that return 204 No Content — the body is empty by design.
