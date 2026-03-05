@@ -101,7 +101,7 @@ export function registerGenerateAndSaveTool(server: McpServer) {
             (effectiveMode === "guide"
               ? `Pass includeFormat: false for subsequent chunks to save tokens. `
               : "") +
-            `Example: generate_and_save(specPath: '${specPath}', tag: '${plan.chunks[0].tag}'` +
+            `Example: generate_and_save(specPath: '${specPath}', tag: '${plan.chunks[0]!.tag}'` +
             (effectiveMode === "guide" ? `, mode: 'guide'` : "") + `)`,
         };
         if (coverageInfo) {
