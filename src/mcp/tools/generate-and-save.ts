@@ -128,12 +128,12 @@ export function registerGenerateAndSaveTool(server: McpServer) {
           const fileName = (suite.fileStem ?? suite.name) + ".yaml";
           const filePath = join(effectiveOutputDir, fileName);
 
-          const result = await validateAndSave(filePath, yaml, overwrite ?? false);
+          const { result: saveResult } = await validateAndSave(filePath, yaml, overwrite ?? false);
           files.push({
-            saved: result.saved,
-            filePath: result.filePath ?? filePath,
+            saved: saveResult.saved,
+            filePath: saveResult.filePath ?? filePath,
             tests: suite.tests.length,
-            ...(result.error ? { error: result.error } : {}),
+            ...(saveResult.error ? { error: saveResult.error } : {}),
           });
         }
 
