@@ -113,6 +113,12 @@ Only proceed if the user has confirmed a safe (non-production) environment.
    manage_server(action: "start")
    ```
 
+## Workflow Rules
+
+- **MCP tools for analysis, Read+Edit for fixes**: Use generate_and_save, diagnose_failure, coverage_analysis, describe_endpoint for analysis and generation. Use Read + Edit for modifying individual YAML test files.
+- **save_test_suites for initial bulk save only**: Do not use for point fixes — it overwrites entire files, expensive in tokens and unreadable in diffs.
+- **No Bash for spec parsing**: coverage_analysis and describe_endpoint already parse OpenAPI specs — do not use cat/grep/node to read specs.
+
 ## Safety Rules
 
 | Mechanism | Purpose |

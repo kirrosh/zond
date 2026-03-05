@@ -1,6 +1,6 @@
 {
   "name": "zond",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config, no cloud, no Postman.",
   "author": {
     "name": "kirrosh",
@@ -14,9 +14,6 @@
     "openapi",
     "yaml",
     "mcp"
-  ],
-  "commands": [
-    "./commands/ui.md"
   ],
   "mcpServers": {
     "zond": {

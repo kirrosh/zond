@@ -1,5 +1,5 @@
 ---
-description: Start testing an API — register, generate tests, run, and diagnose
+description: "Full API test cycle — register, generate, run, diagnose"
 argument-hint: "[path-to-openapi-spec]"
 ---
 
@@ -50,4 +50,10 @@ You are orchestrating a full API test generation workflow using the zond MCP too
    - Show coverage percentage
    - Recommend Phase 2 (CRUD tests) if the user has a staging environment
    - Recommend `manage_server(action: "start")` for visual review
-   - Recommend `/zond:api-coverage` to check and fill coverage gaps
+   - Recommend `/zond:coverage` to check and fill coverage gaps
+
+## Important Rules
+- Use MCP tools for analysis (generate_and_save, coverage_analysis, describe_endpoint)
+- Use Read + Edit for fixing individual test YAML files — NOT save_test_suites
+- save_test_suites is for initial bulk save only
+- Do NOT use Bash to parse OpenAPI specs — MCP tools handle this

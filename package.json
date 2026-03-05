@@ -1,6 +1,6 @@
 {
   "name": "@kirrosh/zond",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "API testing platform — define tests in YAML, run from CLI or WebUI, generate from OpenAPI specs",
   "license": "MIT",
   "module": "index.ts",
