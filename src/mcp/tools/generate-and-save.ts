@@ -11,6 +11,7 @@ import {
   generateSuites,
   findUnresolvedVars,
 } from "../../core/generator/index.ts";
+import { loadEnvironment } from "../../core/parser/variables.ts";
 import { compressEndpointsWithSchemas, buildGenerationGuide } from "../../core/generator/guide-builder.ts";
 import { planChunks, filterByTag } from "../../core/generator/chunker.ts";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
@@ -132,8 +133,10 @@ export function registerGenerateAndSaveTool(server: McpServer) {
         }
 
         const warnings: string[] = [];
+        const env = await loadEnvironment(undefined, effectiveOutputDir);
+        const envKeys = new Set(Object.keys(env));
         for (const suite of suites) {
-          const unresolved = findUnresolvedVars(suite);
+          const unresolved = findUnresolvedVars(suite, envKeys);
           if (unresolved.length > 0)
             warnings.push(`${suite.fileStem ?? suite.name}.yaml: unresolved [${unresolved.join(", ")}]`);
         }

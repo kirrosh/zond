@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { resolve } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { executeRun } from "../../core/runner/execute-run.ts";
 import { getDb } from "../../db/schema.ts";
-import { getResultsByRunId } from "../../db/queries.ts";
+import { getResultsByRunId, findCollectionByTestPath } from "../../db/queries.ts";
+import { readOpenApiSpec, extractEndpoints, scanCoveredEndpoints, filterUncoveredEndpoints } from "../../core/generator/index.ts";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 
 export function registerRunTestsTool(server: McpServer, dbPath?: string) {
@@ -64,6 +66,25 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
       }))
     );
 
+    // Best-effort coverage calculation
+    let coverage: { covered: number; total: number; percentage: number } | undefined;
+    try {
+      const resolvedPath = resolve(testPath);
+      const collection = findCollectionByTestPath(resolvedPath);
+      if (collection?.openapi_spec) {
+        const doc = await readOpenApiSpec(collection.openapi_spec);
+        const allEndpoints = extractEndpoints(doc);
+        const coveredEps = await scanCoveredEndpoints(collection.test_path);
+        const uncovered = filterUncoveredEndpoints(allEndpoints, coveredEps);
+        const coveredCount = allEndpoints.length - uncovered.length;
+        coverage = {
+          covered: coveredCount,
+          total: allEndpoints.length,
+          percentage: allEndpoints.length > 0 ? Math.round((coveredCount / allEndpoints.length) * 100) : 100,
+        };
+      }
+    } catch { /* coverage is best-effort, don't fail run */ }
+
     const hints: string[] = [];
     if (failedSteps.length > 0) {
       hints.push("Use query_db(action: 'diagnose_failure', runId: " + runId + ") for detailed failure analysis");
@@ -83,6 +104,7 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
       suites: results.length,
       status: failed === 0 ? "all_passed" : "has_failures",
       ...(failedSteps.length > 0 ? { failures: failedSteps } : {}),
+      ...(coverage ? { coverage } : {}),
       hints,
     };
 

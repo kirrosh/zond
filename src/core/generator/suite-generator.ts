@@ -117,6 +117,14 @@ function getCaptureField(ep: EndpointInfo): string {
   return "id";
 }
 
+const AUTH_PATH_PATTERNS = /\/(auth|login|signin|signup|register|token|oauth)\b/i;
+
+function isAuthEndpoint(ep: EndpointInfo): boolean {
+  if (AUTH_PATH_PATTERNS.test(ep.path)) return true;
+  if (ep.tags?.some(t => /^auth/i.test(t))) return true;
+  return false;
+}
+
 // ──────────────────────────────────────────────
 // Public API
 // ──────────────────────────────────────────────
@@ -292,9 +300,10 @@ export function generateCrudSuite(
   return suite;
 }
 
-/** Find unresolved template variables in a suite (excluding known globals and captured vars) */
-export function findUnresolvedVars(suite: RawSuite): string[] {
+/** Find unresolved template variables in a suite (excluding known globals, captured vars, and env keys) */
+export function findUnresolvedVars(suite: RawSuite, envKeys?: Set<string>): string[] {
   const KNOWN = new Set(["base_url", "auth_token", "api_key"]);
+  if (envKeys) for (const k of envKeys) KNOWN.add(k);
   const captured = new Set<string>();
   for (const step of suite.tests) {
     if (step.expect?.body) {
@@ -327,8 +336,12 @@ export function generateSuites(opts: {
   // Filter deprecated
   const active = endpoints.filter(ep => !ep.deprecated);
 
+  // Separate auth endpoints
+  const authEndpoints = active.filter(isAuthEndpoint);
+  const nonAuth = active.filter(ep => !isAuthEndpoint(ep));
+
   // 1. Detect CRUD groups
-  const crudGroups = detectCrudGroups(active);
+  const crudGroups = detectCrudGroups(nonAuth);
 
   // Collect endpoints consumed by CRUD groups
   const crudEndpointKeys = new Set<string>();
@@ -340,8 +353,8 @@ export function generateSuites(opts: {
     if (g.delete) crudEndpointKeys.add(`${g.delete.method.toUpperCase()} ${g.delete.path}`);
   }
 
-  // Remaining endpoints (not in any CRUD group)
-  const remaining = active.filter(ep => !crudEndpointKeys.has(`${ep.method.toUpperCase()} ${ep.path}`));
+  // Remaining endpoints (not in any CRUD group, not auth)
+  const remaining = nonAuth.filter(ep => !crudEndpointKeys.has(`${ep.method.toUpperCase()} ${ep.path}`));
 
   const suites: RawSuite[] = [];
 
@@ -407,6 +420,31 @@ export function generateSuites(opts: {
   // 3. CRUD suites
   for (const group of crudGroups) {
     suites.push(generateCrudSuite(group, securitySchemes));
+  }
+
+  // 4. Auth suite (separate — requires real credentials)
+  if (authEndpoints.length > 0) {
+    const tests = authEndpoints.map(ep => generateStep(ep, securitySchemes));
+    const headers = getSuiteHeaders(authEndpoints, securitySchemes);
+
+    const suite: RawSuite = {
+      name: "auth",
+      tags: ["auth"],
+      fileStem: "auth",
+      base_url: "{{base_url}}",
+      tests,
+    };
+
+    if (headers) {
+      suite.headers = headers;
+      for (const t of tests) {
+        if (t.headers && JSON.stringify(t.headers) === JSON.stringify(headers)) {
+          delete (t as any).headers;
+        }
+      }
+    }
+
+    suites.push(suite);
   }
 
   return suites;
