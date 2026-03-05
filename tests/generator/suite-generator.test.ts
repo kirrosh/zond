@@ -176,14 +176,14 @@ describe("detectCrudGroups", () => {
     const groups = detectCrudGroups(endpoints);
 
     expect(groups).toHaveLength(1);
-    expect(groups[0].resource).toBe("pets");
-    expect(groups[0].basePath).toBe("/pets");
-    expect(groups[0].itemPath).toBe("/pets/{petId}");
-    expect(groups[0].idParam).toBe("petId");
-    expect(groups[0].create).toBeDefined();
-    expect(groups[0].read).toBeDefined();
-    expect(groups[0].update).toBeUndefined();
-    expect(groups[0].delete).toBeUndefined();
+    expect(groups[0]!.resource).toBe("pets");
+    expect(groups[0]!.basePath).toBe("/pets");
+    expect(groups[0]!.itemPath).toBe("/pets/{petId}");
+    expect(groups[0]!.idParam).toBe("petId");
+    expect(groups[0]!.create).toBeDefined();
+    expect(groups[0]!.read).toBeDefined();
+    expect(groups[0]!.update).toBeUndefined();
+    expect(groups[0]!.delete).toBeUndefined();
   });
 
   test("detects full CRUD group", () => {
@@ -197,11 +197,11 @@ describe("detectCrudGroups", () => {
     const groups = detectCrudGroups(endpoints);
 
     expect(groups).toHaveLength(1);
-    expect(groups[0].list).toBeDefined();
-    expect(groups[0].create).toBeDefined();
-    expect(groups[0].read).toBeDefined();
-    expect(groups[0].update).toBeDefined();
-    expect(groups[0].delete).toBeDefined();
+    expect(groups[0]!.list).toBeDefined();
+    expect(groups[0]!.create).toBeDefined();
+    expect(groups[0]!.read).toBeDefined();
+    expect(groups[0]!.update).toBeDefined();
+    expect(groups[0]!.delete).toBeDefined();
   });
 
   test("skips deprecated endpoints", () => {
@@ -275,7 +275,7 @@ describe("generateCrudSuite", () => {
     const groups = detectCrudGroups(endpoints);
     expect(groups).toHaveLength(1);
 
-    const suite = generateCrudSuite(groups[0], noSecurity);
+    const suite = generateCrudSuite(groups[0]!, noSecurity);
 
     expect(suite.name).toBe("pets-crud");
     expect(suite.tags).toEqual(["crud"]);
@@ -283,20 +283,20 @@ describe("generateCrudSuite", () => {
     expect(suite.tests).toHaveLength(5); // create, read, update, delete, verify
 
     // Create step has capture
-    const createStep = suite.tests[0];
+    const createStep = suite.tests[0]!;
     expect(createStep.expect.body?.id).toEqual({ capture: "pet_id" });
 
     // Read uses captured var
-    const readStep = suite.tests[1];
+    const readStep = suite.tests[1]!;
     expect(readStep.GET).toBe("/pets/{{pet_id}}");
 
     // Delete step
-    const deleteStep = suite.tests[3];
+    const deleteStep = suite.tests[3]!;
     expect(deleteStep.DELETE).toBe("/pets/{{pet_id}}");
     expect(deleteStep.expect.status).toBe(204);
 
     // Verify deleted
-    const verifyStep = suite.tests[4];
+    const verifyStep = suite.tests[4]!;
     expect(verifyStep.GET).toBe("/pets/{{pet_id}}");
     expect(verifyStep.expect.status).toBe(404);
   });
@@ -307,7 +307,7 @@ describe("generateCrudSuite", () => {
       makeEndpoint({ path: "/items/{itemId}", method: "GET" }),
     ];
     const groups = detectCrudGroups(endpoints);
-    const suite = generateCrudSuite(groups[0], noSecurity);
+    const suite = generateCrudSuite(groups[0]!, noSecurity);
 
     expect(suite.tests).toHaveLength(2); // create, read
   });
@@ -344,7 +344,7 @@ describe("generateSuites", () => {
 
     const crudSuites = suites.filter(s => s.tags?.includes("crud"));
     expect(crudSuites).toHaveLength(1);
-    expect(crudSuites[0].name).toBe("pets-crud");
+    expect(crudSuites[0]!.name).toBe("pets-crud");
 
     // /health should be in smoke, not CRUD
     const systemSmoke = suites.find(s => s.name === "system-smoke");
@@ -373,7 +373,7 @@ describe("generateSuites", () => {
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
 
     expect(suites).toHaveLength(1);
-    expect(suites[0].name).toBe("untagged-smoke");
+    expect(suites[0]!.name).toBe("untagged-smoke");
   });
 
   test("suite-level auth when all endpoints share same security", () => {

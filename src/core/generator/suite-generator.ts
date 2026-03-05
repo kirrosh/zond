@@ -24,7 +24,7 @@ function escapeRegex(s: string): string {
 function getExpectedStatus(ep: EndpointInfo): number {
   const success = ep.responses.find(r => r.statusCode >= 200 && r.statusCode < 300);
   if (success) return success.statusCode;
-  if (ep.responses.length > 0) return ep.responses[0].statusCode;
+  if (ep.responses.length > 0) return ep.responses[0]!.statusCode;
   return 200;
 }
 
@@ -182,10 +182,10 @@ export function detectCrudGroups(endpoints: EndpointInfo[]): CrudGroup[] {
 
     if (itemEndpoints.length === 0) continue;
 
-    const itemPath = itemEndpoints[0].path;
+    const itemPath = itemEndpoints[0]!.path;
     const idMatch = itemPath.match(/\{([^}]+)\}$/);
     if (!idMatch) continue;
-    const idParam = idMatch[1];
+    const idParam = idMatch[1]!;
 
     const read = itemEndpoints.find(ep => ep.method.toUpperCase() === "GET");
     if (!read) continue; // Minimum: POST + GET/{id}
@@ -316,7 +316,7 @@ export function findUnresolvedVars(suite: RawSuite, envKeys?: Set<string>): stri
   const scan = (obj: unknown) => {
     if (typeof obj === "string") {
       for (const m of obj.matchAll(/\{\{([^$}][^}]*)\}\}/g)) {
-        if (!KNOWN.has(m[1]) && !captured.has(m[1])) vars.add(m[1]);
+        if (!KNOWN.has(m[1]!) && !captured.has(m[1]!)) vars.add(m[1]!);
       }
     } else if (obj && typeof obj === "object") {
       for (const v of Object.values(obj)) scan(v);
