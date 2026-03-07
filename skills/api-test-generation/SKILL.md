@@ -30,7 +30,9 @@ This ensures `zond.db` and all relative paths resolve correctly.
    ```
    setup_api(specPath: "<path-to-spec>")
    ```
-   Name is auto-detected from `info.title`. This creates the directory structure, reads the spec, sets up `.env.yaml` (including path parameter defaults like `id: 1`), and registers a collection in the database.
+   Name is auto-detected from `info.title`. This creates the directory structure, reads the spec, sets up `.env.yaml` (including path parameter defaults like `id: 1`), and registers a collection in the database. Use `insecure: true` for self-signed HTTPS certs.
+
+   **Check warnings:** If the spec has a relative server URL (e.g. `/api/v1`), `setup_api` returns a warning. Override with `envVars: {"base_url": "https://your-host/api/v1"}`.
 
 2. **Analyze coverage baseline:**
    ```

@@ -9,7 +9,7 @@ Complete reference for all 12 MCP tools provided by the zond server.
 | Tool | Description |
 |------|-------------|
 | `set_work_dir` | Set project root for the session. **Call first** with npx MCP so `zond.db` and relative paths resolve correctly. |
-| `setup_api` | Register a new API — creates directory structure, reads OpenAPI spec, sets up `.env.yaml` with `.gitignore`, creates a collection in the database. |
+| `setup_api` | Register a new API — creates directory structure, reads OpenAPI spec, sets up `.env.yaml` with `.gitignore`, creates a collection in the database. Warns if spec has relative server URL. Use `insecure: true` for self-signed HTTPS certs. |
 
 ### Test Generation
 
@@ -39,7 +39,7 @@ Complete reference for all 12 MCP tools provided by the zond server.
 | `query_db` | Query the database with various actions (see below). |
 | `coverage_analysis` | Compare OpenAPI spec vs existing tests. Shows covered/uncovered endpoints. `failThreshold` for CI gates. `runId` for enriched pass/fail/5xx breakdown. |
 | `describe_endpoint` | Full details for one endpoint: params by type, request body schema, all response schemas + headers, security, deprecated flag. |
-| `send_request` | Ad-hoc HTTP request with variable interpolation from environments. |
+| `send_request` | Ad-hoc HTTP request with variable interpolation from environments. Use `jsonPath` to extract subset (e.g. `[0].code`), `maxResponseChars` to truncate large responses. |
 
 ### Infrastructure
 
@@ -55,7 +55,7 @@ Complete reference for all 12 MCP tools provided by the zond server.
 | `list_collections` | — | All registered APIs with run stats |
 | `list_runs` | `limit` (optional) | Recent test runs |
 | `get_run_results` | `runId` | Full detail for a run — all steps with status |
-| `diagnose_failure` | `runId` | Only failed/errored steps with `response_body`, `failure_type`, and `envHint` |
+| `diagnose_failure` | `runId`, `verbose` (opt) | Only failed/errored steps with `response_body`, `failure_type`, and `envHint`. Stack traces truncated by default; use `verbose: true` for full output |
 | `compare_runs` | `runId`, `runIdB` | Diff two runs — regressions, fixes, performance delta |
 
 ### diagnose_failure Details
@@ -63,6 +63,7 @@ Complete reference for all 12 MCP tools provided by the zond server.
 Each failure includes:
 - **failure_type**: `api_error` (HTTP 4xx/5xx), `assertion_failed` (response didn't match), `network_error` (connection/timeout)
 - **envHint**: diagnostic hint for common issues (relative URL, unresolved `{{variable}}`, malformed URL)
+- **error_message**: truncated by default (first line + 3 stack lines); use `verbose: true` for full trace
 - **response_body**: actual response for debugging
 - **summary**: aggregated counts of `api_errors`, `assertion_failures`, `network_errors`
 
@@ -91,7 +92,10 @@ tests:
       name: { type: string }
 ```
 
-**Important**: assertions go directly inside `expect:`, NOT nested under `body:`. Use `_body` for root-level body assertions.
+**Important**:
+- Assertions go directly inside `expect:`, NOT nested under `body:`. Use `_body` for root-level body assertions.
+- Use `json:` for JSON request bodies. `body:` is NOT a valid key.
+- `_body` capture works for all response types including `text/plain` (stored as string).
 
 ### Assertions
 

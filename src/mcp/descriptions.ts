@@ -12,7 +12,8 @@ export const TOOL_DESCRIPTIONS = {
   setup_api:
     "Register a new API for testing. Creates directory structure, reads OpenAPI spec, " +
     "sets up environment variables, and creates a collection in the database. " +
-    "Use this before generating tests for a new API.",
+    "Use this before generating tests for a new API. " +
+    "Warns if spec has relative server URL. Use insecure: true for self-signed HTTPS certs.",
 
   describe_endpoint:
     "Full details for one endpoint: params grouped by type, request body schema, " +
@@ -36,7 +37,7 @@ export const TOOL_DESCRIPTIONS = {
     "Query the zond database. Actions: list_collections (all APIs with run stats), " +
     "list_runs (recent test runs), get_run_results (full detail for a run), " +
     "diagnose_failure (only failed/errored steps for a run — each failure includes failure_type: api_error/assertion_failed/network_error, " +
-    "and summary includes api_errors/assertion_failures/network_errors counts), " +
+    "and summary includes api_errors/assertion_failures/network_errors counts; stack traces are truncated by default, use verbose: true for full traces), " +
     "compare_runs (regressions and fixes between two runs).",
 
   coverage_analysis:
@@ -46,7 +47,8 @@ export const TOOL_DESCRIPTIONS = {
     "Always includes static spec warnings (deprecated, missing response schemas, required params without examples).",
 
   send_request:
-    "Send an ad-hoc HTTP request. Supports variable interpolation from environments (e.g. {{base_url}}).",
+    "Send an ad-hoc HTTP request. Supports variable interpolation from environments (e.g. {{base_url}}). " +
+    "Use jsonPath to extract a subset of the response (e.g. '[0].code'), maxResponseChars to truncate large responses.",
 
   manage_server:
     "Start, stop, restart, or check status of the zond WebUI server. " +

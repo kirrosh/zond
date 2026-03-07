@@ -96,6 +96,7 @@ Options for 'add-api':
   --spec <path-or-url>   OpenAPI spec (extracts base_url from servers[0])
   --dir <directory>      Base directory (default: ./apis/<name>/)
   --env key=value        Set environment variables (repeatable)
+  --insecure             Skip TLS verification (self-signed certs)
 
 Options for 'chat':
   --provider <name>    LLM provider: ollama, openai, anthropic, custom (default: ollama)
@@ -210,6 +211,7 @@ async function main(): Promise<number> {
         dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
         envPairs: envValues.length > 0 ? envValues : undefined,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+        insecure: flags["insecure"] === true,
       });
     }
 

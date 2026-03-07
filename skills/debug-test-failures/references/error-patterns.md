@@ -174,3 +174,5 @@ send_request(
 ```
 
 Supports variable interpolation from environments when `collectionName` is provided.
+
+For large responses, use `jsonPath` to extract a subset (e.g. `[0].code`, `data.items`), or `maxResponseChars` to truncate.
