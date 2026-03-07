@@ -3,18 +3,9 @@
 import { runCommand } from "./commands/run.ts";
 import { validateCommand } from "./commands/validate.ts";
 import { serveCommand } from "./commands/serve.ts";
-import { collectionsCommand } from "./commands/collections.ts";
-import { aiGenerateCommand } from "./commands/ai-generate.ts";
 import { mcpCommand } from "./commands/mcp.ts";
-import { initCommand } from "./commands/init.ts";
-import { updateCommand } from "./commands/update.ts";
-import { chatCommand } from "./commands/chat.ts";
-import { runsCommand } from "./commands/runs.ts";
 import { coverageCommand } from "./commands/coverage.ts";
-import { doctorCommand } from "./commands/doctor.ts";
-import { addApiCommand } from "./commands/add-api.ts";
 import { ciInitCommand } from "./commands/ci-init.ts";
-import { compareCommand } from "./commands/compare.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { getDb } from "../db/schema.ts";
@@ -75,51 +66,13 @@ function printUsage(): void {
   console.log(`zond - API Testing Platform
 
 Usage:
-  zond add-api <name>   Register a new API (collection)
   zond run <path>       Run API tests
   zond validate <path>  Validate test files without running
-  zond ai-generate --from <spec> --prompt "..."  Generate tests with AI
-  zond runs [id]        View test run history
-  zond coverage --spec <path> --tests <dir>  Analyze API test coverage
-  zond collections      List test collections
+  zond coverage         Analyze API test coverage
   zond serve            Start web dashboard
-  zond init             Initialize a new zond project
-  zond ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
   zond mcp              Start MCP server (stdio transport for AI agents)
                            --dir <path>  Set working directory (relative paths resolve here)
-  zond chat             Start interactive AI chat for API testing
-  zond compare <runA> <runB>  Compare two test runs (regressions/fixes)
-  zond doctor           Run diagnostic checks
-  zond update           Update to latest version
-
-Options for 'add-api':
-  --spec <path-or-url>   OpenAPI spec (extracts base_url from servers[0])
-  --dir <directory>      Base directory (default: ./apis/<name>/)
-  --env key=value        Set environment variables (repeatable)
-  --insecure             Skip TLS verification (self-signed certs)
-
-Options for 'chat':
-  --provider <name>    LLM provider: ollama, openai, anthropic, custom (default: ollama)
-  --model <name>       Model name (default: provider-specific)
-  --api-key <key>      API key (or set ZOND_AI_KEY env var)
-  --base-url <url>     Provider base URL override
-  --safe               Only allow running GET tests (read-only mode)
-
-Options for 'runs':
-  runs                 List recent test runs
-  runs <id>            Show run details with step results
-  --limit <n>          Number of runs to show (default: 20)
-
-Options for 'compare':
-  compare <runA> <runB>   Compare two run IDs
-  Exit code 1 if regressions found, 0 otherwise
-
-Options for 'coverage':
-  --api <name>         Use API collection (auto-resolves spec and tests dir)
-  --spec <path>        Path to OpenAPI spec (required unless --api used)
-  --tests <dir>        Path to test files directory (required unless --api used)
-  --fail-on-coverage N Exit 1 when coverage percentage is below N (0–100)
-  --run-id <number>    Cross-reference with a test run for pass/fail/5xx breakdown
+  zond ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
 
 Options for 'run':
   --dry-run            Show requests without sending them (exit code always 0)
@@ -135,15 +88,12 @@ Options for 'run':
   --safe               Run only GET tests (read-only, safe mode)
   --tag <tag>          Filter suites by tag (repeatable, comma-separated, OR logic)
 
-Options for 'ai-generate':
-  --api <name>         Use API collection (auto-resolves spec and output dir)
-  --from <spec>        Path to OpenAPI spec (required unless --api used)
-  --prompt <text>      Test scenario description (required)
-  --provider <name>    LLM provider: ollama, openai, anthropic, custom (default: ollama)
-  --model <name>       Model name (default: provider-specific)
-  --api-key <key>      API key (or set ZOND_AI_KEY env var)
-  --base-url <url>     Provider base URL override
-  --output <dir>       Output directory (default: ./generated/ai/)
+Options for 'coverage':
+  --api <name>         Use API collection (auto-resolves spec and tests dir)
+  --spec <path>        Path to OpenAPI spec (required unless --api used)
+  --tests <dir>        Path to test files directory (required unless --api used)
+  --fail-on-coverage N Exit 1 when coverage percentage is below N (0–100)
+  --run-id <number>    Cross-reference with a test run for pass/fail/5xx breakdown
 
 Options for 'serve':
   --port <port>        Server port (default: 8080)
@@ -186,35 +136,6 @@ async function main(): Promise<number> {
   }
 
   switch (command) {
-    case "add-api": {
-      const name = positional[0];
-      if (!name) {
-        printError("Missing name argument. Usage: zond add-api <name> [--spec <path>] [--dir <dir>]");
-        return 2;
-      }
-
-      // Collect all --env flags (parseArgs only stores last one, so re-parse)
-      const envValues: string[] = [];
-      const rawArgs = process.argv.slice(2);
-      for (let i = 0; i < rawArgs.length; i++) {
-        if (rawArgs[i] === "--env" && rawArgs[i + 1] && rawArgs[i + 1]!.includes("=")) {
-          envValues.push(rawArgs[i + 1]!);
-          i++;
-        } else if (rawArgs[i]?.startsWith("--env=") && rawArgs[i]!.slice(6).includes("=")) {
-          envValues.push(rawArgs[i]!.slice(6));
-        }
-      }
-
-      return addApiCommand({
-        name,
-        spec: typeof flags["spec"] === "string" ? flags["spec"] : undefined,
-        dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
-        envPairs: envValues.length > 0 ? envValues : undefined,
-        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
-        insecure: flags["insecure"] === true,
-      });
-    }
-
     case "run": {
       let path = positional[0];
       const apiFlag = typeof flags["api"] === "string" ? flags["api"] : undefined;
@@ -297,51 +218,6 @@ async function main(): Promise<number> {
       return validateCommand({ path });
     }
 
-    case "ai-generate": {
-      let from = flags["from"] as string | undefined;
-      let output = typeof flags["output"] === "string" ? flags["output"] : undefined;
-      const aiGenApiFlag = typeof flags["api"] === "string" ? flags["api"] : undefined;
-
-      // Resolve --api to spec and output dir from collection
-      if (aiGenApiFlag) {
-        try {
-          getDb(typeof flags["db"] === "string" ? flags["db"] : undefined);
-          const col = findCollectionByNameOrId(aiGenApiFlag);
-          if (!col) { printError(`API '${aiGenApiFlag}' not found`); return 1; }
-          if (!from && col.openapi_spec) from = col.openapi_spec;
-          if (!output && col.test_path) output = col.test_path;
-        } catch (err) {
-          printError(`Failed to resolve --api: ${(err as Error).message}`);
-          return 2;
-        }
-      }
-
-      if (typeof from !== "string") {
-        printError("Missing --from <spec>. Usage: zond ai-generate --from <spec> --prompt \"...\"");
-        return 2;
-      }
-      const prompt = flags["prompt"];
-      if (typeof prompt !== "string") {
-        printError("Missing --prompt <text>. Usage: zond ai-generate --from <spec> --prompt \"...\"");
-        return 2;
-      }
-      return aiGenerateCommand({
-        from,
-        prompt,
-        provider: typeof flags["provider"] === "string" ? flags["provider"] : "ollama",
-        model: typeof flags["model"] === "string" ? flags["model"] : undefined,
-        apiKey: typeof flags["api-key"] === "string" ? flags["api-key"] : undefined,
-        baseUrl: typeof flags["base-url"] === "string" ? flags["base-url"] : undefined,
-        output,
-      });
-    }
-
-    case "collections": {
-      return collectionsCommand(
-        typeof flags["db"] === "string" ? flags["db"] : undefined,
-      );
-    }
-
     case "serve": {
       const portRaw = flags["port"];
       let port: number | undefined;
@@ -361,59 +237,10 @@ async function main(): Promise<number> {
       });
     }
 
-    case "init": {
-      return initCommand({
-        force: flags["force"] === true,
-      });
-    }
-
     case "mcp": {
       return mcpCommand({
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
         dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
-      });
-    }
-
-    case "chat": {
-      return chatCommand({
-        provider: typeof flags["provider"] === "string" ? flags["provider"] : undefined,
-        model: typeof flags["model"] === "string" ? flags["model"] : undefined,
-        apiKey: typeof flags["api-key"] === "string" ? flags["api-key"] : undefined,
-        baseUrl: typeof flags["base-url"] === "string" ? flags["base-url"] : undefined,
-        safe: flags["safe"] === true,
-        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
-      });
-    }
-
-    case "update": {
-      return updateCommand({ force: flags["force"] === true });
-    }
-
-    case "runs": {
-      const idRaw = positional[0];
-      let runId: number | undefined;
-      if (idRaw) {
-        runId = parseInt(idRaw, 10);
-        if (isNaN(runId)) {
-          printError(`Invalid run ID: ${idRaw}`);
-          return 2;
-        }
-      }
-
-      const limitRaw = flags["limit"];
-      let limit: number | undefined;
-      if (typeof limitRaw === "string") {
-        limit = parseInt(limitRaw, 10);
-        if (isNaN(limit) || limit <= 0) {
-          printError(`Invalid limit value: ${limitRaw}`);
-          return 2;
-        }
-      }
-
-      return runsCommand({
-        runId,
-        limit,
-        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
       });
     }
 
@@ -430,32 +257,6 @@ async function main(): Promise<number> {
         platform,
         force: flags["force"] === true,
         dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
-      });
-    }
-
-    case "compare": {
-      const rawA = positional[0];
-      const rawB = positional[1];
-      if (!rawA || !rawB) {
-        printError("Usage: zond compare <runA> <runB>");
-        return 2;
-      }
-      const runA = parseInt(rawA, 10);
-      const runB = parseInt(rawB, 10);
-      if (isNaN(runA) || isNaN(runB)) {
-        printError("Run IDs must be integers");
-        return 2;
-      }
-      return compareCommand({
-        runA,
-        runB,
-        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
-      });
-    }
-
-    case "doctor": {
-      return doctorCommand({
-        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
       });
     }
 

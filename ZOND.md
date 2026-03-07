@@ -92,20 +92,12 @@ ci_init()
 
 | Command | Description | Key flags |
 |---------|-------------|-----------|
-| `add-api <name>` | Register new API | `--spec`, `--dir`, `--env key=value`, `--insecure` |
 | `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--report json\|junit` |
-| `compare <runA> <runB>` | Compare two test runs | |
+| `validate <path>` | Validate YAML tests | |
 | `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
-| `validate` | Validate YAML tests | |
-| `runs [id]` | Run history | `--limit` |
-| `collections` | List collections | |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch` |
-| `chat` | Interactive AI agent | `--provider`, `--model`, `--safe` |
-| `mcp` | Start MCP server | `--db` |
+| `mcp` | Start MCP server | `--db`, `--dir` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
-| `init` | Scaffold new project | |
-| `doctor` | Diagnostics | |
-| `update` | Self-update | |
 
 ---
 

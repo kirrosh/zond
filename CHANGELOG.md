@@ -48,6 +48,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **AI subsystem** — removed `ai-generate` CLI, `chat` CLI, AI agent loop, LLM client, TUI chat UI, and all AI SDK dependencies (`ai`, `@ai-sdk/openai`, `@ai-sdk/anthropic`)
+- **CLI commands** — removed `add-api`, `init`, `collections`, `runs`, `compare`, `doctor`, `update` (available via MCP tools or unnecessary)
+- **Directories** — removed `generated/`, `examples/`, `self-tests/`, `apis/`, `docs/archive/`
+- **Files** — removed `seed-demo.ts`, `BACKLOG.md`, `docs/agent.md`
+
 ### Added
 
 - **Extended YAML test format** — 12 new assertion operators, flow control, and data transforms:

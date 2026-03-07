@@ -2,9 +2,6 @@ export { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "./ope
 export { serializeSuite, isRelativeUrl, sanitizeEnvName, resolveSpecPath } from "./serializer.ts";
 export type { RawSuite, RawStep } from "./serializer.ts";
 export { generateFromSchema } from "./data-factory.ts";
-export { generateWithAI } from "./ai/ai-generator.ts";
-export { resolveProviderConfig, PROVIDER_DEFAULTS } from "./ai/types.ts";
-export type { AIProviderConfig, AIGenerateOptions, AIGenerateResult } from "./ai/types.ts";
 export { scanCoveredEndpoints, filterUncoveredEndpoints, normalizePath, specPathToRegex } from "./coverage-scanner.ts";
 export type { CoveredEndpoint } from "./coverage-scanner.ts";
 export { analyzeEndpoints } from "./endpoint-warnings.ts";

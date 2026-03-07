@@ -4,10 +4,6 @@
  */
 
 const MOCKED_FILES = [
-  "tests/agent/tools/diagnose-failure.test.ts",
-  "tests/agent/tools/query-results.test.ts",
-  "tests/agent/tools/run-tests.test.ts",
-  "tests/agent/tools/send-request.test.ts",
   "tests/mcp/coverage-analysis.test.ts",
   "tests/mcp/send-request.test.ts",
   "tests/mcp/setup-api.test.ts",
