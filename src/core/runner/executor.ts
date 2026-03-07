@@ -1,8 +1,10 @@
-import type { TestSuite, Environment } from "../parser/types.ts";
+import type { TestSuite, TestStep, Environment } from "../parser/types.ts";
 import { substituteString, substituteStep, substituteDeep, extractVariableReferences } from "../parser/variables.ts";
 import type { TestRunResult, StepResult, HttpRequest } from "./types.ts";
 import { executeRequest, type FetchOptions } from "./http-client.ts";
 import { checkAssertions, extractCaptures } from "./assertions.ts";
+import { evaluateExpr } from "./expr-eval.ts";
+import { applyTransform } from "./transforms.ts";
 
 function buildUrl(baseUrl: string | undefined, path: string, query?: Record<string, string>): string {
   let url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}${path}` : path;
@@ -38,13 +40,76 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
     follow_redirects: suite.config.follow_redirects,
   };
 
-  for (const step of suite.tests) {
+  // Expand steps lazily (for_each needs current variables)
+  let stepIndex = 0;
+  const rawSteps = [...suite.tests];
+
+  while (stepIndex < rawSteps.length) {
+    const step = rawSteps[stepIndex]!;
+    stepIndex++;
+
+    // Expand for_each: insert expanded steps and skip current
+    if (step.for_each) {
+      const resolvedIn = substituteDeep(step.for_each.in, variables);
+      const items = Array.isArray(resolvedIn) ? resolvedIn : [];
+      const expanded: TestStep[] = [];
+      for (const item of items) {
+        const { for_each: _, ...rest } = step;
+        expanded.push({ ...rest, name: `${step.name} [${step.for_each.var}=${JSON.stringify(item)}]` } as TestStep);
+        // We'll inject the variable right before executing each expanded step
+        // Store the var assignment via a set field
+      }
+      // Insert expanded steps at current position
+      rawSteps.splice(stepIndex, 0, ...expanded);
+      // Set the for_each variable for each expanded step
+      for (let i = 0; i < items.length; i++) {
+        const expandedStep = rawSteps[stepIndex + i]!;
+        // Temporarily inject into variables when we reach this step
+        // We need a way to pass the variable — use a hidden _for_each_vars
+        (expandedStep as Record<string, unknown>).__for_each_var = { key: step.for_each.var, value: items[i] };
+      }
+      continue;
+    }
+
+    // Inject for_each variable if present
+    const forEachData = (step as Record<string, unknown>).__for_each_var as { key: string; value: unknown } | undefined;
+    if (forEachData) {
+      variables[forEachData.key] = forEachData.value;
+      delete (step as Record<string, unknown>).__for_each_var;
+    }
+
+    // Handle set-only steps (no HTTP request)
+    if (step.set && step.path === "") {
+      for (const [key, rawDirective] of Object.entries(step.set)) {
+        const substituted = substituteDeep(rawDirective, variables);
+        variables[key] = applyTransform(substituted);
+      }
+      steps.push({
+        name: step.name,
+        status: "pass",
+        duration_ms: 0,
+        request: { method: "", url: "", headers: {} },
+        assertions: [],
+        captures: {},
+      });
+      continue;
+    }
+
     // Skip check: if step references a failed capture variable, skip it
     const referencedVars = extractVariableReferences(step);
     const missingCapture = referencedVars.find((v) => failedCaptures.has(v));
     if (missingCapture) {
       steps.push(makeSkippedResult(step.name, `Depends on missing capture: ${missingCapture}`));
       continue;
+    }
+
+    // skip_if evaluation
+    if (step.skip_if) {
+      const exprAfterSubst = String(substituteString(step.skip_if, variables));
+      if (evaluateExpr(exprAfterSubst)) {
+        steps.push(makeSkippedResult(step.name, `Skipped: ${step.skip_if}`));
+        continue;
+      }
     }
 
     // Substitute variables
@@ -101,6 +166,59 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
         captures: {},
         error: `[DRY RUN] ${resolved.method} ${url}${bodyPreview}`,
       });
+      continue;
+    }
+
+    // retry_until wrapper
+    if (step.retry_until) {
+      const rt = step.retry_until;
+      let lastStepResult: StepResult | undefined;
+      for (let attempt = 0; attempt < rt.max_attempts; attempt++) {
+        try {
+          const response = await executeRequest(request, fetchOptions);
+          const captures = extractCaptures(resolved.expect.body, response.body_parsed);
+          const assertions = checkAssertions(resolved.expect, response);
+          const allPassed = assertions.every((a) => a.passed);
+
+          lastStepResult = {
+            name: step.name,
+            status: allPassed ? "pass" : "fail",
+            duration_ms: response.duration_ms,
+            request,
+            response,
+            assertions,
+            captures,
+          };
+
+          // Evaluate condition with response context
+          const condVars: Record<string, unknown> = { ...variables, ...captures, status: response.status };
+          if (response.body_parsed && typeof response.body_parsed === "object") {
+            for (const [k, v] of Object.entries(response.body_parsed as Record<string, unknown>)) {
+              condVars[k] = v;
+            }
+          }
+          const condStr = String(substituteString(rt.condition, condVars));
+          if (evaluateExpr(condStr)) {
+            Object.assign(variables, captures);
+            break;
+          }
+
+          if (attempt < rt.max_attempts - 1) {
+            await new Promise((resolve) => setTimeout(resolve, rt.delay_ms));
+          }
+        } catch (err) {
+          lastStepResult = {
+            name: step.name,
+            status: "error",
+            duration_ms: 0,
+            request,
+            assertions: [],
+            captures: {},
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }
+      if (lastStepResult) steps.push(lastStepResult);
       continue;
     }
 

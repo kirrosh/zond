@@ -11,7 +11,7 @@
       "name": "zond",
       "source": "./",
       "description": "Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config, no cloud, no Postman.",
-      "version": "0.12.7",
+      "version": "0.13.0",
       "author": {
         "name": "kirrosh",
         "url": "https://github.com/kirrosh"

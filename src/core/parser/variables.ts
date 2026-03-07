@@ -19,6 +19,7 @@ function randomChars(len: number): string {
 export const GENERATORS: Record<string, () => string | number> = {
   "$uuid": () => crypto.randomUUID(),
   "$timestamp": () => Math.floor(Date.now() / 1000),
+  "$isoTimestamp": () => new Date().toISOString(),
   "$randomName": () => randomFrom(NAMES),
   "$randomEmail": () => `${randomChars(8).toLowerCase()}@test.com`,
   "$randomInt": () => Math.floor(Math.random() * 10000),

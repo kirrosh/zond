@@ -50,6 +50,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **Extended YAML test format** — 12 new assertion operators, flow control, and data transforms:
+  - **Assertion operators**: `not_equals`, `not_contains`, `gte`, `lte`, `length`, `length_gt/gte/lt/lte`
+  - **Array assertions**: `each` (every element matches), `contains_item` (at least one matches), `set_equals` (order-independent comparison)
+  - **Flow control**: `skip_if` (conditional skip with expression evaluator), `retry_until` (retry with condition/max_attempts/delay_ms), `for_each` (iterate over array)
+  - **Data transforms**: `set` steps with directives — `concat`, `append`, `length`, `get`, `first`, `map_field`
+  - **Generator**: `{{$isoTimestamp}}` — ISO 8601 timestamp string
+  - **Expression evaluator**: supports `==`, `!=`, `>`, `<`, `>=`, `<=` for skip_if/retry_until conditions
+  - Guide-builder YAML cheatsheet updated with all new features
+  - Full backward compatibility — all existing tests continue to work unchanged
+
 - **MCP feedback improvements**
   - `diagnose_failure` now includes `response_headers` in failure output (e.g. `X-Ably-ErrorMessage`)
   - `generate_tests_guide`: annotates `any`-typed request bodies with a warning comment

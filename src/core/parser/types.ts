@@ -4,11 +4,23 @@ export interface AssertionRule {
   capture?: string;
   type?: "string" | "integer" | "number" | "boolean" | "array" | "object";
   equals?: unknown;
+  not_equals?: unknown;
   contains?: string;
+  not_contains?: string;
   matches?: string;
   gt?: number;
   lt?: number;
+  gte?: number;
+  lte?: number;
   exists?: boolean;
+  length?: number;
+  length_gt?: number;
+  length_gte?: number;
+  length_lt?: number;
+  length_lte?: number;
+  each?: Record<string, AssertionRule>;
+  contains_item?: Record<string, AssertionRule>;
+  set_equals?: unknown;
 }
 
 export interface TestStepExpect {
@@ -16,6 +28,17 @@ export interface TestStepExpect {
   body?: Record<string, AssertionRule>;
   headers?: Record<string, string>;
   duration?: number;
+}
+
+export interface RetryUntil {
+  condition: string;
+  max_attempts: number;
+  delay_ms: number;
+}
+
+export interface ForEach {
+  var: string;
+  in: unknown;
 }
 
 export interface TestStep {
@@ -27,6 +50,10 @@ export interface TestStep {
   form?: Record<string, string>;
   query?: Record<string, string>;
   expect: TestStepExpect;
+  skip_if?: string;
+  retry_until?: RetryUntil;
+  for_each?: ForEach;
+  set?: Record<string, unknown>;
 }
 
 export interface SuiteConfig {

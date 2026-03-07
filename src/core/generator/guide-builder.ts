@@ -120,7 +120,7 @@ Use \`json:\` for JSON request bodies. Do NOT use \`body:\` — it is not a vali
 For form-encoded: use \`form:\` instead of \`json:\`.
 
 ### Built-in generators
-\`{{$uuid}}\`, \`{{$randomInt}}\`, \`{{$timestamp}}\`, \`{{$randomName}}\`, \`{{$randomEmail}}\`, \`{{$randomString}}\`
+\`{{$uuid}}\`, \`{{$randomInt}}\`, \`{{$timestamp}}\`, \`{{$isoTimestamp}}\`, \`{{$randomName}}\`, \`{{$randomEmail}}\`, \`{{$randomString}}\`
 
 ### Variable capture & interpolation
 \`\`\`yaml
@@ -137,6 +137,58 @@ For form-encoded: use \`form:\` instead of \`json:\`.
     expect:
       status: 200
       id: { equals: "{{created_id}}" }
+\`\`\`
+
+### Array assertions
+\`\`\`yaml
+items:
+  each:                          # every element must match
+    status: { not_equals: "deleted" }
+    id: { type: integer }
+
+items:
+  contains_item:                 # at least one element matches
+    name: { contains: "test" }
+
+ids:
+  set_equals: [1, 2, 3]         # same elements, order-independent
+\`\`\`
+
+### Flow control
+\`\`\`yaml
+  # skip_if — skip step when condition is true (after variable substitution)
+  - name: Delete only if exists
+    DELETE: /items/{{item_id}}
+    skip_if: "{{item_id}} == 0"
+    expect:
+      status: 204
+
+  # retry_until — repeat request until condition met
+  - name: Wait for processing
+    GET: /jobs/{{job_id}}
+    retry_until:
+      condition: "{{status}} == completed"
+      max_attempts: 5
+      delay_ms: 1000
+    expect:
+      status: 200
+
+  # for_each — repeat step for each item in array
+  - name: Delete item
+    DELETE: /items/{{id}}
+    for_each:
+      var: id
+      in: "{{item_ids}}"
+    expect:
+      status: [200, 204]
+
+  # set — transform variables without HTTP request
+  - name: Extract IDs
+    set:
+      all_ids: { map_field: ["{{items}}", "id"] }
+      count: { length: "{{items}}" }
+      first_item: { first: "{{items}}" }
+      merged: { concat: ["{{list_a}}", "{{list_b}}"] }
 \`\`\`
 
 ### Coverage matching

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { TestSuite, TestStep, AssertionRule, TestStepExpect, SuiteConfig } from "./types.ts";
+import type { TestSuite, TestStep, AssertionRule, TestStepExpect, SuiteConfig, RetryUntil, ForEach } from "./types.ts";
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
@@ -26,11 +26,19 @@ function extractMethodAndPath(raw: unknown): unknown {
     return { ...rest, method: foundMethod, path };
   }
 
+  // set-only step: no HTTP method required
+  if (obj.set && !obj.method) {
+    return { ...obj, method: "GET", path: "" };
+  }
+
   return raw;
 }
 
 const ASSERTION_KEYS = new Set([
-  "capture", "type", "equals", "contains", "matches", "gt", "lt", "exists",
+  "capture", "type", "equals", "not_equals", "contains", "not_contains",
+  "matches", "gt", "lt", "gte", "lte", "exists",
+  "length", "length_gt", "length_gte", "length_lt", "length_lte",
+  "each", "contains_item", "set_equals",
 ]);
 
 /**
@@ -68,7 +76,7 @@ export function flattenBodyAssertions(body: Record<string, unknown>): Record<str
   return result;
 }
 
-const AssertionRuleSchema: z.ZodType<AssertionRule> = z.preprocess(
+const AssertionRuleSchemaInner: z.ZodType<AssertionRule> = z.preprocess(
   (val) => {
     if (typeof val === "string") return { type: val };
     if (val === null || val === undefined) return { exists: true };
@@ -86,13 +94,27 @@ const AssertionRuleSchema: z.ZodType<AssertionRule> = z.preprocess(
     capture: z.string().optional(),
     type: z.enum(["string", "integer", "number", "boolean", "array", "object"]).optional(),
     equals: z.unknown().optional(),
+    not_equals: z.unknown().optional(),
     contains: z.string().optional(),
+    not_contains: z.string().optional(),
     matches: z.string().optional(),
     gt: z.number().optional(),
     lt: z.number().optional(),
+    gte: z.number().optional(),
+    lte: z.number().optional(),
     exists: z.boolean().optional(),
+    length: z.number().int().optional(),
+    length_gt: z.number().int().optional(),
+    length_gte: z.number().int().optional(),
+    length_lt: z.number().int().optional(),
+    length_lte: z.number().int().optional(),
+    each: z.record(z.string(), z.lazy(() => AssertionRuleSchemaInner)).optional(),
+    contains_item: z.record(z.string(), z.lazy(() => AssertionRuleSchemaInner)).optional(),
+    set_equals: z.unknown().optional(),
   }),
 ) as z.ZodType<AssertionRule>;
+
+const AssertionRuleSchema = AssertionRuleSchemaInner;
 
 const TestStepExpectSchema: z.ZodType<TestStepExpect> = z.preprocess(
   (val) => {
@@ -117,8 +139,29 @@ const TestStepExpectSchema: z.ZodType<TestStepExpect> = z.preprocess(
   }),
 ) as z.ZodType<TestStepExpect>;
 
+const RetryUntilSchema: z.ZodType<RetryUntil> = z.object({
+  condition: z.string(),
+  max_attempts: z.number().int().positive(),
+  delay_ms: z.number().int().nonnegative(),
+});
+
+const ForEachSchema: z.ZodType<ForEach> = z.object({
+  var: z.string(),
+  in: z.unknown(),
+});
+
 const TestStepSchema: z.ZodType<TestStep> = z.preprocess(
-  extractMethodAndPath,
+  (raw) => {
+    const obj = extractMethodAndPath(raw);
+    // Make expect optional for set-only steps
+    if (typeof obj === "object" && obj !== null) {
+      const o = obj as Record<string, unknown>;
+      if (o.set && !o.expect) {
+        o.expect = {};
+      }
+    }
+    return obj;
+  },
   z.object({
     name: z.string(),
     method: z.enum(HTTP_METHODS),
@@ -128,6 +171,10 @@ const TestStepSchema: z.ZodType<TestStep> = z.preprocess(
     form: z.record(z.string(), z.string()).optional(),
     query: z.record(z.string(), z.string()).optional(),
     expect: TestStepExpectSchema,
+    skip_if: z.string().optional(),
+    retry_until: RetryUntilSchema.optional(),
+    for_each: ForEachSchema.optional(),
+    set: z.record(z.string(), z.unknown()).optional(),
   }),
 ) as z.ZodType<TestStep>;
 

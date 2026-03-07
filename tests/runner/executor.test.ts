@@ -309,6 +309,208 @@ describe("runSuites", () => {
   });
 });
 
+describe("flow control", () => {
+  test("skip_if skips step when condition is true", async () => {
+    mockFetchResponses([{ status: 200, body: { ok: true } }]);
+
+    const suite: TestSuite = {
+      name: "Skip test",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "Conditional",
+          method: "GET",
+          path: "http://example.com/test",
+          skip_if: "1 == 1",
+          expect: { status: 200 },
+        },
+        {
+          name: "Always runs",
+          method: "GET",
+          path: "http://example.com/test",
+          expect: { status: 200 },
+        },
+      ],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("skip");
+    expect(result.steps[0]!.error).toContain("Skipped");
+    expect(result.steps[1]!.status).toBe("pass");
+  });
+
+  test("skip_if does NOT skip when condition is false", async () => {
+    mockFetchResponses([{ status: 200, body: { ok: true } }]);
+
+    const suite: TestSuite = {
+      name: "No skip",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Runs",
+        method: "GET",
+        path: "http://example.com/test",
+        skip_if: "1 == 0",
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("pass");
+  });
+
+  test("skip_if with variable substitution", async () => {
+    mockFetchResponses([]);
+
+    const suite: TestSuite = {
+      name: "Skip with var",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Conditional",
+        method: "GET",
+        path: "http://example.com/test",
+        skip_if: "{{should_skip}} == true",
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite, { should_skip: "true" });
+    expect(result.steps[0]!.status).toBe("skip");
+  });
+
+  test("set step writes variables without HTTP request", async () => {
+    mockFetchResponses([{ status: 200, body: { ok: true } }]);
+
+    const suite: TestSuite = {
+      name: "Set test",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "Set vars",
+          method: "GET" as const,
+          path: "",
+          set: { greeting: "hello", count: 42 },
+          expect: {},
+        },
+        {
+          name: "Use vars",
+          method: "GET",
+          path: "http://example.com/{{greeting}}",
+          expect: { status: 200 },
+        },
+      ],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("pass");
+    expect(result.steps[0]!.request.method).toBe("");
+    expect(result.steps[1]!.request.url).toBe("http://example.com/hello");
+  });
+
+  test("set step with transform directives", async () => {
+    mockFetchResponses([{ status: 200, body: { ok: true } }]);
+
+    const suite: TestSuite = {
+      name: "Transform test",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "Transform",
+          method: "GET" as const,
+          path: "",
+          set: {
+            ids: { map_field: ["{{items}}", "id"] },
+          },
+          expect: {},
+        },
+      ],
+    };
+
+    const items = [{ id: 1, name: "a" }, { id: 2, name: "b" }];
+    const result = await runSuite(suite, { items: JSON.stringify(items) } as Record<string, string>);
+    expect(result.steps[0]!.status).toBe("pass");
+  });
+
+  test("for_each expands steps for each item", async () => {
+    let urls: string[] = [];
+    globalThis.fetch = mock(async (url: string | URL | Request) => {
+      urls.push(typeof url === "string" ? url : (url as Request).url);
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "ForEach test",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Delete item",
+        method: "DELETE",
+        path: "/items/{{id}}",
+        for_each: { var: "id", in: [1, 2, 3] },
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite);
+    // Original for_each step is not executed, 3 expanded steps are
+    expect(result.total).toBe(3);
+    expect(result.passed).toBe(3);
+    expect(urls).toEqual([
+      "http://example.com/items/1",
+      "http://example.com/items/2",
+      "http://example.com/items/3",
+    ]);
+  });
+
+  test("retry_until retries until condition met", async () => {
+    let callCount = 0;
+    globalThis.fetch = mock(async () => {
+      callCount++;
+      const status = callCount >= 3 ? "completed" : "pending";
+      return new Response(JSON.stringify({ status }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "Retry test",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Wait for completion",
+        method: "GET",
+        path: "http://example.com/job/1",
+        retry_until: { condition: "{{status}} == completed", max_attempts: 5, delay_ms: 0 },
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("pass");
+    expect(callCount).toBe(3);
+  });
+
+  test("retry_until stops after max_attempts", async () => {
+    let callCount = 0;
+    globalThis.fetch = mock(async () => {
+      callCount++;
+      return new Response(JSON.stringify({ status: "pending" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "Retry max",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Never completes",
+        method: "GET",
+        path: "http://example.com/job/1",
+        retry_until: { condition: "{{status}} == completed", max_attempts: 3, delay_ms: 0 },
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite);
+    expect(callCount).toBe(3);
+    expect(result.total).toBe(1);
+  });
+});
+
 describe("URL validation", () => {
   test("relative URL (no base_url) produces error with actionable message", async () => {
     const suite: TestSuite = {

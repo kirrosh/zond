@@ -147,4 +147,100 @@ describe("validateSuite", () => {
     expect(suite.base_url).toBe("http://localhost:3000");
     expect(suite.headers).toEqual({ Authorization: "Bearer token" });
   });
+
+  test("parses skip_if on step", () => {
+    const suite = validateSuite({
+      name: "Test",
+      tests: [{ GET: "/health", name: "Conditional", skip_if: "{{flag}} == true", expect: {} }],
+    });
+    expect(suite.tests[0]!.skip_if).toBe("{{flag}} == true");
+  });
+
+  test("parses retry_until on step", () => {
+    const suite = validateSuite({
+      name: "Test",
+      tests: [{
+        GET: "/job/1",
+        name: "Retry",
+        retry_until: { condition: "{{status}} == done", max_attempts: 5, delay_ms: 1000 },
+        expect: {},
+      }],
+    });
+    expect(suite.tests[0]!.retry_until).toEqual({ condition: "{{status}} == done", max_attempts: 5, delay_ms: 1000 });
+  });
+
+  test("parses for_each on step", () => {
+    const suite = validateSuite({
+      name: "Test",
+      tests: [{
+        DELETE: "/items/{{id}}",
+        name: "Delete",
+        for_each: { var: "id", in: [1, 2, 3] },
+        expect: { status: 204 },
+      }],
+    });
+    expect(suite.tests[0]!.for_each).toEqual({ var: "id", in: [1, 2, 3] });
+  });
+
+  test("parses set-only step without HTTP method", () => {
+    const suite = validateSuite({
+      name: "Test",
+      tests: [
+        { name: "Set vars", set: { greeting: "hello" } },
+        { GET: "/test", name: "Use", expect: { status: 200 } },
+      ],
+    });
+    expect(suite.tests[0]!.set).toEqual({ greeting: "hello" });
+    expect(suite.tests[0]!.path).toBe("");
+  });
+
+  test("parses new assertion operators", () => {
+    const suite = validateSuite({
+      name: "Test",
+      tests: [{
+        GET: "/data",
+        name: "Assertions",
+        expect: {
+          status: 200,
+          body: {
+            status: { not_equals: "deleted" },
+            msg: { not_contains: "error" },
+            count: { gte: 1, lte: 100 },
+            items: { length: 5, length_gt: 0 },
+            tags: { set_equals: ["a", "b"] },
+          },
+        },
+      }],
+    });
+    const body = suite.tests[0]!.expect.body!;
+    expect(body["status"]!.not_equals).toBe("deleted");
+    expect(body["msg"]!.not_contains).toBe("error");
+    expect(body["count"]!.gte).toBe(1);
+    expect(body["count"]!.lte).toBe(100);
+    expect(body["items"]!.length).toBe(5);
+    expect(body["items"]!.length_gt).toBe(0);
+    expect(body["tags"]!.set_equals).toEqual(["a", "b"]);
+  });
+
+  test("parses each and contains_item assertions", () => {
+    const suite = validateSuite({
+      name: "Test",
+      tests: [{
+        GET: "/data",
+        name: "Array assertions",
+        expect: {
+          status: 200,
+          body: {
+            items: { each: { id: { type: "integer" } } },
+            results: { contains_item: { name: { contains: "test" } } },
+          },
+        },
+      }],
+    });
+    const body = suite.tests[0]!.expect.body!;
+    expect(body["items"]!.each).toBeDefined();
+    expect(body["items"]!.each!["id"]!.type).toBe("integer");
+    expect(body["results"]!.contains_item).toBeDefined();
+    expect(body["results"]!.contains_item!["name"]!.contains).toBe("test");
+  });
 });

@@ -90,6 +90,132 @@ function checkRule(path: string, rule: AssertionRule, actual: unknown): Assertio
     });
   }
 
+  if (rule.not_equals !== undefined) {
+    results.push({
+      field, rule: `not_equals ${JSON.stringify(rule.not_equals)}`,
+      passed: !deepEquals(actual, rule.not_equals), actual, expected: rule.not_equals,
+    });
+  }
+
+  if (rule.not_contains !== undefined) {
+    const passed = typeof actual === "string" && !actual.includes(rule.not_contains);
+    results.push({
+      field, rule: `not_contains "${rule.not_contains}"`,
+      passed, actual, expected: rule.not_contains,
+    });
+  }
+
+  if (rule.gte !== undefined) {
+    const passed = typeof actual === "number" && actual >= rule.gte;
+    results.push({
+      field, rule: `gte ${rule.gte}`,
+      passed, actual, expected: rule.gte,
+    });
+  }
+
+  if (rule.lte !== undefined) {
+    const passed = typeof actual === "number" && actual <= rule.lte;
+    results.push({
+      field, rule: `lte ${rule.lte}`,
+      passed, actual, expected: rule.lte,
+    });
+  }
+
+  if (rule.length !== undefined) {
+    const hasLength = (Array.isArray(actual) || typeof actual === "string");
+    const passed = hasLength && (actual as string | unknown[]).length === rule.length;
+    results.push({
+      field, rule: `length ${rule.length}`,
+      passed, actual: hasLength ? (actual as string | unknown[]).length : describeType(actual), expected: rule.length,
+    });
+  }
+
+  if (rule.length_gt !== undefined) {
+    const hasLength = (Array.isArray(actual) || typeof actual === "string");
+    const passed = hasLength && (actual as string | unknown[]).length > rule.length_gt;
+    results.push({
+      field, rule: `length_gt ${rule.length_gt}`,
+      passed, actual: hasLength ? (actual as string | unknown[]).length : describeType(actual), expected: rule.length_gt,
+    });
+  }
+
+  if (rule.length_gte !== undefined) {
+    const hasLength = (Array.isArray(actual) || typeof actual === "string");
+    const passed = hasLength && (actual as string | unknown[]).length >= rule.length_gte;
+    results.push({
+      field, rule: `length_gte ${rule.length_gte}`,
+      passed, actual: hasLength ? (actual as string | unknown[]).length : describeType(actual), expected: rule.length_gte,
+    });
+  }
+
+  if (rule.length_lt !== undefined) {
+    const hasLength = (Array.isArray(actual) || typeof actual === "string");
+    const passed = hasLength && (actual as string | unknown[]).length < rule.length_lt;
+    results.push({
+      field, rule: `length_lt ${rule.length_lt}`,
+      passed, actual: hasLength ? (actual as string | unknown[]).length : describeType(actual), expected: rule.length_lt,
+    });
+  }
+
+  if (rule.length_lte !== undefined) {
+    const hasLength = (Array.isArray(actual) || typeof actual === "string");
+    const passed = hasLength && (actual as string | unknown[]).length <= rule.length_lte;
+    results.push({
+      field, rule: `length_lte ${rule.length_lte}`,
+      passed, actual: hasLength ? (actual as string | unknown[]).length : describeType(actual), expected: rule.length_lte,
+    });
+  }
+
+  if (rule.each !== undefined) {
+    if (!Array.isArray(actual)) {
+      results.push({ field, rule: "each", passed: false, actual: describeType(actual), expected: "array" });
+    } else {
+      for (let i = 0; i < actual.length; i++) {
+        for (const [subPath, subRule] of Object.entries(rule.each)) {
+          const subActual = getByPath(actual[i], subPath);
+          const subResults = checkRule(`${path}[${i}].${subPath}`, subRule, subActual);
+          results.push(...subResults);
+        }
+      }
+    }
+  }
+
+  if (rule.contains_item !== undefined) {
+    if (!Array.isArray(actual)) {
+      results.push({ field, rule: "contains_item", passed: false, actual: describeType(actual), expected: "array" });
+    } else {
+      const found = actual.some((item) => {
+        for (const [subPath, subRule] of Object.entries(rule.contains_item!)) {
+          const subActual = getByPath(item, subPath);
+          const subResults = checkRule("", subRule, subActual);
+          if (subResults.some(r => !r.passed)) return false;
+        }
+        return true;
+      });
+      results.push({
+        field, rule: "contains_item",
+        passed: found, actual: `array(${actual.length})`, expected: "at least one matching item",
+      });
+    }
+  }
+
+  if (rule.set_equals !== undefined) {
+    if (!Array.isArray(actual) || !Array.isArray(rule.set_equals)) {
+      results.push({
+        field, rule: "set_equals",
+        passed: false, actual: describeType(actual), expected: "both must be arrays",
+      });
+    } else {
+      const actualSet = new Set(actual.map(v => JSON.stringify(v)));
+      const expectedSet = new Set((rule.set_equals as unknown[]).map(v => JSON.stringify(v)));
+      const passed = actualSet.size === expectedSet.size && [...actualSet].every(v => expectedSet.has(v));
+      results.push({
+        field, rule: "set_equals",
+        passed, actual, expected: rule.set_equals,
+      });
+    }
+  }
+
   return results;
 }
 

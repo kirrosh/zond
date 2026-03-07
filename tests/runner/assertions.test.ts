@@ -283,3 +283,201 @@ describe("extractCaptures", () => {
     expect(extractCaptures({ id: { capture: "x" } }, undefined)).toEqual({});
   });
 });
+
+describe("new assertion operators", () => {
+  describe("not_equals", () => {
+    test("passes when values differ", () => {
+      const res = makeResponse({ body_parsed: { status: "active" } });
+      const results = checkAssertions({ body: { status: { not_equals: "deleted" } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("fails when values are equal", () => {
+      const res = makeResponse({ body_parsed: { status: "deleted" } });
+      const results = checkAssertions({ body: { status: { not_equals: "deleted" } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+  });
+
+  describe("not_contains", () => {
+    test("passes when string does not contain substring", () => {
+      const res = makeResponse({ body_parsed: { msg: "all good" } });
+      const results = checkAssertions({ body: { msg: { not_contains: "error" } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("fails when string contains substring", () => {
+      const res = makeResponse({ body_parsed: { msg: "fatal error" } });
+      const results = checkAssertions({ body: { msg: { not_contains: "error" } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+
+    test("fails when not a string", () => {
+      const res = makeResponse({ body_parsed: { val: 42 } });
+      const results = checkAssertions({ body: { val: { not_contains: "42" } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+  });
+
+  describe("gte / lte", () => {
+    test("gte passes when equal", () => {
+      const res = makeResponse({ body_parsed: { count: 5 } });
+      const results = checkAssertions({ body: { count: { gte: 5 } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("gte passes when greater", () => {
+      const res = makeResponse({ body_parsed: { count: 10 } });
+      const results = checkAssertions({ body: { count: { gte: 5 } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("gte fails when less", () => {
+      const res = makeResponse({ body_parsed: { count: 3 } });
+      const results = checkAssertions({ body: { count: { gte: 5 } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+
+    test("lte passes when equal", () => {
+      const res = makeResponse({ body_parsed: { count: 5 } });
+      const results = checkAssertions({ body: { count: { lte: 5 } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("lte passes when less", () => {
+      const res = makeResponse({ body_parsed: { count: 3 } });
+      const results = checkAssertions({ body: { count: { lte: 5 } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("lte fails when greater", () => {
+      const res = makeResponse({ body_parsed: { count: 10 } });
+      const results = checkAssertions({ body: { count: { lte: 5 } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+  });
+
+  describe("length", () => {
+    test("passes for array with exact length", () => {
+      const res = makeResponse({ body_parsed: { items: [1, 2, 3] } });
+      const results = checkAssertions({ body: { items: { length: 3 } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("passes for string with exact length", () => {
+      const res = makeResponse({ body_parsed: { code: "abc" } });
+      const results = checkAssertions({ body: { code: { length: 3 } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("fails for wrong length", () => {
+      const res = makeResponse({ body_parsed: { items: [1, 2] } });
+      const results = checkAssertions({ body: { items: { length: 3 } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+
+    test("fails for non-array non-string", () => {
+      const res = makeResponse({ body_parsed: { val: 42 } });
+      const results = checkAssertions({ body: { val: { length: 2 } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+  });
+
+  describe("length_gt/gte/lt/lte", () => {
+    test("length_gt passes", () => {
+      const res = makeResponse({ body_parsed: { items: [1, 2, 3] } });
+      const results = checkAssertions({ body: { items: { length_gt: 2 } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("length_gt fails at boundary", () => {
+      const res = makeResponse({ body_parsed: { items: [1, 2] } });
+      const results = checkAssertions({ body: { items: { length_gt: 2 } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+
+    test("length_gte passes at boundary", () => {
+      const res = makeResponse({ body_parsed: { items: [1, 2] } });
+      const results = checkAssertions({ body: { items: { length_gte: 2 } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("length_lt passes", () => {
+      const res = makeResponse({ body_parsed: { items: [1] } });
+      const results = checkAssertions({ body: { items: { length_lt: 2 } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("length_lte passes at boundary", () => {
+      const res = makeResponse({ body_parsed: { items: [1, 2] } });
+      const results = checkAssertions({ body: { items: { length_lte: 2 } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+  });
+
+  describe("each", () => {
+    test("passes when all items match", () => {
+      const res = makeResponse({ body_parsed: { items: [{ id: 1, active: true }, { id: 2, active: true }] } });
+      const results = checkAssertions({ body: { items: { each: { active: { equals: true } } } } }, res);
+      expect(results.every(r => r.passed)).toBe(true);
+    });
+
+    test("fails when one item does not match", () => {
+      const res = makeResponse({ body_parsed: { items: [{ id: 1, active: true }, { id: 2, active: false }] } });
+      const results = checkAssertions({ body: { items: { each: { active: { equals: true } } } } }, res);
+      expect(results.some(r => !r.passed)).toBe(true);
+    });
+
+    test("fails when value is not an array", () => {
+      const res = makeResponse({ body_parsed: { items: "not_array" } });
+      const results = checkAssertions({ body: { items: { each: { id: { exists: true } } } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+  });
+
+  describe("contains_item", () => {
+    test("passes when at least one item matches", () => {
+      const res = makeResponse({ body_parsed: { items: [{ name: "foo" }, { name: "test-bar" }] } });
+      const results = checkAssertions({ body: { items: { contains_item: { name: { contains: "test" } } } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("fails when no item matches", () => {
+      const res = makeResponse({ body_parsed: { items: [{ name: "foo" }, { name: "bar" }] } });
+      const results = checkAssertions({ body: { items: { contains_item: { name: { contains: "test" } } } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+
+    test("fails when value is not an array", () => {
+      const res = makeResponse({ body_parsed: { items: 42 } });
+      const results = checkAssertions({ body: { items: { contains_item: { id: { exists: true } } } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+  });
+
+  describe("set_equals", () => {
+    test("passes for same elements in different order", () => {
+      const res = makeResponse({ body_parsed: { ids: [3, 1, 2] } });
+      const results = checkAssertions({ body: { ids: { set_equals: [1, 2, 3] } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("fails for different elements", () => {
+      const res = makeResponse({ body_parsed: { ids: [1, 2, 4] } });
+      const results = checkAssertions({ body: { ids: { set_equals: [1, 2, 3] } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+
+    test("fails for different sizes", () => {
+      const res = makeResponse({ body_parsed: { ids: [1, 2] } });
+      const results = checkAssertions({ body: { ids: { set_equals: [1, 2, 3] } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+
+    test("fails when actual is not an array", () => {
+      const res = makeResponse({ body_parsed: { ids: "not_array" } });
+      const results = checkAssertions({ body: { ids: { set_equals: [1, 2] } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+  });
+});

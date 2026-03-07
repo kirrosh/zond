@@ -93,17 +93,53 @@ export function serializeSuite(suite: RawSuite): string {
       serializeValue(test.query, 3, lines);
     }
 
-    // expect
-    lines.push("    expect:");
-    if (test.expect.status !== undefined) {
-      lines.push(`      status: ${test.expect.status}`);
+    // skip_if
+    if (test.skip_if) {
+      lines.push(`    skip_if: ${yamlScalar(String(test.skip_if))}`);
     }
-    if (test.expect.body) {
-      lines.push("      body:");
-      for (const [key, rule] of Object.entries(test.expect.body)) {
-        lines.push(`        ${key}:`);
-        for (const [rk, rv] of Object.entries(rule)) {
-          lines.push(`          ${rk}: ${yamlScalar(String(rv))}`);
+
+    // retry_until
+    if (test.retry_until && typeof test.retry_until === "object") {
+      const rt = test.retry_until as Record<string, unknown>;
+      lines.push("    retry_until:");
+      if (rt.condition !== undefined) lines.push(`      condition: ${yamlScalar(String(rt.condition))}`);
+      if (rt.max_attempts !== undefined) lines.push(`      max_attempts: ${rt.max_attempts}`);
+      if (rt.delay_ms !== undefined) lines.push(`      delay_ms: ${rt.delay_ms}`);
+    }
+
+    // for_each
+    if (test.for_each && typeof test.for_each === "object") {
+      const fe = test.for_each as Record<string, unknown>;
+      lines.push("    for_each:");
+      if (fe.var !== undefined) lines.push(`      var: ${yamlScalar(String(fe.var))}`);
+      if (fe.in !== undefined) lines.push(`      in: ${yamlScalar(String(fe.in))}`);
+    }
+
+    // set
+    if (test.set && typeof test.set === "object") {
+      lines.push("    set:");
+      serializeValue(test.set, 3, lines);
+    }
+
+    // expect
+    const hasExpect = test.expect && (test.expect.status !== undefined || test.expect.body);
+    if (hasExpect) {
+      lines.push("    expect:");
+      if (test.expect.status !== undefined) {
+        lines.push(`      status: ${test.expect.status}`);
+      }
+      if (test.expect.body) {
+        lines.push("      body:");
+        for (const [key, rule] of Object.entries(test.expect.body)) {
+          lines.push(`        ${key}:`);
+          for (const [rk, rv] of Object.entries(rule)) {
+            if (typeof rv === "object" && rv !== null) {
+              lines.push(`          ${rk}:`);
+              serializeValue(rv, 6, lines);
+            } else {
+              lines.push(`          ${rk}: ${yamlScalar(String(rv))}`);
+            }
+          }
         }
       }
     }

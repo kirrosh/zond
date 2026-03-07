@@ -71,6 +71,12 @@ describe("substituteString", () => {
   test("user variable takes precedence over generator", () => {
     expect(substituteString("{{$uuid}}", { "$uuid": "custom" })).toBe("custom");
   });
+
+  test("resolves $isoTimestamp generator as ISO 8601 string", () => {
+    const result = substituteString("{{$isoTimestamp}}", {}) as string;
+    expect(typeof result).toBe("string");
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/);
+  });
 });
 
 describe("substituteDeep", () => {
