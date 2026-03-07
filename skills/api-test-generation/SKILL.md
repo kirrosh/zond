@@ -131,6 +131,15 @@ Only proceed if the user has confirmed a safe (non-production) environment.
 
 **Never run CRUD or destructive tests unless the user has confirmed a safe environment.**
 
+## CRITICAL: Never Mask Server Errors
+
+When fixing failing tests, fix the **test request** (wrong auth, missing body fields, wrong path), NOT the **expected response**:
+
+- If an endpoint returns 500 — do NOT change `status: 200` to `status: 500` to make the test pass
+- A failing test = signal about an API bug that must be preserved
+- Legitimate error expectations: `404` for missing resource, `400`/`422` for bad input, `401` for missing auth
+- If a test cannot pass due to a confirmed server bug: keep correct expected status, add `tags: [known-bug]`
+
 ## Tag Taxonomy
 
 - **smoke** — GET-only, safe for production, quick health check

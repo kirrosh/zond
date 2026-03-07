@@ -75,10 +75,13 @@ Detailed reference for common API test failure patterns and their solutions.
 - Database connection issues on the server
 - Missing server-side dependencies
 
+**CRITICAL: Do NOT change `status: 200` to `status: 500` to make the test pass.** A 500 response is a server bug — the test should keep failing as a signal. Fix the request (auth, body, path) if the 500 is caused by a bad request. If it's a genuine server bug, keep `status: 200` and optionally add `tags: [known-bug]`.
+
 **Solutions:**
 1. Check server logs for stack traces
 2. Try with simpler request data
 3. Report to API maintainers if consistent
+4. Add `tags: [known-bug]` but keep the correct expected status
 
 ## Environment Hints (envHint)
 

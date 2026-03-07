@@ -143,6 +143,12 @@ For form-encoded: use \`form:\` instead of \`json:\`.
 Use spec paths with \`{param}\` placeholders in the path for coverage to match:
 - Spec says \`GET /products/{id}\` → write \`GET: /products/1\` (hardcode the value)
 - Coverage scanner matches test paths against spec paths automatically
+
+### CRITICAL: Never mask server errors
+- If an endpoint returns 500 — do NOT change expect to \`status: 500\`. Keep \`status: 200\` and let the test fail.
+- A failing test = signal about an API bug. The goal is NOT "all tests green" but "tests reflect expected behavior".
+- Fixing tests means fixing test logic (wrong path, missing auth, bad body), NOT accepting error responses as expected.
+- Legitimate error expectations: 404 for missing resources, 400/422 for invalid input, 401 for no auth — these are negative tests by design.
 `;
 
 export interface GuideOptions {

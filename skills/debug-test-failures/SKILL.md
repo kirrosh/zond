@@ -98,6 +98,15 @@ send_request(method: "GET", url: "https://api.example.com/users/1",
 - **diagnose_failure is often sufficient**: Contains actual request/response/status. Load describe_endpoint only if context is insufficient.
 - **No Bash for spec parsing**: describe_endpoint and coverage_analysis already handle this.
 
+## CRITICAL: Never mask server errors
+
+- If an endpoint returns 500, do NOT change `status: 200` to `status: 500` to make the test pass.
+- A failing test is a signal about an API bug — that signal must be preserved.
+- **Fixing tests** means fixing test logic: wrong path, missing auth, incorrect request body, wrong field names.
+- **NOT fixing tests** means accepting broken API responses as "expected" behavior.
+- Legitimate error expectations: `404` for missing resource, `400`/`422` for bad input, `401` for missing auth — these are intentional negative tests.
+- If a test genuinely cannot pass due to a server bug, add `tags: [known-bug]` but keep the correct expected status.
+
 ## Step 5 — Verify the Fix
 
 1. **Re-run tests:**

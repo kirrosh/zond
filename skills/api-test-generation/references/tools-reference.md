@@ -224,3 +224,4 @@ save_test_suites(files: [...])
 7. **String query params**: Query parameter values must be strings: `limit: "10"` not `limit: 10`
 8. **Hardcoded credentials**: NEVER put actual API keys/tokens in YAML — use `{{api_key}}` from env instead
 9. **Body assertions on 204**: Don't add `body:` checks for DELETE or other endpoints that return 204 No Content — the body is empty by design.
+10. **Never mask server errors**: If an endpoint returns 500, do NOT set `status: 500` in expect to make the test green. Keep `status: 200` — the failing test is a signal about an API bug. Fix the test request (auth, body, path), not the expected response. Legitimate error expects: 404 for missing resources, 400/422 for bad input.

@@ -45,6 +45,11 @@ query_db(action: "compare_runs", runId: prev, runIdB: curr)
 ci_init()
 ```
 
+**Key testing rules:**
+- Never mask server errors: if endpoint returns 500, keep `status: 200` in expect — a failing test signals an API bug
+- Fix test requests (auth, body, path), not expected responses
+- Legitimate error expects: 404 missing, 400/422 bad input, 401 no auth
+
 **Key safety rules:**
 - `safe: true` on `run_tests` -> only GET requests execute, write ops are skipped
 - `dryRun: true` on `run_tests` -> shows all requests without sending any
