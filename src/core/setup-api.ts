@@ -20,6 +20,7 @@ export interface SetupApiOptions {
   envVars?: Record<string, string>;
   dbPath?: string;
   force?: boolean;
+  insecure?: boolean;
 }
 
 export interface SetupApiResult {
@@ -30,6 +31,7 @@ export interface SetupApiResult {
   baseUrl: string;
   specEndpoints: number;
   pathParams?: Record<string, string>;
+  warnings?: string[];
 }
 
 export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult> {
@@ -42,12 +44,16 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   let baseUrl = "";
   let endpointCount = 0;
   const pathParams = new Map<string, string>();
+  const warnings: string[] = [];
   let specTitle: string | undefined;
   if (spec) {
-    const doc = await readOpenApiSpec(spec);
+    const doc = await readOpenApiSpec(spec, { insecure: options.insecure });
     openapiSpec = spec;
     if ((doc as any).servers?.[0]?.url) {
       baseUrl = (doc as any).servers[0].url;
+    }
+    if (baseUrl && !baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
+      warnings.push(`Spec server URL "${baseUrl}" is relative — requests will fail without a host. Override with envVars: {"base_url": "https://your-host${baseUrl}"}`);
     }
     specTitle = (doc as any).info?.title;
     const endpoints = extractEndpoints(doc);
@@ -139,5 +145,6 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     baseUrl,
     specEndpoints: endpointCount,
     ...(pathParamsObj ? { pathParams: pathParamsObj } : {}),
+    ...(warnings.length > 0 ? { warnings } : {}),
   };
 }

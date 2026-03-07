@@ -1,6 +1,6 @@
 {
   "name": "zond",
-  "version": "0.12.5",
+  "version": "0.12.6",
   "description": "Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config, no cloud, no Postman.",
   "author": {
     "name": "kirrosh",

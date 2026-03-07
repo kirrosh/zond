@@ -21,6 +21,7 @@ query_db(action: "list_runs", limit: 5)
 The response includes:
 - **failure_type** for each failed step: `api_error`, `assertion_failed`, or `network_error`
 - **envHint** — diagnostic hint for environment-related issues
+- **error_message** — truncated by default (first line + 3 stack trace lines). Use `verbose: true` for full traces.
 - **response_body** — actual response received
 - **summary** — aggregated counts by failure type
 

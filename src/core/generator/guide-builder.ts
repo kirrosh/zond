@@ -106,15 +106,18 @@ Inline the value directly — there is NO \`params\` field:
 - Array element: \`items.0.name: { exists: true }\`
 - YAML keys must be unique — do NOT repeat \`_body\` twice
 
-### Request body (JSON)
+### Request body — IMPORTANT
+Use \`json:\` for JSON request bodies. Do NOT use \`body:\` — it is not a valid key.
 \`\`\`yaml
   - name: Create resource
     POST: /resources
-    json: { name: "test", email: "a@b.com" }
+    json: { name: "test", email: "a@b.com" }   # correct — use json:
+    # body: { ... }                              # WRONG — body: is not supported
     expect:
       status: 201
       id: { exists: true }
 \`\`\`
+For form-encoded: use \`form:\` instead of \`json:\`.
 
 ### Built-in generators
 \`{{$uuid}}\`, \`{{$randomInt}}\`, \`{{$timestamp}}\`, \`{{$randomName}}\`, \`{{$randomEmail}}\`, \`{{$randomString}}\`

@@ -59,7 +59,7 @@ ci_init()
 | Tool | Description |
 |------|-------------|
 | `set_work_dir` | Set project root for the session (call **first** with npx MCP) |
-| `setup_api` | Register API (dirs + spec + env + collection). Creates `.gitignore` with `.env*.yaml` |
+| `setup_api` | Register API (dirs + spec + env + collection). Creates `.gitignore` with `.env*.yaml`. Warns on relative server URL. `insecure: true` for self-signed certs |
 | `generate_and_save` | **Recommended entry point.** Auto-chunks large APIs by tag (>30 endpoints). Returns plan or focused guide. Supports `tag`, `methodFilter`, `testsDir` for coverage mode |
 | `save_test_suite` | Validate YAML + save single file. Returns structured errors if validation fails |
 | `save_test_suites` | Batch save multiple YAML suites in one call |
@@ -67,7 +67,7 @@ ci_init()
 | `query_db` | List collections/runs; `diagnose_failure` includes `response_body`; `compare_runs` for regression |
 | `describe_endpoint` | Full details for one endpoint: params, schemas, response headers, security |
 | `coverage_analysis` | Compare spec vs existing tests. `failThreshold` for pass/fail gate |
-| `send_request` | Ad-hoc HTTP request with variable interpolation |
+| `send_request` | Ad-hoc HTTP request with variable interpolation. `jsonPath` to extract subset, `maxResponseChars` to truncate |
 | `manage_server` | Start/stop WebUI server (health strip, endpoints/suites/runs tabs) |
 | `ci_init` | Generate CI/CD workflow (GitHub Actions / GitLab CI) |
 
@@ -78,7 +78,7 @@ ci_init()
 | `list_collections` | All registered APIs with run stats |
 | `list_runs` | Recent test runs (use `limit` to control count) |
 | `get_run_results` | Full detail for a run (requires `runId`) |
-| `diagnose_failure` | Only failed/errored steps with `response_body` (requires `runId`) |
+| `diagnose_failure` | Only failed/errored steps with `response_body` (requires `runId`). Stack traces truncated by default; use `verbose: true` for full output |
 | `compare_runs` | Diff two runs — new failures, fixed tests, performance delta (requires `runId` + `runIdB`) |
 
 ---
@@ -87,7 +87,7 @@ ci_init()
 
 | Command | Description | Key flags |
 |---------|-------------|-----------|
-| `add-api <name>` | Register new API | `--spec`, `--dir`, `--env key=value` |
+| `add-api <name>` | Register new API | `--spec`, `--dir`, `--env key=value`, `--insecure` |
 | `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--report json\|junit` |
 | `compare <runA> <runB>` | Compare two test runs | |
 | `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |

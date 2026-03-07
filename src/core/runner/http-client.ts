@@ -53,6 +53,16 @@ export async function executeRequest(
           // Body is not valid JSON despite content-type
         }
       }
+      // Fallback: for non-JSON responses, store trimmed body as string
+      // so that captures like `_body` work for text/plain, text/html, etc.
+      if (body_parsed === undefined && bodyText.length > 0) {
+        // Try JSON parse as fallback (some APIs omit content-type)
+        try {
+          body_parsed = JSON.parse(bodyText);
+        } catch {
+          body_parsed = bodyText.trim();
+        }
+      }
 
       const headers: Record<string, string> = {};
       response.headers.forEach((v, k) => {

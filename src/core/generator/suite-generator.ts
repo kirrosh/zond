@@ -62,10 +62,19 @@ function getAuthHeaders(
     const scheme = schemes.find(s => s.name === secName);
     if (!scheme) continue;
 
-    if (scheme.type === "http" && scheme.scheme === "bearer") {
-      return { Authorization: "Bearer {{auth_token}}" };
+    if (scheme.type === "http") {
+      if (scheme.scheme === "bearer" || !scheme.scheme) {
+        return { Authorization: "Bearer {{auth_token}}" };
+      }
+      if (scheme.scheme === "basic") {
+        return { Authorization: "Basic {{auth_token}}" };
+      }
     }
     if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
+      // When apiKey scheme uses Authorization header, it's typically a Bearer token
+      if (scheme.apiKeyName === "Authorization") {
+        return { Authorization: "Bearer {{auth_token}}" };
+      }
       return { [scheme.apiKeyName]: "{{api_key}}" };
     }
   }

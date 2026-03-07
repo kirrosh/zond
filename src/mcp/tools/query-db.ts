@@ -6,6 +6,28 @@ import { join } from "node:path";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
 import { statusHint, classifyFailure, envHint, envCategory, schemaHint } from "../../core/diagnostics/failure-hints.ts";
 
+function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
+  if (!raw) return undefined;
+  if (verbose || raw.length < 500) return raw;
+  const lines = raw.split(/\r?\n/);
+  // First line is the error message itself
+  const msgLines = [lines[0]!];
+  // Grab up to 3 stack-trace lines (indented or starting with "at ")
+  let traceCount = 0;
+  for (let i = 1; i < lines.length && traceCount < 3; i++) {
+    const line = lines[i]!;
+    if (/^\s+/.test(line) || /^\s*at\s/.test(line)) {
+      msgLines.push(line);
+      traceCount++;
+    }
+  }
+  const remaining = lines.length - msgLines.length;
+  if (remaining > 0) {
+    msgLines.push(`...[truncated ${remaining} lines]`);
+  }
+  return msgLines.join("\n");
+}
+
 function parseBodySafe(raw: string | null | undefined): unknown {
   if (!raw) return undefined;
   const truncated = raw.length > 2000 ? raw.slice(0, 2000) + "…[truncated]" : raw;
@@ -49,8 +71,10 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
         .describe("Second run ID (required for compare_runs — this is the newer run)"),
       limit: z.optional(z.number().int().min(1).max(100))
         .describe("Max number of runs to return (default: 20, only for list_runs)"),
+      verbose: z.optional(z.boolean())
+        .describe("Show full error messages and stack traces (default: false, truncates long traces)"),
     },
-  }, async ({ action, runId, runIdB, limit }) => {
+  }, async ({ action, runId, runIdB, limit, verbose }) => {
     try {
       getDb(dbPath);
 
@@ -105,7 +129,7 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
               request_method: r.request_method,
               request_url: r.request_url,
               response_status: r.response_status,
-              error_message: r.error_message,
+              error_message: truncateErrorMessage(r.error_message, verbose),
               assertions: r.assertions,
             })),
           };
@@ -151,7 +175,7 @@ export function registerQueryDbTool(server: McpServer, dbPath?: string) {
                 test_name: r.test_name,
                 status: r.status,
                 failure_type,
-                error_message: r.error_message,
+                error_message: truncateErrorMessage(r.error_message, verbose),
                 request_method: r.request_method,
                 request_url: r.request_url,
                 response_status: r.response_status,

@@ -58,7 +58,7 @@ describe("executeRequest", () => {
     expect(response.body_parsed).toEqual({ key: "value" });
   });
 
-  test("does not parse body when content-type is not JSON", async () => {
+  test("stores raw text as body_parsed when content-type is not JSON", async () => {
     globalThis.fetch = mock(async () => {
       return new Response("<html>Hello</html>", {
         status: 200,
@@ -67,7 +67,7 @@ describe("executeRequest", () => {
     }) as unknown as typeof fetch;
 
     const response = await executeRequest({ method: "GET", url: "http://example.com", headers: {} });
-    expect(response.body_parsed).toBeUndefined();
+    expect(response.body_parsed).toBe("<html>Hello</html>");
     expect(response.body).toBe("<html>Hello</html>");
   });
 

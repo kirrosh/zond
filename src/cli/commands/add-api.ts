@@ -7,10 +7,11 @@ export interface AddApiOptions {
   dir?: string;
   envPairs?: string[];
   dbPath?: string;
+  insecure?: boolean;
 }
 
 export async function addApiCommand(options: AddApiOptions): Promise<number> {
-  const { name, spec, envPairs, dbPath, dir } = options;
+  const { name, spec, envPairs, dbPath, dir, insecure } = options;
 
   // Parse --env key=value pairs into a record
   const envVars: Record<string, string> = {};
@@ -31,6 +32,7 @@ export async function addApiCommand(options: AddApiOptions): Promise<number> {
       dir,
       envVars: Object.keys(envVars).length > 0 ? envVars : undefined,
       dbPath,
+      insecure,
     });
 
     printSuccess(`API '${name}' created (id=${result.collectionId})`);

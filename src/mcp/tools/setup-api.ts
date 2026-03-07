@@ -27,8 +27,9 @@ export function registerSetupApiTool(server: McpServer, dbPath?: string) {
       dir: z.optional(z.string()).describe("Base directory (default: ./apis/<name>/)"),
       envVars: z.optional(z.string()).describe("Environment variables as JSON string (e.g. '{\"base_url\": \"...\", \"token\": \"...\"}')"),
       force: z.optional(z.boolean()).describe("If true, delete existing API with same name and recreate from scratch"),
+      insecure: z.optional(z.boolean()).describe("Skip TLS certificate verification when fetching spec over HTTPS (for self-signed certs)"),
     },
-  }, async ({ name, specPath, dir, envVars, force }) => {
+  }, async ({ name, specPath, dir, envVars, force, insecure }) => {
     try {
       let parsedEnvVars: Record<string, string> | undefined;
       if (envVars) {
@@ -59,12 +60,15 @@ export function registerSetupApiTool(server: McpServer, dbPath?: string) {
         envVars: parsedEnvVars,
         dbPath,
         force,
+        insecure,
       });
 
       const envFilePath = join(result.baseDir, ".env.yaml");
+      const warningSteps = result.warnings?.map(w => `WARNING: ${w}`) ?? [];
       const response = {
         ...result,
         nextSteps: [
+          ...warningSteps,
           `Edit ${envFilePath} to add credentials (auth_token, api_key, base_url, etc.)`,
           `File is already git-ignored via .gitignore`,
           `Then run: run_tests(testPath: "${result.testPath}")`,
