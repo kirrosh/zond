@@ -6,6 +6,7 @@
     "name": "kirrosh",
     "url": "https://github.com/kirrosh"
   },
+  "homepage": "https://github.com/kirrosh/zond",
   "repository": "https://github.com/kirrosh/zond",
   "license": "MIT",
   "keywords": [
@@ -15,28 +16,6 @@
     "yaml",
     "mcp"
   ],
-  "mcpServers": {
-    "zond": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@kirrosh/zond@latest",
-        "mcp"
-      ]
-    }
-  },
-  "skills": [
-    "skills/api-testing",
-    "skills/test-generation",
-    "skills/test-diagnosis"
-  ],
-  "commands": [
-    "commands/test-api.md",
-    "commands/smoke.md",
-    "commands/diagnose.md"
-  ],
-  "agents": [
-    "agents/test-writer.md"
-  ],
-  "hooks": "hooks/hooks.json"
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json"
 }

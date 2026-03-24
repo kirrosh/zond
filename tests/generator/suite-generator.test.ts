@@ -301,6 +301,21 @@ describe("generateCrudSuite", () => {
     expect(verifyStep.expect.status).toBe(404);
   });
 
+  test("includes list step when GET /collection exists", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/pets", method: "GET", operationId: "listPets" }),
+      makeEndpoint({ path: "/pets", method: "POST", operationId: "createPet" }),
+      makeEndpoint({ path: "/pets/{petId}", method: "GET", operationId: "getPet" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    const suite = generateCrudSuite(groups[0]!, noSecurity);
+
+    expect(suite.tests).toHaveLength(3); // list, create, read
+    expect(suite.tests[0]!.GET).toBe("/pets");
+    expect(suite.tests[0]!.name).toBe("listPets");
+    expect(suite.tests[1]!.POST).toBe("/pets");
+  });
+
   test("minimal CRUD (POST + GET only) — no verify step", () => {
     const endpoints = [
       makeEndpoint({ path: "/items", method: "POST" }),

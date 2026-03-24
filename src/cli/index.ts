@@ -11,6 +11,7 @@ import { describeCommand } from "./commands/describe.ts";
 import { dbCommand } from "./commands/db.ts";
 import { requestCommand } from "./commands/request.ts";
 import { guideCommand } from "./commands/guide.ts";
+import { generateCommand } from "./commands/generate.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { getDb } from "../db/schema.ts";
@@ -25,6 +26,23 @@ export interface ParsedArgs {
   positional: string[];
   flags: Record<string, string | boolean>;
 }
+
+/**
+ * Strip MSYS/Git Bash automatic path conversion.
+ * Git Bash on Windows converts "/foo" → "C:/Program Files/Git/foo".
+ * Detect and reverse this for flags that expect API paths (e.g. --path /users).
+ */
+const MSYS_PREFIX_RE = /^[A-Z]:[\\/](?:Program Files[\\/]Git|msys64|usr)[\\/]/i;
+
+function stripMsysPath(value: string): string {
+  if (!MSYS_PREFIX_RE.test(value)) return value;
+  // Extract the original path: "C:/Program Files/Git/products" → "/products"
+  const stripped = value.replace(MSYS_PREFIX_RE, "/");
+  return stripped;
+}
+
+/** Flags whose values are API paths, not filesystem paths — subject to MSYS fix */
+const API_PATH_FLAGS = new Set(["path", "json-path"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   // argv: [bunPath, scriptPath, ...userArgs]
@@ -41,12 +59,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
       const eqIndex = arg.indexOf("=");
       if (eqIndex !== -1) {
         // --flag=value
-        flags[arg.slice(2, eqIndex)] = arg.slice(eqIndex + 1);
+        const key = arg.slice(2, eqIndex);
+        let val = arg.slice(eqIndex + 1);
+        if (API_PATH_FLAGS.has(key)) val = stripMsysPath(val);
+        flags[key] = val;
       } else {
         const key = arg.slice(2);
         const next = args[i + 1];
         if (next !== undefined && !next.startsWith("-")) {
-          flags[key] = next;
+          flags[key] = API_PATH_FLAGS.has(key) ? stripMsysPath(next) : next;
           i++;
         } else {
           flags[key] = true;
@@ -78,8 +99,10 @@ Usage:
   zond describe <spec>  Describe endpoints from OpenAPI spec
   zond db <subcommand>  Query the test database
   zond request <method> <url>  Send an ad-hoc HTTP request
+  zond generate <spec>  Generate test suites from OpenAPI spec
   zond guide <spec>     Generate test generation guide from OpenAPI spec
   zond serve            Start web dashboard
+  zond ui               Alias for 'serve --open' (start dashboard & open browser)
   zond mcp              Start MCP server (stdio transport for AI agents)
                            --dir <path>  Set working directory (relative paths resolve here)
   zond ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
@@ -123,6 +146,11 @@ Options for 'request':
   --api <name>         Collection name (loads env from its directory)
   --json-path <path>   Extract value from response (dot notation)
 
+Options for 'generate':
+  --output <dir>       Output directory for generated test files (required)
+  --tag <tag>          Generate only for endpoints with this tag
+  --uncovered-only     Skip endpoints already covered by existing tests
+
 Options for 'guide':
   --tests-dir <dir>    Filter to uncovered endpoints only
   --tag <tag>          Generate only for endpoints with this tag
@@ -134,11 +162,11 @@ Options for 'coverage':
   --fail-on-coverage N Exit 1 when coverage percentage is below N (0–100)
   --run-id <number>    Cross-reference with a test run for pass/fail/5xx breakdown
 
-Options for 'serve':
+Options for 'serve' / 'ui':
   --port <port>        Server port (default: 8080)
   --host <host>        Server host (default: 0.0.0.0)
-  --openapi <spec>     Path to OpenAPI spec for Explorer
   --db <path>          Path to SQLite database file (default: zond.db)
+  --open               Open dashboard in browser after starting
   --watch              Enable dev mode with hot reload (auto-refresh browser on file changes)
 
 Options for 'ci init':
@@ -260,6 +288,7 @@ async function main(): Promise<number> {
       return validateCommand({ path, json: jsonFlag });
     }
 
+    case "ui":
     case "serve": {
       const portRaw = flags["port"];
       let port: number | undefined;
@@ -273,9 +302,9 @@ async function main(): Promise<number> {
       return serveCommand({
         port,
         host: typeof flags["host"] === "string" ? flags["host"] : undefined,
-        openapiSpec: typeof flags["openapi"] === "string" ? flags["openapi"] : undefined,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
         watch: flags["watch"] === true,
+        open: command === "ui" || flags["open"] === true,
       });
     }
 
@@ -437,6 +466,26 @@ async function main(): Promise<number> {
         api: typeof flags["api"] === "string" ? flags["api"] : undefined,
         jsonPath: typeof flags["json-path"] === "string" ? flags["json-path"] : undefined,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+        json: jsonFlag,
+      });
+    }
+
+    case "generate": {
+      const specPath = positional[0];
+      if (!specPath) {
+        printError("Missing spec path. Usage: zond generate <spec> --output <dir> [--tag <tag>] [--uncovered-only] [--json]");
+        return 2;
+      }
+      const output = typeof flags["output"] === "string" ? flags["output"] : undefined;
+      if (!output) {
+        printError("Missing --output <dir>. Usage: zond generate <spec> --output <dir>");
+        return 2;
+      }
+      return generateCommand({
+        specPath,
+        output,
+        tag: typeof flags["tag"] === "string" ? flags["tag"] : undefined,
+        uncoveredOnly: flags["uncovered-only"] === true,
         json: jsonFlag,
       });
     }
