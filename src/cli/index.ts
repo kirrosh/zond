@@ -6,6 +6,11 @@ import { serveCommand } from "./commands/serve.ts";
 import { mcpCommand } from "./commands/mcp.ts";
 import { coverageCommand } from "./commands/coverage.ts";
 import { ciInitCommand } from "./commands/ci-init.ts";
+import { initCommand } from "./commands/init.ts";
+import { describeCommand } from "./commands/describe.ts";
+import { dbCommand } from "./commands/db.ts";
+import { requestCommand } from "./commands/request.ts";
+import { guideCommand } from "./commands/guide.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { getDb } from "../db/schema.ts";
@@ -69,6 +74,11 @@ Usage:
   zond run <path>       Run API tests
   zond validate <path>  Validate test files without running
   zond coverage         Analyze API test coverage
+  zond init             Register a new API for testing
+  zond describe <spec>  Describe endpoints from OpenAPI spec
+  zond db <subcommand>  Query the test database
+  zond request <method> <url>  Send an ad-hoc HTTP request
+  zond guide <spec>     Generate test generation guide from OpenAPI spec
   zond serve            Start web dashboard
   zond mcp              Start MCP server (stdio transport for AI agents)
                            --dir <path>  Set working directory (relative paths resolve here)
@@ -87,6 +97,35 @@ Options for 'run':
   --auth-token <token> Auth token injected as {{auth_token}} variable
   --safe               Run only GET tests (read-only, safe mode)
   --tag <tag>          Filter suites by tag (repeatable, comma-separated, OR logic)
+
+Options for 'init':
+  --name <name>        API name (auto-detected from spec title if omitted)
+  --spec <path>        Path to OpenAPI spec file
+  --base-url <url>     Override base URL
+  --force              Overwrite existing API collection
+
+Options for 'describe':
+  --compact            List all endpoints briefly
+  --method <method>    HTTP method for single endpoint detail
+  --path <path>        Endpoint path for single endpoint detail
+
+Options for 'db':
+  zond db collections           List all API collections
+  zond db runs [--limit N]      List recent test runs
+  zond db run <id> [--verbose]  Show run details
+  zond db diagnose <id>         Diagnose run failures
+  zond db compare <idA> <idB>   Compare two runs
+
+Options for 'request':
+  --header <H>         Request header "Name: Value" (repeatable)
+  --body <json>        Request body (JSON string)
+  --env <name>         Environment for variable interpolation
+  --api <name>         Collection name (loads env from its directory)
+  --json-path <path>   Extract value from response (dot notation)
+
+Options for 'guide':
+  --tests-dir <dir>    Filter to uncovered endpoints only
+  --tag <tag>          Generate only for endpoints with this tag
 
 Options for 'coverage':
   --api <name>         Use API collection (auto-resolves spec and tests dir)
@@ -109,6 +148,7 @@ Options for 'ci init':
   --force              Overwrite existing CI config
 
 General:
+  --json               Output in JSON envelope format (available for all commands)
   --help, -h           Show this help
   --version, -v        Show version`);
 }
@@ -117,6 +157,7 @@ const VALID_REPORTERS = new Set<string>(["console", "json", "junit"]);
 
 async function main(): Promise<number> {
   const { command, positional, flags } = parseArgs(process.argv);
+  const jsonFlag = flags["json"] === true;
 
   // Help
   if (command === "help" || command === "--help" || flags["help"] === true || flags["h"] === true) {
@@ -205,6 +246,7 @@ async function main(): Promise<number> {
         tag: tags.length > 0 ? tags : undefined,
         envVars: envVarValues.length > 0 ? envVarValues : undefined,
         dryRun: flags["dry-run"] === true,
+        json: jsonFlag,
       });
     }
 
@@ -215,7 +257,7 @@ async function main(): Promise<number> {
         return 2;
       }
 
-      return validateCommand({ path });
+      return validateCommand({ path, json: jsonFlag });
     }
 
     case "serve": {
@@ -257,6 +299,7 @@ async function main(): Promise<number> {
         platform,
         force: flags["force"] === true,
         dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
+        json: jsonFlag,
       });
     }
 
@@ -304,7 +347,112 @@ async function main(): Promise<number> {
           return 2;
         }
       }
-      return coverageCommand({ spec, tests, failOnCoverage, runId });
+      return coverageCommand({ spec, tests, failOnCoverage, runId, json: jsonFlag });
+    }
+
+    case "init": {
+      return initCommand({
+        name: typeof flags["name"] === "string" ? flags["name"] : undefined,
+        spec: typeof flags["spec"] === "string" ? flags["spec"] : positional[0],
+        baseUrl: typeof flags["base-url"] === "string" ? flags["base-url"] : undefined,
+        dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
+        force: flags["force"] === true,
+        insecure: flags["insecure"] === true,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+        json: jsonFlag,
+      });
+    }
+
+    case "describe": {
+      const specPath = positional[0];
+      if (!specPath) {
+        printError("Missing spec path. Usage: zond describe <spec> [--compact | --method <M> --path <P>]");
+        return 2;
+      }
+      return describeCommand({
+        specPath,
+        compact: flags["compact"] === true,
+        method: typeof flags["method"] === "string" ? flags["method"] : undefined,
+        path: typeof flags["path"] === "string" ? flags["path"] : undefined,
+        json: jsonFlag,
+      });
+    }
+
+    case "db": {
+      const dbSub = positional[0];
+      if (!dbSub) {
+        printError("Missing subcommand. Usage: zond db <collections|runs|run|diagnose|compare> [args]");
+        return 2;
+      }
+      const limitRaw = flags["limit"];
+      let limit: number | undefined;
+      if (typeof limitRaw === "string") {
+        limit = parseInt(limitRaw, 10);
+        if (isNaN(limit) || limit <= 0) limit = undefined;
+      }
+      return dbCommand({
+        subcommand: dbSub,
+        positional: positional.slice(1),
+        limit,
+        verbose: flags["verbose"] === true,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+        json: jsonFlag,
+      });
+    }
+
+    case "request": {
+      const method = positional[0];
+      const url = positional[1];
+      if (!method || !url) {
+        printError("Missing arguments. Usage: zond request <METHOD> <URL> [--header H] [--body JSON]");
+        return 2;
+      }
+      // Collect all --header flags
+      const headerValues: string[] = [];
+      const rawArgs = process.argv.slice(2);
+      for (let i = 0; i < rawArgs.length; i++) {
+        const arg = rawArgs[i]!;
+        if (arg === "--header" && rawArgs[i + 1]) {
+          headerValues.push(rawArgs[i + 1]!);
+          i++;
+        } else if (arg.startsWith("--header=")) {
+          headerValues.push(arg.slice("--header=".length));
+        }
+      }
+
+      const timeoutRaw = flags["timeout"];
+      let timeout: number | undefined;
+      if (typeof timeoutRaw === "string") {
+        timeout = parseInt(timeoutRaw, 10);
+        if (isNaN(timeout) || timeout <= 0) timeout = undefined;
+      }
+
+      return requestCommand({
+        method,
+        url,
+        headers: headerValues.length > 0 ? headerValues : undefined,
+        body: typeof flags["body"] === "string" ? flags["body"] : undefined,
+        timeout,
+        env: typeof flags["env"] === "string" ? flags["env"] : undefined,
+        api: typeof flags["api"] === "string" ? flags["api"] : undefined,
+        jsonPath: typeof flags["json-path"] === "string" ? flags["json-path"] : undefined,
+        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
+        json: jsonFlag,
+      });
+    }
+
+    case "guide": {
+      const specPath = positional[0];
+      if (!specPath) {
+        printError("Missing spec path. Usage: zond guide <spec> [--tests-dir <dir>] [--tag <tag>]");
+        return 2;
+      }
+      return guideCommand({
+        specPath,
+        testsDir: typeof flags["tests-dir"] === "string" ? flags["tests-dir"] : undefined,
+        tag: typeof flags["tag"] === "string" ? flags["tag"] : undefined,
+        json: jsonFlag,
+      });
     }
 
     default: {

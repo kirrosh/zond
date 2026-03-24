@@ -1,11 +1,13 @@
 import { resolve, dirname } from "path";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { printSuccess, printError } from "../output.ts";
+import { jsonOk, printJson } from "../json-envelope.ts";
 
 export interface CiInitOptions {
   platform?: "github" | "gitlab";
   force: boolean;
   dir?: string;
+  json?: boolean;
 }
 
 const GH_ACTIONS_TEMPLATE = `name: API Tests
@@ -155,7 +157,16 @@ export async function ciInitCommand(options: CiInitOptions): Promise<number> {
     created = writeIfMissing(targetPath, GITLAB_CI_TEMPLATE, options.force);
   }
 
-  if (created) {
+  if (options.json) {
+    const targetPath = platform === "github"
+      ? resolve(cwd, ".github/workflows/api-tests.yml")
+      : resolve(cwd, ".gitlab-ci.yml");
+    printJson(jsonOk("ci init", {
+      platform,
+      filePath: targetPath,
+      created,
+    }));
+  } else if (created) {
     printSuccess("CI workflow created. Commit and push to activate.");
   }
 

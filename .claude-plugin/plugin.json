@@ -1,7 +1,7 @@
 {
   "name": "zond",
   "version": "0.14.0",
-  "description": "Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config, no cloud, no Postman.",
+  "description": "AI-native API testing — OpenAPI → tests → execution → diagnostics",
   "author": {
     "name": "kirrosh",
     "url": "https://github.com/kirrosh"
@@ -24,5 +24,19 @@
         "mcp"
       ]
     }
-  }
+  },
+  "skills": [
+    "skills/api-testing",
+    "skills/test-generation",
+    "skills/test-diagnosis"
+  ],
+  "commands": [
+    "commands/test-api.md",
+    "commands/smoke.md",
+    "commands/diagnose.md"
+  ],
+  "agents": [
+    "agents/test-writer.md"
+  ],
+  "hooks": "hooks/hooks.json"
 }

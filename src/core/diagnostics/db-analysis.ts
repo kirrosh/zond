@@ -1,0 +1,283 @@
+import { getDb } from "../../db/schema.ts";
+import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
+import { join } from "node:path";
+import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue } from "./failure-hints.ts";
+
+export function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
+  if (!raw) return undefined;
+  if (verbose || raw.length < 500) return raw;
+  const lines = raw.split(/\r?\n/);
+  const msgLines = [lines[0]!];
+  let traceCount = 0;
+  for (let i = 1; i < lines.length && traceCount < 3; i++) {
+    const line = lines[i]!;
+    if (/^\s+/.test(line) || /^\s*at\s/.test(line)) {
+      msgLines.push(line);
+      traceCount++;
+    }
+  }
+  const remaining = lines.length - msgLines.length;
+  if (remaining > 0) {
+    msgLines.push(`...[truncated ${remaining} lines]`);
+  }
+  return msgLines.join("\n");
+}
+
+export function parseBodySafe(raw: string | null | undefined): unknown {
+  if (!raw) return undefined;
+  const truncated = raw.length > 2000 ? raw.slice(0, 2000) + "\u2026[truncated]" : raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return truncated;
+  }
+}
+
+const USEFUL_HEADERS = new Set([
+  "content-type", "content-length", "location", "retry-after",
+  "www-authenticate", "allow",
+]);
+const USEFUL_PREFIXES = ["x-", "ratelimit"];
+
+export function filterHeaders(raw: string | null | undefined): Record<string, string> | undefined {
+  if (!raw) return undefined;
+  try {
+    const h = JSON.parse(raw) as Record<string, string>;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(h)) {
+      const l = k.toLowerCase();
+      if (USEFUL_HEADERS.has(l) || USEFUL_PREFIXES.some(p => l.startsWith(p))) {
+        out[k] = v;
+      }
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
+  } catch { return undefined; }
+}
+
+export interface RunDetail {
+  run: {
+    id: number;
+    started_at: string;
+    finished_at: string | null;
+    total: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+    trigger: string | null;
+    environment: string | null;
+    duration_ms: number | null;
+  };
+  results: Array<{
+    suite_name: string;
+    test_name: string;
+    status: string;
+    duration_ms: number | null;
+    request_method: string | null;
+    request_url: string | null;
+    response_status: number | null;
+    error_message?: string;
+    assertions: unknown;
+  }>;
+}
+
+export function getRunDetail(runId: number, verbose?: boolean, dbPath?: string): RunDetail {
+  getDb(dbPath);
+  const run = getRunById(runId);
+  if (!run) throw new Error(`Run ${runId} not found`);
+  const results = getResultsByRunId(runId);
+  return {
+    run: {
+      id: run.id,
+      started_at: run.started_at,
+      finished_at: run.finished_at,
+      total: run.total,
+      passed: run.passed,
+      failed: run.failed,
+      skipped: run.skipped,
+      trigger: run.trigger,
+      environment: run.environment,
+      duration_ms: run.duration_ms,
+    },
+    results: results.map(r => ({
+      suite_name: r.suite_name,
+      test_name: r.test_name,
+      status: r.status,
+      duration_ms: r.duration_ms,
+      request_method: r.request_method,
+      request_url: r.request_url,
+      response_status: r.response_status,
+      error_message: truncateErrorMessage(r.error_message, verbose),
+      assertions: r.assertions,
+    })),
+  };
+}
+
+export interface DiagnoseResult {
+  run: {
+    id: number;
+    started_at: string;
+    environment: string | null;
+    duration_ms: number | null;
+  };
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    api_errors: number;
+    assertion_failures: number;
+    network_errors: number;
+  };
+  env_issue?: string;
+  failures: Array<{
+    suite_name: string;
+    test_name: string;
+    status: string;
+    failure_type: string;
+    error_message?: string;
+    request_method: string | null;
+    request_url: string | null;
+    response_status: number | null;
+    hint?: string;
+    schema_hint?: string;
+    response_body?: unknown;
+    response_headers?: Record<string, string>;
+    assertions: unknown;
+    duration_ms: number | null;
+  }>;
+}
+
+export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): DiagnoseResult {
+  getDb(dbPath);
+  const diagRun = getRunById(runId);
+  if (!diagRun) throw new Error(`Run ${runId} not found`);
+
+  let envFilePath: string | undefined;
+  if (diagRun.collection_id) {
+    const collection = getCollectionById(diagRun.collection_id);
+    if (collection?.base_dir) {
+      envFilePath = join(collection.base_dir, ".env.yaml").replace(/\\/g, "/");
+    }
+  }
+
+  const allResults = getResultsByRunId(runId);
+  const failures = allResults
+    .filter(r => r.status === "fail" || r.status === "error")
+    .map(r => {
+      const hint = envHint(r.request_url, r.error_message, envFilePath) ?? statusHint(r.response_status);
+      const failure_type = classifyFailure(r.status, r.response_status);
+      const sHint = schemaHint(failure_type, r.response_status);
+      return {
+        suite_name: r.suite_name,
+        test_name: r.test_name,
+        status: r.status,
+        failure_type,
+        error_message: truncateErrorMessage(r.error_message, verbose),
+        request_method: r.request_method,
+        request_url: r.request_url,
+        response_status: r.response_status,
+        ...(hint ? { hint } : {}),
+        ...(sHint ? { schema_hint: sHint } : {}),
+        response_body: parseBodySafe(r.response_body),
+        response_headers: filterHeaders(r.response_headers),
+        assertions: r.assertions,
+        duration_ms: r.duration_ms,
+      };
+    });
+
+  const sharedEnvHint = computeSharedEnvIssue(failures, envFilePath);
+
+  const apiErrors = failures.filter(f => f.failure_type === "api_error").length;
+  const assertionFailures = failures.filter(f => f.failure_type === "assertion_failed").length;
+  const networkErrors = failures.filter(f => f.failure_type === "network_error").length;
+
+  return {
+    run: {
+      id: diagRun.id,
+      started_at: diagRun.started_at,
+      environment: diagRun.environment,
+      duration_ms: diagRun.duration_ms,
+    },
+    summary: {
+      total: diagRun.total,
+      passed: diagRun.passed,
+      failed: diagRun.failed,
+      api_errors: apiErrors,
+      assertion_failures: assertionFailures,
+      network_errors: networkErrors,
+    },
+    ...(sharedEnvHint ? { env_issue: sharedEnvHint } : {}),
+    failures,
+  };
+}
+
+export interface CompareResult {
+  runA: { id: number; started_at: string };
+  runB: { id: number; started_at: string };
+  summary: {
+    regressions: number;
+    fixes: number;
+    unchanged: number;
+    newTests: number;
+    removedTests: number;
+  };
+  regressions: Array<{ suite: string; test: string; before: string; after: string }>;
+  fixes: Array<{ suite: string; test: string; before: string; after: string }>;
+  hasRegressions: boolean;
+}
+
+export function compareRuns(idA: number, idB: number, dbPath?: string): CompareResult {
+  getDb(dbPath);
+  const runARecord = getRunById(idA);
+  const runBRecord = getRunById(idB);
+  if (!runARecord) throw new Error(`Run #${idA} not found`);
+  if (!runBRecord) throw new Error(`Run #${idB} not found`);
+
+  const resultsA = getResultsByRunId(idA);
+  const resultsB = getResultsByRunId(idB);
+
+  const mapA = new Map<string, string>();
+  const mapB = new Map<string, string>();
+  for (const r of resultsA) mapA.set(`${r.suite_name}::${r.test_name}`, r.status);
+  for (const r of resultsB) mapB.set(`${r.suite_name}::${r.test_name}`, r.status);
+
+  const regressions: Array<{ suite: string; test: string; before: string; after: string }> = [];
+  const fixes: Array<{ suite: string; test: string; before: string; after: string }> = [];
+  let unchanged = 0;
+  let newTests = 0;
+  let removedTests = 0;
+
+  for (const [key, statusB] of mapB) {
+    const statusA = mapA.get(key);
+    if (statusA === undefined) { newTests++; continue; }
+    const [suite, test] = key.split("::") as [string, string];
+    const wasPass = statusA === "pass";
+    const isPass = statusB === "pass";
+    const wasFail = statusA === "fail" || statusA === "error";
+    const isFail = statusB === "fail" || statusB === "error";
+    if (wasPass && isFail) regressions.push({ suite, test, before: statusA, after: statusB });
+    else if (wasFail && isPass) fixes.push({ suite, test, before: statusA, after: statusB });
+    else unchanged++;
+  }
+  for (const key of mapA.keys()) {
+    if (!mapB.has(key)) removedTests++;
+  }
+
+  return {
+    runA: { id: idA, started_at: runARecord.started_at },
+    runB: { id: idB, started_at: runBRecord.started_at },
+    summary: { regressions: regressions.length, fixes: fixes.length, unchanged, newTests, removedTests },
+    regressions,
+    fixes,
+    hasRegressions: regressions.length > 0,
+  };
+}
+
+export function getCollections(dbPath?: string) {
+  getDb(dbPath);
+  return listCollections();
+}
+
+export function getRuns(limit?: number, dbPath?: string) {
+  getDb(dbPath);
+  return listRuns(limit ?? 20);
+}

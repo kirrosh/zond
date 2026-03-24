@@ -2,12 +2,14 @@ import { readOpenApiSpec, extractEndpoints, scanCoveredEndpoints, filterUncovere
 import { getDb } from "../../db/schema.ts";
 import { getResultsByRunId, getRunById } from "../../db/queries.ts";
 import { printError, printSuccess } from "../output.ts";
+import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 
 export interface CoverageOptions {
   spec: string;
   tests: string;
   failOnCoverage?: number;
   runId?: number;
+  json?: boolean;
 }
 
 const RESET = "\x1b[0m";
@@ -145,12 +147,30 @@ export async function coverageCommand(options: CoverageOptions): Promise<number>
       }
     }
 
+    if (options.json) {
+      const coveredEndpoints = allEndpoints.filter(ep => !uncovered.includes(ep)).map(ep => `${ep.method} ${ep.path}`);
+      const uncoveredEndpoints = uncovered.map(ep => `${ep.method} ${ep.path}`);
+      printJson(jsonOk("coverage", {
+        covered: coveredCount,
+        uncovered: uncovered.length,
+        total: allEndpoints.length,
+        percentage,
+        coveredEndpoints,
+        uncoveredEndpoints,
+      }));
+    }
+
     if (options.failOnCoverage !== undefined) {
       return percentage < options.failOnCoverage ? 1 : 0;
     }
     return uncovered.length > 0 ? 1 : 0;
   } catch (err) {
-    printError(err instanceof Error ? err.message : String(err));
+    const message = err instanceof Error ? err.message : String(err);
+    if (options.json) {
+      printJson(jsonError("coverage", [message]));
+    } else {
+      printError(message);
+    }
     return 2;
   }
 }

@@ -3,11 +3,11 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { resolve, join } from "node:path";
 import { existsSync } from "node:fs";
 import { resetDb } from "../../db/schema.ts";
-import { TOOL_DESCRIPTIONS } from "../descriptions.js";
+// set_work_dir removed from MCP — tool file kept for reference
 
 export function registerSetWorkDirTool(server: McpServer) {
   server.registerTool("set_work_dir", {
-    description: TOOL_DESCRIPTIONS.set_work_dir,
+    description: "Set the working directory for this MCP session",
     inputSchema: {
       workDir: z.string().describe(
         "Absolute path to project root (e.g. /home/user/myproject or C:/Users/user/myproject)"

@@ -4,7 +4,7 @@ import { validateSuite } from "../../core/parser/schema.ts";
 import { join, dirname } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import YAML from "yaml";
-import { TOOL_DESCRIPTIONS } from "../descriptions.js";
+// Tool descriptions are inline since save_test_suite/save_test_suites were removed from central descriptions
 
 export interface SaveResult {
   saved: boolean;
@@ -149,7 +149,7 @@ export async function validateAndSave(
 
 export function registerSaveTestSuiteTool(server: McpServer, dbPath?: string) {
   server.registerTool("save_test_suite", {
-    description: TOOL_DESCRIPTIONS.save_test_suite,
+    description: "Save a YAML test suite file with validation",
     inputSchema: {
       filePath: z.string().describe("Path for saving the YAML test file (e.g. apis/petstore/tests/pets-crud.yaml)"),
       content: z.string().describe("YAML content of the test suite"),
@@ -176,7 +176,7 @@ export function registerSaveTestSuiteTool(server: McpServer, dbPath?: string) {
 
 export function registerSaveTestSuitesTool(server: McpServer, dbPath?: string) {
   server.registerTool("save_test_suites", {
-    description: TOOL_DESCRIPTIONS.save_test_suites,
+    description: "Save multiple YAML test suite files in a single call",
     inputSchema: {
       files: z.array(z.object({
         filePath: z.string().describe("Path for saving the YAML test file"),
