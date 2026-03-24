@@ -94,9 +94,9 @@ After fixing, re-run and repeat until all smoke tests pass.
 
 ```
 ## What's next
-- Expand to CRUD tests: `/test-api run` (choose CRUD level)
-- Check coverage gaps: `/test-api coverage`
-- Open dashboard: `/zond:dashboard`
+- Expand to CRUD tests: `/zond:test-api run` (choose CRUD level)
+- Check coverage gaps: `/zond:test-api coverage`
+- Start dashboard: `zond serve --open`
 ```
 
 ### Step 6: Run full suite (CRUD level and above)
@@ -111,9 +111,9 @@ Diagnose and fix failures the same way as step 5.
 
 ```
 ## What's next
-- Check coverage gaps: `/test-api coverage`
-- Add edge case tests: `/test-api run` (choose Maximum level)
-- Open dashboard: `/zond:dashboard`
+- Check coverage gaps: `/zond:test-api coverage`
+- Add edge case tests: `/zond:test-api run` (choose Maximum level)
+- Start dashboard: `zond serve --open`
 ```
 
 ### Step 7: Track coverage and fill gaps (Maximum only)
