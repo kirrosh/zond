@@ -46,6 +46,19 @@ This single command creates:
 
 **Do NOT write YAML files manually.** The generator handles assertions, captures, request bodies, and tag grouping automatically.
 
+### Step 3.5: Choose coverage level
+
+**Ask the user** which coverage level they want before running any tests:
+
+> Which coverage level would you like?
+> 1. **Safe only** — smoke tests (GET-only), safe even for production
+> 2. **CRUD** — smoke + CRUD chains (requires staging/test environment)
+> 3. **Maximum** — smoke + CRUD + coverage gaps + edge cases (requires staging/test environment)
+
+Default to **Safe only** if the user is unsure or doesn't respond clearly.
+
+Remember the chosen level — it controls which steps below are executed and where to stop.
+
 ### Step 4: Validate and run smoke tests immediately
 ```bash
 zond validate <tests-dir>
@@ -69,7 +82,16 @@ zond request POST https://api.example.com/endpoint --body '{"key":"value"}' --js
 
 After fixing, re-run and repeat until all smoke tests pass.
 
-### Step 6: Run full suite (when user confirms test environment)
+**If coverage level = "Safe only" → STOP here.** Output:
+
+```
+## What's next
+- Expand to CRUD tests: `/test-api run` (choose CRUD level)
+- Check coverage gaps: `/test-api coverage`
+- Open dashboard: `/zond:dashboard`
+```
+
+### Step 6: Run full suite (CRUD level and above)
 ```bash
 zond run <tests-dir> --json               # all tests including CRUD
 zond run <tests-dir> --tag crud --json    # CRUD only
@@ -77,7 +99,16 @@ zond run <tests-dir> --env staging --json # specific environment
 ```
 Diagnose and fix failures the same way as step 5.
 
-### Step 7: Track coverage and fill gaps
+**If coverage level = "CRUD" → STOP here.** Output:
+
+```
+## What's next
+- Check coverage gaps: `/test-api coverage`
+- Add edge case tests: `/test-api run` (choose Maximum level)
+- Open dashboard: `/zond:dashboard`
+```
+
+### Step 7: Track coverage and fill gaps (Maximum only)
 ```bash
 zond coverage --spec <spec> --tests <tests-dir> --json
 ```

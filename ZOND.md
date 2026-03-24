@@ -10,6 +10,8 @@
 
 ## Safe Test Coverage Workflow
 
+CLI skill (`/test-api`) asks the user to choose coverage level (Safe / CRUD / Maximum), mapping to Phase 1 / Phase 1+2 / Phase 1+2+3.
+
 **When asked to "safely cover", "test without breaking anything", or "start with read-only tests" — follow this 4-phase approach:**
 
 **Step 0 (required for npx MCP — single shared server):**
