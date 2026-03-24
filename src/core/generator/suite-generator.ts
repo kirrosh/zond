@@ -233,6 +233,13 @@ export function generateCrudSuite(
   const allEps = [group.create, group.list, group.read, group.update, group.delete].filter(Boolean) as EndpointInfo[];
   const suiteHeaders = getSuiteHeaders(allEps, securitySchemes);
 
+  // 0. List all (before create, to verify collection exists)
+  if (group.list) {
+    const step = generateStep(group.list, securitySchemes);
+    if (suiteHeaders) delete (step as any).headers;
+    tests.push(step);
+  }
+
   // 1. Create
   if (group.create) {
     const step = generateStep(group.create, securitySchemes);

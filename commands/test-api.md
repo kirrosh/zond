@@ -11,10 +11,10 @@ If $ARGUMENTS = "run" — run existing tests.
 If $ARGUMENTS = "coverage" — show coverage.
 Otherwise treat $ARGUMENTS as spec file path.
 
-Follow workflow from skill api-testing:
-1. zond init (if no structure)
-2. zond describe --compact (understand API)
-3. Generate tests (use skill generate-api-tests)
-4. zond validate
-5. zond run --safe --json
-6. On failures — use skill test-diagnosis
+Workflow:
+1. `zond init --name <name> --spec <spec>` (if no structure exists)
+2. `zond describe <spec> --compact --json` (do NOT read spec with Read tool)
+3. `zond generate <spec> --output <tests-dir> --json` (do NOT write YAML manually)
+4. `zond validate <tests-dir>` then `zond run <tests-dir> --safe --json` (smoke immediately)
+5. On failures — `zond db diagnose <run-id> --json`, fix specific files, re-run
+6. When user confirms test env — `zond run <tests-dir> --json` (full suite with CRUD)

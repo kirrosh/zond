@@ -5,7 +5,7 @@ description: |
   run smoke tests, analyze API coverage, diagnose test failures,
   set up API test infrastructure, generate CI for API tests.
   Also activates on: openapi.json, swagger, API spec, test coverage.
-allowed-tools: [Read, Write, Bash(zond *), Bash(cat *), Bash(which zond)]
+allowed-tools: [Read, Write, Bash(zond *), Bash(which zond)]
 ---
 
 # Zond API Testing
@@ -16,63 +16,96 @@ allowed-tools: [Read, Write, Bash(zond *), Bash(cat *), Bash(which zond)]
 If NOT_INSTALLED, run: `npx -y @kirrosh/zond@latest` as prefix for all commands below.
 Otherwise use `zond` directly.
 
-## How it works
+## NEVER do these — MANDATORY
+- **NEVER read OpenAPI/Swagger/JSON spec files** with Read or cat — use `zond describe`
+- **NEVER use curl/wget** for HTTP requests — use `zond request`
+- **NEVER write test YAML files from scratch** — use `zond generate` first, then edit specific files to fix failures
+- **NEVER invent endpoints** — only use endpoints from `zond describe` output
 
-Zond is a CLI tool for API testing. You call it via bash, read JSON output,
-and make decisions based on results.
+## Workflow
 
-### Core workflow
+### Step 1: Init (once per API)
+```bash
+zond init --name <name> --spec <path-to-openapi> [--base-url <url>]
+```
 
-1. **Init** (once per API):
-   ```bash
-   zond init --name <name> --spec <path-to-openapi> [--base-url <url>]
-   ```
+### Step 2: Explore
+```bash
+zond describe <spec> --compact --json
+```
 
-2. **Explore** (understand what to test):
-   ```bash
-   zond describe <spec> --compact --json    # overview of all endpoints
-   zond describe <spec> --path /endpoint --method GET --json  # one endpoint
-   ```
+### Step 3: Generate tests — ALWAYS use CLI
+```bash
+zond generate <spec> --output <tests-dir> --json
+```
+This single command creates:
+- Smoke tests (GET endpoints, grouped by tag)
+- CRUD chains (POST → GET → PUT → DELETE with variable capture)
+- Auth tests (login/register endpoints)
+- `.env.yaml` with `base_url` from spec
 
-3. **Write tests** — YOU write YAML files directly (see format below)
+**Do NOT write YAML files manually.** The generator handles assertions, captures, request bodies, and tag grouping automatically.
 
-4. **Validate** before running:
-   ```bash
-   zond validate <tests-dir-or-file>
-   ```
+### Step 4: Validate and run smoke tests immediately
+```bash
+zond validate <tests-dir>
+zond run <tests-dir> --safe --json
+```
+Always run smoke (GET-only) tests right after generation — they are safe and reveal spec/API mismatches early.
 
-5. **Run**:
-   ```bash
-   zond run <path> --safe --json              # GET-only, safe for prod
-   zond run <path> --dry-run --json           # preview without sending
-   zond run <path> --env staging --json       # specific environment
-   zond run <path> --tag smoke --json         # filter by tag
-   ```
+### Step 5: Diagnose and fix failures
+If tests fail, use `run_id` from the run output:
+```bash
+zond db diagnose <run-id> --json
+```
+Read the diagnosis, then fix **specific** YAML files with Edit/Write.
+Common fixes: wrong expected status, missing auth headers, incorrect body schema.
 
-6. **Diagnose failures**:
-   ```bash
-   zond db diagnose <run-id> --json
-   ```
+Use ad-hoc requests to debug endpoints:
+```bash
+zond request GET https://api.example.com/endpoint --json
+zond request POST https://api.example.com/endpoint --body '{"key":"value"}' --json
+```
 
-7. **Track coverage**:
-   ```bash
-   zond coverage --spec <spec> --tests <dir> --json
-   ```
+After fixing, re-run and repeat until all smoke tests pass.
 
-8. **Compare runs** (regression):
-   ```bash
-   zond db compare <old-run-id> <new-run-id> --json
-   ```
+### Step 6: Run full suite (when user confirms test environment)
+```bash
+zond run <tests-dir> --json               # all tests including CRUD
+zond run <tests-dir> --tag crud --json    # CRUD only
+zond run <tests-dir> --env staging --json # specific environment
+```
+Diagnose and fix failures the same way as step 5.
 
-### YAML test format
+### Step 7: Track coverage and fill gaps
+```bash
+zond coverage --spec <spec> --tests <tests-dir> --json
+```
+If gaps remain:
+```bash
+zond generate <spec> --output <tests-dir> --uncovered-only --json
+```
+For edge cases the generator can't create (negative tests, business logic), write individual YAML files — see format reference below.
 
+## Safety rules
+- `--safe` → only GET requests execute
+- `--dry-run` → shows requests without sending
+- Never run CRUD tests unless user confirmed staging/test environment
+- If endpoint returns 500, keep `status: 200` in expect — failing test = API bug
+
+## JSON output format
+All `--json` output follows:
+```json
+{"ok": true, "command": "...", "data": {...}, "warnings": [], "errors": []}
+```
+
+## YAML reference (for editing/fixing tests)
 ```yaml
 name: "Suite name"
 tags: [smoke]
 base_url: "{{base_url}}"
 headers:
   Authorization: "Bearer {{auth_token}}"
-
 tests:
   - name: "Test name"
     GET: /endpoint
@@ -80,54 +113,10 @@ tests:
       status: 200
       body:
         id: { type: integer }
-        name: { type: string }
 ```
-
-#### Assertions
-`equals`, `type`, `capture`, `contains`, `matches`, `gt`, `lt`, `exists`.
-Nested: `category.name: { equals: "Dogs" }`.
-Root body: `_body: { type: "array" }`.
-Status accepts single int or array: `status: [200, 204]`.
-
-#### Variable capture and chaining
-```yaml
-- name: "Create"
-  POST: /users
-  json: { name: "{{$randomName}}" }
-  expect:
-    status: 201
-    body:
-      id: { capture: user_id }
-
-- name: "Get created"
-  GET: /users/{{user_id}}
-  expect:
-    status: 200
-```
-
-#### Generators
-`{{$randomInt}}`, `{{$uuid}}`, `{{$timestamp}}`, `{{$randomEmail}}`,
-`{{$randomString}}`, `{{$randomName}}`
-
-#### Environments
-`.env.yaml` (default) or `.env.<name>.yaml` in tests dir or parent.
-
-### Safety rules
-
-- `--safe` → only GET requests execute, write ops skipped
-- `--dry-run` → shows requests without sending
-- Never run CRUD tests unless user confirmed staging/test environment
-- Tags: `smoke` for GET-only, `crud` for write operations
-- If endpoint returns 500, keep `status: 200` in expect — failing test = API bug
-
-### Reading JSON output
-
-All `--json` output follows:
-```json
-{"ok": true, "command": "...", "data": {...}, "warnings": [], "errors": []}
-```
-
-For `run --json`, data contains:
-- `summary`: total/passed/failed/skipped counts
-- `failures`: array of {step, expected, actual, response_body}
-- `run_id`: for use with `db diagnose` and `db compare`
+Assertions: `equals`, `type`, `capture`, `contains`, `matches`, `gt`, `lt`, `exists`.
+Nested: `category.name: { equals: "Dogs" }`. Root body: `_body: { type: "array" }`.
+Status: `status: 200` or `status: [200, 204]`.
+Capture: `id: { capture: user_id }` then use `{{user_id}}` in later steps.
+Generators: `{{$randomInt}}`, `{{$uuid}}`, `{{$timestamp}}`, `{{$randomEmail}}`, `{{$randomString}}`, `{{$randomName}}`.
+Env: `.env.yaml` (default) or `.env.<name>.yaml` in tests dir or parent.
