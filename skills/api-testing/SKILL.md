@@ -48,13 +48,25 @@ This single command creates:
 
 ### Step 3.5: Choose coverage level
 
-Use **AskUserQuestion** with radio-button options to let the user pick a coverage level:
+Before asking, check what has already been completed by running:
+```bash
+zond db runs --limit 5 --json
+```
+
+**Filter the options based on prior runs:**
+- If smoke tests (safe mode) already passed → remove "Safe only" from options
+- If CRUD tests already passed → remove "CRUD" from options
+- If only one option remains → skip the question, use that option automatically
+- If no options remain (everything passed) → skip to Step 7 (coverage gaps only)
+
+Use **AskUserQuestion** with only the relevant options:
 
 ```
 AskUserQuestion({
   question: "Which coverage level would you like?",
   header: "Coverage",
   options: [
+    // Include only levels NOT yet completed:
     { label: "Safe only", description: "Smoke tests (GET-only) — safe even for production" },
     { label: "CRUD", description: "Smoke + CRUD chains — requires staging/test environment" },
     { label: "Maximum", description: "Smoke + CRUD + coverage gaps + edge cases — requires staging/test env" }
@@ -63,7 +75,7 @@ AskUserQuestion({
 })
 ```
 
-Default to **Safe only** if the user doesn't respond or picks nothing.
+Default to the lowest remaining level if the user doesn't respond clearly.
 
 Remember the chosen level — it controls which steps below are executed and where to stop.
 
