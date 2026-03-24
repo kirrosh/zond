@@ -6,21 +6,9 @@ import { join } from "path";
 const root = join(import.meta.dir, "..");
 const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf-8"));
 
-const files = [
-  ".claude-plugin/plugin.json",
-  ".claude-plugin/marketplace.json",
-];
-
-for (const rel of files) {
-  const path = join(root, rel);
-  const json = JSON.parse(readFileSync(path, "utf-8"));
-
-  if (rel.includes("marketplace")) {
-    json.plugins[0].version = version;
-  } else {
-    json.version = version;
-  }
-
-  writeFileSync(path, JSON.stringify(json, null, 2) + "\n");
-  console.log(`${rel} → ${version}`);
-}
+// Sync version in plugin.json (authoritative source for plugin version)
+const pluginPath = join(root, ".claude-plugin/plugin.json");
+const pluginJson = JSON.parse(readFileSync(pluginPath, "utf-8"));
+pluginJson.version = version;
+writeFileSync(pluginPath, JSON.stringify(pluginJson, null, 2) + "\n");
+console.log(`.claude-plugin/plugin.json → ${version}`);

@@ -1,29 +1,25 @@
 {
   "name": "zond-marketplace",
   "owner": {
-    "name": "kirrosh"
+    "name": "kirrosh",
+    "url": "https://github.com/kirrosh"
   },
   "metadata": {
-    "description": "Point your AI agent at an OpenAPI spec. Get working tests in minutes."
+    "description": "AI-native API testing plugins"
   },
   "plugins": [
     {
       "name": "zond",
       "source": "./",
       "description": "Point your AI agent at an OpenAPI spec. Get working tests in minutes. No config, no cloud, no Postman.",
-      "version": "0.14.0",
-      "author": {
-        "name": "kirrosh",
-        "url": "https://github.com/kirrosh"
-      },
-      "repository": "https://github.com/kirrosh/zond",
-      "license": "MIT",
-      "keywords": [
-        "api",
-        "testing",
+      "category": "testing",
+      "tags": [
+        "api-testing",
         "openapi",
         "yaml",
-        "mcp"
+        "rest",
+        "smoke-tests",
+        "coverage"
       ]
     }
   ]
