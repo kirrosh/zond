@@ -103,6 +103,7 @@ export interface StoredStepResult {
   error_message: string | null;
   assertions: import("../core/runner/types.ts").AssertionResult[];
   captures: Record<string, unknown>;
+  suite_file: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -244,11 +245,11 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
     INSERT INTO results
       (run_id, suite_name, test_name, status, duration_ms,
        request_method, request_url, request_body,
-       response_status, response_body, response_headers, error_message, assertions, captures)
+       response_status, response_body, response_headers, error_message, assertions, captures, suite_file)
     VALUES
       ($run_id, $suite_name, $test_name, $status, $duration_ms,
        $request_method, $request_url, $request_body,
-       $response_status, $response_body, $response_headers, $error_message, $assertions, $captures)
+       $response_status, $response_body, $response_headers, $error_message, $assertions, $captures, $suite_file)
   `);
 
   db.transaction(() => {
@@ -272,6 +273,7 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
           $error_message: step.error ?? null,
           $assertions: step.assertions.length > 0 ? JSON.stringify(step.assertions) : null,
           $captures: Object.keys(step.captures).length > 0 ? JSON.stringify(step.captures) : null,
+          $suite_file: suite.suite_file ?? null,
         });
       }
     }

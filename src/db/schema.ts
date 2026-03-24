@@ -48,7 +48,7 @@ export function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -82,7 +82,8 @@ const SCHEMA = `
     error_message    TEXT,
     assertions       TEXT,
     captures         TEXT,
-    response_headers TEXT
+    response_headers TEXT,
+    suite_file       TEXT
   );
 
   CREATE TABLE IF NOT EXISTS collections (
@@ -153,7 +154,14 @@ function runMigrations(db: Database): void {
   if (ver >= SCHEMA_VERSION) return;
 
   db.transaction(() => {
-    db.exec(SCHEMA);
+    if (ver === 0) {
+      // Fresh database — create all tables
+      db.exec(SCHEMA);
+    }
+    if (ver >= 1 && ver < 2) {
+      // Migration v1→v2: add suite_file column to results
+      db.exec("ALTER TABLE results ADD COLUMN suite_file TEXT");
+    }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();
 }

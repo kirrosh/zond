@@ -13,9 +13,19 @@
     "api",
     "testing",
     "openapi",
-    "yaml",
-    "mcp"
+    "yaml"
   ],
-  "hooks": "./hooks/hooks.json",
-  "mcpServers": "./.mcp.json"
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write(*.yaml)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "zond validate \"$TOOL_INPUT_FILE_PATH\" 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
 }

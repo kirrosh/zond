@@ -130,24 +130,36 @@ export async function runCommand(options: RunOptions): Promise<number> {
     results.push(...all);
   }
 
-  // 5. Report
+  // 5. Collect warnings
+  const warnings: string[] = [];
+  const rateLimited = results.flatMap(r => r.steps)
+    .filter(s => s.response?.status === 429);
+  if (rateLimited.length > 0) {
+    warnings.push(`${rateLimited.length} request(s) hit rate limit (429). Consider: consolidating login steps, adding --bail, or using retry_until with delay.`);
+  }
+
+  // 5b. Report
   if (!options.json) {
     const reporter = getReporter(options.report);
     reporter.report(results);
+    for (const w of warnings) {
+      printWarning(w);
+    }
   }
 
   // 6. Save to DB
+  let savedRunId: number | undefined;
   if (!options.noDb) {
     try {
       getDb(options.dbPath);
       const collection = findCollectionByTestPath(options.path);
-      const runId = createRun({
+      savedRunId = createRun({
         started_at: results[0]?.started_at ?? new Date().toISOString(),
         environment: options.env,
         collection_id: collection?.id,
       });
-      finalizeRun(runId, results);
-      saveResults(runId, results);
+      finalizeRun(savedRunId, results);
+      saveResults(savedRunId, results);
     } catch (err) {
       printWarning(`Failed to save results to DB: ${(err as Error).message}`);
     }
@@ -170,11 +182,12 @@ export async function runCommand(options: RunOptions): Promise<number> {
       r.steps.filter(s => s.status === "fail" || s.status === "error").map(s => ({
         suite: r.suite_name,
         test: s.name,
+        ...(r.suite_file ? { file: r.suite_file } : {}),
         status: s.status,
         error: s.error,
       }))
     );
-    printJson(jsonOk("run", { summary: { total, passed, failed }, failures, runId: undefined as number | undefined }));
+    printJson(jsonOk("run", { summary: { total, passed, failed }, failures, warnings, runId: savedRunId }));
   }
 
   return hasFailures ? 1 : 0;

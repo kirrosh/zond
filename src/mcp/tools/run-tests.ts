@@ -56,6 +56,7 @@ export function registerRunTestsTool(server: McpServer, dbPath?: string) {
       r.steps.filter(s => s.status === "fail" || s.status === "error").map(s => ({
         suite: r.suite_name,
         test: s.name,
+        ...(r.suite_file ? { file: r.suite_file } : {}),
         status: s.status,
         error: s.error,
         assertions: s.assertions.filter(a => !a.passed).map(a => ({

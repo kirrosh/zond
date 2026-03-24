@@ -4,6 +4,7 @@ import {
   detectCrudGroups,
   generateCrudSuite,
   generateSuites,
+  generateAuthSuite,
 } from "../../src/core/generator/suite-generator.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../src/core/generator/types.ts";
 import type { OpenAPIV3 } from "openapi-types";
@@ -409,5 +410,175 @@ describe("generateSuites", () => {
   test("returns empty array for empty endpoints", () => {
     const suites = generateSuites({ endpoints: [], securitySchemes: noSecurity });
     expect(suites).toHaveLength(0);
+  });
+
+  test("auth endpoints go into auth suite", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/auth/login", method: "POST", tags: ["auth"] }),
+      makeEndpoint({ path: "/pets", method: "GET", tags: ["pets"] }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
+    const authSuite = suites.find(s => s.tags?.includes("auth"));
+    expect(authSuite).toBeDefined();
+    expect(authSuite!.name).toBe("auth");
+  });
+});
+
+// ── generateAuthSuite ──
+
+describe("generateAuthSuite", () => {
+  test("register+login pair uses consistent credentials", () => {
+    const registerEp = makeEndpoint({
+      path: "/auth/register",
+      method: "POST",
+      operationId: "register",
+      requestBodySchema: {
+        type: "object",
+        properties: {
+          email: { type: "string", format: "email" } as OpenAPIV3.SchemaObject,
+          password: { type: "string" } as OpenAPIV3.SchemaObject,
+          name: { type: "string" } as OpenAPIV3.SchemaObject,
+        },
+      } as OpenAPIV3.SchemaObject,
+    });
+    const loginEp = makeEndpoint({
+      path: "/auth/login",
+      method: "POST",
+      operationId: "login",
+      requestBodySchema: {
+        type: "object",
+        properties: {
+          email: { type: "string", format: "email" } as OpenAPIV3.SchemaObject,
+          password: { type: "string" } as OpenAPIV3.SchemaObject,
+        },
+      } as OpenAPIV3.SchemaObject,
+      responses: [{
+        statusCode: 200,
+        description: "OK",
+        schema: {
+          type: "object",
+          properties: {
+            access_token: { type: "string" } as OpenAPIV3.SchemaObject,
+          },
+        } as OpenAPIV3.SchemaObject,
+      }],
+    });
+
+    const suite = generateAuthSuite([registerEp, loginEp], noSecurity);
+
+    expect(suite.name).toBe("auth");
+    expect(suite.tags).toEqual(["auth"]);
+    // Should have: set credentials, register, login = 3 steps
+    expect(suite.tests.length).toBe(3);
+
+    // First step sets shared credentials
+    const setStep = suite.tests[0]!;
+    expect(setStep.name).toBe("Set test credentials");
+    expect((setStep as any).set.test_email).toBeDefined();
+    expect((setStep as any).set.test_password).toBe("TestPass123!");
+
+    // Register uses shared vars
+    const registerStep = suite.tests[1]!;
+    const regJson = registerStep.json as Record<string, unknown>;
+    expect(regJson.email).toBe("{{test_email}}");
+    expect(regJson.password).toBe("{{test_password}}");
+
+    // Login uses same shared vars
+    const loginStep = suite.tests[2]!;
+    const loginJson = loginStep.json as Record<string, unknown>;
+    expect(loginJson.email).toBe("{{test_email}}");
+    expect(loginJson.password).toBe("{{test_password}}");
+
+    // Login captures auth_token
+    expect(loginStep.expect.body?.access_token).toEqual({ capture: "auth_token" });
+  });
+
+  test("username-based auth uses test_username", () => {
+    const registerEp = makeEndpoint({
+      path: "/auth/signup",
+      method: "POST",
+      requestBodySchema: {
+        type: "object",
+        properties: {
+          username: { type: "string" } as OpenAPIV3.SchemaObject,
+          password: { type: "string" } as OpenAPIV3.SchemaObject,
+        },
+      } as OpenAPIV3.SchemaObject,
+    });
+    const loginEp = makeEndpoint({
+      path: "/auth/signin",
+      method: "POST",
+      requestBodySchema: {
+        type: "object",
+        properties: {
+          username: { type: "string" } as OpenAPIV3.SchemaObject,
+          password: { type: "string" } as OpenAPIV3.SchemaObject,
+        },
+      } as OpenAPIV3.SchemaObject,
+    });
+
+    const suite = generateAuthSuite([registerEp, loginEp], noSecurity);
+
+    const setStep = suite.tests[0]!;
+    expect((setStep as any).set.test_username).toBeDefined();
+    expect((setStep as any).set.test_password).toBe("TestPass123!");
+
+    const regJson = suite.tests[1]!.json as Record<string, unknown>;
+    expect(regJson.username).toBe("{{test_username}}");
+  });
+
+  test("fallback to plain suite when no register+login pair", () => {
+    const loginEp = makeEndpoint({
+      path: "/auth/login",
+      method: "POST",
+      operationId: "login",
+      requestBodySchema: {
+        type: "object",
+        properties: {
+          email: { type: "string" } as OpenAPIV3.SchemaObject,
+          password: { type: "string" } as OpenAPIV3.SchemaObject,
+        },
+      } as OpenAPIV3.SchemaObject,
+    });
+
+    const suite = generateAuthSuite([loginEp], noSecurity);
+    // No set step — just the login step
+    expect(suite.tests.length).toBe(1);
+    expect(suite.tests[0]!.name).toBe("login");
+  });
+
+  test("includes other auth endpoints after register+login", () => {
+    const registerEp = makeEndpoint({
+      path: "/auth/register",
+      method: "POST",
+      requestBodySchema: {
+        type: "object",
+        properties: {
+          email: { type: "string", format: "email" } as OpenAPIV3.SchemaObject,
+          password: { type: "string" } as OpenAPIV3.SchemaObject,
+        },
+      } as OpenAPIV3.SchemaObject,
+    });
+    const loginEp = makeEndpoint({
+      path: "/auth/login",
+      method: "POST",
+      requestBodySchema: {
+        type: "object",
+        properties: {
+          email: { type: "string", format: "email" } as OpenAPIV3.SchemaObject,
+          password: { type: "string" } as OpenAPIV3.SchemaObject,
+        },
+      } as OpenAPIV3.SchemaObject,
+    });
+    const logoutEp = makeEndpoint({
+      path: "/auth/logout",
+      method: "POST",
+      operationId: "logout",
+    });
+
+    const suite = generateAuthSuite([registerEp, loginEp, logoutEp], noSecurity);
+    // set + register + login + logout = 4 steps
+    expect(suite.tests.length).toBe(4);
+    expect(suite.tests[3]!.name).toBe("logout");
   });
 });

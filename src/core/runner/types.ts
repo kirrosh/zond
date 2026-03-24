@@ -38,6 +38,7 @@ export interface TestRunResult {
   suite_name: string;
   suite_tags?: string[];
   suite_description?: string;
+  suite_file?: string;
   started_at: string;
   finished_at: string;
   total: number;
