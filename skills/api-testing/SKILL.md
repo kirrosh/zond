@@ -48,14 +48,22 @@ This single command creates:
 
 ### Step 3.5: Choose coverage level
 
-**Ask the user** which coverage level they want before running any tests:
+Use **AskUserQuestion** with radio-button options to let the user pick a coverage level:
 
-> Which coverage level would you like?
-> 1. **Safe only** — smoke tests (GET-only), safe even for production
-> 2. **CRUD** — smoke + CRUD chains (requires staging/test environment)
-> 3. **Maximum** — smoke + CRUD + coverage gaps + edge cases (requires staging/test environment)
+```
+AskUserQuestion({
+  question: "Which coverage level would you like?",
+  header: "Coverage",
+  options: [
+    { label: "Safe only", description: "Smoke tests (GET-only) — safe even for production" },
+    { label: "CRUD", description: "Smoke + CRUD chains — requires staging/test environment" },
+    { label: "Maximum", description: "Smoke + CRUD + coverage gaps + edge cases — requires staging/test env" }
+  ],
+  multiSelect: false
+})
+```
 
-Default to **Safe only** if the user is unsure or doesn't respond clearly.
+Default to **Safe only** if the user doesn't respond or picks nothing.
 
 Remember the chosen level — it controls which steps below are executed and where to stop.
 
