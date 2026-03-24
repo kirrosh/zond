@@ -39,15 +39,6 @@ export const TOOL_DESCRIPTIONS = {
     "Start, stop, restart, or check status of the zond WebUI server. " +
     "Useful for viewing test results in a browser without leaving the MCP session.",
 
-  generate_and_save:
-    "Read an OpenAPI spec, auto-chunk by tags if large (>30 endpoints), " +
-    "and return a focused test generation guide. For large APIs returns a chunking plan — " +
-    "call again with tag parameter for each chunk. Use testsDir param to only generate for uncovered endpoints. " +
-    "After generating YAML, use save_test_suites to save files, then run_tests to verify. " +
-    "Includes YAML format cheatsheet by default; pass includeFormat: false for subsequent tag chunks to save tokens. " +
-    "Use mode: 'generate' to auto-generate and save deterministic YAML test files (smoke + CRUD) without LLM. " +
-    "Default mode is 'generate'; use mode: 'guide' for the text-based generation guide.",
-
   ci_init:
     "Generate a CI/CD workflow file for running API tests automatically on push, PR, and schedule. " +
     "Supports GitHub Actions and GitLab CI. Auto-detects platform from project structure " +

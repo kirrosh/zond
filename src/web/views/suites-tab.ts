@@ -8,7 +8,7 @@ import { basename } from "node:path";
 
 export function renderSuitesTab(state: CollectionState): string {
   if (state.suites.length === 0) {
-    return `<div class="tab-empty">No test suites found on disk. Generate tests with <code>generate_and_save</code>.</div>`;
+    return `<div class="tab-empty">No test suites found on disk. Generate tests with <code>zond guide</code> or use the test-generation skill.</div>`;
   }
 
   const rows = state.suites.map((s, i) => renderSuiteRow(s, i)).join("");
