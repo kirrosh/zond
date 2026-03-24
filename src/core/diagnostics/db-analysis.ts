@@ -112,6 +112,15 @@ export function getRunDetail(runId: number, verbose?: boolean, dbPath?: string):
   };
 }
 
+export interface FailureGroup {
+  pattern: string;
+  count: number;
+  failure_type: string;
+  hint?: string;
+  examples: string[];
+  response_status: number | null;
+}
+
 export interface DiagnoseResult {
   run: {
     id: number;
@@ -131,6 +140,7 @@ export interface DiagnoseResult {
   failures: Array<{
     suite_name: string;
     test_name: string;
+    suite_file?: string;
     status: string;
     failure_type: string;
     error_message?: string;
@@ -144,6 +154,7 @@ export interface DiagnoseResult {
     assertions: unknown;
     duration_ms: number | null;
   }>;
+  grouped_failures?: FailureGroup[];
 }
 
 export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): DiagnoseResult {
@@ -169,6 +180,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
       return {
         suite_name: r.suite_name,
         test_name: r.test_name,
+        ...(r.suite_file ? { suite_file: r.suite_file } : {}),
         status: r.status,
         failure_type,
         error_message: truncateErrorMessage(r.error_message, verbose),
@@ -190,6 +202,10 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
   const assertionFailures = failures.filter(f => f.failure_type === "assertion_failed").length;
   const networkErrors = failures.filter(f => f.failure_type === "network_error").length;
 
+  const { grouped_failures, compactFailures } = verbose
+    ? { grouped_failures: undefined, compactFailures: failures }
+    : groupFailures(failures);
+
   return {
     run: {
       id: diagRun.id,
@@ -206,8 +222,60 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
       network_errors: networkErrors,
     },
     ...(sharedEnvHint ? { env_issue: sharedEnvHint } : {}),
-    failures,
+    failures: compactFailures,
+    ...(grouped_failures ? { grouped_failures } : {}),
   };
+}
+
+type FailureItem = { suite_name: string; test_name: string; failure_type: string; hint?: string; response_status: number | null };
+
+/** Group similar failures for compact output. Exported for testing. */
+export function groupFailures<T extends FailureItem>(failures: T[]): { grouped_failures?: FailureGroup[]; compactFailures: T[] } {
+  if (failures.length <= 5) {
+    return { compactFailures: failures };
+  }
+
+  const groupMap = new Map<string, { items: T[]; failure_type: string; hint?: string; response_status: number | null }>();
+
+  for (const f of failures) {
+    const key = `${f.response_status ?? "null"}|${f.failure_type}`;
+    const existing = groupMap.get(key);
+    if (existing) {
+      existing.items.push(f);
+    } else {
+      groupMap.set(key, {
+        items: [f],
+        failure_type: f.failure_type,
+        hint: f.hint,
+        response_status: f.response_status,
+      });
+    }
+  }
+
+  const hasGroups = [...groupMap.values()].some(g => g.items.length > 2);
+  if (!hasGroups) {
+    return { compactFailures: failures };
+  }
+
+  const grouped_failures: FailureGroup[] = [];
+  const compactFailures: T[] = [];
+
+  for (const [, group] of groupMap) {
+    const pattern = group.response_status
+      ? `${group.response_status} ${group.failure_type}`
+      : group.failure_type;
+    grouped_failures.push({
+      pattern,
+      count: group.items.length,
+      failure_type: group.failure_type,
+      hint: group.hint,
+      examples: group.items.slice(0, 2).map(f => `${f.suite_name}/${f.test_name}`),
+      response_status: group.response_status,
+    });
+    compactFailures.push(group.items[0]!);
+  }
+
+  return { grouped_failures, compactFailures };
 }
 
 export interface CompareResult {

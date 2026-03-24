@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "zond": {
-      "command": "npx",
-      "args": ["-y", "@kirrosh/zond@latest", "mcp"]
-    }
-  }
-}

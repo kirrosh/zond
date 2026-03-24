@@ -342,6 +342,131 @@ export function findUnresolvedVars(suite: RawSuite, envKeys?: Set<string>): stri
   return [...vars];
 }
 
+/** Check if a schema has a specific field name (case-insensitive) */
+function schemaHasField(schema: OpenAPIV3.SchemaObject | undefined, ...names: string[]): boolean {
+  if (!schema?.properties) return false;
+  const keys = Object.keys(schema.properties).map(k => k.toLowerCase());
+  return names.some(n => keys.includes(n.toLowerCase()));
+}
+
+/** Generate auth suite with register+login consistency */
+export function generateAuthSuite(
+  authEndpoints: EndpointInfo[],
+  securitySchemes: SecuritySchemeInfo[],
+): RawSuite {
+  // Detect register → login pair
+  const registerEp = authEndpoints.find(ep =>
+    /\/(register|signup)\b/i.test(ep.path) && ep.method.toUpperCase() === "POST"
+  );
+  const loginEp = authEndpoints.find(ep =>
+    ep !== registerEp &&
+    /\/(login|signin|auth)\b/i.test(ep.path) &&
+    ep.method.toUpperCase() === "POST"
+  );
+
+  const hasCredentialPair = registerEp && loginEp &&
+    schemaHasField(registerEp.requestBodySchema, "email", "username") &&
+    schemaHasField(registerEp.requestBodySchema, "password") &&
+    schemaHasField(loginEp.requestBodySchema, "email", "username") &&
+    schemaHasField(loginEp.requestBodySchema, "password");
+
+  if (hasCredentialPair) {
+    return generateConsistentAuthSuite(registerEp, loginEp, authEndpoints, securitySchemes);
+  }
+
+  // Fallback: plain auth suite
+  const tests = authEndpoints.map(ep => generateStep(ep, securitySchemes));
+  const headers = getSuiteHeaders(authEndpoints, securitySchemes);
+
+  const suite: RawSuite = {
+    name: "auth",
+    tags: ["auth"],
+    fileStem: "auth",
+    base_url: "{{base_url}}",
+    tests,
+  };
+
+  if (headers) {
+    suite.headers = headers;
+    for (const t of tests) {
+      if (t.headers && JSON.stringify(t.headers) === JSON.stringify(headers)) {
+        delete (t as any).headers;
+      }
+    }
+  }
+
+  return suite;
+}
+
+/** Generate auth suite with consistent register → login credentials */
+function generateConsistentAuthSuite(
+  registerEp: EndpointInfo,
+  loginEp: EndpointInfo,
+  allAuthEndpoints: EndpointInfo[],
+  securitySchemes: SecuritySchemeInfo[],
+): RawSuite {
+  const tests: RawStep[] = [];
+
+  // Determine credential field: "email" or "username"
+  const useEmail = schemaHasField(registerEp.requestBodySchema, "email");
+  const credField = useEmail ? "email" : "username";
+  const credValue = useEmail ? "test_{{$timestamp}}@test.com" : "testuser_{{$timestamp}}";
+
+  // 0. Set shared credentials
+  const setStep: RawStep = {
+    name: "Set test credentials",
+    set: {
+      [`test_${credField}`]: credValue,
+      test_password: "TestPass123!",
+    },
+    expect: {},
+  } as RawStep;
+  tests.push(setStep);
+
+  // 1. Register step — replace credential fields with shared vars
+  const registerStep = generateStep(registerEp, securitySchemes);
+  if (registerStep.json && typeof registerStep.json === "object") {
+    const json = registerStep.json as Record<string, unknown>;
+    if (credField in json) json[credField] = `{{test_${credField}}}`;
+    if ("password" in json) json.password = "{{test_password}}";
+  }
+  tests.push(registerStep);
+
+  // 2. Login step — reuse same credentials + capture token
+  const loginStep = generateStep(loginEp, securitySchemes);
+  if (loginStep.json && typeof loginStep.json === "object") {
+    const json = loginStep.json as Record<string, unknown>;
+    if (credField in json) json[credField] = `{{test_${credField}}}`;
+    if ("password" in json) json.password = "{{test_password}}";
+  }
+  // Try to capture auth token from login response
+  const loginSchema = getSuccessSchema(loginEp);
+  if (loginSchema?.properties) {
+    const tokenField = Object.keys(loginSchema.properties).find(k =>
+      /token|access_token|accessToken|jwt/i.test(k)
+    );
+    if (tokenField) {
+      if (!loginStep.expect.body) loginStep.expect.body = {};
+      loginStep.expect.body[tokenField] = { capture: "auth_token" };
+    }
+  }
+  tests.push(loginStep);
+
+  // 3. Any remaining auth endpoints (not register/login)
+  const others = allAuthEndpoints.filter(ep => ep !== registerEp && ep !== loginEp);
+  for (const ep of others) {
+    tests.push(generateStep(ep, securitySchemes));
+  }
+
+  return {
+    name: "auth",
+    tags: ["auth"],
+    fileStem: "auth",
+    base_url: "{{base_url}}",
+    tests,
+  };
+}
+
 /** Main entry point: generate all suites from endpoints */
 export function generateSuites(opts: {
   endpoints: EndpointInfo[];
@@ -440,26 +565,7 @@ export function generateSuites(opts: {
 
   // 4. Auth suite (separate — requires real credentials)
   if (authEndpoints.length > 0) {
-    const tests = authEndpoints.map(ep => generateStep(ep, securitySchemes));
-    const headers = getSuiteHeaders(authEndpoints, securitySchemes);
-
-    const suite: RawSuite = {
-      name: "auth",
-      tags: ["auth"],
-      fileStem: "auth",
-      base_url: "{{base_url}}",
-      tests,
-    };
-
-    if (headers) {
-      suite.headers = headers;
-      for (const t of tests) {
-        if (t.headers && JSON.stringify(t.headers) === JSON.stringify(headers)) {
-          delete (t as any).headers;
-        }
-      }
-    }
-
+    const suite = generateAuthSuite(authEndpoints, securitySchemes);
     suites.push(suite);
   }
 

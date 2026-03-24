@@ -38,10 +38,10 @@ export function generateFromSchema(
       return guessStringPlaceholder(schema, propertyName);
 
     case "integer":
-      return guessIntPlaceholder(propertyName);
+      return guessIntPlaceholder(propertyName, schema);
 
     case "number":
-      return "{{$randomInt}}";
+      return 29.99;
 
     case "boolean":
       return true;
@@ -86,6 +86,11 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
   if (schema.format === "email") return "{{$randomEmail}}";
   if (schema.format === "uuid") return "{{$uuid}}";
   if (schema.format === "date-time" || schema.format === "date") return "2025-01-01T00:00:00Z";
+  if (schema.format === "uri" || schema.format === "url") return "https://example.com/test";
+  if (schema.format === "hostname") return "example.com";
+  if (schema.format === "ipv4") return "192.168.1.1";
+  if (schema.format === "ipv6") return "::1";
+  if (schema.format === "password") return "TestPass123!";
 
   // Name-based heuristics
   if (name) {
@@ -99,17 +104,23 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
     if (lower === "name" || lower.endsWith("_name") || lower.endsWith("Name")) {
       return "{{$randomName}}";
     }
+    if (lower === "url" || lower.endsWith("_url") || lower === "uri" || lower === "href" || lower === "website") {
+      return "https://example.com/test";
+    }
+    if (lower === "password" || lower.endsWith("_password")) {
+      return "TestPass123!";
+    }
+    if (lower === "phone" || lower === "telephone" || lower.endsWith("_phone")) {
+      return "+1234567890";
+    }
   }
 
   return "{{$randomString}}";
 }
 
-function guessIntPlaceholder(name?: string): string {
-  if (name) {
-    const lower = name.toLowerCase();
-    if (lower === "id" || lower.endsWith("_id") || lower.endsWith("Id")) {
-      return "{{$randomInt}}";
-    }
+function guessIntPlaceholder(name?: string, schema?: OpenAPIV3.SchemaObject): number | string {
+  if (schema?.minimum !== undefined && schema.minimum > 0) {
+    return schema.minimum;
   }
   return "{{$randomInt}}";
 }

@@ -9,6 +9,7 @@ export function statusHint(status: number | null | undefined): string | null {
   if (status === 401 || status === 403) return "Auth failure — check auth_token/api_key in .env.yaml";
   if (status === 404) return "Resource not found — verify the path and ID";
   if (status === 400 || status === 422) return "Validation error — check request body fields match the schema";
+  if (status === 429) return "Rate limited — too many requests. Consider consolidating auth/login steps or adding delays between suites";
   return null;
 }
 

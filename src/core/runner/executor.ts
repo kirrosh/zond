@@ -286,6 +286,7 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
     suite_name: suite.name,
     suite_tags: suite.tags,
     suite_description: suite.description,
+    suite_file: suite.filePath,
     started_at: startedAt,
     finished_at: finishedAt,
     total: steps.length,
