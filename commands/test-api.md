@@ -15,7 +15,7 @@ Workflow:
 1. `zond init --name <name> --spec <spec>` (if no structure exists)
 2. `zond describe <spec> --compact --json` (do NOT read spec with Read tool)
 3. `zond generate <spec> --output <tests-dir> --json` (do NOT write YAML manually)
-3.5. Use **AskUserQuestion** with radio options (Safe only / CRUD / Maximum) — see SKILL.md Step 3.5
+3.5. Check prior runs (`zond db runs`), filter already-completed levels, then **AskUserQuestion** with remaining options — see SKILL.md Step 3.5
 4. `zond validate <tests-dir>` then `zond run <tests-dir> --safe --json` (smoke immediately)
 5. On failures — `zond db diagnose <run-id> --json`, fix specific files, re-run
    - If "Safe only" → STOP after smoke passes, show next-step commands
