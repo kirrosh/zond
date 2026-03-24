@@ -53,14 +53,19 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
-  // 1c. Safe mode: filter to GET-only tests
+  // 1c. Safe mode: keep GET, set-only steps, and auth-related requests
   if (options.safe) {
+    const AUTH_PATH_RE = /\/(auth|login|signin|token|oauth)\b/i;
     for (const suite of suites) {
-      suite.tests = suite.tests.filter(t => t.method === "GET");
+      suite.tests = suite.tests.filter(t => {
+        if (t.method === "GET" || !t.method) return true;
+        if (AUTH_PATH_RE.test(t.path)) return true;
+        return false;
+      });
     }
     suites = suites.filter(s => s.tests.length > 0);
     if (suites.length === 0) {
-      printWarning("No GET tests found. Nothing to run in safe mode.");
+      printWarning("No safe tests found. Nothing to run in safe mode.");
       return 0;
     }
   }

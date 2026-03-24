@@ -56,11 +56,22 @@ export async function sendAdHocRequest(options: SendAdHocRequestOptions): Promis
   const resolvedHeaders = Object.keys(parsedHeaders).length > 0 ? substituteDeep(parsedHeaders, vars) : {};
   const resolvedBody = options.body ? substituteString(options.body, vars) as string : undefined;
 
+  // Auto-detect Content-Type for body if not explicitly set
+  const finalHeaders: Record<string, string> = { ...resolvedHeaders };
+  if (resolvedBody && !finalHeaders["Content-Type"] && !finalHeaders["content-type"]) {
+    try {
+      JSON.parse(resolvedBody);
+      finalHeaders["Content-Type"] = "application/json";
+    } catch {
+      // Not JSON — don't set content-type, let server decide
+    }
+  }
+
   const response = await executeRequest(
     {
       method: options.method,
       url: resolvedUrl,
-      headers: resolvedHeaders,
+      headers: finalHeaders,
       body: resolvedBody,
     },
     options.timeout ? { timeout: options.timeout } : undefined,

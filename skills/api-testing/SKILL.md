@@ -117,6 +117,7 @@ tests:
 Assertions: `equals`, `type`, `capture`, `contains`, `matches`, `gt`, `lt`, `exists`.
 Nested: `category.name: { equals: "Dogs" }`. Root body: `_body: { type: "array" }`.
 Status: `status: 200` or `status: [200, 204]`.
-Capture: `id: { capture: user_id }` then use `{{user_id}}` in later steps.
+Capture: `id: { capture: user_id }` then use `{{user_id}}` in later steps. **Captures are suite-scoped** — they do NOT propagate between suites. Each suite needing auth must login itself or use `.env.yaml`.
+ETag: If-Match requires escaped quotes — `If-Match: "\"{{etag}}\""`. Same for If-None-Match.
 Generators: `{{$randomInt}}`, `{{$uuid}}`, `{{$timestamp}}`, `{{$randomEmail}}`, `{{$randomString}}`, `{{$randomName}}`.
 Env: `.env.yaml` (default) or `.env.<name>.yaml` in tests dir or parent.

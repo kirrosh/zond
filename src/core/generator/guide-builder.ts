@@ -196,6 +196,26 @@ Use spec paths with \`{param}\` placeholders in the path for coverage to match:
 - Spec says \`GET /products/{id}\` → write \`GET: /products/1\` (hardcode the value)
 - Coverage scanner matches test paths against spec paths automatically
 
+### Suite variable isolation — IMPORTANT
+Each suite runs in its own variable scope. Captured variables (via \`capture:\`) do NOT propagate between suites.
+If multiple suites need auth, each suite must either:
+- Include its own login step with \`capture: auth_token\`
+- Or use \`auth_token\` from \`.env.yaml\` (pre-configured, no capture needed)
+
+Do NOT create a separate "setup" suite expecting other suites to use its captures.
+
+### ETag / Conditional Requests
+If-Match and If-None-Match require escaped quotes around the ETag value:
+\`\`\`yaml
+  - name: Update with ETag
+    PUT: /items/{{item_id}}
+    headers:
+      If-Match: "\\"{{etag}}\\""
+    json: { name: "updated" }
+    expect:
+      status: 200
+\`\`\`
+
 ### CRITICAL: Never mask server errors
 - If an endpoint returns 500 — do NOT change expect to \`status: 500\`. Keep \`status: 200\` and let the test fail.
 - A failing test = signal about an API bug. The goal is NOT "all tests green" but "tests reflect expected behavior".

@@ -141,6 +141,23 @@ tests:
 
 `status` accepts a single integer (`200`) or an array of allowed codes (`[200, 204]`).
 
+### Suite Variable Isolation
+
+Each suite runs in its own variable scope. Captured variables do **not** propagate between suites. If multiple suites need `auth_token`, each must include its own login step or use a pre-set value from `.env.yaml`.
+
+### ETag / Conditional Requests
+
+If-Match and If-None-Match require escaped quotes around the ETag value:
+```yaml
+  - name: Update with ETag
+    PUT: /items/{{item_id}}
+    headers:
+      If-Match: "\"{{etag}}\""
+    json: { name: "updated" }
+    expect:
+      status: 200
+```
+
 ### Generators
 
 `{{$randomInt}}`, `{{$uuid}}`, `{{$timestamp}}`, `{{$randomEmail}}`, `{{$randomString}}`, `{{$randomName}}`
