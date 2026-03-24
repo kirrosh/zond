@@ -3,12 +3,6 @@
  * Update descriptions here — they are imported by each tool file.
  */
 export const TOOL_DESCRIPTIONS = {
-  set_work_dir:
-    "Set the working directory for this MCP session. " +
-    "Call this FIRST before any other tool when using a shared MCP server (npx). " +
-    "Determines where zond.db and relative test paths resolve to. " +
-    "Pass the absolute path to your project root (same as workspace root in your editor).",
-
   setup_api:
     "Register a new API for testing. Creates directory structure, reads OpenAPI spec, " +
     "sets up environment variables, and creates a collection in the database. " +
@@ -19,15 +13,6 @@ export const TOOL_DESCRIPTIONS = {
     "Full details for one endpoint: params grouped by type, request body schema, " +
     "all response schemas + response headers, security, deprecated flag. " +
     "Use when a test fails and you need complete endpoint spec without reading the whole file.",
-
-  save_test_suite:
-    "Save a YAML test suite file with validation. Parses and validates the YAML content " +
-    "before writing. Returns structured errors if validation fails so you can fix and retry. " +
-    "Use after generating test content with generate_and_save.",
-
-  save_test_suites:
-    "Save multiple YAML test suite files in a single call. Each file is validated before writing. " +
-    "Returns per-file results. Use when you have generated multiple suites at once.",
 
   run_tests:
     "Execute API tests from a YAML file or directory and return results summary with failures. " +

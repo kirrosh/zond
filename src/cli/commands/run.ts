@@ -9,6 +9,7 @@ import type { ReporterName } from "../../core/reporter/types.ts";
 import type { TestSuite } from "../../core/parser/types.ts";
 import type { TestRunResult } from "../../core/runner/types.ts";
 import { printError, printWarning } from "../output.ts";
+import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { getDb } from "../../db/schema.ts";
 import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from "../../db/queries.ts";
 
@@ -25,6 +26,7 @@ export interface RunOptions {
   tag?: string[];
   envVars?: string[];
   dryRun?: boolean;
+  json?: boolean;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -129,8 +131,10 @@ export async function runCommand(options: RunOptions): Promise<number> {
   }
 
   // 5. Report
-  const reporter = getReporter(options.report);
-  reporter.report(results);
+  if (!options.json) {
+    const reporter = getReporter(options.report);
+    reporter.report(results);
+  }
 
   // 6. Save to DB
   if (!options.noDb) {
@@ -150,7 +154,28 @@ export async function runCommand(options: RunOptions): Promise<number> {
   }
 
   // 7. Exit code (always 0 in dry-run mode)
-  if (dryRun) return 0;
+  if (dryRun) {
+    if (options.json) {
+      printJson(jsonOk("run", { summary: { total: results.length, passed: 0, failed: 0 }, dryRun: true }));
+    }
+    return 0;
+  }
   const hasFailures = results.some((r) => r.failed > 0 || r.steps.some((s) => s.status === "error"));
+
+  if (options.json) {
+    const total = results.reduce((s, r) => s + r.total, 0);
+    const passed = results.reduce((s, r) => s + r.passed, 0);
+    const failed = results.reduce((s, r) => s + r.failed, 0);
+    const failures = results.flatMap(r =>
+      r.steps.filter(s => s.status === "fail" || s.status === "error").map(s => ({
+        suite: r.suite_name,
+        test: s.name,
+        status: s.status,
+        error: s.error,
+      }))
+    );
+    printJson(jsonOk("run", { summary: { total, passed, failed }, failures, runId: undefined as number | undefined }));
+  }
+
   return hasFailures ? 1 : 0;
 }

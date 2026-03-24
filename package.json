@@ -26,12 +26,13 @@
   "scripts": {
     "zond": "bun run src/cli/index.ts",
     "test": "bun run test:unit && bun run test:mocked",
-    "test:unit": "bun test tests/db/ tests/parser/ tests/runner/ tests/generator/ tests/core/ tests/cli/args.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/safe-run.test.ts tests/integration/ tests/web/ tests/mcp/tools.test.ts tests/mcp/save-test-suite.test.ts tests/reporter/ tests/version-sync.test.ts",
+    "test:unit": "bun test tests/db/ tests/parser/ tests/runner/ tests/generator/ tests/core/ tests/cli/args.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/safe-run.test.ts tests/cli/json-envelope.test.ts tests/cli/describe.test.ts tests/cli/db.test.ts tests/cli/request.test.ts tests/cli/init.test.ts tests/cli/guide.test.ts tests/integration/ tests/web/ tests/mcp/tools.test.ts tests/mcp/save-test-suite.test.ts tests/reporter/ tests/version-sync.test.ts",
     "test:mocked": "bun run scripts/run-mocked-tests.ts",
     "check": "tsc --noEmit --project tsconfig.json",
     "build": "bun build --compile src/cli/index.ts --outfile zond",
     "version:sync": "bun run scripts/sync-version.ts",
-    "postversion": "bun run scripts/sync-version.ts && git add .claude-plugin/plugin.json .claude-plugin/marketplace.json"
+    "postversion": "bun run scripts/sync-version.ts && git add .claude-plugin/plugin.json .claude-plugin/marketplace.json",
+    "bench:api": "bun benchmarks/api/server.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

@@ -1,28 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { executeRequest } from "../../core/runner/http-client.ts";
-import { loadEnvironment, substituteString, substituteDeep } from "../../core/parser/variables.ts";
-import { getDb } from "../../db/schema.ts";
-import { findCollectionByNameOrId } from "../../db/queries.ts";
+import { sendAdHocRequest } from "../../core/runner/send-request.ts";
 import { TOOL_DESCRIPTIONS } from "../descriptions.js";
-
-function extractByPath(obj: unknown, path: string): unknown {
-  const segments = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
-  let current: unknown = obj;
-  for (const seg of segments) {
-    if (current === null || current === undefined) return undefined;
-    if (Array.isArray(current)) {
-      const idx = parseInt(seg, 10);
-      if (isNaN(idx)) return undefined;
-      current = current[idx];
-    } else if (typeof current === 'object') {
-      current = (current as Record<string, unknown>)[seg];
-    } else {
-      return undefined;
-    }
-  }
-  return current;
-}
 
 export function registerSendRequestTool(server: McpServer, dbPath?: string) {
   server.registerTool("send_request", {
@@ -40,48 +19,23 @@ export function registerSendRequestTool(server: McpServer, dbPath?: string) {
     },
   }, async ({ method, url, headers, body, timeout, envName, collectionName, jsonPath, maxResponseChars }) => {
     try {
-      let searchDir = process.cwd();
-      if (collectionName) {
-        getDb(dbPath);
-        const col = findCollectionByNameOrId(collectionName);
-        if (col?.base_dir) searchDir = col.base_dir;
-      }
-      const vars = await loadEnvironment(envName, searchDir);
+      const parsedHeaders = headers ? JSON.parse(headers) as Record<string, string> : undefined;
 
-      const resolvedUrl = substituteString(url, vars) as string;
-      const parsedHeaders = headers ? JSON.parse(headers) as Record<string, string> : {};
-      const resolvedHeaders = Object.keys(parsedHeaders).length > 0 ? substituteDeep(parsedHeaders, vars) : {};
-      const resolvedBody = body ? substituteString(body, vars) as string : undefined;
-
-      const response = await executeRequest(
-        {
-          method,
-          url: resolvedUrl,
-          headers: resolvedHeaders,
-          body: resolvedBody,
-        },
-        timeout ? { timeout } : undefined,
-      );
-
-      let responseBody: unknown = response.body_parsed ?? response.body;
-
-      // Apply jsonPath filter
-      if (jsonPath && responseBody !== undefined) {
-        responseBody = extractByPath(responseBody, jsonPath);
-      }
-
-      const result = {
-        status: response.status,
-        headers: response.headers,
-        body: responseBody,
-        duration_ms: response.duration_ms,
-      };
+      const result = await sendAdHocRequest({
+        method,
+        url,
+        headers: parsedHeaders,
+        body: body ?? undefined,
+        timeout,
+        envName,
+        collectionName,
+        jsonPath,
+        dbPath,
+      });
 
       let text = JSON.stringify(result, null, 2);
-
-      // Apply maxResponseChars truncation
       if (maxResponseChars && text.length > maxResponseChars) {
-        text = text.slice(0, maxResponseChars) + '\n…[truncated]';
+        text = text.slice(0, maxResponseChars) + '\n\u2026[truncated]';
       }
 
       return {

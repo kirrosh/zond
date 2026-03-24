@@ -4,11 +4,9 @@ import { registerRunTestsTool } from "./tools/run-tests.ts";
 import { registerQueryDbTool } from "./tools/query-db.ts";
 import { registerSendRequestTool } from "./tools/send-request.ts";
 import { registerCoverageAnalysisTool } from "./tools/coverage-analysis.ts";
-import { registerSaveTestSuiteTool, registerSaveTestSuitesTool } from "./tools/save-test-suite.ts";
 import { registerSetupApiTool } from "./tools/setup-api.ts";
 import { registerManageServerTool } from "./tools/manage-server.ts";
 import { registerCiInitTool } from "./tools/ci-init.ts";
-import { registerSetWorkDirTool } from "./tools/set-work-dir.ts";
 import { registerDescribeEndpointTool } from "./tools/describe-endpoint.ts";
 import { registerGenerateAndSaveTool } from "./tools/generate-and-save.ts";
 import { version } from "../../package.json";
@@ -25,17 +23,14 @@ export async function startMcpServer(options: McpServerOptions = {}): Promise<vo
     version,
   });
 
-  // Register all tools
+  // Register tools (slim set — removed set_work_dir, save_test_suite, save_test_suites)
   registerRunTestsTool(server, dbPath);
   registerQueryDbTool(server, dbPath);
   registerSendRequestTool(server, dbPath);
   registerCoverageAnalysisTool(server, dbPath);
-  registerSaveTestSuiteTool(server, dbPath);
-  registerSaveTestSuitesTool(server, dbPath);
   registerSetupApiTool(server, dbPath);
   registerManageServerTool(server, dbPath);
   registerCiInitTool(server);
-  registerSetWorkDirTool(server);
   registerDescribeEndpointTool(server);
   registerGenerateAndSaveTool(server);
 
