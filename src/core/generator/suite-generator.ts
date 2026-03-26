@@ -21,6 +21,17 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const HEALTHCHECK_PATH_RE = /\/(health|healthz|ping|status|ready|readiness|liveness|alive)\b/i;
+const SHORT_PATH_RE = /^\/[a-z0-9-]*$/i; // matches /, /api, /v1, etc.
+
+function selectHealthcheckEndpoint(gets: EndpointInfo[]): EndpointInfo | undefined {
+  return (
+    gets.find(ep => HEALTHCHECK_PATH_RE.test(ep.path) && !ep.parameters.some(p => p.in === "path")) ??
+    gets.find(ep => SHORT_PATH_RE.test(ep.path) && !ep.parameters.some(p => p.in === "path") && ep.security.length === 0) ??
+    gets.find(ep => !ep.parameters.some(p => p.in === "path") && ep.security.length === 0)
+  );
+}
+
 function getExpectedStatus(ep: EndpointInfo): number {
   const success = ep.responses.find(r => r.statusCode >= 200 && r.statusCode < 300);
   if (success) return success.statusCode;
@@ -469,6 +480,40 @@ function generateConsistentAuthSuite(
   };
 }
 
+/** Generate 1-2 minimal tests for quick connectivity and auth validation */
+export function generateSanitySuite(opts: {
+  authEndpoints: EndpointInfo[];
+  nonAuthGetEndpoints: EndpointInfo[];
+  securitySchemes: SecuritySchemeInfo[];
+}): RawSuite | null {
+  const { authEndpoints, nonAuthGetEndpoints, securitySchemes } = opts;
+  const tests: RawStep[] = [];
+
+  // Priority 1: auth login/token endpoint
+  if (authEndpoints.length > 0) {
+    const loginEp =
+      authEndpoints.find(ep => /\/(login|signin|token)\b/i.test(ep.path) && ep.method.toUpperCase() === "POST") ??
+      authEndpoints[0]!;
+    tests.push(generateStep(loginEp, securitySchemes));
+  }
+
+  // Priority 2: healthcheck or first simple GET with no path params
+  const healthEp = selectHealthcheckEndpoint(nonAuthGetEndpoints);
+  if (healthEp) {
+    tests.push(generateStep(healthEp, securitySchemes));
+  }
+
+  if (tests.length === 0) return null;
+
+  return {
+    name: "sanity",
+    tags: ["sanity"],
+    fileStem: "sanity",
+    base_url: "{{base_url}}",
+    tests: tests.slice(0, 2),
+  };
+}
+
 /** Main entry point: generate all suites from endpoints */
 export function generateSuites(opts: {
   endpoints: EndpointInfo[];
@@ -571,5 +616,9 @@ export function generateSuites(opts: {
     suites.push(suite);
   }
 
-  return suites;
+  // 5. Sanity suite (prepend — 1-2 tests for quick connectivity/auth check)
+  const nonAuthGetEndpoints = nonAuth.filter(ep => ep.method.toUpperCase() === "GET");
+  const sanitySuite = generateSanitySuite({ authEndpoints, nonAuthGetEndpoints, securitySchemes });
+
+  return sanitySuite ? [sanitySuite, ...suites] : suites;
 }
