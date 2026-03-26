@@ -42,22 +42,14 @@
 ### Регистрация и настройка
 | Инструмент | Когда использовать |
 |------------|-------------------|
-| `set_work_dir` | **Всегда первым** при npx MCP — привязывает сессию к директории проекта |
 | `setup_api` | Один раз для каждого API — создаёт директории, сохраняет spec, формирует `.env.yaml` |
 
 ### Исследование API
 | Инструмент | Когда использовать |
 |------------|-------------------|
 | `describe_endpoint` | Детали одного эндпоинта: параметры, схема запроса/ответа, security |
-| `generate_and_save` | **Рекомендуемый.** Авто-чанкинг по тегам для больших API (>30 эндпоинтов). Поддерживает `tag`, `methodFilter`, `testsDir` |
-| `generate_tests_guide` | Полный гайд по генерации: spec + алгоритм написания тестов. Поддерживает `tag` фильтр |
-| `generate_missing_tests` | Гайд только для непокрытых эндпоинтов. Поддерживает `tag` фильтр |
 
-### Написание и валидация тестов
-| Инструмент | Когда использовать |
-|------------|-------------------|
-| `save_test_suite` | Сохранить один YAML-файл с тестами |
-| `save_test_suites` | Сохранить несколько файлов за один вызов |
+> **Генерация тестов:** используйте CLI — `zond generate <spec> --output <dir>`. MCP-инструментов для генерации и сохранения файлов больше нет — агент пишет YAML-файлы напрямую.
 
 ### Запуск и диагностика
 | Инструмент | Когда использовать |
@@ -76,16 +68,6 @@
 ---
 
 ## Основной флоу с примерами
-
-### Шаг 0. Привязка директории (только для npx MCP)
-
-```
-set_work_dir(workDir: "/home/user/myproject")
-```
-
-Без этого `zond.db` создаётся в системной temp-директории и данные теряются между сессиями.
-
----
 
 ### Шаг 1. Регистрация API
 
@@ -108,63 +90,31 @@ apis/petstore/
 
 ---
 
-### Шаг 2. Генерация тестов
+### Шаг 2. Генерация и сохранение тестов
 
-**Используйте `generate_and_save`** — он автоматически разбивает большие API по тегам:
+Генерация тестов выполняется через CLI (инструментов MCP для этого больше нет):
 
-```
-generate_and_save(specPath: "apis/petstore/openapi.json")
-```
-
-Для большого API (>30 эндпоинтов) вернёт план с разбивкой по тегам. Вызывайте с `tag` для каждого чанка:
-
-```
-generate_and_save(specPath: "apis/petstore/openapi.json", tag: "pets")
+```bash
+zond generate apis/petstore/openapi.json --output apis/petstore/tests/
 ```
 
 Только GET-эндпоинты (безопасно для продакшена):
 
-```
-generate_and_save(
-  specPath: "apis/petstore/openapi.json",
-  methodFilter: ["GET"]
-)
+```bash
+zond generate apis/petstore/openapi.json --output apis/petstore/tests/ --tag smoke
 ```
 
 Только непокрытые эндпоинты:
 
-```
-generate_and_save(
-  specPath: "apis/petstore/openapi.json",
-  testsDir: "apis/petstore/tests/"
-)
+```bash
+zond generate apis/petstore/openapi.json --output apis/petstore/tests/ --uncovered-only
 ```
 
-> Альтернативы: `generate_tests_guide` (полный гайд без чанкинга), `generate_missing_tests` (только непокрытые, без чанкинга). Оба поддерживают `tag` фильтр.
+Агент может также писать YAML-файлы напрямую — они автоматически валидируются хуком `PostToolUse`.
 
 ---
 
-### Шаг 3. Сохранение тестов
-
-```
-save_test_suite(
-  filePath: "apis/petstore/tests/pets-smoke.yaml",
-  content: "..."
-)
-```
-
-Или несколько файлов сразу:
-
-```
-save_test_suites(suites: [
-  { filePath: "apis/petstore/tests/pets-smoke.yaml", content: "..." },
-  { filePath: "apis/petstore/tests/pets-crud.yaml", content: "..." }
-])
-```
-
----
-
-### Шаг 4. Запуск тестов
+### Шаг 3. Запуск тестов
 
 Безопасный запуск (только GET):
 
@@ -220,12 +170,13 @@ ci_init()
 
 ## Как улучшить результат
 
-### Используйте `generate_and_save` перед тестами
-Никогда не пишите тесты по памяти или по частичному знанию API. Инструмент возвращает сжатый spec и точный алгоритм — агент пишет тесты правильно с первого раза. Для больших API автоматически разбивает по тегам.
+### Используйте `zond generate` перед тестами
+Никогда не пишите тесты по памяти или по частичному знанию API. Команда читает spec и генерирует YAML-стабы — агент пишет тесты правильно с первого раза.
 
 ### Начинайте с GET-запросов
-```
-generate_and_save(specPath: "...", methodFilter: ["GET"])
+```bash
+zond generate <spec> --output <dir>
+zond run <dir> --safe
 ```
 Smoke-тесты безопасны для продакшена. После их прохождения переходите к CRUD только с подтверждением пользователя.
 
@@ -304,10 +255,13 @@ describe_endpoint(specPath: "openapi.json", path: "/orders", method: "POST")
 
 ```
 coverage_analysis(specPath: "openapi.json", testsDir: "apis/myapi/tests/")
-generate_missing_tests(specPath: "openapi.json", testsDir: "apis/myapi/tests/")
 ```
 
-`coverage_analysis` покажет процент покрытия, `generate_missing_tests` сформирует гайд только для пропущенных.
+`coverage_analysis` покажет процент покрытия. Для генерации тестов только для непокрытых эндпоинтов используйте CLI:
+
+```bash
+zond generate openapi.json --output apis/myapi/tests/ --uncovered-only
+```
 
 ### Переменные не подставляются
 

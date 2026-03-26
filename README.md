@@ -17,7 +17,7 @@ Zond reads your OpenAPI spec and gives your AI agent everything it needs to test
 
 Then say: _"Safely cover the API from openapi.json with tests"_
 
-You get skills, slash commands, and 12 MCP tools in one package.
+You get auto-validation hooks, CLI tools, and 8 MCP tools — all in one package.
 
 <details>
 <summary>Other installation methods (MCP, CLI, binary)</summary>
