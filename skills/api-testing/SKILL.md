@@ -25,6 +25,8 @@ Otherwise use `zond` directly.
 - **NEVER put `logout` in a setup suite** — it invalidates the captured token for all other suites; keep logout in a dedicated non-setup auth test suite
 - **NEVER tag reset/system endpoints as `smoke`** — use `[system, reset]` or `[unsafe]` tags; `smoke` runs in `--safe` mode and will wipe server state
 - **NEVER repeat login steps in multiple suites** — centralize auth in `setup.yaml`; repeated logins trigger rate limits (e.g. 10 req/60s)
+- **NEVER use `zond request POST /auth/login` to debug auth failures** — each manual login call burns the rate limit budget; use `zond db diagnose` and existing run results instead
+- **NEVER run `--tag crud` alone if there's a setup suite** — setup suites only run when their tag is included; always use `--tag crud,setup` (or whatever tag the setup suite has)
 
 ## Workflow
 
@@ -142,10 +144,20 @@ After fixing `fix_test_logic` failures, re-run and repeat until smoke tests pass
 
 ### Step 6: Run full suite (CRUD level and above)
 ```bash
-zond run <tests-dir> --json               # all tests including CRUD
-zond run <tests-dir> --tag crud --json    # CRUD only
-zond run <tests-dir> --env staging --json # specific environment
+zond run <tests-dir> --json                          # all tests including CRUD
+zond run <tests-dir> --tag crud,setup --json         # CRUD + setup (setup must be included!)
+zond run <tests-dir> --env staging --json            # specific environment
 ```
+
+**CRITICAL:** `--tag` filters suites by their tags. Setup suites run only if their tag is in the list. When targeting specific groups (crud, smoke, auth), always append the setup suite's tag:
+```bash
+# Wrong — setup won't run, CRUD suites get 401
+zond run <tests-dir> --tag crud --json
+
+# Correct
+zond run <tests-dir> --tag crud,setup --json
+```
+
 Diagnose and fix failures the same way as step 5.
 
 **If coverage level = "CRUD" → STOP here.** Output:
@@ -196,6 +208,8 @@ Rules for `setup: true` suites:
 - **No logout step** — it invalidates the captured token for all following suites
 - Captured variables override `.env.yaml` values in all regular suites automatically
 - Only one login step needed here — remove login steps from all other suites
+- **Create setup.yaml immediately** when starting a new test project — adding it later means wasted debugging time chasing 401s
+- If the API has a reset endpoint (clears state), add it as the first step in setup.yaml with tag `[system, reset]` — never `[smoke]`
 
 ## Incremental updates (after initial setup)
 
