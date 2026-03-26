@@ -1,10 +1,12 @@
 import { describe, test, expect } from "bun:test";
 import { groupFailures } from "../../src/core/diagnostics/db-analysis.ts";
+import type { RecommendedAction } from "../../src/core/diagnostics/failure-hints.ts";
 
 function makeFailure(overrides: Partial<{
   suite_name: string;
   test_name: string;
   failure_type: string;
+  recommended_action: RecommendedAction;
   hint: string;
   response_status: number | null;
 }> = {}) {
@@ -12,6 +14,7 @@ function makeFailure(overrides: Partial<{
     suite_name: overrides.suite_name ?? "suite",
     test_name: overrides.test_name ?? "test",
     failure_type: overrides.failure_type ?? "assertion_failed",
+    recommended_action: overrides.recommended_action ?? ("fix_test_logic" as RecommendedAction),
     hint: overrides.hint,
     response_status: overrides.response_status ?? null,
   };
@@ -98,5 +101,20 @@ describe("groupFailures", () => {
     );
     const result = groupFailures(failures);
     expect(result.grouped_failures![0]!.hint).toBe("Rate limited — too many requests");
+  });
+
+  test("grouped api_error failures carry report_backend_bug action", () => {
+    const failures = Array.from({ length: 6 }, (_, i) =>
+      makeFailure({
+        suite_name: `s_${i}`,
+        test_name: `t_${i}`,
+        response_status: 500,
+        failure_type: "api_error",
+        recommended_action: "report_backend_bug",
+      })
+    );
+    const result = groupFailures(failures);
+    expect(result.grouped_failures).toBeDefined();
+    expect(result.grouped_failures![0]!.recommended_action).toBe("report_backend_bug");
   });
 });

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { statusHint, classifyFailure } from "../../src/core/diagnostics/failure-hints.ts";
+import { statusHint, classifyFailure, recommendedAction } from "../../src/core/diagnostics/failure-hints.ts";
 
 describe("statusHint", () => {
   test("returns hint for 401", () => {
@@ -31,6 +31,32 @@ describe("statusHint", () => {
 
   test("returns null for null status", () => {
     expect(statusHint(null)).toBeNull();
+  });
+});
+
+describe("recommendedAction", () => {
+  test("api_error always returns report_backend_bug", () => {
+    expect(recommendedAction("api_error", 500)).toBe("report_backend_bug");
+    expect(recommendedAction("api_error", 503)).toBe("report_backend_bug");
+  });
+
+  test("assertion_failed with 401/403 returns fix_auth_config", () => {
+    expect(recommendedAction("assertion_failed", 401)).toBe("fix_auth_config");
+    expect(recommendedAction("assertion_failed", 403)).toBe("fix_auth_config");
+  });
+
+  test("assertion_failed with other status returns fix_test_logic", () => {
+    expect(recommendedAction("assertion_failed", 404)).toBe("fix_test_logic");
+    expect(recommendedAction("assertion_failed", 200)).toBe("fix_test_logic");
+  });
+
+  test("network_error with null status returns fix_network_config", () => {
+    expect(recommendedAction("network_error", null)).toBe("fix_network_config");
+  });
+
+  test("network_error with 401/403 returns fix_auth_config", () => {
+    expect(recommendedAction("network_error", 401)).toBe("fix_auth_config");
+    expect(recommendedAction("network_error", 403)).toBe("fix_auth_config");
   });
 });
 

@@ -91,8 +91,14 @@ If tests fail, use `run_id` from the run output:
 ```bash
 zond db diagnose <run-id> --json
 ```
-Read the diagnosis, then fix **specific** YAML files with Edit/Write.
-Common fixes: wrong expected status, missing auth headers, incorrect body schema.
+
+**Check `agent_directive` first** — if present in the output, follow it literally.
+
+Act based on each failure's `recommended_action`:
+- `report_backend_bug` → **STOP. Do NOT modify test.** Server returned 5xx — this is a backend bug. Report to user.
+- `fix_auth_config` → Fix `.env.yaml` credentials. Do not change test YAML.
+- `fix_test_logic` → Fix path, request body, or assertions in specific YAML files.
+- `fix_network_config` → Fix `base_url` in `.env.yaml`.
 
 Use ad-hoc requests to debug endpoints:
 ```bash
@@ -100,7 +106,7 @@ zond request GET https://api.example.com/endpoint --json
 zond request POST https://api.example.com/endpoint --body '{"key":"value"}' --json
 ```
 
-After fixing, re-run and repeat until all smoke tests pass.
+After fixing `fix_test_logic` failures, re-run and repeat until smoke tests pass or only `report_backend_bug` failures remain.
 
 **If coverage level = "Safe only" → STOP here.** Output:
 

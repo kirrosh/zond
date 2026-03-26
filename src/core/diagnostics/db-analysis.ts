@@ -1,7 +1,7 @@
 import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
-import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue } from "./failure-hints.ts";
+import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, recommendedAction, type RecommendedAction } from "./failure-hints.ts";
 import { AUTH_PATH_RE } from "../runner/execute-run.ts";
 
 export function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
@@ -117,6 +117,7 @@ export interface FailureGroup {
   pattern: string;
   count: number;
   failure_type: string;
+  recommended_action: RecommendedAction;
   hint?: string;
   examples: string[];
   response_status: number | null;
@@ -143,6 +144,7 @@ export interface DiagnoseResult {
     assertion_failures: number;
     network_errors: number;
   };
+  agent_directive?: string;
   env_issue?: string;
   auth_hint?: string;
   cascade_skips?: CascadeSkipGroup[];
@@ -152,6 +154,7 @@ export interface DiagnoseResult {
     suite_file?: string;
     status: string;
     failure_type: string;
+    recommended_action: RecommendedAction;
     error_message?: string;
     request_method: string | null;
     request_url: string | null;
@@ -185,6 +188,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
     .map(r => {
       const hint = envHint(r.request_url, r.error_message, envFilePath) ?? statusHint(r.response_status);
       const failure_type = classifyFailure(r.status, r.response_status);
+      const rec_action = recommendedAction(failure_type, r.response_status);
       const sHint = schemaHint(failure_type, r.response_status);
       return {
         suite_name: r.suite_name,
@@ -192,6 +196,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
         ...(r.suite_file ? { suite_file: r.suite_file } : {}),
         status: r.status,
         failure_type,
+        recommended_action: rec_action,
         error_message: truncateErrorMessage(r.error_message, verbose),
         request_method: r.request_method,
         request_url: r.request_url,
@@ -214,6 +219,19 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
     else if (f.failure_type === "assertion_failed") assertionFailures++;
     else if (f.failure_type === "network_error") networkErrors++;
     if (f.response_status === 401 || f.response_status === 403) authFailureCount++;
+  }
+
+  let agent_directive: string | undefined;
+  if (apiErrors > 0) {
+    const fixable = assertionFailures + networkErrors;
+    agent_directive =
+      `${apiErrors} test${apiErrors === 1 ? "" : "s"} returned 5xx server errors. ` +
+      `Do NOT change test expectations to accept 5xx responses. ` +
+      `These are backend bugs, not test logic errors. ` +
+      `Stop iterating on these tests and report the failures to the API team.` +
+      (fixable > 0
+        ? ` The remaining ${fixable} failure${fixable === 1 ? "" : "s"} may be fixable in test logic.`
+        : "");
   }
 
   // Cascade skips: skipped tests due to missing captures from failed create steps
@@ -268,6 +286,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
       assertion_failures: assertionFailures,
       network_errors: networkErrors,
     },
+    ...(agent_directive ? { agent_directive } : {}),
     ...(sharedEnvHint ? { env_issue: sharedEnvHint } : {}),
     ...(auth_hint ? { auth_hint } : {}),
     ...(cascade_skips ? { cascade_skips } : {}),
@@ -276,7 +295,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
   };
 }
 
-type FailureItem = { suite_name: string; test_name: string; failure_type: string; hint?: string; response_status: number | null };
+type FailureItem = { suite_name: string; test_name: string; failure_type: string; recommended_action: RecommendedAction; hint?: string; response_status: number | null };
 
 /** Group similar failures for compact output. Exported for testing. */
 export function groupFailures<T extends FailureItem>(failures: T[]): { grouped_failures?: FailureGroup[]; compactFailures: T[] } {
@@ -317,6 +336,7 @@ export function groupFailures<T extends FailureItem>(failures: T[]): { grouped_f
       pattern,
       count: group.items.length,
       failure_type: group.failure_type,
+      recommended_action: group.items[0]!.recommended_action,
       hint: group.hint,
       examples: group.items.slice(0, 2).map(f => `${f.suite_name}/${f.test_name}`),
       response_status: group.response_status,

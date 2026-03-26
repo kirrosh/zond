@@ -37,6 +37,26 @@ export function envHint(url: string | null, errorMessage: string | null, envFile
   return null;
 }
 
+export type RecommendedAction =
+  | "report_backend_bug"
+  | "fix_auth_config"
+  | "fix_test_logic"
+  | "fix_network_config";
+
+export function recommendedAction(
+  failureType: "api_error" | "assertion_failed" | "network_error",
+  responseStatus: number | null,
+): RecommendedAction {
+  if (failureType === "api_error") return "report_backend_bug";
+  if (failureType === "network_error") {
+    if (responseStatus === 401 || responseStatus === 403) return "fix_auth_config";
+    return "fix_network_config";
+  }
+  // assertion_failed
+  if (responseStatus === 401 || responseStatus === 403) return "fix_auth_config";
+  return "fix_test_logic";
+}
+
 export function envCategory(hint: string | undefined): string | null {
   if (!hint) return null;
   if (hint.includes("base_url is not set") || hint.includes("base_url is missing") || hint.includes("base_url is not configured")) return "base_url_missing";
