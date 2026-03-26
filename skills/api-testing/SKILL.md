@@ -53,6 +53,14 @@ This single command creates:
 
 **Do NOT write YAML files manually.** The generator handles assertions, captures, request bodies, and tag grouping automatically.
 
+Generator smart behaviors:
+- `multipart/form-data` endpoints get `multipart:` bodies (binary fields → `{file: ./fixtures/<field>.bin}`)
+- Reset/flush/purge endpoints get `[system, reset]` tags — not `[smoke, unsafe]`, so they won't run in smoke passes
+- ETag endpoints (412 in responses or `If-Match` parameter) get a GET capture step auto-inserted before PUT/PATCH/DELETE
+- GET endpoints with path params use seed values (from spec examples, or `1` for id-like params) instead of unresolved `{{id}}`
+- Integer fields with `maximum` in schema get a bounded concrete value, not `{{$randomInt}}`
+- Logout/revoke endpoints are excluded from `setup: true` auth suites (they would invalidate the token)
+
 ### Step 3.25: Sanity check — MANDATORY before choosing coverage level
 
 ```bash
@@ -223,14 +231,6 @@ zond sync <spec> --tests <tests-dir> --json             # generate tests for new
 - If a target file already exists (e.g. new endpoint belongs to existing tag): shown as "Skipped" → add to that file manually
 - **Automatically updates the registered collection's spec reference in the DB** — if `zond init` was previously run for this tests directory, the `openapi_spec` field is kept in sync. `zond generate` does the same on full regeneration.
 
-### When zond itself updates
-```bash
-zond migrate --tests <tests-dir> --dry-run              # preview migrations
-zond migrate --tests <tests-dir>                        # apply pending migrations
-```
-- Applies versioned format migrations to YAML test files
-- Only rewrites files that actually changed; untouched files are preserved byte-for-byte
-
 ## Safety rules
 - `--safe` → only GET requests execute
 - `--dry-run` → shows requests without sending
@@ -294,5 +294,13 @@ ETag pattern — always GET before PUT to capture etag:
 Generators: `{{$randomInt}}`, `{{$uuid}}`, `{{$timestamp}}`, `{{$randomEmail}}`, `{{$randomString}}`, `{{$randomName}}`.
 Generators in `set:` are evaluated **once** when the step executes — use `set:` to pin a generated value across multiple steps. To reuse the same generated value in a later step, either store it via `set:` or capture it from the response.
 Soft delete: some APIs return `200` on DELETE with a status field instead of `404` — verify actual behavior before asserting status or absence of the resource.
-`form:` sends `application/x-www-form-urlencoded` only — binary file uploads (multipart) are not supported; exclude file upload endpoints from coverage.
+`form:` sends `application/x-www-form-urlencoded`. For `multipart/form-data` (file uploads) use `multipart:` — text fields as strings, file fields as objects with `file:` (path relative to the yaml file), optional `filename:` and `content_type:`:
+```yaml
+multipart:
+  description: "My file"
+  upload:
+    file: ./fixtures/doc.pdf
+    filename: doc.pdf
+    content_type: application/pdf
+```
 Env: `.env.yaml` (default) or `.env.<name>.yaml` in tests dir or parent.

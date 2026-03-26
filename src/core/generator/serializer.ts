@@ -29,6 +29,7 @@ export interface RawStep {
   expect: {
     status?: number;
     body?: Record<string, Record<string, string>>;
+    headers?: Record<string, unknown>;
   };
 }
 

@@ -75,6 +75,25 @@ export function schemaHint(
   return null;
 }
 
+export function softDeleteHint(
+  actualStatus: number | null | undefined,
+  requestMethod: string | null | undefined,
+  responseBody: unknown,
+): string | null {
+  if (actualStatus !== 200 || requestMethod?.toUpperCase() !== "GET") return null;
+  if (responseBody && typeof responseBody === "object") {
+    const hasStatusField =
+      "status" in (responseBody as object) ||
+      "state" in (responseBody as object) ||
+      "deleted" in (responseBody as object) ||
+      "is_deleted" in (responseBody as object);
+    if (hasStatusField) {
+      return 'GET returned 200 with a status/state field after DELETE — likely soft delete. Update the test: remove the "Verify deleted → 404" step and instead assert the status field value (e.g. status: "cancelled")';
+    }
+  }
+  return null;
+}
+
 export function computeSharedEnvIssue(
   failures: Array<{ hint?: string }>,
   envFilePath?: string,

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { statusHint, classifyFailure, recommendedAction } from "../../src/core/diagnostics/failure-hints.ts";
+import { statusHint, classifyFailure, recommendedAction, softDeleteHint } from "../../src/core/diagnostics/failure-hints.ts";
 
 describe("statusHint", () => {
   test("returns hint for 401", () => {
@@ -73,5 +73,39 @@ describe("classifyFailure", () => {
   test("assertion_failed for 4xx", () => {
     expect(classifyFailure("fail", 401)).toBe("assertion_failed");
     expect(classifyFailure("fail", 429)).toBe("assertion_failed");
+  });
+});
+
+describe("softDeleteHint", () => {
+  test("returns null when status is not 200", () => {
+    expect(softDeleteHint(404, "GET", {})).toBeNull();
+    expect(softDeleteHint(204, "GET", { status: "cancelled" })).toBeNull();
+  });
+
+  test("returns null when method is not GET", () => {
+    expect(softDeleteHint(200, "POST", { status: "cancelled" })).toBeNull();
+    expect(softDeleteHint(200, null, { status: "deleted" })).toBeNull();
+  });
+
+  test("returns soft delete hint for GET 200 with status field", () => {
+    const hint = softDeleteHint(200, "GET", { status: "cancelled" });
+    expect(hint).not.toBeNull();
+    expect(hint).toContain("soft delete");
+  });
+
+  test("returns soft delete hint for GET 200 with state field", () => {
+    const hint = softDeleteHint(200, "GET", { id: 1, state: "archived" });
+    expect(hint).not.toBeNull();
+    expect(hint).toContain("soft delete");
+  });
+
+  test("returns soft delete hint for GET 200 with deleted field", () => {
+    const hint = softDeleteHint(200, "GET", { deleted: true });
+    expect(hint).not.toBeNull();
+  });
+
+  test("returns null for GET 200 with body but no status/state/deleted field", () => {
+    const hint = softDeleteHint(200, "GET", { id: 1, name: "foo" });
+    expect(hint).toBeNull();
   });
 });
