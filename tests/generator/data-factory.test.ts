@@ -185,6 +185,21 @@ describe("generateFromSchema", () => {
     expect(result.image).toBe("https://example.com/test");
   });
 
+  test("format: date returns date-only string", () => {
+    const result = generateFromSchema({ type: "string", format: "date" } as OpenAPIV3.SchemaObject);
+    expect(result).toBe("2025-01-01");
+  });
+
+  test("format: date-time returns full datetime string", () => {
+    const result = generateFromSchema({ type: "string", format: "date-time" } as OpenAPIV3.SchemaObject);
+    expect(result).toBe("2025-01-01T00:00:00Z");
+  });
+
+  test("integer with format: uuid returns uuid placeholder", () => {
+    const result = generateFromSchema({ type: "integer", format: "uuid" } as OpenAPIV3.SchemaObject);
+    expect(result).toBe("{{$uuid}}");
+  });
+
   test("nested object", () => {
     const schema: OpenAPIV3.SchemaObject = {
       type: "object",

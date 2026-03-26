@@ -52,14 +52,15 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
     }
   }
 
-  // Safe mode: filter to GET-only tests
+  // Safe mode: filter to GET + auth endpoints (same logic as run.ts)
   if (safe) {
+    const AUTH_PATH_RE = /\/(auth|login|signin|token|oauth)\b/i;
     for (const suite of suites) {
-      suite.tests = suite.tests.filter(t => t.method === "GET");
+      suite.tests = suite.tests.filter(t => t.method === "GET" || !t.method || AUTH_PATH_RE.test(t.path));
     }
     suites = suites.filter(s => s.tests.length > 0);
     if (suites.length === 0) {
-      throw new Error("No GET tests found. Nothing to run in safe mode.");
+      throw new Error("No safe tests found. Nothing to run in safe mode.");
     }
   }
 

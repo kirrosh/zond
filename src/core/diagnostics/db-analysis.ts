@@ -121,6 +121,12 @@ export interface FailureGroup {
   response_status: number | null;
 }
 
+export interface CascadeSkipGroup {
+  capture_var: string;
+  count: number;
+  examples: string[];
+}
+
 export interface DiagnoseResult {
   run: {
     id: number;
@@ -137,6 +143,8 @@ export interface DiagnoseResult {
     network_errors: number;
   };
   env_issue?: string;
+  auth_hint?: string;
+  cascade_skips?: CascadeSkipGroup[];
   failures: Array<{
     suite_name: string;
     test_name: string;
@@ -202,6 +210,42 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
   const assertionFailures = failures.filter(f => f.failure_type === "assertion_failed").length;
   const networkErrors = failures.filter(f => f.failure_type === "network_error").length;
 
+  // Cascade skips: skipped tests due to missing captures from failed create steps
+  const CASCADE_RE = /^Depends on missing capture: (.+)$/;
+  const skippedResults = allResults.filter(r => r.status === "skip" && CASCADE_RE.test(r.error_message ?? ""));
+  let cascade_skips: CascadeSkipGroup[] | undefined;
+  if (skippedResults.length > 0) {
+    const groupMap = new Map<string, string[]>();
+    for (const r of skippedResults) {
+      const match = CASCADE_RE.exec(r.error_message ?? "");
+      if (!match) continue;
+      const captureVar = match[1]!;
+      const existing = groupMap.get(captureVar) ?? [];
+      existing.push(`${r.suite_name}/${r.test_name}`);
+      groupMap.set(captureVar, existing);
+    }
+    cascade_skips = [...groupMap.entries()].map(([capture_var, examples]) => ({
+      capture_var,
+      count: examples.length,
+      examples: examples.slice(0, 3),
+    }));
+  }
+
+  // Auth hint: when many tests fail with 401/403, suggest auth setup
+  const authFailures = failures.filter(f => f.response_status === 401 || f.response_status === 403);
+  let auth_hint: string | undefined;
+  if (authFailures.length >= 5 && authFailures.length / diagRun.total >= 0.3) {
+    const AUTH_URL_RE = /\/(auth|login|signin|token|oauth)\b/i;
+    const loginEndpoint = allResults.find(
+      r => (r.request_method === "POST" || r.request_method === "post") && AUTH_URL_RE.test(r.request_url ?? "")
+    );
+    if (loginEndpoint) {
+      auth_hint = `${authFailures.length} tests failed with 401/403. Found auth endpoint: POST ${loginEndpoint.request_url} — set auth_token in .env.yaml or use --auth-token`;
+    } else {
+      auth_hint = `${authFailures.length} tests failed with 401/403 — set auth_token in .env.yaml or use --auth-token`;
+    }
+  }
+
   const { grouped_failures, compactFailures } = verbose
     ? { grouped_failures: undefined, compactFailures: failures }
     : groupFailures(failures);
@@ -222,6 +266,8 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
       network_errors: networkErrors,
     },
     ...(sharedEnvHint ? { env_issue: sharedEnvHint } : {}),
+    ...(auth_hint ? { auth_hint } : {}),
+    ...(cascade_skips ? { cascade_skips } : {}),
     failures: compactFailures,
     ...(grouped_failures ? { grouped_failures } : {}),
   };
