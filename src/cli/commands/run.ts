@@ -12,6 +12,7 @@ import { printError, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { getDb } from "../../db/schema.ts";
 import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from "../../db/queries.ts";
+import { AUTH_PATH_RE } from "../../core/runner/execute-run.ts";
 
 export interface RunOptions {
   path: string;
@@ -55,7 +56,6 @@ export async function runCommand(options: RunOptions): Promise<number> {
 
   // 1c. Safe mode: keep GET, set-only steps, and auth-related requests
   if (options.safe) {
-    const AUTH_PATH_RE = /\/(auth|login|signin|token|oauth)\b/i;
     for (const suite of suites) {
       suite.tests = suite.tests.filter(t => {
         if (t.method === "GET" || !t.method) return true;

@@ -8,6 +8,8 @@ import { dirname, resolve } from "path";
 import { stat } from "node:fs/promises";
 import type { TestRunResult } from "./types.ts";
 
+export const AUTH_PATH_RE = /\/(auth|login|signin|token|oauth)\b/i;
+
 export interface ExecuteRunOptions {
   testPath: string;
   envName?: string;
@@ -54,7 +56,6 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
 
   // Safe mode: filter to GET + auth endpoints (same logic as run.ts)
   if (safe) {
-    const AUTH_PATH_RE = /\/(auth|login|signin|token|oauth)\b/i;
     for (const suite of suites) {
       suite.tests = suite.tests.filter(t => t.method === "GET" || !t.method || AUTH_PATH_RE.test(t.path));
     }
@@ -88,7 +89,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
   const setupSuites = suites.filter(s => s.setup);
   const regularSuites = suites.filter(s => !s.setup);
   const setupResults: Awaited<ReturnType<typeof runSuite>>[] = [];
-  const setupCaptures: Record<string, unknown> = {};
+  const setupCaptures: Record<string, string> = {};
 
   for (const suite of setupSuites) {
     const suiteDir = suite.filePath ? dirname(suite.filePath) : envDir;
@@ -96,7 +97,9 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
     const result = await runSuite(suite, env, options.dryRun);
     setupResults.push(result);
     for (const step of result.steps) {
-      Object.assign(setupCaptures, step.captures);
+      for (const [k, v] of Object.entries(step.captures)) {
+        setupCaptures[k] = String(v);
+      }
     }
   }
 
