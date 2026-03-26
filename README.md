@@ -17,16 +17,10 @@ Zond reads your OpenAPI spec and gives your AI agent everything it needs to test
 
 Then say: _"Safely cover the API from openapi.json with tests"_
 
-You get auto-validation hooks, CLI tools, and 8 MCP tools — all in one package.
+You get auto-validation hooks and CLI tools — all in one package.
 
 <details>
-<summary>Other installation methods (MCP, CLI, binary)</summary>
-
-### MCP Server (Cursor, Windsurf, other editors)
-
-[![Install in Cursor](https://cursor.com/deeplink/mcp-install-dark.svg)](https://cursor.com/en/install-mcp?name=zond&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIkBraXJyb3NoL3pvbmQiLCJtY3AiXX0K)
-
-Or add manually — see [MCP setup guide](docs/mcp-guide.md) for Cursor, Claude Code, and Windsurf config.
+<summary>Other installation methods (CLI, binary)</summary>
 
 ### CLI / Binary
 
@@ -75,8 +69,7 @@ Claude Code can write pytest from scratch — but it takes 30-60 minutes per flo
 
 ## Documentation
 
-- [ZOND.md](ZOND.md) — full CLI and MCP tools reference
-- [docs/mcp-guide.md](docs/mcp-guide.md) — MCP agent workflow guide
+- [ZOND.md](ZOND.md) — full CLI reference
 - [docs/quickstart.md](docs/quickstart.md) — step-by-step quickstart (RU)
 - [docs/ci.md](docs/ci.md) — CI/CD integration
 

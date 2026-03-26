@@ -3,7 +3,6 @@
 import { runCommand } from "./commands/run.ts";
 import { validateCommand } from "./commands/validate.ts";
 import { serveCommand } from "./commands/serve.ts";
-import { mcpCommand } from "./commands/mcp.ts";
 import { coverageCommand } from "./commands/coverage.ts";
 import { ciInitCommand } from "./commands/ci-init.ts";
 import { initCommand } from "./commands/init.ts";
@@ -103,8 +102,6 @@ Usage:
   zond guide <spec>     Generate test generation guide from OpenAPI spec
   zond serve            Start web dashboard
   zond ui               Alias for 'serve --open' (start dashboard & open browser)
-  zond mcp              Start MCP server (stdio transport for AI agents)
-                           --dir <path>  Set working directory (relative paths resolve here)
   zond ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
 
 Options for 'run':
@@ -305,13 +302,6 @@ async function main(): Promise<number> {
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
         watch: flags["watch"] === true,
         open: command === "ui" || flags["open"] === true,
-      });
-    }
-
-    case "mcp": {
-      return mcpCommand({
-        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
-        dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
       });
     }
 
