@@ -161,13 +161,47 @@ If gaps remain:
 ```bash
 zond generate <spec> --output <tests-dir> --uncovered-only --json
 ```
+Or, if this API already has `.zond-meta.json` (generated previously), prefer `zond sync` instead — it's smarter and non-destructive.
+
 For edge cases the generator can't create (negative tests, business logic), write individual YAML files — see format reference below.
+
+## Incremental updates (after initial setup)
+
+### When the API adds new endpoints
+```bash
+zond sync <spec> --tests <tests-dir> --dry-run --json   # preview what's new
+zond sync <spec> --tests <tests-dir> --json             # generate tests for new endpoints only
+```
+- Creates new suite files for new endpoints; **never overwrites existing files**
+- Reports removed endpoints as warnings — review tests manually, nothing is deleted
+- If a target file already exists (e.g. new endpoint belongs to existing tag): shown as "Skipped" → add to that file manually
+- **Automatically updates the registered collection's spec reference in the DB** — if `zond init` was previously run for this tests directory, the `openapi_spec` field is kept in sync. `zond generate` does the same on full regeneration.
+
+### When zond itself updates
+```bash
+zond migrate --tests <tests-dir> --dry-run              # preview migrations
+zond migrate --tests <tests-dir>                        # apply pending migrations
+```
+- Applies versioned format migrations to YAML test files
+- Only rewrites files that actually changed; untouched files are preserved byte-for-byte
 
 ## Safety rules
 - `--safe` → only GET requests execute
 - `--dry-run` → shows requests without sending
 - Never run CRUD tests unless user confirmed staging/test environment
 - If endpoint returns 500, keep `status: 200` in expect — failing test = API bug
+
+## Spec reference: two sources of truth
+
+Zond tracks the OpenAPI spec in two places:
+
+| Where | What | Updated by |
+|-------|------|------------|
+| SQLite `collections.openapi_spec` | path/URL used by `--api`, `coverage`, web UI | `zond init`, `zond generate`, `zond sync` |
+| `.zond-meta.json` → `specUrl` + `specHash` | path/URL + SHA-256 hash for drift detection | `zond generate`, `zond sync` |
+
+`zond generate` and `zond sync` keep both in sync automatically when a collection is registered.
+If they diverge (e.g. spec was renamed manually), re-run `zond generate` or `zond sync` to reconcile.
 
 ## JSON output format
 All `--json` output follows:
