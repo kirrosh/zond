@@ -13,7 +13,6 @@ import { guideCommand } from "./commands/guide.ts";
 import { generateCommand } from "./commands/generate.ts";
 import { exportCommand } from "./commands/export.ts";
 import { syncCommand } from "./commands/sync.ts";
-import { migrateCommand } from "./commands/migrate.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { getDb } from "../db/schema.ts";
@@ -108,7 +107,6 @@ Usage:
   zond ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
   zond export postman <path>  Export YAML tests as Postman Collection v2.1
   zond sync <spec>      Detect new/removed endpoints and generate tests for new ones
-  zond migrate          Apply pending test format migrations to a tests directory
 
 Options for 'run':
   --dry-run            Show requests without sending them (exit code always 0)
@@ -187,11 +185,6 @@ Options for 'sync':
   --tests <dir>        Path to test files directory (required)
   --dry-run            Show what would be generated without writing files
   --tag <tag>          Limit sync to endpoints with this tag
-
-Options for 'migrate':
-  --tests <dir>        Path to test files directory (required)
-  --dry-run            Show pending migrations without applying them
-  --from-version <v>   Override the version in metadata (for testing)
 
 General:
   --json               Output in JSON envelope format (available for all commands)
@@ -551,20 +544,6 @@ async function main(): Promise<number> {
         testsDir,
         dryRun: flags["dry-run"] === true,
         tag: typeof flags["tag"] === "string" ? flags["tag"] : undefined,
-        json: jsonFlag,
-      });
-    }
-
-    case "migrate": {
-      const testsDir = typeof flags["tests"] === "string" ? flags["tests"] : undefined;
-      if (!testsDir) {
-        printError("Missing --tests <dir>. Usage: zond migrate --tests <dir> [--dry-run]");
-        return 2;
-      }
-      return migrateCommand({
-        testsDir,
-        dryRun: flags["dry-run"] === true,
-        fromVersion: typeof flags["from-version"] === "string" ? flags["from-version"] : undefined,
         json: jsonFlag,
       });
     }
