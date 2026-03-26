@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test";
 import { serializeSuite } from "../../src/core/generator/serializer.ts";
 import type { RawSuite } from "../../src/core/generator/serializer.ts";
+import { validateSuite } from "../../src/core/parser/schema.ts";
 
 describe("serializeSuite", () => {
   test("nested object in json body does not produce [object Object]", () => {
@@ -49,6 +50,41 @@ describe("serializeSuite", () => {
     expect(yaml).toContain("city:");
     expect(yaml).toContain("NY");
     expect(yaml).toContain("country:");
+  });
+
+  test("setup: true appears in YAML output after name", () => {
+    const suite: RawSuite = {
+      name: "auth",
+      setup: true,
+      tags: ["auth"],
+      tests: [
+        { name: "login", POST: "/auth/login", json: {}, expect: { status: 200 } },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    expect(yaml).toContain("setup: true");
+    // setup should appear before tags
+    expect(yaml.indexOf("setup: true")).toBeLessThan(yaml.indexOf("tags:"));
+  });
+
+  test("setup omitted when false/undefined", () => {
+    const suite: RawSuite = {
+      name: "users",
+      tests: [{ name: "list", GET: "/users", expect: { status: 200 } }],
+    };
+    const yaml = serializeSuite(suite);
+    expect(yaml).not.toContain("setup:");
+  });
+
+  test("setup: true round-trips through parser", () => {
+    const suite: RawSuite = {
+      name: "auth",
+      setup: true,
+      tests: [{ name: "login", POST: "/auth/login", json: {}, expect: { status: 200 } }],
+    };
+    const yaml = serializeSuite(suite);
+    const parsed = validateSuite(Bun.YAML.parse(yaml));
+    expect(parsed.setup).toBe(true);
   });
 
   test("array of primitive strings serializes correctly", () => {

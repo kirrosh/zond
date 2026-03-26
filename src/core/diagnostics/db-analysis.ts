@@ -240,9 +240,9 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
       r => (r.request_method === "POST" || r.request_method === "post") && AUTH_URL_RE.test(r.request_url ?? "")
     );
     if (loginEndpoint) {
-      auth_hint = `${authFailures.length} tests failed with 401/403. Found auth endpoint: POST ${loginEndpoint.request_url} — set auth_token in .env.yaml or use --auth-token`;
+      auth_hint = `${authFailures.length} tests failed with 401/403. Found auth endpoint: POST ${loginEndpoint.request_url} — add \`setup: true\` to your auth suite so its captured token is shared with all other suites, or set auth_token manually in .env.yaml`;
     } else {
-      auth_hint = `${authFailures.length} tests failed with 401/403 — set auth_token in .env.yaml or use --auth-token`;
+      auth_hint = `${authFailures.length} tests failed with 401/403 — add \`setup: true\` to your auth suite so its captured token is shared with all other suites, or set auth_token in .env.yaml`;
     }
   }
 

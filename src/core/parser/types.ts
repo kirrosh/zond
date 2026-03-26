@@ -67,6 +67,8 @@ export interface SuiteConfig {
 export interface TestSuite {
   name: string;
   description?: string;
+  /** If true, this suite runs before all regular suites and its captures are shared into their env */
+  setup?: boolean;
   tags?: string[];
   base_url?: string;
   headers?: Record<string, string>;

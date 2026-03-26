@@ -117,13 +117,30 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
-  // 4. Run suites
+  // 4. Run suites — setup suites run first (sequentially), their captures flow into regular suites
   const results: TestRunResult[] = [];
   const dryRun = options.dryRun === true;
+
+  const setupSuites = suites.filter(s => s.setup);
+  const regularSuites = suites.filter(s => !s.setup);
+  const setupCaptures: Record<string, string> = {};
+
+  for (const suite of setupSuites) {
+    const result = await runSuite(suite, env, dryRun);
+    results.push(result);
+    for (const step of result.steps) {
+      for (const [k, v] of Object.entries(step.captures)) {
+        setupCaptures[k] = String(v);
+      }
+    }
+  }
+
+  const enrichedEnv = { ...env, ...setupCaptures };
+
   if (options.bail) {
     // Sequential with bail at suite level
-    for (const suite of suites) {
-      const result = await runSuite(suite, env, dryRun);
+    for (const suite of regularSuites) {
+      const result = await runSuite(suite, enrichedEnv, dryRun);
       results.push(result);
       if (!dryRun && (result.failed > 0 || result.steps.some((s) => s.status === "error"))) {
         break;
@@ -131,7 +148,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   } else {
     // Parallel
-    const all = await Promise.all(suites.map((suite) => runSuite(suite, env, dryRun)));
+    const all = await Promise.all(regularSuites.map((suite) => runSuite(suite, enrichedEnv, dryRun)));
     results.push(...all);
   }
 

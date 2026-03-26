@@ -34,6 +34,7 @@ export interface RawStep {
 
 export interface RawSuite {
   name: string;
+  setup?: boolean;
   tags?: string[];
   folder?: string;
   fileStem?: string;
@@ -49,6 +50,9 @@ export interface RawSuite {
 export function serializeSuite(suite: RawSuite): string {
   const lines: string[] = [];
   lines.push(`name: ${yamlScalar(suite.name)}`);
+  if (suite.setup) {
+    lines.push("setup: true");
+  }
   if (suite.tags && suite.tags.length > 0) {
     lines.push(`tags: [${suite.tags.join(", ")}]`);
   }
