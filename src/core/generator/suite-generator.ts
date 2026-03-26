@@ -380,6 +380,7 @@ export function generateAuthSuite(
 
   const suite: RawSuite = {
     name: "auth",
+    setup: true,
     tags: ["auth"],
     fileStem: "auth",
     base_url: "{{base_url}}",
@@ -460,6 +461,7 @@ function generateConsistentAuthSuite(
 
   return {
     name: "auth",
+    setup: true,
     tags: ["auth"],
     fileStem: "auth",
     base_url: "{{base_url}}",
