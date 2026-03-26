@@ -67,25 +67,22 @@ claude --dangerously-skip-permissions
 /plugin install zond@zond-marketplace
 ```
 
-### Способ Б: Только MCP-сервер
+### Способ Б: MCP-сервер (для Cursor, Windsurf и других редакторов)
 
-Если нужны только MCP-инструменты без скиллов и команд:
+Если вы используете не Claude Code, а другой редактор с поддержкой MCP:
 
+```json
+{
+  "mcpServers": {
+    "zond": {
+      "command": "npx",
+      "args": ["-y", "@kirrosh/zond@latest", "mcp"]
+    }
+  }
+}
 ```
-/mcp add zond -- npx -y @kirrosh/zond@latest mcp
-```
 
-> **Что произойдёт?** Claude Code сохранит конфигурацию MCP-сервера в файл `.mcp.json` в текущей папке. При следующем запуске агент получит доступ к инструментам zond.
-
-Перезапустите Claude Code:
-
-```
-/exit
-```
-
-```bash
-claude --dangerously-skip-permissions
-```
+Добавьте эту конфигурацию в настройки MCP вашего редактора. Подробнее: [docs/mcp-guide.md](mcp-guide.md).
 
 ---
 
@@ -105,19 +102,18 @@ claude --dangerously-skip-permissions
 
 ```
 Покрой API из файла openapi.json безопасными smoke-тестами.
-Используй zond MCP. Начни только с GET-запросов (safe: true).
+Начни только с GET-запросов (safe: true).
 Запусти тесты и покажи результаты.
 ```
 
-> **Подсказка:** Не обязательно писать такой подробный промпт. Главное — чтобы агент понял задачу. Например, `Покрой openapi.json smoke-тестами` тоже сработает. Агент сам разберётся с деталями.
+> **Подсказка:** Не обязательно писать такой подробный промпт. Например, `Покрой openapi.json smoke-тестами` тоже сработает.
 
-> **Что произойдёт?** Агент выполнит несколько шагов:
+> **Что произойдёт?** Агент выполнит несколько шагов через CLI:
 >
-> 1. `setup_api` — зарегистрирует ваш API, создаст структуру папок и файл `.env.yaml`
-> 2. `generate_and_save` — прочитает OpenAPI-спецификацию и сгенерирует YAML-тесты для GET-эндпоинтов
-> 3. `save_test_suite` — сохранит тесты в файлы
-> 4. `run_tests` с `safe: true` — запустит только GET-запросы
-> 5. Покажет сводку: сколько тестов прошло, сколько упало и почему
+> 1. `zond init --spec openapi.json` — зарегистрирует ваш API, создаст структуру папок и файл `.env.yaml`
+> 2. `zond generate openapi.json --output apis/myapi/tests/` — сгенерирует YAML-тесты
+> 3. `zond run apis/myapi/tests/ --safe` — запустит только GET-запросы
+> 4. Покажет сводку: сколько тестов прошло, сколько упало и почему
 
 ---
 
@@ -238,8 +234,7 @@ auth_token: Bearer sk-your-token-here
 
 ```
 my-api-tests/
-├── .mcp.json              ← конфигурация MCP для Claude Code
-├── zond.db             ← база данных с результатами запусков
+├── zond.db                ← база данных с результатами запусков
 └── apis/
     └── myapi/
         ├── openapi.json   ← ваша OpenAPI-спецификация

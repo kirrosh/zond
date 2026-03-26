@@ -2,8 +2,8 @@
 
 **AI-native API testing tool** — OpenAPI spec → test generation → execution → diagnostics. One binary. Zero config.
 
-- **MCP** — primary interface for AI agents (Claude Code, Cursor, Windsurf)
-- **CLI** — for humans and CI/CD
+- **CLI** — primary interface for Claude Code agents and CI/CD
+- **MCP** — for Cursor, Windsurf, and other MCP-compatible editors
 - **WebUI** — dashboard with health strip, endpoints/suites/runs tabs, step-level details
 
 ---
@@ -14,34 +14,54 @@ CLI skill (`/test-api`) asks the user to choose coverage level (Safe / CRUD / Ma
 
 **When asked to "safely cover", "test without breaking anything", or "start with read-only tests" — follow this 4-phase approach:**
 
-**Step 0 (required for npx MCP — single shared server):**
-```
-set_work_dir(workDir: "<absolute path to project root>")
-```
-Call this once at the start of the session so `zond.db` and all relative paths resolve to your project directory.
-
 **Phase 0 — Register + static analysis (zero requests)**
+
+CLI (Claude Code agents):
+```bash
+zond init --spec <path> [--name <name>] [--base-url <url>]
+zond coverage --spec <path> --tests <dir>   # baseline, no HTTP
+```
+MCP (Cursor, Windsurf):
 ```
 setup_api(...)
-coverage_analysis(specPath, testsDir)   <- baseline, no HTTP
+coverage_analysis(specPath, testsDir)
 ```
 
 **Phase 1 — Smoke tests (GET-only, safe for production)**
+
+CLI:
+```bash
+zond generate <spec> --output <dir>   # generates test stubs; use --tag to filter
+zond run <tests-dir> --safe           # --safe enforces GET-only
 ```
-generate_and_save(specPath, methodFilter: ["GET"])      <- GET endpoints only
-save_test_suite(...)                                    <- tags: [smoke]
-run_tests(testPath, safe: true)                         <- --safe enforces GET-only
+MCP:
+```
+run_tests(testPath, safe: true)       # agent writes YAML files directly, no save_test_suite
 ```
 Stop here if the user hasn't explicitly confirmed a staging/test environment.
 
 **Phase 2 — CRUD tests (only with explicit user confirmation + staging env)**
+
+CLI:
+```bash
+zond run <tests-dir> --tag crud --dry-run   # show requests first, no sending
+# [show user what would be sent, ask confirmation]
+zond run <tests-dir> --tag crud --env staging
 ```
-run_tests(testPath, tag: ["crud"], dryRun: true)        <- show requests first, no sending
-[show user what would be sent, ask confirmation]
-run_tests(testPath, tag: ["crud"], envName: "staging")  <- only after confirmation
+MCP:
+```
+run_tests(testPath, tag: ["crud"], dryRun: true)
+run_tests(testPath, tag: ["crud"], envName: "staging")
 ```
 
 **Phase 3 — Regression tracking**
+
+CLI:
+```bash
+zond db compare <idA> <idB>
+zond ci init
+```
+MCP:
 ```
 query_db(action: "compare_runs", runId: prev, runIdB: curr)
 ci_init()
@@ -53,9 +73,9 @@ ci_init()
 - Legitimate error expects: 404 missing, 400/422 bad input, 401 no auth
 
 **Key safety rules:**
-- `safe: true` on `run_tests` -> only GET requests execute, write ops are skipped
-- `dryRun: true` on `run_tests` -> shows all requests without sending any
-- `methodFilter: ["GET"]` on `generate_and_save` -> only generates GET test stubs
+- `safe: true` on `run_tests` / `--safe` on `zond run` -> only GET requests execute, write ops are skipped
+- `dryRun: true` on `run_tests` / `--dry-run` on `zond run` -> shows all requests without sending any
+- `--safe` on `zond run` / `methodFilter: ["GET"]` (MCP) -> only GET endpoints execute
 - Always use `tags: [smoke]` for GET-only suites, `tags: [crud]` for write operations
 - Never run CRUD tests unless user confirmed environment is safe (staging/test)
 
@@ -65,11 +85,7 @@ ci_init()
 
 | Tool | Description |
 |------|-------------|
-| `set_work_dir` | Set project root for the session (call **first** with npx MCP) |
 | `setup_api` | Register API (dirs + spec + env + collection). Creates `.gitignore` with `.env*.yaml`. Warns on relative server URL. `insecure: true` for self-signed certs |
-| `generate_and_save` | **Recommended entry point.** Auto-chunks large APIs by tag (>30 endpoints). Returns plan or focused guide. Supports `tag`, `methodFilter`, `testsDir` for coverage mode |
-| `save_test_suite` | Validate YAML + save single file. Returns structured errors if validation fails |
-| `save_test_suites` | Batch save multiple YAML suites in one call |
 | `run_tests` | Execute tests, return summary with failures. Use `diagnose_failure` for per-step details |
 | `query_db` | List collections/runs; `diagnose_failure` includes `response_body`; `compare_runs` for regression |
 | `describe_endpoint` | Full details for one endpoint: params, schemas, response headers, security |
@@ -77,6 +93,8 @@ ci_init()
 | `send_request` | Ad-hoc HTTP request with variable interpolation. `jsonPath` to extract subset, `maxResponseChars` to truncate |
 | `manage_server` | Start/stop WebUI server (health strip, endpoints/suites/runs tabs) |
 | `ci_init` | Generate CI/CD workflow (GitHub Actions / GitLab CI) |
+
+> **Note for MCP users:** test file generation and saving is done by the agent writing YAML files directly (no `generate_and_save` or `save_test_suite` tools). Use `zond generate` CLI or write files manually, then run with `run_tests`.
 
 ### query_db actions
 
