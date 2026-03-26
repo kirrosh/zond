@@ -2,6 +2,7 @@ import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
 import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue } from "./failure-hints.ts";
+import { AUTH_PATH_RE } from "../runner/execute-run.ts";
 
 export function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
   if (!raw) return undefined;
@@ -206,43 +207,45 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
 
   const sharedEnvHint = computeSharedEnvIssue(failures, envFilePath);
 
-  const apiErrors = failures.filter(f => f.failure_type === "api_error").length;
-  const assertionFailures = failures.filter(f => f.failure_type === "assertion_failed").length;
-  const networkErrors = failures.filter(f => f.failure_type === "network_error").length;
+  let apiErrors = 0, assertionFailures = 0, networkErrors = 0;
+  let authFailureCount = 0;
+  for (const f of failures) {
+    if (f.failure_type === "api_error") apiErrors++;
+    else if (f.failure_type === "assertion_failed") assertionFailures++;
+    else if (f.failure_type === "network_error") networkErrors++;
+    if (f.response_status === 401 || f.response_status === 403) authFailureCount++;
+  }
 
   // Cascade skips: skipped tests due to missing captures from failed create steps
   const CASCADE_RE = /^Depends on missing capture: (.+)$/;
-  const skippedResults = allResults.filter(r => r.status === "skip" && CASCADE_RE.test(r.error_message ?? ""));
-  let cascade_skips: CascadeSkipGroup[] | undefined;
-  if (skippedResults.length > 0) {
-    const groupMap = new Map<string, string[]>();
-    for (const r of skippedResults) {
-      const match = CASCADE_RE.exec(r.error_message ?? "");
-      if (!match) continue;
-      const captureVar = match[1]!;
-      const existing = groupMap.get(captureVar) ?? [];
-      existing.push(`${r.suite_name}/${r.test_name}`);
-      groupMap.set(captureVar, existing);
-    }
-    cascade_skips = [...groupMap.entries()].map(([capture_var, examples]) => ({
-      capture_var,
-      count: examples.length,
-      examples: examples.slice(0, 3),
-    }));
+  const groupMap = new Map<string, string[]>();
+  for (const r of allResults) {
+    if (r.status !== "skip") continue;
+    const match = CASCADE_RE.exec(r.error_message ?? "");
+    if (!match) continue;
+    const captureVar = match[1]!;
+    const existing = groupMap.get(captureVar) ?? [];
+    existing.push(`${r.suite_name}/${r.test_name}`);
+    groupMap.set(captureVar, existing);
   }
+  const cascade_skips: CascadeSkipGroup[] | undefined = groupMap.size > 0
+    ? [...groupMap.entries()].map(([capture_var, examples]) => ({
+        capture_var,
+        count: examples.length,
+        examples: examples.slice(0, 3),
+      }))
+    : undefined;
 
   // Auth hint: when many tests fail with 401/403, suggest auth setup
-  const authFailures = failures.filter(f => f.response_status === 401 || f.response_status === 403);
   let auth_hint: string | undefined;
-  if (authFailures.length >= 5 && authFailures.length / diagRun.total >= 0.3) {
-    const AUTH_URL_RE = /\/(auth|login|signin|token|oauth)\b/i;
+  if (authFailureCount >= 5 && authFailureCount / diagRun.total >= 0.3) {
     const loginEndpoint = allResults.find(
-      r => (r.request_method === "POST" || r.request_method === "post") && AUTH_URL_RE.test(r.request_url ?? "")
+      r => r.request_method?.toUpperCase() === "POST" && AUTH_PATH_RE.test(r.request_url ?? "")
     );
     if (loginEndpoint) {
-      auth_hint = `${authFailures.length} tests failed with 401/403. Found auth endpoint: POST ${loginEndpoint.request_url} — add \`setup: true\` to your auth suite so its captured token is shared with all other suites, or set auth_token manually in .env.yaml`;
+      auth_hint = `${authFailureCount} tests failed with 401/403. Found auth endpoint: POST ${loginEndpoint.request_url} — add \`setup: true\` to your auth suite so its captured token is shared with all other suites, or set auth_token manually in .env.yaml`;
     } else {
-      auth_hint = `${authFailures.length} tests failed with 401/403 — add \`setup: true\` to your auth suite so its captured token is shared with all other suites, or set auth_token in .env.yaml`;
+      auth_hint = `${authFailureCount} tests failed with 401/403 — add \`setup: true\` to your auth suite so its captured token is shared with all other suites, or set auth_token in .env.yaml`;
     }
   }
 
