@@ -85,7 +85,7 @@ YAML-файл с набором тестов. Содержит `name`, `base_url
 | `started_at` | TEXT | ISO 8601 |
 | `finished_at` | TEXT? | ISO 8601 |
 | `total` / `passed` / `failed` / `skipped` | INTEGER | Счётчики |
-| `trigger` | TEXT | `manual`, `cli`, `webui`, `mcp` |
+| `trigger` | TEXT | `manual`, `cli`, `webui` |
 | `environment` | TEXT? | Имя использованного окружения |
 | `duration_ms` | INTEGER? | Длительность прогона |
 | `collection_id` | INTEGER? | FK → collections |
@@ -113,7 +113,7 @@ YAML-файл с набором тестов. Содержит `name`, `base_url
 - `.env.yaml` → `""`
 - `.env.staging.yaml` → `"staging"`
 
-**`setup_api`** создаёт `.gitignore` с `.env*.yaml` в `baseDir`, чтобы секреты не попадали в git.
+**`zond init`** создаёт `.gitignore` с `.env*.yaml` в `baseDir`, чтобы секреты не попадали в git.
 
 **Пример:**
 ```yaml
