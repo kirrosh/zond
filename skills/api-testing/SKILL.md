@@ -21,6 +21,10 @@ Otherwise use `zond` directly.
 - **NEVER use curl/wget** for HTTP requests — use `zond request`
 - **NEVER write test YAML files from scratch** — use `zond generate` first, then edit specific files to fix failures
 - **NEVER invent endpoints** — only use endpoints from `zond describe` output
+- **NEVER hardcode auth tokens in `.env.yaml` for servers with in-memory storage** — tokens reset on restart; use `setup.yaml` with `setup: true` to capture a fresh token. Static tokens in `.env.yaml` are fine for persistent API keys or long-lived tokens.
+- **NEVER put `logout` in a setup suite** — it invalidates the captured token for all other suites; keep logout in a dedicated non-setup auth test suite
+- **NEVER tag reset/system endpoints as `smoke`** — use `[system, reset]` or `[unsafe]` tags; `smoke` runs in `--safe` mode and will wipe server state
+- **NEVER repeat login steps in multiple suites** — centralize auth in `setup.yaml`; repeated logins trigger rate limits (e.g. 10 req/60s)
 
 ## Workflow
 
@@ -165,6 +169,34 @@ Or, if this API already has `.zond-meta.json` (generated previously), prefer `zo
 
 For edge cases the generator can't create (negative tests, business logic), write individual YAML files — see format reference below.
 
+## Auth setup pattern (for APIs with in-memory / session tokens)
+
+When a server resets tokens on restart, hardcoding `auth_token` in `.env.yaml` breaks after each server restart. Use a dedicated setup suite instead:
+
+```yaml
+# setup.yaml
+name: setup
+setup: true
+tags: [setup]
+base_url: "{{base_url}}"
+tests:
+  - name: Login
+    POST: /auth/login
+    json:
+      username: "{{admin_username}}"
+      password: "{{admin_password}}"
+    expect:
+      status: 200
+      body:
+        token: { capture: auth_token }
+```
+
+Rules for `setup: true` suites:
+- **Must capture** the token (add `capture: auth_token` to the response body field)
+- **No logout step** — it invalidates the captured token for all following suites
+- Captured variables override `.env.yaml` values in all regular suites automatically
+- Only one login step needed here — remove login steps from all other suites
+
 ## Incremental updates (after initial setup)
 
 ### When the API adds new endpoints
@@ -229,5 +261,24 @@ Nested: `category.name: { equals: "Dogs" }`. Root body: `_body: { type: "array" 
 Status: `status: 200` or `status: [200, 204]`.
 Capture: `id: { capture: user_id }` then use `{{user_id}}` in later steps. **Captures are suite-scoped** — they do NOT propagate between suites. Each suite needing auth must login itself or use `.env.yaml`.
 ETag: If-Match requires escaped quotes — `If-Match: "\"{{etag}}\""`. Same for If-None-Match.
+ETag pattern — always GET before PUT to capture etag:
+```yaml
+- name: Get item (capture etag)
+  GET: /items/{{item_id}}
+  expect:
+    status: 200
+    body:
+      etag: { capture: etag }
+- name: Update item
+  PUT: /items/{{item_id}}
+  headers:
+    If-Match: "\"{{etag}}\""
+  json: { name: "updated" }
+  expect:
+    status: 200
+```
 Generators: `{{$randomInt}}`, `{{$uuid}}`, `{{$timestamp}}`, `{{$randomEmail}}`, `{{$randomString}}`, `{{$randomName}}`.
+Generators in `set:` are evaluated **once** when the step executes — use `set:` to pin a generated value across multiple steps. If you need to use the same email in register + login, use `set:` or capture from the register response.
+Soft delete: some APIs return `200 + {status: "cancelled"}` on DELETE instead of 404 — verify actual behavior before asserting.
+`form:` sends `application/x-www-form-urlencoded` only — binary file uploads (multipart) are not supported; exclude file upload endpoints from coverage.
 Env: `.env.yaml` (default) or `.env.<name>.yaml` in tests dir or parent.
