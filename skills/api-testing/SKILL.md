@@ -39,6 +39,7 @@ zond describe <spec> --compact --json
 zond generate <spec> --output <tests-dir> --json
 ```
 This single command creates:
+- `sanity.yaml` — 1-2 minimal tests: auth + connectivity probe (run this first)
 - Smoke tests (GET endpoints, grouped by tag)
 - CRUD chains (POST → GET → PUT → DELETE with variable capture)
 - Auth tests (login/register endpoints)
@@ -46,9 +47,27 @@ This single command creates:
 
 **Do NOT write YAML files manually.** The generator handles assertions, captures, request bodies, and tag grouping automatically.
 
+### Step 3.25: Sanity check — MANDATORY before choosing coverage level
+
+```bash
+zond run <tests-dir> --tag sanity --json
+```
+
+This runs `sanity.yaml` — 1-2 tests that validate basic connectivity and auth before generating/running many more tests.
+
+**If sanity fails:**
+- Auth step failed → ask user to clarify credentials, update `.env.yaml`, re-run sanity
+- GET step failed → fix `base_url` in `.env.yaml`, re-run sanity
+- Use `zond db diagnose <run-id> --json` and follow `recommended_action`
+- Repeat until sanity is green — only then proceed to Step 3.5
+
+**If sanity passes** → proceed to Step 3.5.
+
 ### Step 3.5: Choose coverage level
 
-Before asking, check what has already been completed by running:
+Before asking, verify sanity passed (Step 3.25). If not — fix issues first.
+
+Then check what has already been completed by running:
 ```bash
 zond db runs --limit 5 --json
 ```

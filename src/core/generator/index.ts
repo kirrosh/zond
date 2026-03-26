@@ -9,4 +9,4 @@ export { compressEndpointsWithSchemas, buildGenerationGuide } from "./guide-buil
 export type { GuideOptions } from "./guide-builder.ts";
 export type { EndpointWarning, WarningCode } from "./endpoint-warnings.ts";
 export type { EndpointInfo, ResponseInfo, GenerateOptions, SecuritySchemeInfo, CrudGroup } from "./types.ts";
-export { generateSuites, generateStep, detectCrudGroups, generateCrudSuite, findUnresolvedVars } from "./suite-generator.ts";
+export { generateSuites, generateStep, detectCrudGroups, generateCrudSuite, generateSanitySuite, findUnresolvedVars } from "./suite-generator.ts";
