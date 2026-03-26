@@ -1,7 +1,7 @@
 import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
-import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, recommendedAction, type RecommendedAction } from "./failure-hints.ts";
+import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, recommendedAction, softDeleteHint, type RecommendedAction } from "./failure-hints.ts";
 import { AUTH_PATH_RE } from "../runner/execute-run.ts";
 
 export function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
@@ -186,7 +186,10 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
   const failures = allResults
     .filter(r => r.status === "fail" || r.status === "error")
     .map(r => {
-      const hint = envHint(r.request_url, r.error_message, envFilePath) ?? statusHint(r.response_status);
+      const parsedBody = parseBodySafe(r.response_body);
+      const hint = envHint(r.request_url, r.error_message, envFilePath) ??
+        softDeleteHint(r.response_status, r.request_method, parsedBody) ??
+        statusHint(r.response_status);
       const failure_type = classifyFailure(r.status, r.response_status);
       const rec_action = recommendedAction(failure_type, r.response_status);
       const sHint = schemaHint(failure_type, r.response_status);
@@ -203,7 +206,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
         response_status: r.response_status,
         ...(hint ? { hint } : {}),
         ...(sHint ? { schema_hint: sHint } : {}),
-        response_body: parseBodySafe(r.response_body),
+        response_body: parsedBody,
         response_headers: filterHeaders(r.response_headers),
         assertions: r.assertions,
         duration_ms: r.duration_ms,

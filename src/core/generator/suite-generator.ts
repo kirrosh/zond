@@ -1,7 +1,7 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo, CrudGroup } from "./types.ts";
 import type { RawSuite, RawStep } from "./serializer.ts";
-import { generateFromSchema } from "./data-factory.ts";
+import { generateFromSchema, generateMultipartFromSchema } from "./data-factory.ts";
 import { groupEndpointsByTag } from "./chunker.ts";
 
 // ──────────────────────────────────────────────
@@ -13,6 +13,22 @@ function convertPath(path: string): string {
   return path.replace(/\{([^}]+)\}/g, "{{$1}}");
 }
 
+/**
+ * Convert path params to seed values for smoke suites (no capture context).
+ * Uses the parameter's example/default from the spec, or falls back to "1" for
+ * id-like params. Non-id string params keep the {{placeholder}} form.
+ */
+function convertPathWithSeeds(path: string, ep: EndpointInfo): string {
+  return path.replace(/\{([^}]+)\}/g, (_, name: string) => {
+    const param = ep.parameters.find(p => p.name === name && p.in === "path");
+    const schema = param?.schema as OpenAPIV3.SchemaObject | undefined;
+    const example = (param as any)?.example ?? schema?.example ?? schema?.default;
+    if (example !== undefined) return String(example);
+    if (schema?.type === "integer" || /^id$|_id$|Id$/i.test(name)) return "1";
+    return `{{${name}}}`;
+  });
+}
+
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -22,6 +38,8 @@ function escapeRegex(s: string): string {
 }
 
 const HEALTHCHECK_PATH_RE = /\/(health|healthz|ping|status|ready|readiness|liveness|alive)\b/i;
+const RESET_PATH_RE = /\/(reset|flush|purge|truncate|wipe|clear-data|factory-reset)\b/i;
+const LOGOUT_PATH_RE = /\/(logout|signout|invalidate|revoke)\b/i;
 const SHORT_PATH_RE = /^\/[a-z0-9-]*$/i; // matches /, /api, /v1, etc.
 
 function selectHealthcheckEndpoint(gets: EndpointInfo[]): EndpointInfo | undefined {
@@ -172,7 +190,11 @@ export function generateStep(
   }
 
   if (["POST", "PUT", "PATCH"].includes(method) && ep.requestBodySchema) {
-    step.json = generateFromSchema(ep.requestBodySchema);
+    if (ep.requestBodyContentType === "multipart/form-data") {
+      step.multipart = generateMultipartFromSchema(ep.requestBodySchema);
+    } else {
+      step.json = generateFromSchema(ep.requestBodySchema);
+    }
   }
 
   const query = getRequiredQueryParams(ep);
@@ -276,13 +298,31 @@ export function generateCrudSuite(
   // 3. Update
   if (group.update) {
     const method = group.update.method.toUpperCase();
+    const itemPath = convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`);
+    const etagVar = `${group.resource.replace(/s$/, "")}_etag`;
+
+    // If endpoint requires ETag (optimistic locking), capture it from a GET step first
+    if (group.update.requiresEtag && group.read) {
+      tests.push({
+        name: `Get ETag before update ${group.resource.replace(/s$/, "")}`,
+        GET: itemPath,
+        expect: {
+          status: getExpectedStatus(group.read),
+          headers: { ETag: { capture: etagVar } },
+        },
+      });
+    }
+
     const step: RawStep = {
       name: group.update.operationId ?? `Update ${group.resource.replace(/s$/, "")}`,
-      [method]: convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`),
+      [method]: itemPath,
       expect: {
         status: getExpectedStatus(group.update),
       },
     };
+    if (group.update.requiresEtag) {
+      step.headers = { "If-Match": `"{{${etagVar}}}"` };
+    }
     if (group.update.requestBodySchema) {
       step.json = generateFromSchema(group.update.requestBodySchema);
     }
@@ -291,13 +331,32 @@ export function generateCrudSuite(
 
   // 4. Delete
   if (group.delete) {
+    const itemPath = convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`);
+    const etagVar = `${group.resource.replace(/s$/, "")}_etag`;
+
+    // If delete requires ETag and update didn't already capture it, add a GET step
+    const updateAlreadyCapturedEtag = group.update?.requiresEtag;
+    if (group.delete.requiresEtag && group.read && !updateAlreadyCapturedEtag) {
+      tests.push({
+        name: `Get ETag before delete ${group.resource.replace(/s$/, "")}`,
+        GET: itemPath,
+        expect: {
+          status: getExpectedStatus(group.read),
+          headers: { ETag: { capture: etagVar } },
+        },
+      });
+    }
+
     const step: RawStep = {
       name: group.delete.operationId ?? `Delete ${group.resource.replace(/s$/, "")}`,
-      DELETE: convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`),
+      DELETE: itemPath,
       expect: {
         status: getExpectedStatus(group.delete),
       },
     };
+    if (group.delete.requiresEtag) {
+      step.headers = { "If-Match": `"{{${etagVar}}}"` };
+    }
     tests.push(step);
 
     // 5. Verify deleted
@@ -385,9 +444,10 @@ export function generateAuthSuite(
     return generateConsistentAuthSuite(registerEp, loginEp, authEndpoints, securitySchemes);
   }
 
-  // Fallback: plain auth suite
-  const tests = authEndpoints.map(ep => generateStep(ep, securitySchemes));
-  const headers = getSuiteHeaders(authEndpoints, securitySchemes);
+  // Fallback: plain auth suite — exclude logout/revoke endpoints from setup suite
+  const nonLogoutEndpoints = authEndpoints.filter(ep => !LOGOUT_PATH_RE.test(ep.path));
+  const tests = nonLogoutEndpoints.map(ep => generateStep(ep, securitySchemes));
+  const headers = getSuiteHeaders(nonLogoutEndpoints, securitySchemes);
 
   const suite: RawSuite = {
     name: "auth",
@@ -464,8 +524,11 @@ function generateConsistentAuthSuite(
   }
   tests.push(loginStep);
 
-  // 3. Any remaining auth endpoints (not register/login)
-  const others = allAuthEndpoints.filter(ep => ep !== registerEp && ep !== loginEp);
+  // 3. Any remaining auth endpoints (not register/login, not logout)
+  // Logout/revoke endpoints must NOT be in a setup suite — they invalidate the token
+  const others = allAuthEndpoints.filter(ep =>
+    ep !== registerEp && ep !== loginEp && !LOGOUT_PATH_RE.test(ep.path)
+  );
   for (const ep of others) {
     tests.push(generateStep(ep, securitySchemes));
   }
@@ -552,10 +615,16 @@ export function generateSuites(opts: {
   for (const [tag, tagEndpoints] of byTag) {
     const tagSlug = slugify(tag) || "api";
 
-    // GET endpoints → smoke suite
+    // GET endpoints → smoke suite (use seed values for path params — no capture context)
     const getEndpoints = tagEndpoints.filter(ep => ep.method.toUpperCase() === "GET");
     if (getEndpoints.length > 0) {
-      const tests = getEndpoints.map(ep => generateStep(ep, securitySchemes));
+      const tests = getEndpoints.map(ep => {
+        const step = generateStep(ep, securitySchemes);
+        // Replace path param placeholders with seed values so the suite runs out of the box
+        const seededPath = convertPathWithSeeds(ep.path, ep);
+        (step as any)[ep.method.toUpperCase()] = seededPath;
+        return step;
+      });
       const headers = getSuiteHeaders(getEndpoints, securitySchemes);
 
       const suite: RawSuite = {
@@ -578,8 +647,37 @@ export function generateSuites(opts: {
       suites.push(suite);
     }
 
-    // Non-GET endpoints → smoke-unsafe suite
-    const unsafeEndpoints = tagEndpoints.filter(ep => ep.method.toUpperCase() !== "GET");
+    // Non-GET endpoints: split reset/system endpoints out of smoke-unsafe
+    const nonGetEndpoints = tagEndpoints.filter(ep => ep.method.toUpperCase() !== "GET");
+    const resetEndpoints = nonGetEndpoints.filter(ep => RESET_PATH_RE.test(ep.path));
+    const unsafeEndpoints = nonGetEndpoints.filter(ep => !RESET_PATH_RE.test(ep.path));
+
+    // Reset/system endpoints → [system, reset] suite (never run as part of smoke)
+    if (resetEndpoints.length > 0) {
+      const tests = resetEndpoints.map(ep => generateStep(ep, securitySchemes));
+      const headers = getSuiteHeaders(resetEndpoints, securitySchemes);
+
+      const suite: RawSuite = {
+        name: `${tagSlug}-system`,
+        tags: ["system", "reset"],
+        fileStem: `system-${tagSlug}`,
+        base_url: "{{base_url}}",
+        tests,
+      };
+
+      if (headers) {
+        suite.headers = headers;
+        for (const t of tests) {
+          if (t.headers && JSON.stringify(t.headers) === JSON.stringify(headers)) {
+            delete (t as any).headers;
+          }
+        }
+      }
+
+      suites.push(suite);
+    }
+
+    // Remaining non-GET endpoints → smoke-unsafe suite
     if (unsafeEndpoints.length > 0) {
       const tests = unsafeEndpoints.map(ep => generateStep(ep, securitySchemes));
       const headers = getSuiteHeaders(unsafeEndpoints, securitySchemes);

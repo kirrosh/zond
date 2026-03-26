@@ -703,4 +703,74 @@ describe("setup suite propagation", () => {
     const sentHeader = regularResult.steps[0]!.request.headers["Authorization"];
     expect(sentHeader).toBe("Bearer setup-token-xyz");
   });
+
+  test("sends multipart/form-data with text fields", async () => {
+    let capturedInit: RequestInit | undefined;
+    globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
+      capturedInit = init;
+      return new Response(JSON.stringify({ id: 1 }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "Multipart",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Upload text fields",
+        method: "POST",
+        path: "http://example.com/files",
+        multipart: {
+          description: "Hello world",
+          tag: "test",
+        },
+        expect: { status: 201 },
+      }],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("pass");
+    expect(capturedInit?.body).toBeInstanceOf(FormData);
+    const fd = capturedInit!.body as FormData;
+    expect(fd.get("description")).toBe("Hello world");
+    expect(fd.get("tag")).toBe("test");
+  });
+});
+
+describe("header captures", () => {
+  test("captures value from response header via AssertionRule", async () => {
+    mockFetchResponses([
+      { status: 200, body: { id: 1 }, headers: { "ETag": '"abc123"' } },
+      { status: 200, body: { id: 1 } },
+    ]);
+
+    const suite: TestSuite = {
+      name: "ETag capture",
+      config: DEFAULT_CONFIG,
+      base_url: "http://example.com",
+      tests: [
+        {
+          name: "Get item with ETag",
+          method: "GET",
+          path: "http://example.com/items/1",
+          expect: {
+            status: 200,
+            headers: { ETag: { capture: "item_etag" } },
+          },
+        },
+        {
+          name: "Use captured ETag",
+          method: "PUT",
+          path: "http://example.com/items/1",
+          headers: { "If-Match": "{{item_etag}}" },
+          expect: { status: 200 },
+        },
+      ],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.captures).toMatchObject({ item_etag: '"abc123"' });
+    expect(result.steps[1]!.status).toBe("pass");
+  });
 });

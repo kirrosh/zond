@@ -19,6 +19,7 @@ export interface EndpointInfo {
   responses: ResponseInfo[];
   security: string[];
   deprecated?: boolean;
+  requiresEtag?: boolean;
 }
 
 export interface SecuritySchemeInfo {
