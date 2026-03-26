@@ -13,6 +13,10 @@ import { filterByTag } from "../../core/generator/chunker.ts";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import { printError, printSuccess } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
+import { readMeta, writeMeta, hashSpec, buildFileMeta } from "../../core/meta/meta-store.ts";
+import { version as ZOND_VERSION } from "../../../package.json";
+import { getDb } from "../../db/schema.ts";
+import { findCollectionByTestPath, updateCollection } from "../../db/queries.ts";
 
 export interface GenerateOptions {
   specPath: string;
@@ -64,12 +68,39 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
     // Write suite files
     const createdFiles: Array<{ file: string; suite: string; tests: number }> = [];
 
+    // Build metadata for written files
+    const metaFiles: Record<string, import("../../core/meta/types.ts").FileMeta> = {};
+
     for (const suite of suites) {
       const yaml = serializeSuite(suite);
       const fileName = `${suite.fileStem ?? suite.name}.yaml`;
       const filePath = join(options.output, fileName);
       await Bun.write(filePath, yaml);
       createdFiles.push({ file: filePath, suite: suite.name, tests: suite.tests.length });
+      metaFiles[fileName] = buildFileMeta(suite, ZOND_VERSION);
+    }
+
+    // Write .zond-meta.json (merge with existing meta to preserve info about prior files)
+    const existingMeta = await readMeta(options.output);
+    const specContent = typeof doc === "object" ? JSON.stringify(doc) : String(doc);
+    await writeMeta(options.output, {
+      zondVersion: ZOND_VERSION,
+      lastSyncedAt: new Date().toISOString(),
+      specUrl: options.specPath,
+      specHash: hashSpec(specContent),
+      files: { ...(existingMeta?.files ?? {}), ...metaFiles },
+    });
+
+    // Sync DB collection spec reference if one is registered for this output directory
+    try {
+      getDb();
+      const collection = findCollectionByTestPath(options.output);
+      if (collection && collection.openapi_spec !== options.specPath) {
+        updateCollection(collection.id, { openapi_spec: options.specPath });
+        warnings.push(`Updated collection '${collection.name}' spec reference → ${options.specPath}`);
+      }
+    } catch {
+      // DB unavailable — not fatal
     }
 
     // Create .env.yaml with base_url if it doesn't exist

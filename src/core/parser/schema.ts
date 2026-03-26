@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { TestSuite, TestStep, AssertionRule, TestStepExpect, SuiteConfig, RetryUntil, ForEach } from "./types.ts";
+import type { TestSuite, TestStep, AssertionRule, TestStepExpect, SuiteConfig, RetryUntil, ForEach, MultipartField } from "./types.ts";
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
@@ -134,7 +134,7 @@ const TestStepExpectSchema: z.ZodType<TestStepExpect> = z.preprocess(
   z.object({
     status: z.union([z.number().int(), z.array(z.number().int())]).optional(),
     body: z.record(z.string(), AssertionRuleSchema).optional(),
-    headers: z.record(z.string(), z.string()).optional(),
+    headers: z.record(z.string(), z.union([z.string(), AssertionRuleSchema])).optional(),
     duration: z.number().optional(),
   }),
 ) as z.ZodType<TestStepExpect>;
@@ -149,6 +149,14 @@ const ForEachSchema: z.ZodType<ForEach> = z.object({
   var: z.string(),
   in: z.unknown(),
 });
+
+const MultipartFileFieldSchema = z.object({
+  file: z.string(),
+  filename: z.string().optional(),
+  content_type: z.string().optional(),
+});
+
+const MultipartFieldSchema: z.ZodType<MultipartField> = z.union([z.string(), MultipartFileFieldSchema]);
 
 const TestStepSchema: z.ZodType<TestStep> = z.preprocess(
   (raw) => {
@@ -169,6 +177,7 @@ const TestStepSchema: z.ZodType<TestStep> = z.preprocess(
     headers: z.record(z.string(), z.string()).optional(),
     json: z.unknown().optional(),
     form: z.record(z.string(), z.string()).optional(),
+    multipart: z.record(z.string(), MultipartFieldSchema).optional(),
     query: z.record(z.string(), z.string()).optional(),
     expect: TestStepExpectSchema,
     skip_if: z.string().optional(),
@@ -207,6 +216,7 @@ const TestSuiteSchema = z.preprocess(
   z.object({
     name: z.string(),
     description: z.string().optional(),
+    setup: z.boolean().optional(),
     tags: z.array(z.string()).optional(),
     base_url: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),

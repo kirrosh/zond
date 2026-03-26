@@ -5,6 +5,7 @@ export interface HttpRequest {
   url: string;
   headers: Record<string, string>;
   body?: string;
+  formData?: FormData;
 }
 
 export interface HttpResponse {

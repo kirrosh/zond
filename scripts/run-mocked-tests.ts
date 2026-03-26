@@ -3,18 +3,19 @@
  * to avoid Bun's module cache pollution bug (bun#7823, bun#12823).
  */
 
+// Files that use mock.module() — must run in separate subprocesses
+// to avoid Bun's module cache pollution bug (bun#7823, bun#12823).
+// These files live in tests/mocked/ and do NOT end in .test.ts so that
+// plain `bun test` does not auto-discover and run them in-process.
 const MOCKED_FILES = [
-  "tests/mcp/coverage-analysis.test.ts",
-  "tests/mcp/send-request.test.ts",
-  "tests/mcp/setup-api.test.ts",
-  "tests/cli/coverage.test.ts",
+  "tests/mocked/coverage.ts",
 ];
 
 const CONCURRENCY = 4;
 let failed = 0;
 
 async function runFile(file: string): Promise<boolean> {
-  const proc = Bun.spawn(["bun", "test", file], {
+  const proc = Bun.spawn(["bun", "test", `./${file}`], {
     stdout: "inherit",
     stderr: "inherit",
     env: { ...process.env, FORCE_COLOR: "1" },

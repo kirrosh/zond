@@ -79,6 +79,9 @@ export function substituteStep(step: TestStep, vars: Record<string, unknown>): T
   if (step.form) {
     result.form = substituteDeep(step.form, vars);
   }
+  if (step.multipart) {
+    result.multipart = substituteDeep(step.multipart, vars);
+  }
   if (step.query) {
     result.query = substituteDeep(step.query, vars);
   }

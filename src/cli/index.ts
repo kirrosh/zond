@@ -3,7 +3,6 @@
 import { runCommand } from "./commands/run.ts";
 import { validateCommand } from "./commands/validate.ts";
 import { serveCommand } from "./commands/serve.ts";
-import { mcpCommand } from "./commands/mcp.ts";
 import { coverageCommand } from "./commands/coverage.ts";
 import { ciInitCommand } from "./commands/ci-init.ts";
 import { initCommand } from "./commands/init.ts";
@@ -12,6 +11,8 @@ import { dbCommand } from "./commands/db.ts";
 import { requestCommand } from "./commands/request.ts";
 import { guideCommand } from "./commands/guide.ts";
 import { generateCommand } from "./commands/generate.ts";
+import { exportCommand } from "./commands/export.ts";
+import { syncCommand } from "./commands/sync.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { getDb } from "../db/schema.ts";
@@ -103,9 +104,9 @@ Usage:
   zond guide <spec>     Generate test generation guide from OpenAPI spec
   zond serve            Start web dashboard
   zond ui               Alias for 'serve --open' (start dashboard & open browser)
-  zond mcp              Start MCP server (stdio transport for AI agents)
-                           --dir <path>  Set working directory (relative paths resolve here)
   zond ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
+  zond export postman <path>  Export YAML tests as Postman Collection v2.1
+  zond sync <spec>      Detect new/removed endpoints and generate tests for new ones
 
 Options for 'run':
   --dry-run            Show requests without sending them (exit code always 0)
@@ -174,6 +175,16 @@ Options for 'ci init':
   --gitlab             Generate GitLab CI config
   --dir <path>         Project root directory (default: current directory)
   --force              Overwrite existing CI config
+
+Options for 'export postman':
+  --output <file>      Output file path (default: collection.postman.json)
+  --env <file>         Also export .env.yaml as Postman environment
+  --collection-name <name>  Collection name (default: derived from path)
+
+Options for 'sync':
+  --tests <dir>        Path to test files directory (required)
+  --dry-run            Show what would be generated without writing files
+  --tag <tag>          Limit sync to endpoints with this tag
 
 General:
   --json               Output in JSON envelope format (available for all commands)
@@ -305,13 +316,6 @@ async function main(): Promise<number> {
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
         watch: flags["watch"] === true,
         open: command === "ui" || flags["open"] === true,
-      });
-    }
-
-    case "mcp": {
-      return mcpCommand({
-        dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
-        dir: typeof flags["dir"] === "string" ? flags["dir"] : undefined,
       });
     }
 
@@ -499,6 +503,46 @@ async function main(): Promise<number> {
       return guideCommand({
         specPath,
         testsDir: typeof flags["tests-dir"] === "string" ? flags["tests-dir"] : undefined,
+        tag: typeof flags["tag"] === "string" ? flags["tag"] : undefined,
+        json: jsonFlag,
+      });
+    }
+
+    case "export": {
+      const subcommand = positional[0];
+      if (subcommand !== "postman") {
+        printError(`Unknown export subcommand: ${subcommand ?? "(none)"}. Usage: zond export postman <path>`);
+        return 2;
+      }
+      const testsPath = positional[1];
+      if (!testsPath) {
+        printError("Missing tests path. Usage: zond export postman <path> [--output <file>]");
+        return 2;
+      }
+      return exportCommand({
+        testsPath,
+        output: typeof flags["output"] === "string" ? flags["output"] : "collection.postman.json",
+        env: typeof flags["env"] === "string" ? flags["env"] : undefined,
+        collectionName: typeof flags["collection-name"] === "string" ? flags["collection-name"] : undefined,
+        json: jsonFlag,
+      });
+    }
+
+    case "sync": {
+      const specPath = positional[0];
+      if (!specPath) {
+        printError("Missing spec path. Usage: zond sync <spec> --tests <dir> [--dry-run] [--tag <tag>]");
+        return 2;
+      }
+      const testsDir = typeof flags["tests"] === "string" ? flags["tests"] : undefined;
+      if (!testsDir) {
+        printError("Missing --tests <dir>. Usage: zond sync <spec> --tests <dir>");
+        return 2;
+      }
+      return syncCommand({
+        specPath,
+        testsDir,
+        dryRun: flags["dry-run"] === true,
         tag: typeof flags["tag"] === "string" ? flags["tag"] : undefined,
         json: jsonFlag,
       });

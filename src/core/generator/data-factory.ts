@@ -33,6 +33,9 @@ export function generateFromSchema(
     return schema.enum[0];
   }
 
+  // uuid format overrides type (e.g. integer fields with format: uuid)
+  if (schema.format === "uuid") return "{{$uuid}}";
+
   switch (schema.type) {
     case "string":
       return guessStringPlaceholder(schema, propertyName);
@@ -81,11 +84,36 @@ export function generateFromSchema(
   }
 }
 
+/**
+ * Generate a multipart body object from an OpenAPI multipart/form-data schema.
+ * Binary fields (format: binary/byte) become file upload objects; all others become strings.
+ */
+export function generateMultipartFromSchema(
+  schema: OpenAPIV3.SchemaObject,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  if (!schema.properties) return result;
+
+  for (const [key, propSchema] of Object.entries(schema.properties)) {
+    const s = propSchema as OpenAPIV3.SchemaObject;
+    if (s.format === "binary" || s.format === "byte") {
+      result[key] = { file: `./fixtures/${key}.bin`, content_type: "application/octet-stream" };
+    } else {
+      const val = generateFromSchema(s, key);
+      result[key] = val;
+    }
+  }
+
+  return result;
+}
+
 function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): string {
   // Format-based
   if (schema.format === "email") return "{{$randomEmail}}";
   if (schema.format === "uuid") return "{{$uuid}}";
-  if (schema.format === "date-time" || schema.format === "date") return "2025-01-01T00:00:00Z";
+  if (schema.format === "date-time") return "2025-01-01T00:00:00Z";
+  if (schema.format === "date") return "2025-01-01";
   if (schema.format === "uri" || schema.format === "url") return "https://example.com/test";
   if (schema.format === "hostname") return "example.com";
   if (schema.format === "ipv4") return "192.168.1.1";
@@ -119,8 +147,15 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
 }
 
 function guessIntPlaceholder(name?: string, schema?: OpenAPIV3.SchemaObject): number | string {
-  if (schema?.minimum !== undefined && schema.minimum > 0) {
-    return schema.minimum;
+  const min = schema?.minimum;
+  const max = schema?.maximum;
+  if (max !== undefined) {
+    // Use a safe concrete value within the declared range
+    const lo = min !== undefined && min > 0 ? min : 1;
+    return Math.min(lo, max);
+  }
+  if (min !== undefined && min > 0) {
+    return min;
   }
   return "{{$randomInt}}";
 }

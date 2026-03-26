@@ -1,7 +1,8 @@
 import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
-import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue } from "./failure-hints.ts";
+import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, recommendedAction, softDeleteHint, type RecommendedAction } from "./failure-hints.ts";
+import { AUTH_PATH_RE } from "../runner/execute-run.ts";
 
 export function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
   if (!raw) return undefined;
@@ -116,9 +117,16 @@ export interface FailureGroup {
   pattern: string;
   count: number;
   failure_type: string;
+  recommended_action: RecommendedAction;
   hint?: string;
   examples: string[];
   response_status: number | null;
+}
+
+export interface CascadeSkipGroup {
+  capture_var: string;
+  count: number;
+  examples: string[];
 }
 
 export interface DiagnoseResult {
@@ -136,13 +144,17 @@ export interface DiagnoseResult {
     assertion_failures: number;
     network_errors: number;
   };
+  agent_directive?: string;
   env_issue?: string;
+  auth_hint?: string;
+  cascade_skips?: CascadeSkipGroup[];
   failures: Array<{
     suite_name: string;
     test_name: string;
     suite_file?: string;
     status: string;
     failure_type: string;
+    recommended_action: RecommendedAction;
     error_message?: string;
     request_method: string | null;
     request_url: string | null;
@@ -174,8 +186,12 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
   const failures = allResults
     .filter(r => r.status === "fail" || r.status === "error")
     .map(r => {
-      const hint = envHint(r.request_url, r.error_message, envFilePath) ?? statusHint(r.response_status);
+      const parsedBody = parseBodySafe(r.response_body);
+      const hint = envHint(r.request_url, r.error_message, envFilePath) ??
+        softDeleteHint(r.response_status, r.request_method, parsedBody) ??
+        statusHint(r.response_status);
       const failure_type = classifyFailure(r.status, r.response_status);
+      const rec_action = recommendedAction(failure_type, r.response_status);
       const sHint = schemaHint(failure_type, r.response_status);
       return {
         suite_name: r.suite_name,
@@ -183,13 +199,14 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
         ...(r.suite_file ? { suite_file: r.suite_file } : {}),
         status: r.status,
         failure_type,
+        recommended_action: rec_action,
         error_message: truncateErrorMessage(r.error_message, verbose),
         request_method: r.request_method,
         request_url: r.request_url,
         response_status: r.response_status,
         ...(hint ? { hint } : {}),
         ...(sHint ? { schema_hint: sHint } : {}),
-        response_body: parseBodySafe(r.response_body),
+        response_body: parsedBody,
         response_headers: filterHeaders(r.response_headers),
         assertions: r.assertions,
         duration_ms: r.duration_ms,
@@ -198,9 +215,60 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
 
   const sharedEnvHint = computeSharedEnvIssue(failures, envFilePath);
 
-  const apiErrors = failures.filter(f => f.failure_type === "api_error").length;
-  const assertionFailures = failures.filter(f => f.failure_type === "assertion_failed").length;
-  const networkErrors = failures.filter(f => f.failure_type === "network_error").length;
+  let apiErrors = 0, assertionFailures = 0, networkErrors = 0;
+  let authFailureCount = 0;
+  for (const f of failures) {
+    if (f.failure_type === "api_error") apiErrors++;
+    else if (f.failure_type === "assertion_failed") assertionFailures++;
+    else if (f.failure_type === "network_error") networkErrors++;
+    if (f.response_status === 401 || f.response_status === 403) authFailureCount++;
+  }
+
+  let agent_directive: string | undefined;
+  if (apiErrors > 0) {
+    const fixable = assertionFailures + networkErrors;
+    agent_directive =
+      `${apiErrors} test${apiErrors === 1 ? "" : "s"} returned 5xx server errors. ` +
+      `Do NOT change test expectations to accept 5xx responses. ` +
+      `These are backend bugs, not test logic errors. ` +
+      `Stop iterating on these tests and report the failures to the API team.` +
+      (fixable > 0
+        ? ` The remaining ${fixable} failure${fixable === 1 ? "" : "s"} may be fixable in test logic.`
+        : "");
+  }
+
+  // Cascade skips: skipped tests due to missing captures from failed create steps
+  const CASCADE_RE = /^Depends on missing capture: (.+)$/;
+  const groupMap = new Map<string, string[]>();
+  for (const r of allResults) {
+    if (r.status !== "skip") continue;
+    const match = CASCADE_RE.exec(r.error_message ?? "");
+    if (!match) continue;
+    const captureVar = match[1]!;
+    const existing = groupMap.get(captureVar) ?? [];
+    existing.push(`${r.suite_name}/${r.test_name}`);
+    groupMap.set(captureVar, existing);
+  }
+  const cascade_skips: CascadeSkipGroup[] | undefined = groupMap.size > 0
+    ? [...groupMap.entries()].map(([capture_var, examples]) => ({
+        capture_var,
+        count: examples.length,
+        examples: examples.slice(0, 3),
+      }))
+    : undefined;
+
+  // Auth hint: when many tests fail with 401/403, suggest auth setup
+  let auth_hint: string | undefined;
+  if (authFailureCount >= 5 && authFailureCount / diagRun.total >= 0.3) {
+    const loginEndpoint = allResults.find(
+      r => r.request_method?.toUpperCase() === "POST" && AUTH_PATH_RE.test(r.request_url ?? "")
+    );
+    if (loginEndpoint) {
+      auth_hint = `${authFailureCount} tests failed with 401/403. Found auth endpoint: POST ${loginEndpoint.request_url} — add \`setup: true\` to your auth suite so its captured token is shared with all other suites, or set auth_token manually in .env.yaml`;
+    } else {
+      auth_hint = `${authFailureCount} tests failed with 401/403 — add \`setup: true\` to your auth suite so its captured token is shared with all other suites, or set auth_token in .env.yaml`;
+    }
+  }
 
   const { grouped_failures, compactFailures } = verbose
     ? { grouped_failures: undefined, compactFailures: failures }
@@ -221,13 +289,16 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
       assertion_failures: assertionFailures,
       network_errors: networkErrors,
     },
+    ...(agent_directive ? { agent_directive } : {}),
     ...(sharedEnvHint ? { env_issue: sharedEnvHint } : {}),
+    ...(auth_hint ? { auth_hint } : {}),
+    ...(cascade_skips ? { cascade_skips } : {}),
     failures: compactFailures,
     ...(grouped_failures ? { grouped_failures } : {}),
   };
 }
 
-type FailureItem = { suite_name: string; test_name: string; failure_type: string; hint?: string; response_status: number | null };
+type FailureItem = { suite_name: string; test_name: string; failure_type: string; recommended_action: RecommendedAction; hint?: string; response_status: number | null };
 
 /** Group similar failures for compact output. Exported for testing. */
 export function groupFailures<T extends FailureItem>(failures: T[]): { grouped_failures?: FailureGroup[]; compactFailures: T[] } {
@@ -268,6 +339,7 @@ export function groupFailures<T extends FailureItem>(failures: T[]): { grouped_f
       pattern,
       count: group.items.length,
       failure_type: group.failure_type,
+      recommended_action: group.items[0]!.recommended_action,
       hint: group.hint,
       examples: group.items.slice(0, 2).map(f => `${f.suite_name}/${f.test_name}`),
       response_status: group.response_status,

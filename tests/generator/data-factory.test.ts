@@ -185,6 +185,21 @@ describe("generateFromSchema", () => {
     expect(result.image).toBe("https://example.com/test");
   });
 
+  test("format: date returns date-only string", () => {
+    const result = generateFromSchema({ type: "string", format: "date" } as OpenAPIV3.SchemaObject);
+    expect(result).toBe("2025-01-01");
+  });
+
+  test("format: date-time returns full datetime string", () => {
+    const result = generateFromSchema({ type: "string", format: "date-time" } as OpenAPIV3.SchemaObject);
+    expect(result).toBe("2025-01-01T00:00:00Z");
+  });
+
+  test("integer with format: uuid returns uuid placeholder", () => {
+    const result = generateFromSchema({ type: "integer", format: "uuid" } as OpenAPIV3.SchemaObject);
+    expect(result).toBe("{{$uuid}}");
+  });
+
   test("nested object", () => {
     const schema: OpenAPIV3.SchemaObject = {
       type: "object",
@@ -201,5 +216,69 @@ describe("generateFromSchema", () => {
     const result = generateFromSchema(schema) as Record<string, any>;
     expect(result.owner.name).toBe("{{$randomName}}");
     expect(result.owner.email).toBe("{{$randomEmail}}");
+  });
+});
+
+import { generateMultipartFromSchema } from "../../src/core/generator/data-factory.ts";
+import type { OpenAPIV3 as OA } from "openapi-types";
+
+describe("guessIntPlaceholder constraints", () => {
+  test("uses minimum when set and no maximum", () => {
+    const result = generateFromSchema({ type: "integer", minimum: 5 } as OA.SchemaObject);
+    expect(result).toBe(5);
+  });
+
+  test("returns randomInt placeholder when no constraints", () => {
+    const result = generateFromSchema({ type: "integer" } as OA.SchemaObject);
+    expect(result).toBe("{{$randomInt}}");
+  });
+
+  test("respects maximum — returns concrete value within range", () => {
+    const result = generateFromSchema({ type: "integer", maximum: 100 } as OA.SchemaObject);
+    expect(typeof result).toBe("number");
+    expect(result as number).toBeLessThanOrEqual(100);
+  });
+
+  test("respects both minimum and maximum", () => {
+    const result = generateFromSchema({ type: "integer", minimum: 1, maximum: 50 } as OA.SchemaObject);
+    expect(typeof result).toBe("number");
+    expect(result as number).toBeGreaterThanOrEqual(1);
+    expect(result as number).toBeLessThanOrEqual(50);
+  });
+
+  test("maximum = 0 uses 0", () => {
+    const result = generateFromSchema({ type: "integer", maximum: 0 } as OA.SchemaObject);
+    expect(result).toBe(0);
+  });
+});
+
+describe("generateMultipartFromSchema", () => {
+  test("binary field becomes file upload object", () => {
+    const schema: OA.SchemaObject = {
+      type: "object",
+      properties: {
+        file: { type: "string", format: "binary" } as OA.SchemaObject,
+        description: { type: "string" } as OA.SchemaObject,
+      },
+    };
+    const result = generateMultipartFromSchema(schema);
+    expect(result.file).toEqual({ file: "./fixtures/file.bin", content_type: "application/octet-stream" });
+    expect(result.description).toBe("{{$randomString}}");
+  });
+
+  test("byte field becomes file upload object", () => {
+    const schema: OA.SchemaObject = {
+      type: "object",
+      properties: {
+        content: { type: "string", format: "byte" } as OA.SchemaObject,
+      },
+    };
+    const result = generateMultipartFromSchema(schema);
+    expect(result.content).toEqual({ file: "./fixtures/content.bin", content_type: "application/octet-stream" });
+  });
+
+  test("returns empty object for schema without properties", () => {
+    const result = generateMultipartFromSchema({ type: "object" } as OA.SchemaObject);
+    expect(result).toEqual({});
   });
 });
