@@ -33,6 +33,9 @@ export function generateFromSchema(
     return schema.enum[0];
   }
 
+  // uuid format overrides type (e.g. integer fields with format: uuid)
+  if (schema.format === "uuid") return "{{$uuid}}";
+
   switch (schema.type) {
     case "string":
       return guessStringPlaceholder(schema, propertyName);
@@ -85,7 +88,8 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
   // Format-based
   if (schema.format === "email") return "{{$randomEmail}}";
   if (schema.format === "uuid") return "{{$uuid}}";
-  if (schema.format === "date-time" || schema.format === "date") return "2025-01-01T00:00:00Z";
+  if (schema.format === "date-time") return "2025-01-01T00:00:00Z";
+  if (schema.format === "date") return "2025-01-01";
   if (schema.format === "uri" || schema.format === "url") return "https://example.com/test";
   if (schema.format === "hostname") return "example.com";
   if (schema.format === "ipv4") return "192.168.1.1";
