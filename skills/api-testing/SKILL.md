@@ -24,9 +24,9 @@ Otherwise use `zond` directly.
 - **NEVER hardcode auth tokens in `.env.yaml` for servers with in-memory storage** — tokens reset on restart; use `setup.yaml` with `setup: true` to capture a fresh token. Static tokens in `.env.yaml` are fine for persistent API keys or long-lived tokens.
 - **NEVER put `logout` in a setup suite** — it invalidates the captured token for all other suites; keep logout in a dedicated non-setup auth test suite
 - **NEVER tag reset/system endpoints as `smoke`** — use `[system, reset]` or `[unsafe]` tags; `smoke` runs in `--safe` mode and will wipe server state
-- **NEVER repeat login steps in multiple suites** — centralize auth in `setup.yaml`; repeated logins trigger rate limits (e.g. 10 req/60s)
-- **NEVER use `zond request POST /auth/login` to debug auth failures** — each manual login call burns the rate limit budget; use `zond db diagnose` and existing run results instead
-- **NEVER run `--tag crud` alone if there's a setup suite** — setup suites only run when their tag is included; always use `--tag crud,setup` (or whatever tag the setup suite has)
+- **NEVER repeat login steps in multiple suites** — centralize auth in `setup.yaml`; repeated logins quickly exhaust rate limits
+- **NEVER use `zond request` on auth endpoints to debug auth failures** — each manual call burns the rate limit budget; use `zond db diagnose` and existing run results instead
+- **NEVER run `--tag <group>` alone if there's a setup suite** — setup suites only run when their tag is included in the list; always append the setup suite's tag (e.g. `--tag crud,setup`)
 
 ## Workflow
 
@@ -149,13 +149,13 @@ zond run <tests-dir> --tag crud,setup --json         # CRUD + setup (setup must 
 zond run <tests-dir> --env staging --json            # specific environment
 ```
 
-**CRITICAL:** `--tag` filters suites by their tags. Setup suites run only if their tag is in the list. When targeting specific groups (crud, smoke, auth), always append the setup suite's tag:
+**CRITICAL:** `--tag` filters suites by their tags. Setup suites run only if their tag is in the list. When targeting a specific group, always append the setup suite's tag:
 ```bash
-# Wrong — setup won't run, CRUD suites get 401
-zond run <tests-dir> --tag crud --json
+# Wrong — setup won't run, protected suites get 401
+zond run <tests-dir> --tag <group> --json
 
 # Correct
-zond run <tests-dir> --tag crud,setup --json
+zond run <tests-dir> --tag <group>,<setup-tag> --json
 ```
 
 Diagnose and fix failures the same way as step 5.
@@ -292,7 +292,7 @@ ETag pattern — always GET before PUT to capture etag:
     status: 200
 ```
 Generators: `{{$randomInt}}`, `{{$uuid}}`, `{{$timestamp}}`, `{{$randomEmail}}`, `{{$randomString}}`, `{{$randomName}}`.
-Generators in `set:` are evaluated **once** when the step executes — use `set:` to pin a generated value across multiple steps. If you need to use the same email in register + login, use `set:` or capture from the register response.
-Soft delete: some APIs return `200 + {status: "cancelled"}` on DELETE instead of 404 — verify actual behavior before asserting.
+Generators in `set:` are evaluated **once** when the step executes — use `set:` to pin a generated value across multiple steps. To reuse the same generated value in a later step, either store it via `set:` or capture it from the response.
+Soft delete: some APIs return `200` on DELETE with a status field instead of `404` — verify actual behavior before asserting status or absence of the resource.
 `form:` sends `application/x-www-form-urlencoded` only — binary file uploads (multipart) are not supported; exclude file upload endpoints from coverage.
 Env: `.env.yaml` (default) or `.env.<name>.yaml` in tests dir or parent.
