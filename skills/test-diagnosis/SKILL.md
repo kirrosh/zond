@@ -18,14 +18,14 @@ allowed-tools: [Read, Write, Bash(zond *)]
    ```bash
    zond db diagnose <run-id> --json
    ```
-3. For each failure, analyze:
-   - **401/403** → auth problem, check .env.yaml tokens
-   - **404** → wrong path or missing resource, check test URL
-   - **400/422** → request body doesn't match schema, check fields
-   - **500** → server bug, DON'T fix the test expectation
-   - **Timeout** → server slow or unreachable
-4. Fix the TEST (request), not the expected response
-5. Re-run after fixes:
+3. Check `agent_directive` first — if present in the output, follow it literally before anything else.
+4. For each failure, act based on `recommended_action`:
+   - `report_backend_bug` → **STOP iterating.** Server returned 5xx. Do NOT change `expect: status`. Report the issue to the user with the `response_body`.
+   - `fix_auth_config` → Check `.env.yaml` tokens. Do NOT rewrite test logic.
+   - `fix_test_logic` → Fix path, request body, or assertions in the YAML file.
+   - `fix_network_config` → Check `base_url` in `.env.yaml`.
+5. Fix only tests with `fix_test_logic` action. Re-run after fixes:
    ```bash
    zond run <path> --safe --json
    ```
+6. If `summary.api_errors > 0` — stop and report: list affected tests with their `response_body`.
