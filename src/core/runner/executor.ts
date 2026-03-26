@@ -112,6 +112,14 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
       }
     }
 
+    // Process set: on HTTP steps — evaluate generators once before building request
+    if (step.set) {
+      for (const [key, rawDirective] of Object.entries(step.set)) {
+        const substituted = substituteDeep(rawDirective, variables);
+        variables[key] = applyTransform(substituted);
+      }
+    }
+
     // Substitute variables
     const resolved = substituteStep(step, variables);
 

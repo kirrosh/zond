@@ -430,6 +430,44 @@ describe("flow control", () => {
     expect(result.steps[0]!.status).toBe("pass");
   });
 
+  test("set: on HTTP step evaluates generators once before request", async () => {
+    const requestBodies: unknown[] = [];
+    globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
+      if (init?.body) requestBodies.push(JSON.parse(init.body as string));
+      return new Response(JSON.stringify({ ok: true }), { status: 201, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "Set on HTTP test",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "Register",
+          method: "POST",
+          path: "http://example.com/register",
+          set: { test_email: "test_{{$uuid}}@example.com" },
+          json: { email: "{{test_email}}" },
+          expect: { status: 201 },
+        },
+        {
+          name: "Login",
+          method: "POST",
+          path: "http://example.com/login",
+          json: { email: "{{test_email}}" },
+          expect: { status: 201 },
+        },
+      ],
+    };
+
+    await runSuite(suite);
+    expect(requestBodies).toHaveLength(2);
+    const registerEmail = (requestBodies[0] as Record<string, string>).email;
+    const loginEmail = (requestBodies[1] as Record<string, string>).email;
+    // Both steps must use the same email (UUID pinned on set:)
+    expect(registerEmail).toBe(loginEmail);
+    expect(registerEmail).toMatch(/^test_[0-9a-f-]+@example\.com$/);
+  });
+
   test("for_each expands steps for each item", async () => {
     let urls: string[] = [];
     globalThis.fetch = mock(async (url: string | URL | Request) => {
@@ -598,5 +636,71 @@ describe("URL validation", () => {
     expect(result.steps[0]!.status).toBe("error");
     expect(result.steps[1]!.status).toBe("skip");
     expect(result.steps[1]!.error).toContain("item_id");
+  });
+});
+
+describe("setup suite propagation", () => {
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  test("captures from setup suite propagate to regular suite via env merge", async () => {
+    // Simulate the propagation pattern used in execute-run.ts and run.ts:
+    //   setupCaptures collected from setup suite results
+    //   regular suite receives { ...env, ...setupCaptures }
+    mockFetchResponses([
+      { status: 200, body: { token: "setup-token-xyz" } },  // setup: login
+      { status: 200, body: { data: "ok" } },                 // regular: protected endpoint
+    ]);
+
+    const setupSuite: TestSuite = {
+      name: "setup",
+      setup: true,
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Login",
+        method: "POST",
+        path: "http://example.com/auth/login",
+        json: { username: "admin", password: "pass" },
+        expect: {
+          status: 200,
+          body: { token: { capture: "auth_token" } },
+        },
+      }],
+    };
+
+    const regularSuite: TestSuite = {
+      name: "api-tests",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Get data",
+        method: "GET",
+        path: "http://example.com/data",
+        headers: { Authorization: "Bearer {{auth_token}}" },
+        expect: { status: 200 },
+      }],
+    };
+
+    // Run setup suite, collect captures
+    const setupResult = await runSuite(setupSuite, {});
+    expect(setupResult.steps[0]!.status).toBe("pass");
+
+    const setupCaptures: Record<string, string> = {};
+    for (const step of setupResult.steps) {
+      for (const [k, v] of Object.entries(step.captures)) {
+        setupCaptures[k] = String(v);
+      }
+    }
+    expect(setupCaptures["auth_token"]).toBe("setup-token-xyz");
+
+    // Run regular suite with setupCaptures merged in (overrides stale env value)
+    const staleEnv = { auth_token: "old-stale-token" };
+    const enrichedEnv = { ...staleEnv, ...setupCaptures };
+    const regularResult = await runSuite(regularSuite, enrichedEnv);
+    expect(regularResult.steps[0]!.status).toBe("pass");
+
+    // Verify the request used the fresh token, not the stale one
+    const sentHeader = regularResult.steps[0]!.request.headers["Authorization"];
+    expect(sentHeader).toBe("Bearer setup-token-xyz");
   });
 });
