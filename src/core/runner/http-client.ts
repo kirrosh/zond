@@ -34,7 +34,7 @@ export async function executeRequest(
       const response = await fetch(request.url, {
         method: request.method,
         headers: request.headers,
-        body: request.body ?? undefined,
+        body: request.formData ?? request.body ?? undefined,
         signal: controller.signal,
         redirect: opts.follow_redirects ? "follow" : "manual",
         tls: { rejectUnauthorized: false },
