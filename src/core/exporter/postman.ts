@@ -8,6 +8,7 @@ import type { TestSuite, TestStep, AssertionRule } from "../parser/types.ts";
 interface PostmanInfo {
   name: string;
   schema: string;
+  description?: string;
 }
 
 interface PostmanVariable {
@@ -73,6 +74,7 @@ interface PostmanItem {
 
 interface PostmanFolder {
   name: string;
+  description?: string;
   item: PostmanItem[];
 }
 
@@ -261,24 +263,35 @@ function serializeValue(val: unknown): string {
   return JSON.stringify(val);
 }
 
-/** Build JS lines for a single body field assertion rule. */
+/**
+ * Build JS lines for a single body field assertion rule.
+ * `root` controls the JS variable used as the object root (default "jsonData",
+ * use "item" when generating assertions inside a forEach/find callback).
+ */
 function buildFieldAssertions(
   dotPath: string,
   rule: AssertionRule,
-  warnings: string[]
+  warnings: string[],
+  root = "jsonData"
 ): string[] {
   const lines: string[] = [];
-  const accessor = dotPathToAccessor(dotPath, "jsonData");
+  const accessor = dotPathToAccessor(dotPath, root);
 
   if (rule.capture !== undefined) {
     lines.push(`pm.environment.set(${JSON.stringify(rule.capture)}, ${accessor});`);
   }
 
   if (rule.type !== undefined) {
-    const chai = rule.type === "integer" ? "number" : rule.type;
-    lines.push(
-      `pm.test(${JSON.stringify(`${dotPath} is ${rule.type}`)}, () => pm.expect(${accessor}).to.be.a(${JSON.stringify(chai)}));`
-    );
+    if (rule.type === "integer") {
+      // Number.isInteger() is precise — .be.a('number') would also pass floats
+      lines.push(
+        `pm.test(${JSON.stringify(`${dotPath} is integer`)}, () => pm.expect(Number.isInteger(${accessor})).to.be.true);`
+      );
+    } else {
+      lines.push(
+        `pm.test(${JSON.stringify(`${dotPath} is ${rule.type}`)}, () => pm.expect(${accessor}).to.be.a(${JSON.stringify(rule.type)}));`
+      );
+    }
   }
 
   if (rule.equals !== undefined) {
@@ -306,7 +319,6 @@ function buildFieldAssertions(
   }
 
   if (rule.matches !== undefined) {
-    // Build a regex literal from the pattern string
     const escaped = rule.matches.replace(/\//g, "\\/");
     lines.push(
       `pm.test(${JSON.stringify(`${dotPath} matches regex`)}, () => pm.expect(${accessor}).to.match(/${escaped}/));`
@@ -314,7 +326,7 @@ function buildFieldAssertions(
   }
 
   if (rule.exists !== undefined) {
-    const { parent, key } = dotPathToParentAndKey(dotPath, "jsonData");
+    const { parent, key } = dotPathToParentAndKey(dotPath, root);
     if (rule.exists) {
       lines.push(
         `pm.test(${JSON.stringify(`${dotPath} exists`)}, () => pm.expect(${parent}).to.have.property(${JSON.stringify(key)}));`
@@ -374,16 +386,76 @@ function buildFieldAssertions(
   }
 
   if (rule.each !== undefined) {
-    lines.push(`// WARNING: '${dotPath}.each' assertion cannot be translated to Postman (not supported)`);
-    warnings.push(`'${dotPath}.each' assertion skipped — not supported in Postman`);
+    // Generate a forEach loop that applies assertions to every array item.
+    // Pass root="item" so all inner accessors reference the loop variable.
+    const innerLines: string[] = [];
+    for (const [field, fieldRule] of Object.entries(rule.each)) {
+      innerLines.push(...buildFieldAssertions(field, fieldRule, warnings, "item"));
+    }
+    if (innerLines.length > 0) {
+      lines.push(`pm.test(${JSON.stringify(`${dotPath} each item assertions`)}, () => {`);
+      lines.push(`  (${accessor} || []).forEach((item) => {`);
+      for (const inner of innerLines) {
+        lines.push(`    ${inner}`);
+      }
+      lines.push(`  });`);
+      lines.push(`});`);
+    }
   }
+
   if (rule.contains_item !== undefined) {
-    lines.push(`// WARNING: '${dotPath}.contains_item' assertion cannot be translated to Postman (not supported)`);
-    warnings.push(`'${dotPath}.contains_item' assertion skipped — not supported in Postman`);
+    // Build a JS boolean expression per field-rule pair for use in .some().
+    // Covers the most common predicates; unsupported ones fall back to a comment.
+    const conditions: string[] = [];
+    for (const [field, fieldRule] of Object.entries(rule.contains_item)) {
+      const itemAcc = dotPathToAccessor(field, "item");
+      if (fieldRule.equals !== undefined) {
+        conditions.push(`${itemAcc} === ${serializeValue(fieldRule.equals)}`);
+      } else if (fieldRule.not_equals !== undefined) {
+        conditions.push(`${itemAcc} !== ${serializeValue(fieldRule.not_equals)}`);
+      } else if (fieldRule.type === "integer") {
+        conditions.push(`Number.isInteger(${itemAcc})`);
+      } else if (fieldRule.type !== undefined) {
+        const jsType = fieldRule.type === "array" ? "object" : fieldRule.type;
+        conditions.push(`typeof ${itemAcc} === ${JSON.stringify(jsType)}`);
+      } else if (fieldRule.exists === true) {
+        conditions.push(`${itemAcc} !== undefined && ${itemAcc} !== null`);
+      } else if (fieldRule.exists === false) {
+        conditions.push(`(${itemAcc} === undefined || ${itemAcc} === null)`);
+      } else if (fieldRule.gt !== undefined) {
+        conditions.push(`${itemAcc} > ${fieldRule.gt}`);
+      } else if (fieldRule.gte !== undefined) {
+        conditions.push(`${itemAcc} >= ${fieldRule.gte}`);
+      } else if (fieldRule.lt !== undefined) {
+        conditions.push(`${itemAcc} < ${fieldRule.lt}`);
+      } else if (fieldRule.lte !== undefined) {
+        conditions.push(`${itemAcc} <= ${fieldRule.lte}`);
+      } else if (fieldRule.contains !== undefined) {
+        conditions.push(`typeof ${itemAcc} === "string" && ${itemAcc}.includes(${serializeValue(fieldRule.contains)})`);
+      } else if (fieldRule.matches !== undefined) {
+        const escaped = fieldRule.matches.replace(/\//g, "\\/");
+        conditions.push(`/${escaped}/.test(${itemAcc})`);
+      }
+    }
+    if (conditions.length > 0) {
+      lines.push(
+        `pm.test(${JSON.stringify(`${dotPath} contains matching item`)}, () => {`,
+        `  pm.expect((${accessor} || []).some(item => ${conditions.join(" && ")})).to.be.true;`,
+        `});`
+      );
+    } else {
+      lines.push(`// contains_item: no translatable conditions for '${dotPath}'`);
+    }
   }
+
   if (rule.set_equals !== undefined) {
-    lines.push(`// WARNING: '${dotPath}.set_equals' assertion cannot be translated to Postman (not supported)`);
-    warnings.push(`'${dotPath}.set_equals' assertion skipped — not supported in Postman`);
+    // Sort both arrays and deep-compare — order-independent equality
+    const expected = serializeValue(rule.set_equals);
+    lines.push(
+      `pm.test(${JSON.stringify(`${dotPath} set equals`)}, () => {`,
+      `  pm.expect([...${accessor}].sort()).to.deep.equal([...${expected}].sort());`,
+      `});`
+    );
   }
 
   return lines;
@@ -625,6 +697,78 @@ function collectVariables(suites: TestSuite[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// skip_if → pre-request script
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a simple zond skip_if expression and return a JS condition string
+ * suitable for use in a Postman pre-request script.
+ *
+ * Supported patterns:
+ *   "varName == 'value'"   →  pm.environment.get("varName") == "value"
+ *   "varName != 'value'"   →  pm.environment.get("varName") != "value"
+ *   "varName == \"\""      →  !pm.environment.get("varName")
+ *   "varName"              →  !!pm.environment.get("varName")   (truthy)
+ *   "!varName"             →  !pm.environment.get("varName")    (falsy)
+ *
+ * Returns null if the expression cannot be translated.
+ */
+function parseSkipIfCondition(expr: string): string | null {
+  const trimmed = expr.trim();
+
+  // Pattern: varName OP 'value' or varName OP "value" or varName OP number
+  const compMatch = trimmed.match(/^(\w+)\s*(==|!=|>=|<=|>|<)\s*(['"])(.*?)\3\s*$/) ||
+                    trimmed.match(/^(\w+)\s*(==|!=|>=|<=|>|<)\s*(\d+(?:\.\d+)?)\s*$/);
+  if (compMatch) {
+    const varName = compMatch[1]!;
+    const op = compMatch[2]!;
+    const rawVal = compMatch[3]!.startsWith("'") || compMatch[3]!.startsWith('"')
+      ? compMatch[4]!       // string value
+      : compMatch[3]!;      // numeric value (3rd group is digit string here)
+    const jsVal = /^\d/.test(rawVal) && !compMatch[3]!.startsWith("'") && !compMatch[3]!.startsWith('"')
+      ? rawVal
+      : JSON.stringify(rawVal);
+    // Special case: == "" or == '' → treat as falsy check
+    if ((op === "==" || op === "!=") && rawVal === "") {
+      return op === "==" ? `!pm.environment.get(${JSON.stringify(varName)})` : `!!pm.environment.get(${JSON.stringify(varName)})`;
+    }
+    return `pm.environment.get(${JSON.stringify(varName)}) ${op} ${jsVal}`;
+  }
+
+  // Pattern: !varName  (falsy)
+  const negMatch = trimmed.match(/^!(\w+)$/);
+  if (negMatch) {
+    return `!pm.environment.get(${JSON.stringify(negMatch[1]!)})`;
+  }
+
+  // Pattern: bare varName (truthy)
+  if (/^\w+$/.test(trimmed)) {
+    return `!!pm.environment.get(${JSON.stringify(trimmed)})`;
+  }
+
+  return null;
+}
+
+function buildSkipIfEvent(skipIf: string, nextStepName: string | null): PostmanEvent {
+  const condition = parseSkipIfCondition(skipIf);
+  const exec: string[] = [];
+
+  if (condition !== null) {
+    const target = nextStepName !== null ? JSON.stringify(nextStepName) : "null";
+    exec.push(`// skip_if: ${skipIf}`);
+    exec.push(`if (${condition}) {`);
+    exec.push(`  pm.execution.setNextRequest(${target});`);
+    exec.push(`}`);
+  } else {
+    // Cannot parse — emit a comment so the user can fill it in manually
+    exec.push(`// skip_if (manual translation needed): ${skipIf}`);
+    exec.push(`// if (<condition>) pm.execution.setNextRequest(${nextStepName !== null ? JSON.stringify(nextStepName) : "null"});`);
+  }
+
+  return { listen: "prerequest", script: { type: "text/javascript", exec } };
+}
+
+// ---------------------------------------------------------------------------
 // Item builder
 // ---------------------------------------------------------------------------
 
@@ -642,10 +786,12 @@ function isSetOnlyStep(step: TestStep): boolean {
 function buildItem(
   suite: TestSuite,
   step: TestStep,
-  warnings: string[]
+  warnings: string[],
+  nextStepName: string | null,
+  pendingSetVars: Record<string, unknown>
 ): PostmanItem | null {
   if (isSetOnlyStep(step)) {
-    warnings.push(`Step "${step.name}" in suite "${suite.name}" is a set-only step — skipped (not translatable to Postman)`);
+    // set-only steps are absorbed into the pre-request script of the next HTTP step
     return null;
   }
 
@@ -655,15 +801,8 @@ function buildItem(
   if (step.retry_until !== undefined) {
     warnings.push(`Step "${step.name}" in suite "${suite.name}" uses retry_until — converted without retry logic (Postman has no native retry_until)`);
   }
-  if (step.skip_if !== undefined) {
-    warnings.push(`Step "${step.name}" in suite "${suite.name}" uses skip_if — converted without skip logic (Postman has no native skip_if)`);
-  }
 
-  const url = buildUrl(
-    suite.base_url,
-    mapDynamicVars(step.path),
-    step.query
-  );
+  const url = buildUrl(suite.base_url, mapDynamicVars(step.path), step.query);
   const header = buildHeaders(suite, step);
   const body = buildBody(step);
 
@@ -674,12 +813,28 @@ function buildItem(
     ...(body !== undefined ? { body } : {}),
   };
 
+  const events: PostmanEvent[] = [];
+
+  // Pre-request: inject any pending set-step variables
+  if (Object.keys(pendingSetVars).length > 0) {
+    const setLines = Object.entries(pendingSetVars).map(
+      ([k, v]) => `pm.environment.set(${JSON.stringify(k)}, ${serializeValue(v)});`
+    );
+    events.push({ listen: "prerequest", script: { type: "text/javascript", exec: setLines } });
+  }
+
+  // Pre-request: skip_if condition
+  if (step.skip_if !== undefined) {
+    events.push(buildSkipIfEvent(step.skip_if, nextStepName));
+  }
+
   const testEvent = buildTestScript(step, warnings);
+  if (testEvent !== undefined) events.push(testEvent);
 
   const item: PostmanItem = {
     name: step.name,
     request,
-    ...(testEvent !== undefined ? { event: [testEvent] } : {}),
+    ...(events.length > 0 ? { event: events } : {}),
   };
 
   return item;
@@ -709,15 +864,56 @@ export function buildCollection(
 
   const folders: PostmanFolder[] = [];
 
+  // Collect Newman flag hints for non-default suite configs
+  const newmanHints: string[] = [];
+
   for (const suite of sorted) {
     const items: PostmanItem[] = [];
 
-    for (const step of suite.tests) {
-      const item = buildItem(suite, step, warnings);
+    // Collect Newman hints for non-default suite config values
+    if (suite.config.timeout !== 30000) {
+      newmanHints.push(`--timeout-request ${suite.config.timeout}  (suite "${suite.name}")`);
+    }
+    if (!suite.config.verify_ssl) {
+      newmanHints.push(`--insecure  (suite "${suite.name}" has verify_ssl: false)`);
+    }
+    if (suite.config.retries > 0) {
+      newmanHints.push(`# retries: ${suite.config.retries}  (suite "${suite.name}" — no Newman equivalent)`);
+    }
+
+    // Iterate steps: accumulate set-only vars, pass nextStepName to each item builder
+    const httpSteps = suite.tests.filter((s) => !isSetOnlyStep(s));
+    let pendingSetVars: Record<string, unknown> = {};
+
+    for (let i = 0; i < suite.tests.length; i++) {
+      const step = suite.tests[i]!;
+
+      if (isSetOnlyStep(step)) {
+        // Merge into pending set vars for the next HTTP step
+        Object.assign(pendingSetVars, step.set ?? {});
+        continue;
+      }
+
+      // Find the next HTTP step name for setNextRequest in skip_if
+      const httpIdx = httpSteps.indexOf(step);
+      const nextHttpStep = httpSteps[httpIdx + 1] ?? null;
+
+      const item = buildItem(suite, step, warnings, nextHttpStep?.name ?? null, pendingSetVars);
+      pendingSetVars = {}; // consumed
+
       if (item !== null) items.push(item);
     }
 
-    folders.push({ name: suite.name, item: items });
+    // If there are leftover set-only steps at the end with no following HTTP step, warn
+    if (Object.keys(pendingSetVars).length > 0) {
+      warnings.push(`Suite "${suite.name}" has trailing set-only steps with no following HTTP step — variables not exported`);
+    }
+
+    folders.push({
+      name: suite.name,
+      ...(suite.description ? { description: suite.description } : {}),
+      item: items,
+    });
   }
 
   const varNames = collectVariables(sorted);
@@ -727,10 +923,17 @@ export function buildCollection(
     enabled: true,
   }));
 
+  // Build collection-level description with Newman hints if needed
+  const uniqueHints = [...new Set(newmanHints)];
+  const collectionDescription = uniqueHints.length > 0
+    ? `Generated by zond export postman.\n\nNewman flags required by suite config:\n  newman run collection.json \\\n    ${uniqueHints.join(" \\\n    ")}`
+    : undefined;
+
   const collection: PostmanCollection = {
     info: {
       name: collectionName,
       schema: "https://schema.postman.com/json/collection/v2.1.0/collection.json",
+      ...(collectionDescription ? { description: collectionDescription } : {}),
     },
     item: folders,
     ...(variables.length > 0 ? { variable: variables } : {}),
