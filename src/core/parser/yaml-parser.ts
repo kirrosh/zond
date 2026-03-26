@@ -1,4 +1,5 @@
 import { Glob } from "bun";
+import { resolve } from "node:path";
 import { validateSuite } from "./schema.ts";
 import type { TestSuite } from "./types.ts";
 
@@ -19,7 +20,7 @@ export async function parseFile(filePath: string): Promise<TestSuite> {
 
   try {
     const suite = validateSuite(raw);
-    suite.filePath = filePath;
+    suite.filePath = resolve(filePath);
     return suite;
   } catch (err) {
     throw new Error(`Validation error in ${filePath}: ${(err as Error).message}`);

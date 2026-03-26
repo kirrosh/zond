@@ -244,15 +244,24 @@ export function checkAssertions(expect: TestStepExpect, response: HttpResponse):
   }
 
   if (expect.headers) {
-    for (const [key, expectedValue] of Object.entries(expect.headers)) {
+    for (const [key, rule] of Object.entries(expect.headers)) {
       const actual = response.headers[key.toLowerCase()];
-      results.push({
-        field: `headers.${key}`,
-        rule: `equals "${expectedValue}"`,
-        passed: actual === expectedValue,
-        actual,
-        expected: expectedValue,
-      });
+      if (typeof rule === "string") {
+        results.push({
+          field: `headers.${key}`,
+          rule: `equals "${rule}"`,
+          passed: actual === rule,
+          actual,
+          expected: rule,
+        });
+      } else {
+        // AssertionRule in header — supports capture and other checks
+        const ruleResults = checkRule(key, rule, actual).map(r => ({
+          ...r,
+          field: r.field.replace(/^body\./, "headers."),
+        }));
+        results.push(...ruleResults);
+      }
     }
   }
 
@@ -276,24 +285,39 @@ export function checkAssertions(expect: TestStepExpect, response: HttpResponse):
 export function extractCaptures(
   bodyRules: Record<string, AssertionRule> | undefined,
   responseBody: unknown,
+  headerRules?: Record<string, string | AssertionRule>,
+  responseHeaders?: Record<string, string>,
 ): Record<string, unknown> {
   const captures: Record<string, unknown> = {};
-  if (!bodyRules || responseBody === undefined) return captures;
 
-  for (const [path, rule] of Object.entries(bodyRules)) {
-    if (rule.capture) {
-      let value: unknown;
-      if (path === "_body") {
-        value = responseBody;
-      } else if (path.startsWith("_body.")) {
-        value = getByPath(responseBody, path.slice(6));
-      } else {
-        value = getByPath(responseBody, path);
-      }
-      if (value !== undefined) {
-        captures[rule.capture] = value;
+  if (bodyRules && responseBody !== undefined) {
+    for (const [path, rule] of Object.entries(bodyRules)) {
+      if (rule.capture) {
+        let value: unknown;
+        if (path === "_body") {
+          value = responseBody;
+        } else if (path.startsWith("_body.")) {
+          value = getByPath(responseBody, path.slice(6));
+        } else {
+          value = getByPath(responseBody, path);
+        }
+        if (value !== undefined) {
+          captures[rule.capture] = value;
+        }
       }
     }
   }
+
+  if (headerRules && responseHeaders) {
+    for (const [key, rule] of Object.entries(headerRules)) {
+      if (typeof rule !== "string" && rule.capture) {
+        const value = responseHeaders[key.toLowerCase()];
+        if (value !== undefined) {
+          captures[rule.capture] = value;
+        }
+      }
+    }
+  }
+
   return captures;
 }

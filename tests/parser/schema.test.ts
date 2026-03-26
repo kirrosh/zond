@@ -243,4 +243,21 @@ describe("validateSuite", () => {
     expect(body["results"]!.contains_item).toBeDefined();
     expect(body["results"]!.contains_item!["name"]!.contains).toBe("test");
   });
+
+  test("parses setup: true flag", () => {
+    const suite = validateSuite({
+      name: "auth",
+      setup: true,
+      tests: [{ POST: "/auth/login", name: "login", expect: { status: 200 } }],
+    });
+    expect(suite.setup).toBe(true);
+  });
+
+  test("setup defaults to undefined when not set", () => {
+    const suite = validateSuite({
+      name: "regular",
+      tests: [{ GET: "/health", name: "health", expect: { status: 200 } }],
+    });
+    expect(suite.setup).toBeUndefined();
+  });
 });

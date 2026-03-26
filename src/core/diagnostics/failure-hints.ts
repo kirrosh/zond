@@ -37,6 +37,26 @@ export function envHint(url: string | null, errorMessage: string | null, envFile
   return null;
 }
 
+export type RecommendedAction =
+  | "report_backend_bug"
+  | "fix_auth_config"
+  | "fix_test_logic"
+  | "fix_network_config";
+
+export function recommendedAction(
+  failureType: "api_error" | "assertion_failed" | "network_error",
+  responseStatus: number | null,
+): RecommendedAction {
+  if (failureType === "api_error") return "report_backend_bug";
+  if (failureType === "network_error") {
+    if (responseStatus === 401 || responseStatus === 403) return "fix_auth_config";
+    return "fix_network_config";
+  }
+  // assertion_failed
+  if (responseStatus === 401 || responseStatus === 403) return "fix_auth_config";
+  return "fix_test_logic";
+}
+
 export function envCategory(hint: string | undefined): string | null {
   if (!hint) return null;
   if (hint.includes("base_url is not set") || hint.includes("base_url is missing") || hint.includes("base_url is not configured")) return "base_url_missing";
@@ -51,6 +71,25 @@ export function schemaHint(
 ): string | null {
   if (failureType === "assertion_failed" || responseStatus === 400 || responseStatus === 422) {
     return "Use describe_endpoint(specPath, method, path) to verify expected request/response schema";
+  }
+  return null;
+}
+
+export function softDeleteHint(
+  actualStatus: number | null | undefined,
+  requestMethod: string | null | undefined,
+  responseBody: unknown,
+): string | null {
+  if (actualStatus !== 200 || requestMethod?.toUpperCase() !== "GET") return null;
+  if (responseBody && typeof responseBody === "object") {
+    const hasStatusField =
+      "status" in (responseBody as object) ||
+      "state" in (responseBody as object) ||
+      "deleted" in (responseBody as object) ||
+      "is_deleted" in (responseBody as object);
+    if (hasStatusField) {
+      return 'GET returned 200 with a status/state field after DELETE — likely soft delete. Update the test: remove the "Verify deleted → 404" step and instead assert the status field value (e.g. status: "cancelled")';
+    }
   }
   return null;
 }

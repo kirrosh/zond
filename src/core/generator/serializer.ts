@@ -29,11 +29,13 @@ export interface RawStep {
   expect: {
     status?: number;
     body?: Record<string, Record<string, string>>;
+    headers?: Record<string, unknown>;
   };
 }
 
 export interface RawSuite {
   name: string;
+  setup?: boolean;
   tags?: string[];
   folder?: string;
   fileStem?: string;
@@ -49,6 +51,9 @@ export interface RawSuite {
 export function serializeSuite(suite: RawSuite): string {
   const lines: string[] = [];
   lines.push(`name: ${yamlScalar(suite.name)}`);
+  if (suite.setup) {
+    lines.push("setup: true");
+  }
   if (suite.tags && suite.tags.length > 0) {
     lines.push(`tags: [${suite.tags.join(", ")}]`);
   }
@@ -167,10 +172,20 @@ function serializeValue(value: unknown, indent: number, lines: string[]): void {
         const entries = Object.entries(item as Record<string, unknown>);
         if (entries.length > 0) {
           const [firstKey, firstVal] = entries[0]!;
-          lines.push(`${prefix}- ${firstKey}: ${formatInlineValue(firstVal)}`);
+          if (typeof firstVal === "object" && firstVal !== null) {
+            lines.push(`${prefix}- ${firstKey}:`);
+            serializeValue(firstVal, indent + 1, lines);
+          } else {
+            lines.push(`${prefix}- ${firstKey}: ${formatInlineValue(firstVal)}`);
+          }
           for (let i = 1; i < entries.length; i++) {
             const [k, v] = entries[i]!;
-            lines.push(`${prefix}  ${k}: ${formatInlineValue(v)}`);
+            if (typeof v === "object" && v !== null) {
+              lines.push(`${prefix}  ${k}:`);
+              serializeValue(v, indent + 1, lines);
+            } else {
+              lines.push(`${prefix}  ${k}: ${formatInlineValue(v)}`);
+            }
           }
         } else {
           lines.push(`${prefix}- {}`);

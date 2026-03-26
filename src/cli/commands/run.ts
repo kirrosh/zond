@@ -12,6 +12,7 @@ import { printError, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { getDb } from "../../db/schema.ts";
 import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from "../../db/queries.ts";
+import { AUTH_PATH_RE } from "../../core/runner/execute-run.ts";
 
 export interface RunOptions {
   path: string;
@@ -55,7 +56,6 @@ export async function runCommand(options: RunOptions): Promise<number> {
 
   // 1c. Safe mode: keep GET, set-only steps, and auth-related requests
   if (options.safe) {
-    const AUTH_PATH_RE = /\/(auth|login|signin|token|oauth)\b/i;
     for (const suite of suites) {
       suite.tests = suite.tests.filter(t => {
         if (t.method === "GET" || !t.method) return true;
@@ -117,13 +117,30 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
-  // 4. Run suites
+  // 4. Run suites — setup suites run first (sequentially), their captures flow into regular suites
   const results: TestRunResult[] = [];
   const dryRun = options.dryRun === true;
+
+  const setupSuites = suites.filter(s => s.setup);
+  const regularSuites = suites.filter(s => !s.setup);
+  const setupCaptures: Record<string, string> = {};
+
+  for (const suite of setupSuites) {
+    const result = await runSuite(suite, env, dryRun);
+    results.push(result);
+    for (const step of result.steps) {
+      for (const [k, v] of Object.entries(step.captures)) {
+        setupCaptures[k] = String(v);
+      }
+    }
+  }
+
+  const enrichedEnv = { ...env, ...setupCaptures };
+
   if (options.bail) {
     // Sequential with bail at suite level
-    for (const suite of suites) {
-      const result = await runSuite(suite, env, dryRun);
+    for (const suite of regularSuites) {
+      const result = await runSuite(suite, enrichedEnv, dryRun);
       results.push(result);
       if (!dryRun && (result.failed > 0 || result.steps.some((s) => s.status === "error"))) {
         break;
@@ -131,7 +148,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   } else {
     // Parallel
-    const all = await Promise.all(suites.map((suite) => runSuite(suite, env, dryRun)));
+    const all = await Promise.all(regularSuites.map((suite) => runSuite(suite, enrichedEnv, dryRun)));
     results.push(...all);
   }
 

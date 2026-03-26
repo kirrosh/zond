@@ -8,6 +8,8 @@ import { dirname, resolve } from "path";
 import { stat } from "node:fs/promises";
 import type { TestRunResult } from "./types.ts";
 
+export const AUTH_PATH_RE = /\/(auth|login|signin|token|oauth)\b/i;
+
 export interface ExecuteRunOptions {
   testPath: string;
   envName?: string;
@@ -52,14 +54,14 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
     }
   }
 
-  // Safe mode: filter to GET-only tests
+  // Safe mode: filter to GET + auth endpoints (same logic as run.ts)
   if (safe) {
     for (const suite of suites) {
-      suite.tests = suite.tests.filter(t => t.method === "GET");
+      suite.tests = suite.tests.filter(t => t.method === "GET" || !t.method || AUTH_PATH_RE.test(t.path));
     }
     suites = suites.filter(s => s.tests.length > 0);
     if (suites.length === 0) {
-      throw new Error("No GET tests found. Nothing to run in safe mode.");
+      throw new Error("No safe tests found. Nothing to run in safe mode.");
     }
   }
 
@@ -83,18 +85,39 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
     return env;
   }
 
-  let results: Awaited<ReturnType<typeof runSuite>>[];
+  // Phase 1: run setup suites first (sequentially), collect their captures
+  const setupSuites = suites.filter(s => s.setup);
+  const regularSuites = suites.filter(s => !s.setup);
+  const setupResults: Awaited<ReturnType<typeof runSuite>>[] = [];
+  const setupCaptures: Record<string, string> = {};
+
+  for (const suite of setupSuites) {
+    const suiteDir = suite.filePath ? dirname(suite.filePath) : envDir;
+    const env = await loadEnvWithOverrides(suiteDir);
+    const result = await runSuite(suite, env, options.dryRun);
+    setupResults.push(result);
+    for (const step of result.steps) {
+      for (const [k, v] of Object.entries(step.captures)) {
+        setupCaptures[k] = String(v);
+      }
+    }
+  }
+
+  // Phase 2: run regular suites with env enriched by setup captures
+  let regularResults: Awaited<ReturnType<typeof runSuite>>[];
   if (isDirectory) {
-    // Per-suite env: load env from each suite's own directory
-    results = await Promise.all(suites.map(async (s) => {
+    regularResults = await Promise.all(regularSuites.map(async (s) => {
       const suiteDir = s.filePath ? dirname(s.filePath) : envDir;
       const env = await loadEnvWithOverrides(suiteDir);
-      return runSuite(s, env, options.dryRun);
+      return runSuite(s, { ...env, ...setupCaptures }, options.dryRun);
     }));
   } else {
     const env = await loadEnvWithOverrides(envDir);
-    results = await Promise.all(suites.map((s) => runSuite(s, env, options.dryRun)));
+    const enrichedEnv = { ...env, ...setupCaptures };
+    regularResults = await Promise.all(regularSuites.map(s => runSuite(s, enrichedEnv, options.dryRun)));
   }
+
+  const results = [...setupResults, ...regularResults];
 
   const runId = createRun({
     started_at: results[0]?.started_at ?? new Date().toISOString(),

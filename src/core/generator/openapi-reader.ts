@@ -124,6 +124,11 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
       const securityReqs = operation.security ?? doc.security ?? [];
       const security = securityReqs.flatMap((req) => Object.keys(req));
 
+      // ETag optimistic locking: detect if endpoint requires If-Match header
+      const requiresEtag =
+        responses.some(r => r.statusCode === 412) ||
+        parameters.some(p => p.name.toLowerCase() === "if-match" && p.in === "header");
+
       endpoints.push({
         path,
         method: method.toUpperCase(),
@@ -137,6 +142,7 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
         responses,
         security,
         deprecated: operation.deprecated ?? false,
+        requiresEtag,
       });
     }
   }

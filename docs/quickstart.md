@@ -53,9 +53,9 @@ claude --dangerously-skip-permissions
 
 Есть два способа — выберите один.
 
-### Способ А: Claude Code плагин (рекомендуется)
+### Claude Code плагин
 
-Плагин даёт MCP-инструменты + скиллы + slash-команды (`/zond:api-test`, `/zond:api-coverage`):
+Плагин даёт скиллы + slash-команды (`/zond:api-test`, `/zond:api-coverage`):
 
 ```
 /plugin marketplace add kirrosh/zond
@@ -66,27 +66,6 @@ claude --dangerously-skip-permissions
 ```
 /plugin install zond@zond-marketplace
 ```
-
-### Способ Б: MCP-сервер (для Cursor, Windsurf и других редакторов)
-
-Если вы используете не Claude Code, а другой редактор с поддержкой MCP:
-
-```json
-{
-  "mcpServers": {
-    "zond": {
-      "command": "npx",
-      "args": ["-y", "@kirrosh/zond@latest", "mcp"]
-    }
-  }
-}
-```
-
-Добавьте эту конфигурацию в настройки MCP вашего редактора. Подробнее: [docs/mcp-guide.md](mcp-guide.md).
-
----
-
-Проверьте, что подключение работает — в приветственном сообщении должен появиться `zond` в списке MCP-серверов, или выполните `/mcp` для диагностики.
 
 ---
 

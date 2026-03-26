@@ -1,3 +1,4 @@
+import { resolve, dirname, basename } from "node:path";
 import type { TestSuite, TestStep, Environment } from "../parser/types.ts";
 import { substituteString, substituteStep, substituteDeep, extractVariableReferences } from "../parser/variables.ts";
 import type { TestRunResult, StepResult, HttpRequest } from "./types.ts";
@@ -66,16 +67,16 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
         const expandedStep = rawSteps[stepIndex + i]!;
         // Temporarily inject into variables when we reach this step
         // We need a way to pass the variable — use a hidden _for_each_vars
-        (expandedStep as Record<string, unknown>).__for_each_var = { key: step.for_each.var, value: items[i] };
+        (expandedStep as unknown as Record<string, unknown>).__for_each_var = { key: step.for_each.var, value: items[i] };
       }
       continue;
     }
 
     // Inject for_each variable if present
-    const forEachData = (step as Record<string, unknown>).__for_each_var as { key: string; value: unknown } | undefined;
+    const forEachData = (step as unknown as Record<string, unknown>).__for_each_var as { key: string; value: unknown } | undefined;
     if (forEachData) {
       variables[forEachData.key] = forEachData.value;
-      delete (step as Record<string, unknown>).__for_each_var;
+      delete (step as unknown as Record<string, unknown>).__for_each_var;
     }
 
     // Handle set-only steps (no HTTP request)
@@ -112,6 +113,14 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
       }
     }
 
+    // Process set: on HTTP steps — evaluate generators once before building request
+    if (step.set) {
+      for (const [key, rawDirective] of Object.entries(step.set)) {
+        const substituted = substituteDeep(rawDirective, variables);
+        variables[key] = applyTransform(substituted);
+      }
+    }
+
     // Substitute variables
     const resolved = substituteStep(step, variables);
 
@@ -121,6 +130,7 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
     const url = buildUrl(resolvedBaseUrl, resolved.path, resolved.query);
     const headers: Record<string, string> = { ...resolvedSuiteHeaders, ...resolved.headers };
     let body: string | undefined;
+    let formData: FormData | undefined;
 
     if (resolved.json !== undefined) {
       body = JSON.stringify(resolved.json);
@@ -132,9 +142,23 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
       if (!headers["Content-Type"] && !headers["content-type"]) {
         headers["Content-Type"] = "application/x-www-form-urlencoded";
       }
+    } else if (resolved.multipart) {
+      const basedir = suite.filePath ? dirname(suite.filePath) : process.cwd();
+      formData = new FormData();
+      for (const [key, field] of Object.entries(resolved.multipart)) {
+        if (typeof field === "string") {
+          formData.append(key, field);
+        } else {
+          const absPath = resolve(basedir, field.file);
+          const buf = await Bun.file(absPath).arrayBuffer();
+          const mime = field.content_type ?? "application/octet-stream";
+          const filename = field.filename ?? basename(absPath);
+          formData.append(key, new Blob([buf], { type: mime }), filename);
+        }
+      }
     }
 
-    const request: HttpRequest = { method: resolved.method, url, headers, body };
+    const request: HttpRequest = { method: resolved.method, url, headers, body, formData };
 
     // Validate absolute URL before attempting fetch
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
@@ -156,7 +180,9 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
     }
 
     if (dryRun) {
-      const bodyPreview = body ? ` ${body.slice(0, 200)}` : "";
+      const bodyPreview = formData
+        ? ` [multipart: ${[...formData.keys()].length} field(s)]`
+        : body ? ` ${body.slice(0, 200)}` : "";
       steps.push({
         name: step.name,
         status: "pass",
@@ -176,7 +202,7 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
       for (let attempt = 0; attempt < rt.max_attempts; attempt++) {
         try {
           const response = await executeRequest(request, fetchOptions);
-          const captures = extractCaptures(resolved.expect.body, response.body_parsed);
+          const captures = extractCaptures(resolved.expect.body, response.body_parsed, resolved.expect.headers, response.headers);
           const assertions = checkAssertions(resolved.expect, response);
           const allPassed = assertions.every((a) => a.passed);
 
@@ -225,8 +251,8 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
     try {
       const response = await executeRequest(request, fetchOptions);
 
-      // Extract captures
-      const captures = extractCaptures(resolved.expect.body, response.body_parsed);
+      // Extract captures (body + header)
+      const captures = extractCaptures(resolved.expect.body, response.body_parsed, resolved.expect.headers, response.headers);
       Object.assign(variables, captures);
 
       // Track expected captures that weren't obtained

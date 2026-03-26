@@ -26,7 +26,7 @@ export interface AssertionRule {
 export interface TestStepExpect {
   status?: number | number[];
   body?: Record<string, AssertionRule>;
-  headers?: Record<string, string>;
+  headers?: Record<string, string | AssertionRule>;
   duration?: number;
 }
 
@@ -41,6 +41,14 @@ export interface ForEach {
   in: unknown;
 }
 
+export interface MultipartFileField {
+  file: string;
+  filename?: string;
+  content_type?: string;
+}
+
+export type MultipartField = string | MultipartFileField;
+
 export interface TestStep {
   name: string;
   method: HttpMethod;
@@ -48,6 +56,7 @@ export interface TestStep {
   headers?: Record<string, string>;
   json?: unknown;
   form?: Record<string, string>;
+  multipart?: Record<string, MultipartField>;
   query?: Record<string, string>;
   expect: TestStepExpect;
   skip_if?: string;
@@ -67,6 +76,8 @@ export interface SuiteConfig {
 export interface TestSuite {
   name: string;
   description?: string;
+  /** If true, this suite runs before all regular suites and its captures are shared into their env */
+  setup?: boolean;
   tags?: string[];
   base_url?: string;
   headers?: Record<string, string>;

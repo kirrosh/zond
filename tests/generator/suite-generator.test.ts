@@ -388,8 +388,9 @@ describe("generateSuites", () => {
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
 
-    expect(suites).toHaveLength(1);
-    expect(suites[0]!.name).toBe("untagged-smoke");
+    // /ping matches healthcheck pattern → sanity suite is also generated
+    const smokeSuite = suites.find(s => s.name === "untagged-smoke");
+    expect(smokeSuite).toBeDefined();
   });
 
   test("suite-level auth when all endpoints share same security", () => {
@@ -577,8 +578,118 @@ describe("generateAuthSuite", () => {
     });
 
     const suite = generateAuthSuite([registerEp, loginEp, logoutEp], noSecurity);
-    // set + register + login + logout = 4 steps
-    expect(suite.tests.length).toBe(4);
-    expect(suite.tests[3]!.name).toBe("logout");
+    // set + register + login = 3 steps; logout is filtered from setup suites
+    // (logout in setup would invalidate the token before other suites use it)
+    expect(suite.tests.length).toBe(3);
+    const stepNames = suite.tests.map(t => t.name);
+    expect(stepNames).not.toContain("logout");
+  });
+});
+
+// ── reset tag detection ──
+
+describe("generateSuites reset tag", () => {
+  test("reset endpoint gets [system, reset] tags, not [smoke, unsafe]", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/admin/reset", method: "POST", tags: ["admin"] }),
+      makeEndpoint({ path: "/admin/users", method: "POST", tags: ["admin"] }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
+
+    const systemSuite = suites.find(s => s.tags?.includes("reset"));
+    expect(systemSuite).toBeDefined();
+    expect(systemSuite!.tags).toEqual(["system", "reset"]);
+    expect(systemSuite!.tests).toHaveLength(1);
+    // POST /admin/users should be in unsafe, not in reset
+    const unsafeSuite = suites.find(s => s.tags?.includes("unsafe"));
+    expect(unsafeSuite).toBeDefined();
+    expect(unsafeSuite!.tests[0]!["POST"]).toBe("/admin/users");
+  });
+
+  test("reset suite name uses 'system-' prefix", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/api/purge", method: "DELETE", tags: ["api"] }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
+    const systemSuite = suites.find(s => s.tags?.includes("reset"));
+    expect(systemSuite).toBeDefined();
+    expect(systemSuite!.name).toBe("api-system");
+  });
+});
+
+// ── smoke path seeds ──
+
+describe("smoke suite path seeds", () => {
+  test("GET endpoint with path param uses seed value 1 in smoke suite", () => {
+    const endpoints = [
+      makeEndpoint({
+        path: "/orders/{orderId}",
+        method: "GET",
+        tags: ["orders"],
+        parameters: [{ name: "orderId", in: "path", schema: { type: "integer" } } as any],
+      }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
+    const smokeSuite = suites.find(s => s.name === "orders-smoke");
+    expect(smokeSuite).toBeDefined();
+    expect(smokeSuite!.tests[0]!["GET"]).toBe("/orders/1");
+  });
+
+  test("GET endpoint with param example uses example value", () => {
+    const endpoints = [
+      makeEndpoint({
+        path: "/items/{sku}",
+        method: "GET",
+        tags: ["items"],
+        parameters: [{ name: "sku", in: "path", schema: { type: "string" }, example: "ABC-123" } as any],
+      }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
+    const smokeSuite = suites.find(s => s.name === "items-smoke");
+    expect(smokeSuite).toBeDefined();
+    expect(smokeSuite!.tests[0]!["GET"]).toBe("/items/ABC-123");
+  });
+});
+
+// ── ETag detection ──
+
+describe("generateCrudSuite ETag", () => {
+  test("adds ETag capture step before update when requiresEtag", () => {
+    const readEp = makeEndpoint({ path: "/items/{id}", method: "GET" });
+    const createEp = makeEndpoint({
+      path: "/items",
+      method: "POST",
+      requestBodySchema: { type: "object", properties: { name: { type: "string" } } } as any,
+      responses: [{ statusCode: 201, description: "Created", schema: { type: "object", properties: { id: { type: "integer" } } } as any }],
+    });
+    const updateEp = makeEndpoint({
+      path: "/items/{id}",
+      method: "PUT",
+      requiresEtag: true,
+      requestBodySchema: { type: "object", properties: { name: { type: "string" } } } as any,
+    });
+
+    const group = {
+      resource: "items",
+      basePath: "/items",
+      itemPath: "/items/{id}",
+      idParam: "id",
+      create: createEp,
+      read: readEp,
+      update: updateEp,
+    };
+
+    const suite = generateCrudSuite(group, noSecurity);
+    const stepNames = suite.tests.map(t => t.name);
+    const etagStepIdx = stepNames.findIndex(n => /get etag/i.test(n));
+    expect(etagStepIdx).toBeGreaterThanOrEqual(0);
+
+    // ETag step comes before the actual update step (which has If-Match)
+    const updateIdx = suite.tests.findIndex(t => (t as any)["PUT"] !== undefined);
+    expect(etagStepIdx).toBeLessThan(updateIdx);
+
+    // Update step has If-Match header
+    const updateStep = suite.tests[updateIdx]!;
+    expect((updateStep as any).headers?.["If-Match"]).toBeDefined();
   });
 });

@@ -21,6 +21,12 @@ Otherwise use `zond` directly.
 - **NEVER use curl/wget** for HTTP requests — use `zond request`
 - **NEVER write test YAML files from scratch** — use `zond generate` first, then edit specific files to fix failures
 - **NEVER invent endpoints** — only use endpoints from `zond describe` output
+- **NEVER hardcode auth tokens in `.env.yaml` for servers with in-memory storage** — tokens reset on restart; use `setup.yaml` with `setup: true` to capture a fresh token. Static tokens in `.env.yaml` are fine for persistent API keys or long-lived tokens.
+- **NEVER put `logout` in a setup suite** — it invalidates the captured token for all other suites; keep logout in a dedicated non-setup auth test suite
+- **NEVER tag reset/system endpoints as `smoke`** — use `[system, reset]` or `[unsafe]` tags; `smoke` runs in `--safe` mode and will wipe server state
+- **NEVER repeat login steps in multiple suites** — centralize auth in `setup.yaml`; repeated logins quickly exhaust rate limits
+- **NEVER use `zond request` on auth endpoints to debug auth failures** — each manual call burns the rate limit budget; use `zond db diagnose` and existing run results instead
+- **NEVER run `--tag <group>` alone if there's a setup suite** — setup suites only run when their tag is included in the list; always append the setup suite's tag (e.g. `--tag crud,setup`)
 
 ## Workflow
 
@@ -39,6 +45,7 @@ zond describe <spec> --compact --json
 zond generate <spec> --output <tests-dir> --json
 ```
 This single command creates:
+- `sanity.yaml` — 1-2 minimal tests: auth + connectivity probe (run this first)
 - Smoke tests (GET endpoints, grouped by tag)
 - CRUD chains (POST → GET → PUT → DELETE with variable capture)
 - Auth tests (login/register endpoints)
@@ -46,9 +53,35 @@ This single command creates:
 
 **Do NOT write YAML files manually.** The generator handles assertions, captures, request bodies, and tag grouping automatically.
 
+Generator smart behaviors:
+- `multipart/form-data` endpoints get `multipart:` bodies (binary fields → `{file: ./fixtures/<field>.bin}`)
+- Reset/flush/purge endpoints get `[system, reset]` tags — not `[smoke, unsafe]`, so they won't run in smoke passes
+- ETag endpoints (412 in responses or `If-Match` parameter) get a GET capture step auto-inserted before PUT/PATCH/DELETE
+- GET endpoints with path params use seed values (from spec examples, or `1` for id-like params) instead of unresolved `{{id}}`
+- Integer fields with `maximum` in schema get a bounded concrete value, not `{{$randomInt}}`
+- Logout/revoke endpoints are excluded from `setup: true` auth suites (they would invalidate the token)
+
+### Step 3.25: Sanity check — MANDATORY before choosing coverage level
+
+```bash
+zond run <tests-dir> --tag sanity --json
+```
+
+This runs `sanity.yaml` — 1-2 tests that validate basic connectivity and auth before generating/running many more tests.
+
+**If sanity fails:**
+- Auth step failed → ask user to clarify credentials, update `.env.yaml`, re-run sanity
+- GET step failed → fix `base_url` in `.env.yaml`, re-run sanity
+- Use `zond db diagnose <run-id> --json` and follow `recommended_action`
+- Repeat until sanity is green — only then proceed to Step 3.5
+
+**If sanity passes** → proceed to Step 3.5.
+
 ### Step 3.5: Choose coverage level
 
-Before asking, check what has already been completed by running:
+Before asking, verify sanity passed (Step 3.25). If not — fix issues first.
+
+Then check what has already been completed by running:
 ```bash
 zond db runs --limit 5 --json
 ```
@@ -91,8 +124,14 @@ If tests fail, use `run_id` from the run output:
 ```bash
 zond db diagnose <run-id> --json
 ```
-Read the diagnosis, then fix **specific** YAML files with Edit/Write.
-Common fixes: wrong expected status, missing auth headers, incorrect body schema.
+
+**Check `agent_directive` first** — if present in the output, follow it literally.
+
+Act based on each failure's `recommended_action`:
+- `report_backend_bug` → **STOP. Do NOT modify test.** Server returned 5xx — this is a backend bug. Report to user.
+- `fix_auth_config` → Fix `.env.yaml` credentials. Do not change test YAML.
+- `fix_test_logic` → Fix path, request body, or assertions in specific YAML files.
+- `fix_network_config` → Fix `base_url` in `.env.yaml`.
 
 Use ad-hoc requests to debug endpoints:
 ```bash
@@ -100,7 +139,7 @@ zond request GET https://api.example.com/endpoint --json
 zond request POST https://api.example.com/endpoint --body '{"key":"value"}' --json
 ```
 
-After fixing, re-run and repeat until all smoke tests pass.
+After fixing `fix_test_logic` failures, re-run and repeat until smoke tests pass or only `report_backend_bug` failures remain.
 
 **If coverage level = "Safe only" → STOP here.** Output:
 
@@ -113,10 +152,20 @@ After fixing, re-run and repeat until all smoke tests pass.
 
 ### Step 6: Run full suite (CRUD level and above)
 ```bash
-zond run <tests-dir> --json               # all tests including CRUD
-zond run <tests-dir> --tag crud --json    # CRUD only
-zond run <tests-dir> --env staging --json # specific environment
+zond run <tests-dir> --json                          # all tests including CRUD
+zond run <tests-dir> --tag crud,setup --json         # CRUD + setup (setup must be included!)
+zond run <tests-dir> --env staging --json            # specific environment
 ```
+
+**CRITICAL:** `--tag` filters suites by their tags. Setup suites run only if their tag is in the list. When targeting a specific group, always append the setup suite's tag:
+```bash
+# Wrong — setup won't run, protected suites get 401
+zond run <tests-dir> --tag <group> --json
+
+# Correct
+zond run <tests-dir> --tag <group>,<setup-tag> --json
+```
+
 Diagnose and fix failures the same way as step 5.
 
 **If coverage level = "CRUD" → STOP here.** Output:
@@ -136,13 +185,69 @@ If gaps remain:
 ```bash
 zond generate <spec> --output <tests-dir> --uncovered-only --json
 ```
+Or, if this API already has `.zond-meta.json` (generated previously), prefer `zond sync` instead — it's smarter and non-destructive.
+
 For edge cases the generator can't create (negative tests, business logic), write individual YAML files — see format reference below.
+
+## Auth setup pattern (for APIs with in-memory / session tokens)
+
+When a server resets tokens on restart, hardcoding `auth_token` in `.env.yaml` breaks after each server restart. Use a dedicated setup suite instead:
+
+```yaml
+# setup.yaml
+name: setup
+setup: true
+tags: [setup]
+base_url: "{{base_url}}"
+tests:
+  - name: Login
+    POST: /auth/login
+    json:
+      username: "{{admin_username}}"
+      password: "{{admin_password}}"
+    expect:
+      status: 200
+      body:
+        token: { capture: auth_token }
+```
+
+Rules for `setup: true` suites:
+- **Must capture** the token (add `capture: auth_token` to the response body field)
+- **No logout step** — it invalidates the captured token for all following suites
+- Captured variables override `.env.yaml` values in all regular suites automatically
+- Only one login step needed here — remove login steps from all other suites
+- **Create setup.yaml immediately** when starting a new test project — adding it later means wasted debugging time chasing 401s
+- If the API has a reset endpoint (clears state), add it as the first step in setup.yaml with tag `[system, reset]` — never `[smoke]`
+
+## Incremental updates (after initial setup)
+
+### When the API adds new endpoints
+```bash
+zond sync <spec> --tests <tests-dir> --dry-run --json   # preview what's new
+zond sync <spec> --tests <tests-dir> --json             # generate tests for new endpoints only
+```
+- Creates new suite files for new endpoints; **never overwrites existing files**
+- Reports removed endpoints as warnings — review tests manually, nothing is deleted
+- If a target file already exists (e.g. new endpoint belongs to existing tag): shown as "Skipped" → add to that file manually
+- **Automatically updates the registered collection's spec reference in the DB** — if `zond init` was previously run for this tests directory, the `openapi_spec` field is kept in sync. `zond generate` does the same on full regeneration.
 
 ## Safety rules
 - `--safe` → only GET requests execute
 - `--dry-run` → shows requests without sending
 - Never run CRUD tests unless user confirmed staging/test environment
 - If endpoint returns 500, keep `status: 200` in expect — failing test = API bug
+
+## Spec reference: two sources of truth
+
+Zond tracks the OpenAPI spec in two places:
+
+| Where | What | Updated by |
+|-------|------|------------|
+| SQLite `collections.openapi_spec` | path/URL used by `--api`, `coverage`, web UI | `zond init`, `zond generate`, `zond sync` |
+| `.zond-meta.json` → `specUrl` + `specHash` | path/URL + SHA-256 hash for drift detection | `zond generate`, `zond sync` |
+
+`zond generate` and `zond sync` keep both in sync automatically when a collection is registered.
+If they diverge (e.g. spec was renamed manually), re-run `zond generate` or `zond sync` to reconcile.
 
 ## JSON output format
 All `--json` output follows:
@@ -170,5 +275,32 @@ Nested: `category.name: { equals: "Dogs" }`. Root body: `_body: { type: "array" 
 Status: `status: 200` or `status: [200, 204]`.
 Capture: `id: { capture: user_id }` then use `{{user_id}}` in later steps. **Captures are suite-scoped** — they do NOT propagate between suites. Each suite needing auth must login itself or use `.env.yaml`.
 ETag: If-Match requires escaped quotes — `If-Match: "\"{{etag}}\""`. Same for If-None-Match.
+ETag pattern — always GET before PUT to capture etag:
+```yaml
+- name: Get item (capture etag)
+  GET: /items/{{item_id}}
+  expect:
+    status: 200
+    body:
+      etag: { capture: etag }
+- name: Update item
+  PUT: /items/{{item_id}}
+  headers:
+    If-Match: "\"{{etag}}\""
+  json: { name: "updated" }
+  expect:
+    status: 200
+```
 Generators: `{{$randomInt}}`, `{{$uuid}}`, `{{$timestamp}}`, `{{$randomEmail}}`, `{{$randomString}}`, `{{$randomName}}`.
+Generators in `set:` are evaluated **once** when the step executes — use `set:` to pin a generated value across multiple steps. To reuse the same generated value in a later step, either store it via `set:` or capture it from the response.
+Soft delete: some APIs return `200` on DELETE with a status field instead of `404` — verify actual behavior before asserting status or absence of the resource.
+`form:` sends `application/x-www-form-urlencoded`. For `multipart/form-data` (file uploads) use `multipart:` — text fields as strings, file fields as objects with `file:` (path relative to the yaml file), optional `filename:` and `content_type:`:
+```yaml
+multipart:
+  description: "My file"
+  upload:
+    file: ./fixtures/doc.pdf
+    filename: doc.pdf
+    content_type: application/pdf
+```
 Env: `.env.yaml` (default) or `.env.<name>.yaml` in tests dir or parent.

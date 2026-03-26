@@ -2,146 +2,166 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.7.0] — Renamed to zond
+## [Unreleased] — fix/generator-quality-improvements
 
-- Renamed package from `@kirrosh/apitool` to `zond`
-- CLI binary: `apitool` → `zond`
-- Database: `apitool.db` → `zond.db`
-- Environment variable: `APITOOL_AI_KEY` → `ZOND_AI_KEY`
-- MCP server name: `apitool` → `zond`
-- Fresh DB schema (no migrations)
+### Breaking changes
 
-## [0.6.1] - 2026-03-04
+- **MCP layer removed** — `zond mcp` command and `@modelcontextprotocol/sdk` dependency deleted.
+  The agent interface is now exclusively the CLI + skills in `skills/`. No migration path needed.
 
-### Changed
-
-- **Web UI redesign** — single-page dashboard with three tabs:
-  - **Endpoints** — all OpenAPI spec endpoints with coverage status (passing/failing/no tests/not run), filters by status and method, expandable details with covering test steps, assertions, and response status
-  - **Suites** — all YAML test files on disk with run results, expandable step details showing assertions, captures, error messages, and response body for failed steps
-  - **Runs** — paginated run history with progress bars, drill-down into run details with JUnit/JSON export
-- **Health strip** — top-of-page overview: coverage donut chart, pass/fail/skip stats, progress bar, environment alert banner
-- **Broken endpoint marking** — `deprecated`, `no_response_schema`, `no_responses_defined`, `required_params_no_examples` warnings shown as badges on endpoints
-- **diagnose_failure** enriched with `failure_type` (api_error / assertion_failed / network_error) and summary counts
-
-### Fixed
-
-- Slim npm package — non-essential files excluded via `files` field in package.json
-
-## [0.5.4] - 2026-03-03
-
-### Fixed
-
-- **`execute-run.ts`**: removed stale `"default"` fallback for `effectiveEnvName` — when no `envName` was passed but a collection existed, the runner looked for `.env.default.yaml` instead of `.env.yaml`, causing all variables (including `base_url`) to be empty and every request to fail with `"URL is invalid"`
-
-### Added
-
-- **`executor.ts`**: early URL validation before `fetch()` — if `base_url` is missing or empty the step now fails immediately with a descriptive error `"base_url is not configured — URL resolved to a relative path: …"` instead of the cryptic `TypeError: URL is invalid`; subsequent steps that depend on captures from the failed step are automatically skipped
-- **`diagnose_failure`**: `envHint()` detector — surfaces actionable `.env.yaml` hints per failure:
-  - relative URL → `"base_url is not set or empty — add base_url to <path>/.env.yaml"`
-  - URL contains `{{variable}}` → `"URL contains unresolved variable — check variable names in .env.yaml"`
-  - error message contains `"URL is invalid"` → `"URL is malformed — likely base_url is empty or invalid"`
-  - env hints take priority over generic `statusHint` (401/404/5xx)
-  - new top-level `env_issue` field when ALL failures share the same env problem category
-  - env file path resolved from `collection.base_dir` — agent sees the exact file to edit
-- **`run_tests` MCP**: always suggests `manage_server(action: 'start')` in `hints` after a run
-- **`generate_tests_guide` / `generate_missing_tests` descriptions**: mention `manage_server` as the next step after saving and running tests
-
-## [Unreleased]
-
-### Removed
-
-- **AI subsystem** — removed `ai-generate` CLI, `chat` CLI, AI agent loop, LLM client, TUI chat UI, and all AI SDK dependencies (`ai`, `@ai-sdk/openai`, `@ai-sdk/anthropic`)
-- **CLI commands** — removed `add-api`, `init`, `collections`, `runs`, `compare`, `doctor`, `update` (available via MCP tools or unnecessary)
-- **Directories** — removed `generated/`, `examples/`, `self-tests/`, `apis/`, `docs/archive/`
-- **Files** — removed `seed-demo.ts`, `BACKLOG.md`, `docs/agent.md`
-
-### Added
-
-- **Extended YAML test format** — 12 new assertion operators, flow control, and data transforms:
-  - **Assertion operators**: `not_equals`, `not_contains`, `gte`, `lte`, `length`, `length_gt/gte/lt/lte`
-  - **Array assertions**: `each` (every element matches), `contains_item` (at least one matches), `set_equals` (order-independent comparison)
-  - **Flow control**: `skip_if` (conditional skip with expression evaluator), `retry_until` (retry with condition/max_attempts/delay_ms), `for_each` (iterate over array)
-  - **Data transforms**: `set` steps with directives — `concat`, `append`, `length`, `get`, `first`, `map_field`
-  - **Generator**: `{{$isoTimestamp}}` — ISO 8601 timestamp string
-  - **Expression evaluator**: supports `==`, `!=`, `>`, `<`, `>=`, `<=` for skip_if/retry_until conditions
-  - Guide-builder YAML cheatsheet updated with all new features
-  - Full backward compatibility — all existing tests continue to work unchanged
-
-- **MCP feedback improvements**
-  - `diagnose_failure` now includes `response_headers` in failure output (e.g. `X-Ably-ErrorMessage`)
-  - `generate_tests_guide`: annotates `any`-typed request bodies with a warning comment
-  - `generate_tests_guide`: added 204 No Content tips in Practical Tips and Common Mistakes sections
-  - `schema-utils.ts`: added `isAnySchema()` helper
-  - DB schema v6: `results.response_headers TEXT` column
-
-- **M22: MCP-first smart test generation**
-  - `generate_tests_guide` MCP tool — returns full API spec with schemas + step-by-step generation algorithm
-  - `save_test_suite` MCP tool — validates YAML and saves test files with structured error reporting
-  - `explore_api` enhanced — new `includeSchemas` parameter for full request/response body schemas
-  - `schema-utils.ts` — extracted `compressSchema()` and `formatParam()` as shared utilities
-  - Improved MCP tool descriptions with "when to use" guidance
-
-### Removed
-
-- `list_environments` MCP tool — duplicated by `manage_environment(action: "list")`
+- **`zond migrate` removed** — the migration system was added and then removed in the same branch.
+  Format changes in zond are backward-compatible or require a clean `zond generate`.
 
 ---
 
-## [0.3.0] - Unreleased (post-M21)
+### Features
 
-### Added
+#### Generator
 
-- **Environment management in WebUI** — full CRUD for environments (`/environments`)
-- **Key-value editor** — add/remove variables with inline JavaScript
-- **Environment selector** — `<select name="env">` dropdown in collection "Run Tests" form
-- **DB queries** — `getEnvironmentById()`, `deleteEnvironment()`, `listEnvironmentRecords()`
-- **Navigation** — "Environments" link in navbar
-- **Improved runs filter** — environment dropdown merges defined environments + run history
-- **Self-documented API** — routes use `@hono/zod-openapi`, `GET /api/openapi.json` serves spec
-- **Incremental generation** — `apitool generate` skips already-covered endpoints
-- **Dogfooding** — integration tests run against apitool's own API
-- **Generator: `additionalProperties`** — Record types generate sample key-value pairs instead of `{}`
-- **CI: typecheck** — `tsc --noEmit` step added to CI pipeline
+- **Sanity suite** (`sanity.yaml`) — `zond generate` now produces a 1-2 step sanity file as the
+  first output: an auth step (if the API has auth) + a connectivity probe (healthcheck or first
+  simple GET). Run with `--tag sanity` before the full suite to catch `base_url`/auth issues early.
+  Skill workflow updated with mandatory Step 3.25.
 
-### Changed
+- **Multipart bodies** — endpoints with `requestBody: multipart/form-data` now generate `multipart:`
+  blocks instead of empty `json:`. Binary (`format: binary` / `format: byte`) fields become
+  `{ file: ./fixtures/<field>.bin, content_type: application/octet-stream }`.
 
-- **Auth-flow test** — rewritten with inline OpenAPI server (no external `test-server/` dependency)
+- **Reset endpoint isolation** — `reset`, `flush`, `purge`, `truncate`, `wipe`, `clear-data`,
+  `factory-reset` paths now get tags `[system, reset]` instead of `[smoke, unsafe]`, preventing
+  them from running during smoke passes and accidentally wiping server state.
+
+- **Logout exclusion from setup suites** — `logout`, `signout`, `invalidate`, `revoke` endpoints
+  are no longer included in `setup: true` auth suites. Including them would invalidate the captured
+  token for all subsequent suites.
+
+- **Seed values in smoke path params** — GET smoke steps with path parameters now use concrete seed
+  values (from spec `example` field, or `1` for id-like params) instead of unresolved `{{id}}`
+  placeholders that cause failures at runtime.
+
+- **Bounded integer generation** — `integer` fields with a `maximum` constraint now generate a
+  concrete in-range value instead of `{{$randomInt}}`, which could exceed server-side validation
+  limits.
+
+- **ETag auto-injection** — when an endpoint has `412` in its responses or an `If-Match` header
+  parameter, the CRUD generator automatically inserts a GET capture step before PUT/PATCH/DELETE
+  to capture the ETag, and adds the `If-Match: "{{resource_etag}}"` header to the mutation step.
+
+#### Executor
+
+- **`set:` on HTTP steps** — `set:` directives on regular HTTP steps are now evaluated before the
+  request, pinning generators (e.g., `$uuid`) once so the same value can flow into the request body
+  and be reused in subsequent steps.
+
+#### Setup suites
+
+- **Auth token auto-sharing** — `setup: true` flag on a suite causes it to run before all other
+  suites (sequentially). Its captured variables (e.g., `auth_token`) are merged into the environment
+  of every subsequent suite automatically. Generated auth suites now include `setup: true`.
+
+#### Export
+
+- **`zond export postman`** — converts YAML test suites to Postman Collection v2.1 JSON.
+  - Full assertion mapping: `status`, `body`, `headers`, `duration` → `pm.test()`/`pm.expect()`
+  - Captures → `pm.environment.set()` for cross-request variable sharing
+  - `set:` steps → `pm.environment.set()` pre-request scripts on the next HTTP step
+  - `skip_if` → `pm.execution.setNextRequest()` pre-request event
+  - Optional `--env` flag exports `.env.yaml` as a Postman Environment JSON
+  - `each`, `contains_item`, `set_equals` assertions fully translated
+  - `type: integer` → `Number.isInteger()` (not `.be.a('number')`)
+  - Setup suites sorted first to mirror zond runner behaviour
+  - Newman CLI hints embedded in collection description for non-default configs
+
+#### Sync
+
+- **`zond sync`** — incremental test update command. Compares the current spec against the hash
+  stored in `.zond-meta.json`, generates test files only for new endpoints, never overwrites
+  existing files. Reports removed endpoints as warnings. Updates `collections.openapi_spec` in
+  SQLite automatically.
+
+- **`.zond-meta.json`** — metadata file written by `zond generate` and `zond sync`. Stores
+  spec URL, SHA-256 hash, and per-file metadata for drift detection.
+
+#### Diagnostics
+
+- **`recommended_action`** field on every failure in `zond db diagnose --json`:
+  `report_backend_bug` / `fix_auth_config` / `fix_test_logic` / `fix_network_config`.
+
+- **`agent_directive`** top-level field — when `api_error` count > 0, tells the agent explicitly
+  to stop iterating and report the server bug instead of modifying test expectations.
+
+- **`cascade_skips`** field — groups skipped tests by the missing capture variable, making
+  "5 tests skipped because `createCase` step failed" visible instead of a flat skip list.
+
+- **`auth_hint`** — surfaces when ≥30% of tests fail with 401/403, and now mentions
+  `setup: true` as the recommended fix.
+
+- **Soft delete hint** — when a GET returns `200` with a `status`/`state`/`deleted` field instead
+  of the expected `404` (after a DELETE), the diagnostic now surfaces a "likely soft delete" hint
+  with a concrete suggestion to assert the status field value.
+
+---
+
+### Fixes
+
+#### Parser / runtime
+
+- **`expect.headers` now accepts `AssertionRule`** — headers can use `capture:`, `equals:`,
+  `type:`, etc. (previously only plain string equality). Enables ETag and other header captures.
+
+- **`filePath` normalized to absolute** — `yaml-parser.ts` now stores absolute paths so
+  `multipart: file:` paths resolve correctly regardless of CWD at execution time.
+
+- **`multipart:` bodies now reach the HTTP client** — `formData` field added to `HttpRequest`;
+  `http-client.ts` sends `formData` when present (previously only `body` was sent, so multipart
+  requests were sent empty).
+
+- **`multipart:` variable substitution** — `substituteStep` now processes `multipart:` field
+  values, so `{{variables}}` inside multipart blocks are interpolated correctly.
+
+- **Safe mode preserves auth endpoints** — `execute-run.ts` safe mode now keeps
+  `login`/`token`/`oauth` endpoints consistent with `run.ts` behaviour.
+
+#### Generator data quality
+
+- **Nested object serialization** — `serializeValue` in `serializer.ts` now recurses into objects
+  instead of calling `String(val)`, fixing `[object Object]` in array item bodies.
+
+- **`format: date`** returns `"2025-01-01"` (date-only), not a full datetime string.
+
+- **`format: uuid`** overrides type — `integer` fields with `format: uuid` now correctly get
+  `{{$uuid}}` instead of `{{$randomInt}}`.
+
+#### Skill / documentation
+
+- **SKILL.md NEVER rules** — added explicit stop rules for: in-memory auth tokens, ETag, soft
+  delete, rate limits, setup suite design, `--tag` without setup tag.
+
+- **SKILL.md generator smart behaviors** — documents all generator improvements so agents know
+  what to expect from generated output.
+
+---
 
 ### Removed
 
-- **`test-server/`** — replaced by inline test servers in integration tests
-- **Duplicate spec files** — `openapi-self.json`, `self-tests-spec.json` removed from project root
+- `src/mcp/` and all MCP tooling (~1900 lines deleted)
+- `zond mcp` CLI command
+- `@modelcontextprotocol/sdk` dependency
+- `zond migrate` command and `src/core/migrations/` module
+- `docs/mcp-guide.md`
 
-### Fixed
+---
 
-- **Type errors** — `z.coerce.number()` in schemas, `c.body()` return type in export route
-- **Environments CRUD skeleton** — `variables` field now generates test data correctly
+### Tests
 
-## [0.1.0] - 2025-02-27
-
-Initial public release.
-
-### Features
-
-- **YAML test definitions** — declarative API tests with steps, assertions, variables, and captures
-- **Test runner** — sequential HTTP execution with variable substitution, chained captures, and configurable timeouts
-- **Assertions** — status code, JSON body (exact, contains, path), headers, response time
-- **Environment files** — `.env.<name>.yaml` for per-environment variables (base URLs, tokens, etc.)
-- **OpenAPI test generator** — generate skeleton YAML tests from OpenAPI 3.x specs (CRUD operations, auth-aware)
-- **AI-powered test generation** — generate tests using LLM providers (Ollama, OpenAI, Anthropic, custom)
-- **Reporters** — console (colored), JSON, JUnit XML output formats
-- **SQLite storage** — persist test runs, results, and collections in `apitool.db`
-- **WebUI dashboard** — Hono + HTMX web interface with:
-  - Health strip: coverage donut, pass/fail/skip stats, progress bar
-  - Endpoints tab: spec endpoints with coverage status and warning badges
-  - Suites tab: test files with step-level results, assertions, captures
-  - Runs tab: paginated history with drill-down and JUnit/JSON export
-- **CLI commands**:
-  - `apitool run <path>` — execute tests with env, reporter, timeout, bail options
-  - `apitool validate <path>` — validate YAML test files
-  - `apitool generate --from <spec>` — generate tests from OpenAPI
-  - `apitool ai-generate --from <spec> --prompt "..."` — AI test generation
-  - `apitool serve` — start web dashboard
-  - `apitool collections` — list test collections
-- **Multi-auth support** — Basic, Bearer, API Key auth in CLI (`--auth-token`) and WebUI
-- **Standalone binary** — single-file executable via `bun build --compile`
+- 502 tests total (499 unit + 3 mocked), 0 failures
+- New tests: `suite-generator` — reset tag, smoke seeds, logout filter, ETag injection, multipart
+- New tests: `data-factory` — maximum constraint, `generateMultipartFromSchema`
+- New tests: `serializer` — nested object serialization, `setup: true`
+- New tests: `failure-hints` — soft delete hint, `recommended_action`, `classifyFailure`
+- New tests: `executor` — header capture, `set:` pinning, setup capture propagation
+- New tests: `schema` — `setup: true` round-trip
+- Fixed: `mock.module()` cache pollution — coverage tests moved to `tests/mocked/coverage.ts`
+  and run in a separate subprocess via `scripts/run-mocked-tests.ts` (bun#7823, bun#12823)
+- Fixed: `test:unit` script — added `tests/diagnostics/`, corrected `tests/web/` and
+  `tests/reporter/` paths
