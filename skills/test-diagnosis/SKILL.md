@@ -18,6 +18,12 @@ allowed-tools: [Read, Write, Bash(zond *)]
    ```bash
    zond db diagnose <run-id> --json
    ```
+   For more detail:
+   ```bash
+   zond db diagnose <run-id> --verbose --json     # all failure examples, not grouped
+   zond db run <run-id> --status 403 --json       # only 403 responses
+   zond db run <run-id> --method POST --json      # only POST requests
+   ```
 3. Check `agent_directive` first — if present in the output, follow it literally before anything else.
 4. For each failure, act based on `recommended_action`:
    - `report_backend_bug` → **STOP iterating.** Server returned 5xx. Do NOT change `expect: status`. Report the issue to the user with the `response_body`.
