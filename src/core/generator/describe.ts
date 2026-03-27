@@ -248,3 +248,55 @@ export async function describeCompact(
 
   return result;
 }
+
+export interface ParamInfo {
+  name: string;
+  in: string;
+  type?: string;
+  required: boolean;
+  usedBy: string[];
+}
+
+export async function describeAllParams(
+  specPath: string,
+  options?: { insecure?: boolean },
+): Promise<ParamInfo[]> {
+  const doc = await readOpenApiSpec(specPath, options) as OpenAPIV3.Document;
+  const paths = doc.paths ?? {};
+  const paramMap = new Map<string, ParamInfo>();
+
+  for (const [path, pathItem] of Object.entries(paths)) {
+    const pathParams = ((pathItem as any)?.parameters ?? []) as OpenAPIV3.ParameterObject[];
+
+    for (const method of ["get", "post", "put", "patch", "delete"]) {
+      const op = (pathItem as any)?.[method] as OpenAPIV3.OperationObject | undefined;
+      if (!op) continue;
+
+      const allParams = [...pathParams, ...((op.parameters ?? []) as OpenAPIV3.ParameterObject[])];
+      const endpoint = `${method.toUpperCase()} ${path}`;
+
+      for (const p of allParams) {
+        const key = `${p.in}:${p.name}`;
+        const existing = paramMap.get(key);
+        const schema = p.schema as OpenAPIV3.SchemaObject | undefined;
+        if (existing) {
+          existing.usedBy.push(endpoint);
+          if (p.required) existing.required = true;
+        } else {
+          paramMap.set(key, {
+            name: p.name,
+            in: p.in,
+            type: schema?.type,
+            required: p.required ?? false,
+            usedBy: [endpoint],
+          });
+        }
+      }
+    }
+  }
+
+  return [...paramMap.values()].sort((a, b) => {
+    if (a.in !== b.in) return a.in.localeCompare(b.in);
+    return a.name.localeCompare(b.name);
+  });
+}

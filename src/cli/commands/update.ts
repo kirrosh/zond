@@ -39,13 +39,13 @@ async function fetchLatestRelease(): Promise<GitHubRelease> {
 export async function updateCommand(options: UpdateOptions): Promise<number> {
   try {
     if (!isCompiledBinary()) {
-      const msg = "Self-update is only available for standalone binaries. Update via: npm update -g @kirrosh/zond  or  bun update -g @kirrosh/zond";
+      const msg = "Self-update is only available for standalone binaries. Install binary: curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh";
       if (options.json) {
-        printJson(jsonOk("update", { action: "skip", reason: "not-standalone" }, [msg]));
+        printJson(jsonOk("update", { action: "skip", reason: "not-standalone", installHint: "curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh" }, [msg]));
       } else {
         printWarning(msg);
       }
-      return 0;
+      return 3;
     }
 
     const target = getTarget();
@@ -141,16 +141,31 @@ export async function updateCommand(options: UpdateOptions): Promise<number> {
       }
 
       // Replace current binary
-      if (process.platform === "win32") {
-        // Windows: rename current to .old, move new, clean up
-        const oldBinary = currentBinary + ".old";
-        try { await rm(oldBinary, { force: true }); } catch {}
-        await rename(currentBinary, oldBinary);
-        await rename(newBinary, currentBinary);
-        try { await rm(oldBinary, { force: true }); } catch {}
-      } else {
-        await rename(newBinary, currentBinary);
-        await chmod(currentBinary, 0o755);
+      try {
+        if (process.platform === "win32") {
+          // Windows: rename current to .old, move new, clean up
+          const oldBinary = currentBinary + ".old";
+          try { await rm(oldBinary, { force: true }); } catch {}
+          await rename(currentBinary, oldBinary);
+          await rename(newBinary, currentBinary);
+          try { await rm(oldBinary, { force: true }); } catch {}
+        } else {
+          await rename(newBinary, currentBinary);
+          await chmod(currentBinary, 0o755);
+        }
+      } catch (replaceErr: any) {
+        if (replaceErr?.code === "EACCES" || replaceErr?.code === "EPERM") {
+          const hint = process.platform === "win32"
+            ? `Permission denied. Run the terminal as Administrator.`
+            : `Permission denied writing to ${currentBinary}. Run: sudo zond update`;
+          if (options.json) {
+            printJson(jsonError("update", [hint]));
+          } else {
+            printError(hint);
+          }
+          return 2;
+        }
+        throw replaceErr;
       }
 
       if (options.json) {

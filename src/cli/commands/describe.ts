@@ -1,4 +1,4 @@
-import { describeEndpoint, describeCompact } from "../../core/generator/describe.ts";
+import { describeEndpoint, describeCompact, describeAllParams } from "../../core/generator/describe.ts";
 import { printError } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 
@@ -7,11 +7,36 @@ export interface DescribeOptions {
   method?: string;
   path?: string;
   compact?: boolean;
+  listParams?: boolean;
   json?: boolean;
 }
 
 export async function describeCommand(options: DescribeOptions): Promise<number> {
   try {
+    if (options.listParams) {
+      const params = await describeAllParams(options.specPath);
+      if (options.json) {
+        printJson(jsonOk("describe", { params }));
+      } else {
+        const grouped = new Map<string, typeof params>();
+        for (const p of params) {
+          const arr = grouped.get(p.in) ?? [];
+          arr.push(p);
+          grouped.set(p.in, arr);
+        }
+        for (const [location, locationParams] of grouped) {
+          console.log(`\n${location.toUpperCase()} parameters:`);
+          for (const p of locationParams) {
+            const req = p.required ? " (required)" : "";
+            const type = p.type ? ` [${p.type}]` : "";
+            console.log(`  ${p.name}${type}${req} — used in ${p.usedBy.length} endpoint(s)`);
+          }
+        }
+        console.log(`\n${params.length} unique parameter(s)`);
+      }
+      return 0;
+    }
+
     if (options.compact) {
       const endpoints = await describeCompact(options.specPath);
 

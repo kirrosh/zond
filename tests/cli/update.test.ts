@@ -31,16 +31,16 @@ afterEach(() => {
 });
 
 describe("update command", () => {
-  test("non-compiled binary suggests npm/bun update", async () => {
+  test("non-compiled binary returns exit code 3 with install hint", async () => {
     // When running via bun test, isCompiledBinary() returns false
     const { updateCommand } = await import("../../src/cli/commands/update.ts");
     const restore = suppressOutput();
     const code = await updateCommand({ json: false });
     restore();
-    expect(code).toBe(0);
+    expect(code).toBe(3);
   });
 
-  test("non-compiled binary returns skip in JSON mode", async () => {
+  test("non-compiled binary returns skip in JSON mode with installHint", async () => {
     const { updateCommand } = await import("../../src/cli/commands/update.ts");
     let output = "";
     const origWrite = process.stdout.write;
@@ -52,19 +52,20 @@ describe("update command", () => {
     const code = await updateCommand({ json: true });
 
     process.stdout.write = origWrite;
-    expect(code).toBe(0);
+    expect(code).toBe(3);
     const parsed = JSON.parse(output.trim());
     expect(parsed.ok).toBe(true);
     expect(parsed.data.action).toBe("skip");
     expect(parsed.data.reason).toBe("not-standalone");
+    expect(parsed.data.installHint).toContain("install.sh");
   });
 
-  test("check flag works in JSON mode (non-compiled)", async () => {
+  test("check flag returns exit code 3 for non-compiled", async () => {
     const { updateCommand } = await import("../../src/cli/commands/update.ts");
     const restore = suppressOutput();
     // check flag should still work — but since non-compiled, it returns "skip"
     const code = await updateCommand({ json: false, check: true });
     restore();
-    expect(code).toBe(0);
+    expect(code).toBe(3);
   });
 });
