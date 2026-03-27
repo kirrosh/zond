@@ -255,7 +255,9 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
   db.transaction(() => {
     for (const suite of suiteResults) {
       for (const step of suite.steps) {
-        const keepBody = step.status === "fail" || step.status === "error";
+        const maxBodySize = 50_000;
+        const truncBody = (s: string | null | undefined) =>
+          s && s.length > maxBodySize ? s.slice(0, maxBodySize) + "\n...[truncated]" : (s ?? null);
         stmt.run({
           $run_id: runId,
           $suite_name: suite.suite_name,
@@ -264,10 +266,10 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
           $duration_ms: step.duration_ms,
           $request_method: step.request.method,
           $request_url: step.request.url,
-          $request_body: step.request.body ?? null,
+          $request_body: truncBody(step.request.body),
           $response_status: step.response?.status ?? null,
-          $response_body: keepBody ? (step.response?.body ?? null) : null,
-          $response_headers: keepBody && step.response?.headers
+          $response_body: truncBody(step.response?.body),
+          $response_headers: step.response?.headers
             ? JSON.stringify(step.response.headers)
             : null,
           $error_message: step.error ?? null,

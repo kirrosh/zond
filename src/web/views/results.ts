@@ -98,11 +98,11 @@ export function renderSuiteResults(
         }
 
         let reqBodyHtml = "";
-        if (hasFailed && step.request_body) {
+        if (step.request_body) {
           reqBodyHtml = `<details class="body-details"><summary>Request Body</summary><pre>${escapeHtml(step.request_body)}</pre></details>`;
         }
         let resBodyHtml = "";
-        if (hasFailed && step.response_body) {
+        if (step.response_body) {
           resBodyHtml = `<details class="body-details"><summary>Response Body</summary><pre>${escapeHtml(step.response_body)}</pre></details>`;
         }
 
@@ -123,7 +123,8 @@ export function renderSuiteResults(
           }
         }
 
-        const detailPanel = (hasFailed || skipReasonHtml)
+        const hasContent = requestHtml || errorHtml || skipReasonHtml || assertionsHtml || reqBodyHtml || resBodyHtml;
+        const detailPanel = hasContent
           ? `<div class="detail-panel" id="${detailId}" style="display:none">
               ${requestHtml}
               ${errorHtml}
@@ -134,7 +135,7 @@ export function renderSuiteResults(
             </div>`
           : "";
 
-        const toggle = (hasFailed || skipReasonHtml)
+        const toggle = hasContent
           ? `onclick="var d=document.getElementById('${detailId}');d.style.display=d.style.display==='none'?'block':'none'"`
           : "";
 
@@ -144,7 +145,7 @@ export function renderSuiteResults(
         return `
           <div class="step-row${chainedClass}${statusClass}" ${toggle}>
             <div>${stepStatusBadge(step.status)}</div>
-            <div class="step-name">${escapeHtml(step.test_name)}${capturesHtml ? ` ${capturesHtml}` : ""}</div>
+            <div class="step-name">${step.request_method && step.request_url ? (() => { let p: string; try { p = new URL(step.request_url).pathname; } catch { p = step.request_url; } const sc = step.response_status ? ` <span class="step-status-code ${step.response_status >= 400 ? "status-error" : "status-ok"}">${step.response_status}</span>` : ""; return `${methodBadge(step.request_method)} <span class="step-path">${escapeHtml(p)}</span>${sc} <span class="step-name-dim">${escapeHtml(step.test_name)}</span>`; })() : escapeHtml(step.test_name)}${capturesHtml ? ` ${capturesHtml}` : ""}</div>
             <div class="step-duration">${formatDuration(step.duration_ms)}</div>
           </div>
           ${detailPanel}`;

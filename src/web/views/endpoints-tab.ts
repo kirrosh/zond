@@ -93,7 +93,7 @@ function renderWarningBadges(warnings: string[]): string {
     if (w === "deprecated") return '<span class="warning-badge warning-deprecated">DEPRECATED</span>';
     if (w === "no_response_schema") return '<span class="warning-badge warning-schema">NO SCHEMA</span>';
     if (w === "no_responses_defined") return '<span class="warning-badge warning-schema">NO RESPONSES</span>';
-    if (w.startsWith("required_params_no_examples")) return '<span class="warning-badge warning-params">MISSING EXAMPLES</span>';
+    if (w.startsWith("required_params_no_examples")) return "";
     return `<span class="warning-badge">${escapeHtml(w)}</span>`;
   }).join(" ");
 }
@@ -140,7 +140,8 @@ function renderEndpointDetail(ep: EndpointViewState): string {
 
       return `<div class="covering-suite">
         ${icon}
-        <span class="suite-ref">${escapeHtml(step.file)}</span>
+        <a class="suite-ref suite-link" href="#" data-suite="${escapeHtml(step.suiteName)}"
+           onclick="event.stopPropagation();switchToSuite(this.dataset.suite)">${escapeHtml(step.file)}</a>
         <span class="dim" style="font-size:0.75rem;">&rarr; "${escapeHtml(step.stepName)}"</span>
         <span style="margin-left:auto;display:flex;align-items:center;gap:0.5rem;">${statusBadge}${duration}</span>
       </div>${assertionsHtml}${hintHtml}`;
@@ -149,13 +150,16 @@ function renderEndpointDetail(ep: EndpointViewState): string {
   }
 
   // Fallback: just file names
-  const files = ep.coveringFiles.map(f =>
-    `<div class="covering-suite">
+  const files = ep.coveringFiles.map(f => {
+    const fileName = basename(f);
+    const suiteName = fileName.replace(/\.(ya?ml)$/i, "");
+    return `<div class="covering-suite">
       <span class="step-icon" style="color:var(--text-dim);">&#9675;</span>
-      <span class="suite-ref">${escapeHtml(basename(f))}</span>
+      <a class="suite-ref suite-link" href="#" data-suite="${escapeHtml(suiteName)}"
+         onclick="event.stopPropagation();switchToSuite(this.dataset.suite)">${escapeHtml(fileName)}</a>
       <span class="dim" style="font-size:0.75rem;">not run</span>
-    </div>`
-  ).join("");
+    </div>`;
+  }).join("");
   return files;
 }
 

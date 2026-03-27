@@ -40,6 +40,7 @@ export interface StepViewState {
   durationMs?: number;
   requestMethod?: string;
   requestUrl?: string;
+  requestBody?: string;
   responseStatus?: number;
   responseBody?: string;
   assertions?: { field: string; rule: string; passed: boolean; actual?: unknown; expected?: unknown }[];
@@ -281,6 +282,7 @@ export async function buildCollectionState(collection: CollectionRecord): Promis
           durationMs: r.duration_ms ?? undefined,
           requestMethod: r.request_method ?? undefined,
           requestUrl: r.request_url ?? undefined,
+          requestBody: r.request_body ?? undefined,
           responseStatus: r.response_status ?? undefined,
           responseBody: r.response_body ?? undefined,
           assertions: Array.isArray(r.assertions) ? r.assertions : undefined,
