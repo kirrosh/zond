@@ -5,16 +5,39 @@ description: |
   run smoke tests, analyze API coverage, diagnose test failures,
   set up API test infrastructure, generate CI for API tests.
   Also activates on: openapi.json, swagger, API spec, test coverage.
-allowed-tools: [Read, Write, Bash(zond *), Bash(which zond)]
+allowed-tools: [Read, Write, Bash(zond *), Bash(which zond), Bash(curl *), Bash(powershell *), Bash(iwr *), Bash(sudo *)]
 ---
 
 # Zond API Testing
 
-## Setup check
-!`which zond 2>/dev/null && echo "INSTALLED" || echo "NOT_INSTALLED"`
+## Setup — install or update zond
 
-If NOT_INSTALLED, run: `npx -y @kirrosh/zond@latest` as prefix for all commands below.
-Otherwise use `zond` directly.
+### Step 0: Check installation
+!`which zond 2>/dev/null && zond --version --json 2>/dev/null || echo "NOT_INSTALLED"`
+
+### If NOT_INSTALLED — install binary
+
+**macOS / Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
+```
+
+**Windows (PowerShell):**
+```powershell
+powershell -NoProfile -Command "iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex"
+```
+
+After install, verify: `zond --version`
+
+If install script fails (no curl, no internet), fall back to: `npx -y @kirrosh/zond@latest` as prefix for all commands below.
+
+### If already installed — check for updates
+```bash
+zond update --check --json
+```
+- `action: "available"` → run `zond update --json` (if EACCES on Linux: `sudo zond update --json`)
+- `action: "none"` → up to date, proceed
+- `action: "skip"` (exit 3, not a binary) → reinstall as binary using the install commands above
 
 ## NEVER do these — MANDATORY
 - **NEVER read OpenAPI/Swagger/JSON spec files** with Read or cat — use `zond describe`
@@ -37,7 +60,8 @@ zond init --name <name> --spec <path-to-openapi> [--base-url <url>]
 
 ### Step 2: Explore
 ```bash
-zond describe <spec> --compact --json
+zond describe <spec> --compact --json            # list all endpoints
+zond describe <spec> --list-params --json        # list all unique parameters (useful for .env.yaml setup)
 ```
 
 ### Step 3: Generate tests — ALWAYS use CLI
@@ -49,7 +73,7 @@ This single command creates:
 - Smoke tests (GET endpoints, grouped by tag)
 - CRUD chains (POST → GET → PUT → DELETE with variable capture)
 - Auth tests (login/register endpoints)
-- `.env.yaml` with `base_url` from spec
+- `.env.yaml` with `base_url` from spec and placeholder variables for path params (user fills in real values)
 
 **Do NOT write YAML files manually.** The generator handles assertions, captures, request bodies, and tag grouping automatically.
 
@@ -57,7 +81,7 @@ Generator smart behaviors:
 - `multipart/form-data` endpoints get `multipart:` bodies (binary fields → `{file: ./fixtures/<field>.bin}`)
 - Reset/flush/purge endpoints get `[system, reset]` tags — not `[smoke, unsafe]`, so they won't run in smoke passes
 - ETag endpoints (412 in responses or `If-Match` parameter) get a GET capture step auto-inserted before PUT/PATCH/DELETE
-- GET endpoints with path params use seed values (from spec examples, or `1` for id-like params) instead of unresolved `{{id}}`
+- GET endpoints with path params use spec examples as seed values, or `{{paramName}}` placeholders (added to `.env.yaml` for user to fill in)
 - Integer fields with `maximum` in schema get a bounded concrete value, not `{{$randomInt}}`
 - Logout/revoke endpoints are excluded from `setup: true` auth suites (they would invalidate the token)
 
@@ -123,6 +147,9 @@ Always run smoke (GET-only) tests right after generation — they are safe and r
 If tests fail, use `run_id` from the run output:
 ```bash
 zond db diagnose <run-id> --json
+zond db diagnose <run-id> --verbose --json        # all failure examples (not grouped)
+zond db run <run-id> --status 403 --json          # filter: only 403 responses
+zond db run <run-id> --method POST --json         # filter: only POST requests
 ```
 
 **Check `agent_directive` first** — if present in the output, follow it literally.
@@ -164,6 +191,13 @@ zond run <tests-dir> --tag <group> --json
 
 # Correct
 zond run <tests-dir> --tag <group>,<setup-tag> --json
+```
+
+**Filtering options:**
+```bash
+zond run <tests-dir> --exclude-tag unsafe --json          # exclude specific tags
+zond run <tests-dir> --method GET --json                  # only GET tests
+zond run <tests-dir> --tag smoke --exclude-tag reset --json  # combine include + exclude
 ```
 
 Diagnose and fix failures the same way as step 5.
