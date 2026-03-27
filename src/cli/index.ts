@@ -13,6 +13,7 @@ import { guideCommand } from "./commands/guide.ts";
 import { generateCommand } from "./commands/generate.ts";
 import { exportCommand } from "./commands/export.ts";
 import { syncCommand } from "./commands/sync.ts";
+import { updateCommand } from "./commands/update.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { getDb } from "../db/schema.ts";
@@ -107,6 +108,7 @@ Usage:
   zond ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
   zond export postman <path>  Export YAML tests as Postman Collection v2.1
   zond sync <spec>      Detect new/removed endpoints and generate tests for new ones
+  zond update           Check for updates and self-update the binary
 
 Options for 'run':
   --dry-run            Show requests without sending them (exit code always 0)
@@ -185,6 +187,9 @@ Options for 'sync':
   --tests <dir>        Path to test files directory (required)
   --dry-run            Show what would be generated without writing files
   --tag <tag>          Limit sync to endpoints with this tag
+
+Options for 'update':
+  --check              Only check for updates, do not download
 
 General:
   --json               Output in JSON envelope format (available for all commands)
@@ -524,6 +529,14 @@ async function main(): Promise<number> {
         output: typeof flags["output"] === "string" ? flags["output"] : "collection.postman.json",
         env: typeof flags["env"] === "string" ? flags["env"] : undefined,
         collectionName: typeof flags["collection-name"] === "string" ? flags["collection-name"] : undefined,
+        json: jsonFlag,
+      });
+    }
+
+    case "update":
+    case "self-update": {
+      return updateCommand({
+        check: flags["check"] === true,
         json: jsonFlag,
       });
     }

@@ -11,6 +11,7 @@ import {
 import { generateSuites } from "../../core/generator/suite-generator.ts";
 import { filterByTag } from "../../core/generator/chunker.ts";
 import { parse } from "../../core/parser/yaml-parser.ts";
+import { decycleSchema } from "../../core/generator/schema-utils.ts";
 import { printError, printSuccess } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { readMeta, writeMeta, hashSpec, buildFileMeta } from "../../core/meta/meta-store.ts";
@@ -82,7 +83,7 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
 
     // Write .zond-meta.json (merge with existing meta to preserve info about prior files)
     const existingMeta = await readMeta(options.output);
-    const specContent = typeof doc === "object" ? JSON.stringify(doc) : String(doc);
+    const specContent = typeof doc === "object" ? JSON.stringify(decycleSchema(doc)) : String(doc);
     await writeMeta(options.output, {
       zondVersion: ZOND_VERSION,
       lastSyncedAt: new Date().toISOString(),

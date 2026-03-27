@@ -10,6 +10,7 @@ import { generateSuites } from "../../core/generator/suite-generator.ts";
 import { filterByTag } from "../../core/generator/chunker.ts";
 import { readMeta, writeMeta, hashSpec, buildFileMeta } from "../../core/meta/meta-store.ts";
 import { diffEndpoints } from "../../core/sync/spec-differ.ts";
+import { decycleSchema } from "../../core/generator/schema-utils.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { version as ZOND_VERSION } from "../../../package.json";
@@ -41,7 +42,7 @@ export async function syncCommand(options: SyncOptions): Promise<number> {
 
     // Load current spec
     const doc = await readOpenApiSpec(options.specPath);
-    const specContent = JSON.stringify(doc);
+    const specContent = JSON.stringify(decycleSchema(doc));
     const currentHash = hashSpec(specContent);
 
     if (currentHash === meta.specHash) {
