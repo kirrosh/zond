@@ -8,7 +8,7 @@ import {
   filterUncoveredEndpoints,
   serializeSuite,
 } from "../../core/generator/index.ts";
-import { generateSuites } from "../../core/generator/suite-generator.ts";
+import { generateSuites, findUnresolvedVars } from "../../core/generator/suite-generator.ts";
 import { filterByTag } from "../../core/generator/chunker.ts";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import { decycleSchema } from "../../core/generator/schema-utils.ts";
@@ -104,12 +104,23 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       // DB unavailable — not fatal
     }
 
-    // Create .env.yaml with base_url if it doesn't exist
+    // Create .env.yaml with base_url and unresolved variables as placeholders
     const envPath = join(options.output, ".env.yaml");
     const envFile = Bun.file(envPath);
-    if (!(await envFile.exists()) && baseUrl) {
-      await Bun.write(envPath, `base_url: ${baseUrl}\n`);
-      warnings.push(`Created ${envPath} with base_url from spec`);
+    if (!(await envFile.exists())) {
+      const unresolvedVars = new Set<string>();
+      for (const suite of suites) {
+        for (const v of findUnresolvedVars(suite)) unresolvedVars.add(v);
+      }
+      const lines: string[] = [];
+      if (baseUrl) lines.push(`base_url: ${baseUrl}`);
+      for (const v of [...unresolvedVars].sort()) {
+        lines.push(`${v}: "" # TODO: fill in`);
+      }
+      if (lines.length > 0) {
+        await Bun.write(envPath, lines.join("\n") + "\n");
+        warnings.push(`Created ${envPath} with ${unresolvedVars.size} placeholder variable(s)`);
+      }
     }
 
     // Validate generated files

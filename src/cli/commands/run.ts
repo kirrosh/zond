@@ -2,7 +2,7 @@ import { dirname } from "path";
 import { stat } from "node:fs/promises";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
-import { filterSuitesByTags } from "../../core/parser/filter.ts";
+import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
 import { runSuite } from "../../core/runner/executor.ts";
 import { getReporter } from "../../core/reporter/index.ts";
 import type { ReporterName } from "../../core/reporter/types.ts";
@@ -25,6 +25,8 @@ export interface RunOptions {
   authToken?: string;
   safe?: boolean;
   tag?: string[];
+  excludeTag?: string[];
+  method?: string;
   envVars?: string[];
   dryRun?: boolean;
   json?: boolean;
@@ -50,6 +52,24 @@ export async function runCommand(options: RunOptions): Promise<number> {
     suites = filterSuitesByTags(suites, options.tag);
     if (suites.length === 0) {
       printWarning("No suites match the specified tags");
+      return 0;
+    }
+  }
+
+  // 1b2. Exclude-tag filter
+  if (options.excludeTag && options.excludeTag.length > 0) {
+    suites = excludeSuitesByTags(suites, options.excludeTag);
+    if (suites.length === 0) {
+      printWarning("All suites excluded by --exclude-tag");
+      return 0;
+    }
+  }
+
+  // 1b3. Method filter
+  if (options.method) {
+    suites = filterSuitesByMethod(suites, options.method);
+    if (suites.length === 0) {
+      printWarning(`No tests found with method ${options.method.toUpperCase()}`);
       return 0;
     }
   }

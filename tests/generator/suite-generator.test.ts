@@ -620,7 +620,7 @@ describe("generateSuites reset tag", () => {
 // ── smoke path seeds ──
 
 describe("smoke suite path seeds", () => {
-  test("GET endpoint with path param uses seed value 1 in smoke suite", () => {
+  test("GET endpoint with path param uses variable placeholder in smoke suite", () => {
     const endpoints = [
       makeEndpoint({
         path: "/orders/{orderId}",
@@ -632,7 +632,7 @@ describe("smoke suite path seeds", () => {
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
     const smokeSuite = suites.find(s => s.name === "orders-smoke");
     expect(smokeSuite).toBeDefined();
-    expect(smokeSuite!.tests[0]!["GET"]).toBe("/orders/1");
+    expect(smokeSuite!.tests[0]!["GET"]).toBe("/orders/{{orderId}}");
   });
 
   test("GET endpoint with param example uses example value", () => {
