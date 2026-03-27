@@ -4,7 +4,7 @@ import dashboard from "./routes/dashboard.ts";
 import runs from "./routes/runs.ts";
 import api from "./routes/api.ts";
 import styleCssPath from "./static/style.css" with { type: "file" };
-import htmxJsPath from "./static/htmx.min.js" with { type: "file" };
+import htmxJsPath from "./static/htmx.min.cjs" with { type: "file" };
 
 export interface ServerOptions {
   port?: number;

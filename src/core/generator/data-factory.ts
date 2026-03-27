@@ -7,7 +7,10 @@ import type { OpenAPIV3 } from "openapi-types";
 export function generateFromSchema(
   schema: OpenAPIV3.SchemaObject,
   propertyName?: string,
+  _depth = 0,
 ): unknown {
+  if (_depth > 5) return {};
+
   // allOf: merge all schemas
   if (schema.allOf) {
     const merged: OpenAPIV3.SchemaObject = { type: "object", properties: {} };
@@ -17,15 +20,15 @@ export function generateFromSchema(
         merged.properties = { ...merged.properties, ...s.properties };
       }
     }
-    return generateFromSchema(merged, propertyName);
+    return generateFromSchema(merged, propertyName, _depth + 1);
   }
 
   // oneOf / anyOf: use first variant
   if (schema.oneOf) {
-    return generateFromSchema(schema.oneOf[0] as OpenAPIV3.SchemaObject, propertyName);
+    return generateFromSchema(schema.oneOf[0] as OpenAPIV3.SchemaObject, propertyName, _depth + 1);
   }
   if (schema.anyOf) {
-    return generateFromSchema(schema.anyOf[0] as OpenAPIV3.SchemaObject, propertyName);
+    return generateFromSchema(schema.anyOf[0] as OpenAPIV3.SchemaObject, propertyName, _depth + 1);
   }
 
   // enum: first value
@@ -51,7 +54,7 @@ export function generateFromSchema(
 
     case "array": {
       if (schema.items) {
-        const item = generateFromSchema(schema.items as OpenAPIV3.SchemaObject);
+        const item = generateFromSchema(schema.items as OpenAPIV3.SchemaObject, undefined, _depth + 1);
         return [item];
       }
       return [];
@@ -63,14 +66,14 @@ export function generateFromSchema(
       if (schema.properties) {
         const obj: Record<string, unknown> = {};
         for (const [key, propSchema] of Object.entries(schema.properties)) {
-          obj[key] = generateFromSchema(propSchema as OpenAPIV3.SchemaObject, key);
+          obj[key] = generateFromSchema(propSchema as OpenAPIV3.SchemaObject, key, _depth + 1);
         }
         return obj;
       }
       // Record type: additionalProperties defines value schema
       if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
         const valSchema = schema.additionalProperties as OpenAPIV3.SchemaObject;
-        return { key1: generateFromSchema(valSchema, "key1"), key2: generateFromSchema(valSchema, "key2") };
+        return { key1: generateFromSchema(valSchema, "key1", _depth + 1), key2: generateFromSchema(valSchema, "key2", _depth + 1) };
       }
       if (schema.additionalProperties === true) {
         return { key1: "value1", key2: "value2" };
