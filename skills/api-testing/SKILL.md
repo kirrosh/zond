@@ -5,15 +5,13 @@ description: |
   run smoke tests, analyze API coverage, diagnose test failures,
   set up API test infrastructure, generate CI for API tests.
   Also activates on: openapi.json, swagger, API spec, test coverage.
-allowed-tools: [Read, Write, Bash(zond *), Bash(which zond)]
+allowed-tools: [Read, Write, Bash(zond *)]
 ---
 
 # Zond API Testing
 
-## Setup check
-!`which zond 2>/dev/null && zond --version 2>/dev/null || echo "NOT_INSTALLED"`
-
-If NOT_INSTALLED or version is outdated, use the `/zond:setup` skill to install/update zond first, then return here.
+## Setup — ALWAYS run first
+Before anything else, run `/zond:setup` — it checks installation and updates automatically. If zond is already up to date, it completes instantly.
 
 ## NEVER do these — MANDATORY
 - **NEVER read OpenAPI/Swagger/JSON spec files** with Read or cat — use `zond describe`
