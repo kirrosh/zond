@@ -292,6 +292,30 @@ export function getResultsByRunId(runId: number): StoredStepResult[] {
   }));
 }
 
+export function getFilteredResults(runId: number, filters: { method?: string; status?: number }): StoredStepResult[] {
+  const db = getDb();
+  const conditions = ["run_id = ?"];
+  const params: (string | number)[] = [runId];
+
+  if (filters.method) {
+    conditions.push("request_method = ?");
+    params.push(filters.method.toUpperCase());
+  }
+  if (filters.status !== undefined) {
+    conditions.push("response_status = ?");
+    params.push(filters.status);
+  }
+
+  const rows = db.query(`SELECT * FROM results WHERE ${conditions.join(" AND ")} ORDER BY id`).all(...params) as Array<
+    Omit<StoredStepResult, "assertions" | "captures"> & { assertions: string | null; captures: string | null }
+  >;
+  return rows.map((row) => ({
+    ...row,
+    assertions: row.assertions ? JSON.parse(row.assertions) : [],
+    captures: row.captures ? JSON.parse(row.captures) : {},
+  }));
+}
+
 // ──────────────────────────────────────────────
 // Dashboard metrics
 // ──────────────────────────────────────────────
