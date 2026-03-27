@@ -1,6 +1,6 @@
 {
   "name": "zond",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "description": "AI-native API testing — OpenAPI → tests → execution → diagnostics",
   "author": {
     "name": "kirrosh",
