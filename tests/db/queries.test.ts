@@ -163,14 +163,14 @@ describe("saveResults", () => {
     expect(results[0]?.test_name).toBe("Get user");
   });
 
-  test("response_body is null for passing steps", () => {
+  test("response_body is stored for passing steps", () => {
     const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
     saveResults(id, [makeSuiteResult()]);
 
     const row = getDb(dbPath)
       .query("SELECT response_body FROM results WHERE test_name = 'Get user'")
       .get() as { response_body: string | null };
-    expect(row?.response_body).toBeNull();
+    expect(row?.response_body).toBe('{"id":1}');
   });
 
   test("response_body is stored for failing steps", () => {

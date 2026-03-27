@@ -253,6 +253,28 @@ async function renderCollectionContent(collection: CollectionRecord): Promise<st
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active'));
       el.classList.add('tab-active');
     }
+    function switchToSuite(suiteName) {
+      var suitesBtn = document.querySelector('[data-tab="suites"]');
+      if (!suitesBtn) return;
+      suitesBtn.click();
+      document.addEventListener('htmx:afterSwap', function handler(e) {
+        if (e.detail.target && e.detail.target.id === 'tab-content') {
+          document.removeEventListener('htmx:afterSwap', handler);
+          setTimeout(function() {
+            var rows = document.querySelectorAll('.suite-row[data-suite-name]');
+            for (var i = 0; i < rows.length; i++) {
+              if (rows[i].dataset.suiteName === suiteName) {
+                rows[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                rows[i].click();
+                rows[i].classList.add('suite-highlight');
+                setTimeout(function() { rows[i].classList.remove('suite-highlight'); }, 2000);
+                break;
+              }
+            }
+          }, 50);
+        }
+      });
+    }
   </script>`;
 
   return `

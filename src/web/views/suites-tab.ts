@@ -4,6 +4,7 @@
 
 import type { CollectionState, SuiteViewState, StepViewState } from "../data/collection-state.ts";
 import { escapeHtml } from "./layout.ts";
+import { methodBadge } from "./results.ts";
 import { basename } from "node:path";
 
 export function renderSuitesTab(state: CollectionState): string {
@@ -55,7 +56,7 @@ function renderSuiteRow(suite: SuiteViewState, index: number): string {
     : `<div style="font-size:0.75rem;color:var(--text-dim);padding:0.5rem;">No run results yet</div>`;
 
   return `
-    <div class="suite-row"
+    <div class="suite-row" data-suite-name="${escapeHtml(suite.name)}"
       onclick="var d=document.getElementById('${detailId}');d.style.display=d.style.display==='none'?'block':'none'">
       <div class="suite-info">
         <div class="suite-name">${escapeHtml(suite.name)}</div>
@@ -87,6 +88,21 @@ function renderStepRow(step: StepViewState, suiteIdx: number, stepIdx: number): 
     ? `<span class="step-duration">${step.durationMs}ms</span>`
     : `<span class="step-duration">-</span>`;
 
+  // Primary label: prefer METHOD /path [status] over step name
+  let primaryLabel: string;
+  let nameLabel = "";
+  if (step.requestMethod && step.requestUrl) {
+    let urlPath: string;
+    try { urlPath = new URL(step.requestUrl).pathname; } catch { urlPath = step.requestUrl; }
+    const statusTag = step.responseStatus
+      ? ` <span class="step-status-code ${step.responseStatus >= 400 ? "status-error" : "status-ok"}">${step.responseStatus}</span>`
+      : "";
+    primaryLabel = `${methodBadge(step.requestMethod)} <span class="step-path">${escapeHtml(urlPath)}</span>${statusTag}`;
+    nameLabel = ` <span class="step-name-dim">${escapeHtml(step.name)}</span>`;
+  } else {
+    primaryLabel = escapeHtml(step.name);
+  }
+
   // Captures
   const captureHtml = step.captures && Object.keys(step.captures).length > 0
     ? `<span class="step-captures">${Object.entries(step.captures).map(([k, v]) =>
@@ -95,8 +111,13 @@ function renderStepRow(step: StepViewState, suiteIdx: number, stepIdx: number): 
     : `<span class="step-captures"></span>`;
 
   const detailId = `s-${suiteIdx}-step-${stepIdx}`;
-  const hasDetail = (step.status === "fail" || step.status === "error") &&
-    ((step.assertions && step.assertions.length > 0) || step.hint || step.responseBody);
+  const hasDetail =
+    (step.assertions && step.assertions.length > 0) ||
+    step.hint ||
+    step.responseBody ||
+    step.requestBody ||
+    step.errorMessage ||
+    (step.requestMethod && step.requestUrl);
 
   const clickHandler = hasDetail
     ? ` onclick="event.stopPropagation();var d=document.getElementById('${detailId}');d.style.display=d.style.display==='none'?'block':'none'"`
@@ -134,6 +155,13 @@ function renderStepRow(step: StepViewState, suiteIdx: number, stepIdx: number): 
       detailContent += `<div class="failure-hint"><span>&#9888;</span> ${escapeHtml(step.hint)}</div>`;
     }
 
+    // Request body toggle
+    if (step.requestBody) {
+      const truncatedReq = step.requestBody.length > 2000 ? step.requestBody.slice(0, 2000) + "..." : step.requestBody;
+      detailContent += `<div class="req-res-toggle" onclick="event.stopPropagation();var b=this.nextElementSibling;b.style.display=b.style.display==='none'?'block':'none'">&#9660; Request Body</div>
+        <div class="req-res-body" style="display:none;"><pre style="font-size:0.7rem;margin:0.25rem 0;">${escapeHtml(truncatedReq)}</pre></div>`;
+    }
+
     // Response body toggle
     if (step.responseBody) {
       const truncated = step.responseBody.length > 2000 ? step.responseBody.slice(0, 2000) + "..." : step.responseBody;
@@ -146,7 +174,7 @@ function renderStepRow(step: StepViewState, suiteIdx: number, stepIdx: number): 
 
   return `<div class="step-row"${clickHandler}>
     ${icon}
-    <span class="step-label"${labelStyle}>${escapeHtml(step.name)}</span>
+    <span class="step-label"${labelStyle}>${primaryLabel}${nameLabel}</span>
     ${captureHtml}
     ${duration}
   </div>${detailPanel}`;

@@ -816,6 +816,37 @@ h3 { font-size: 1.05rem; margin: 1rem 0 0.25rem; }
 .history-row:hover { background: var(--bg-hover); }
 .pagination { display: flex; gap: 0.5rem; margin: 1.5rem 0; align-items: center; }
 
+/* ── Step method+path+status labels ── */
+.step-path { font-family: var(--font-mono); font-size: 0.8rem; }
+.step-status-code {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+.step-status-code.status-ok { background: var(--pass-dim); color: var(--pass); }
+.step-status-code.status-error { background: var(--fail-dim); color: var(--fail); }
+.step-name-dim { color: var(--text-dim); font-size: 0.7rem; margin-left: 0.5rem; }
+
+/* ── Suite link (endpoints → suites navigation) ── */
+.suite-link {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+.suite-link:hover { text-decoration: underline; }
+.suite-highlight {
+  animation: suite-flash 2s ease-out;
+}
+@keyframes suite-flash {
+  0% { background: rgba(61, 139, 253, 0.25); }
+  100% { background: transparent; }
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .health-strip { grid-template-columns: 1fr; gap: 1rem; }
