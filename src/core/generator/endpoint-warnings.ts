@@ -1,6 +1,6 @@
 import type { EndpointInfo } from "./types.ts";
 
-export type WarningCode = "deprecated" | "no_response_schema" | "no_responses_defined" | "required_params_no_examples";
+export type WarningCode = "deprecated" | "no_response_schema" | "no_responses_defined" | "required_params_no_examples" | "post_body_as_query";
 
 export interface EndpointWarning {
   method: string;
@@ -32,6 +32,15 @@ export function analyzeEndpoints(endpoints: EndpointInfo[]): EndpointWarning[] {
       .map(p => p.name);
     if (missingExamples.length > 0) {
       warnings.push(`required_params_no_examples: ${missingExamples.join(", ")}`);
+    }
+
+    // SpringDoc quirk: POST/PUT/PATCH with query param named "body" or single complex object query param
+    if (["POST", "PUT", "PATCH"].includes(ep.method)) {
+      const queryParams = ep.parameters.filter(p => p.in === "query");
+      const hasBodyQuery = queryParams.some(p => p.name.toLowerCase() === "body");
+      if (hasBodyQuery) {
+        warnings.push("post_body_as_query: query param 'body' on POST/PUT/PATCH likely means request body (SpringDoc quirk)");
+      }
     }
 
     if (warnings.length > 0) {

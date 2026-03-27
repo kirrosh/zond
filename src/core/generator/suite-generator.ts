@@ -15,8 +15,8 @@ function convertPath(path: string): string {
 
 /**
  * Convert path params to seed values for smoke suites (no capture context).
- * Uses the parameter's example/default from the spec, or falls back to "1" for
- * id-like params. Non-id string params keep the {{placeholder}} form.
+ * Uses the parameter's example/default from the spec, or falls back to
+ * {{placeholder}} form so the user fills them in via .env.yaml.
  */
 function convertPathWithSeeds(path: string, ep: EndpointInfo): string {
   return path.replace(/\{([^}]+)\}/g, (_, name: string) => {
@@ -24,7 +24,6 @@ function convertPathWithSeeds(path: string, ep: EndpointInfo): string {
     const schema = param?.schema as OpenAPIV3.SchemaObject | undefined;
     const example = (param as any)?.example ?? schema?.example ?? schema?.default;
     if (example !== undefined) return String(example);
-    if (schema?.type === "integer" || /^id$|_id$|Id$/i.test(name)) return "1";
     return `{{${name}}}`;
   });
 }
@@ -81,6 +80,20 @@ function getBodyAssertions(ep: EndpointInfo): Record<string, Record<string, stri
   return undefined;
 }
 
+/** Derive a variable name for a security scheme's token */
+function schemeVarName(scheme: SecuritySchemeInfo, allSchemes: SecuritySchemeInfo[]): string {
+  // Count how many bearer-like schemes exist
+  const bearerSchemes = allSchemes.filter(s =>
+    (s.type === "http" && (s.scheme === "bearer" || !s.scheme)) ||
+    (s.type === "apiKey" && s.in === "header" && s.apiKeyName === "Authorization")
+  );
+  // If only one bearer scheme → keep generic auth_token for backward compat
+  if (bearerSchemes.length <= 1) return "auth_token";
+  // Multiple → derive from scheme name (e.g. "platformAuth" → "platform_auth_token")
+  const slug = scheme.name.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_token$|_auth$/, "");
+  return `${slug}_token`;
+}
+
 function getAuthHeaders(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
@@ -93,16 +106,15 @@ function getAuthHeaders(
 
     if (scheme.type === "http") {
       if (scheme.scheme === "bearer" || !scheme.scheme) {
-        return { Authorization: "Bearer {{auth_token}}" };
+        return { Authorization: `Bearer {{${schemeVarName(scheme, schemes)}}}` };
       }
       if (scheme.scheme === "basic") {
-        return { Authorization: "Basic {{auth_token}}" };
+        return { Authorization: `Basic {{${schemeVarName(scheme, schemes)}}}` };
       }
     }
     if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
-      // When apiKey scheme uses Authorization header, it's typically a Bearer token
       if (scheme.apiKeyName === "Authorization") {
-        return { Authorization: "Bearer {{auth_token}}" };
+        return { Authorization: `Bearer {{${schemeVarName(scheme, schemes)}}}` };
       }
       return { [scheme.apiKeyName]: "{{api_key}}" };
     }
@@ -111,14 +123,15 @@ function getAuthHeaders(
   return undefined;
 }
 
-function getRequiredQueryParams(ep: EndpointInfo): Record<string, unknown> | undefined {
+function getRequiredQueryParams(ep: EndpointInfo): Record<string, string> | undefined {
   const queryParams = ep.parameters.filter(p => p.in === "query" && p.required);
   if (queryParams.length === 0) return undefined;
 
-  const query: Record<string, unknown> = {};
+  const query: Record<string, string> = {};
   for (const p of queryParams) {
     if (p.schema) {
-      query[p.name] = generateFromSchema(p.schema as OpenAPIV3.SchemaObject, p.name);
+      const val = generateFromSchema(p.schema as OpenAPIV3.SchemaObject, p.name);
+      query[p.name] = typeof val === "object" ? JSON.stringify(val) : String(val);
     } else {
       query[p.name] = "{{$randomString}}";
     }
@@ -387,9 +400,10 @@ export function generateCrudSuite(
 }
 
 /** Find unresolved template variables in a suite (excluding known globals, captured vars, and env keys) */
-export function findUnresolvedVars(suite: RawSuite, envKeys?: Set<string>): string[] {
+export function findUnresolvedVars(suite: RawSuite, envKeys?: Set<string>, extraKnown?: Set<string>): string[] {
   const KNOWN = new Set(["base_url", "auth_token", "api_key"]);
   if (envKeys) for (const k of envKeys) KNOWN.add(k);
+  if (extraKnown) for (const k of extraKnown) KNOWN.add(k);
   const captured = new Set<string>();
   for (const step of suite.tests) {
     if (step.expect?.body) {
@@ -518,8 +532,13 @@ function generateConsistentAuthSuite(
       /token|access_token|accessToken|jwt/i.test(k)
     );
     if (tokenField) {
+      // Determine the capture variable name based on the login endpoint's security scheme
+      const loginScheme = loginEp.security.length > 0
+        ? securitySchemes.find(s => s.name === loginEp.security[0])
+        : undefined;
+      const captureVar = loginScheme ? schemeVarName(loginScheme, securitySchemes) : "auth_token";
       if (!loginStep.expect.body) loginStep.expect.body = {};
-      loginStep.expect.body[tokenField] = { capture: "auth_token" };
+      loginStep.expect.body[tokenField] = { capture: captureVar };
     }
   }
   tests.push(loginStep);

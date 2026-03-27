@@ -123,6 +123,8 @@ Options for 'run':
   --auth-token <token> Auth token injected as {{auth_token}} variable
   --safe               Run only GET tests (read-only, safe mode)
   --tag <tag>          Filter suites by tag (repeatable, comma-separated, OR logic)
+  --exclude-tag <tag>  Exclude suites by tag (repeatable, comma-separated)
+  --method <method>    Filter tests by HTTP method (e.g. GET, POST)
 
 Options for 'init':
   --name <name>        API name (auto-detected from spec title if omitted)
@@ -132,14 +134,15 @@ Options for 'init':
 
 Options for 'describe':
   --compact            List all endpoints briefly
+  --list-params        List all unique parameters across all endpoints
   --method <method>    HTTP method for single endpoint detail
   --path <path>        Endpoint path for single endpoint detail
 
 Options for 'db':
   zond db collections           List all API collections
   zond db runs [--limit N]      List recent test runs
-  zond db run <id> [--verbose]  Show run details
-  zond db diagnose <id>         Diagnose run failures
+  zond db run <id> [--verbose]  Show run details (--method GET, --status 403 to filter)
+  zond db diagnose <id>         Diagnose run failures (--limit N examples per group, --verbose for all)
   zond db compare <idA> <idB>   Compare two runs
 
 Options for 'request':
@@ -256,8 +259,9 @@ async function main(): Promise<number> {
         }
       }
 
-      // Collect all --tag and --env-var flags (parseArgs only stores last one, so re-parse)
+      // Collect all --tag, --exclude-tag, and --env-var flags (parseArgs only stores last one, so re-parse)
       const tagValues: string[] = [];
+      const excludeTagValues: string[] = [];
       const envVarValues: string[] = [];
       const rawRunArgs = process.argv.slice(2);
       for (let i = 0; i < rawRunArgs.length; i++) {
@@ -267,6 +271,11 @@ async function main(): Promise<number> {
           i++;
         } else if (arg.startsWith("--tag=")) {
           tagValues.push(arg.slice("--tag=".length));
+        } else if (arg === "--exclude-tag" && rawRunArgs[i + 1]) {
+          excludeTagValues.push(rawRunArgs[i + 1]!);
+          i++;
+        } else if (arg.startsWith("--exclude-tag=")) {
+          excludeTagValues.push(arg.slice("--exclude-tag=".length));
         } else if (arg === "--env-var" && rawRunArgs[i + 1]) {
           envVarValues.push(rawRunArgs[i + 1]!);
           i++;
@@ -276,6 +285,7 @@ async function main(): Promise<number> {
       }
       // Support comma-separated: --tag smoke,crud → ["smoke", "crud"]
       const tags = tagValues.flatMap(v => v.split(",")).filter(Boolean);
+      const excludeTags = excludeTagValues.flatMap(v => v.split(",")).filter(Boolean);
 
       return runCommand({
         path,
@@ -288,6 +298,8 @@ async function main(): Promise<number> {
         authToken: typeof flags["auth-token"] === "string" ? flags["auth-token"] : undefined,
         safe: flags["safe"] === true,
         tag: tags.length > 0 ? tags : undefined,
+        excludeTag: excludeTags.length > 0 ? excludeTags : undefined,
+        method: typeof flags["method"] === "string" ? flags["method"] : undefined,
         envVars: envVarValues.length > 0 ? envVarValues : undefined,
         dryRun: flags["dry-run"] === true,
         json: jsonFlag,
@@ -410,6 +422,7 @@ async function main(): Promise<number> {
       return describeCommand({
         specPath,
         compact: flags["compact"] === true,
+        listParams: flags["list-params"] === true,
         method: typeof flags["method"] === "string" ? flags["method"] : undefined,
         path: typeof flags["path"] === "string" ? flags["path"] : undefined,
         json: jsonFlag,
@@ -428,6 +441,13 @@ async function main(): Promise<number> {
         limit = parseInt(limitRaw, 10);
         if (isNaN(limit) || limit <= 0) limit = undefined;
       }
+      const statusRaw = flags["status"];
+      let statusFilter: number | undefined;
+      if (typeof statusRaw === "string") {
+        statusFilter = parseInt(statusRaw, 10);
+        if (isNaN(statusFilter)) statusFilter = undefined;
+      }
+
       return dbCommand({
         subcommand: dbSub,
         positional: positional.slice(1),
@@ -435,6 +455,8 @@ async function main(): Promise<number> {
         verbose: flags["verbose"] === true,
         dbPath: typeof flags["db"] === "string" ? flags["db"] : undefined,
         json: jsonFlag,
+        method: typeof flags["method"] === "string" ? flags["method"] : undefined,
+        status: statusFilter,
       });
     }
 

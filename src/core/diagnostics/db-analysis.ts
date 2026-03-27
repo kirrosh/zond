@@ -169,7 +169,7 @@ export interface DiagnoseResult {
   grouped_failures?: FailureGroup[];
 }
 
-export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): DiagnoseResult {
+export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, maxExamples?: number): DiagnoseResult {
   getDb(dbPath);
   const diagRun = getRunById(runId);
   if (!diagRun) throw new Error(`Run ${runId} not found`);
@@ -272,7 +272,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
 
   const { grouped_failures, compactFailures } = verbose
     ? { grouped_failures: undefined, compactFailures: failures }
-    : groupFailures(failures);
+    : groupFailures(failures, maxExamples);
 
   return {
     run: {
@@ -301,7 +301,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string): 
 type FailureItem = { suite_name: string; test_name: string; failure_type: string; recommended_action: RecommendedAction; hint?: string; response_status: number | null };
 
 /** Group similar failures for compact output. Exported for testing. */
-export function groupFailures<T extends FailureItem>(failures: T[]): { grouped_failures?: FailureGroup[]; compactFailures: T[] } {
+export function groupFailures<T extends FailureItem>(failures: T[], maxExamples = 2): { grouped_failures?: FailureGroup[]; compactFailures: T[] } {
   if (failures.length <= 5) {
     return { compactFailures: failures };
   }
@@ -341,7 +341,7 @@ export function groupFailures<T extends FailureItem>(failures: T[]): { grouped_f
       failure_type: group.failure_type,
       recommended_action: group.items[0]!.recommended_action,
       hint: group.hint,
-      examples: group.items.slice(0, 2).map(f => `${f.suite_name}/${f.test_name}`),
+      examples: (maxExamples === 0 ? group.items : group.items.slice(0, maxExamples)).map(f => `${f.suite_name}/${f.test_name}`),
       response_status: group.response_status,
     });
     compactFailures.push(group.items[0]!);

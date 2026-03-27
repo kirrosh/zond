@@ -1,4 +1,6 @@
 import { getCollections, getRuns, getRunDetail, diagnoseRun, compareRuns } from "../../core/diagnostics/db-analysis.ts";
+import { getFilteredResults } from "../../db/queries.ts";
+import { getDb } from "../../db/schema.ts";
 import { printError } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 
@@ -9,6 +11,8 @@ export interface DbOptions {
   verbose?: boolean;
   dbPath?: string;
   json?: boolean;
+  method?: string;
+  status?: number;
 }
 
 export async function dbCommand(options: DbOptions): Promise<number> {
@@ -58,11 +62,22 @@ export async function dbCommand(options: DbOptions): Promise<number> {
           else printError(msg);
           return 2;
         }
-        const detail = getRunDetail(id, options.verbose, options.dbPath);
-        if (json) {
-          printJson(jsonOk("db run", detail));
+        // If filtering by method/status, show filtered results instead of full detail
+        if (options.method || options.status !== undefined) {
+          getDb(options.dbPath);
+          const results = getFilteredResults(id, { method: options.method, status: options.status });
+          if (json) {
+            printJson(jsonOk("db run", { run_id: id, count: results.length, results }));
+          } else {
+            console.log(JSON.stringify({ run_id: id, count: results.length, results }, null, 2));
+          }
         } else {
-          console.log(JSON.stringify(detail, null, 2));
+          const detail = getRunDetail(id, options.verbose, options.dbPath);
+          if (json) {
+            printJson(jsonOk("db run", detail));
+          } else {
+            console.log(JSON.stringify(detail, null, 2));
+          }
         }
         return 0;
       }
@@ -75,7 +90,7 @@ export async function dbCommand(options: DbOptions): Promise<number> {
           else printError(msg);
           return 2;
         }
-        const result = diagnoseRun(id, options.verbose, options.dbPath);
+        const result = diagnoseRun(id, options.verbose, options.dbPath, options.limit);
         if (json) {
           printJson(jsonOk("db diagnose", result));
         } else {
