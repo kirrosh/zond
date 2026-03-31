@@ -14,6 +14,7 @@ import { generateCommand } from "./commands/generate.ts";
 import { exportCommand } from "./commands/export.ts";
 import { syncCommand } from "./commands/sync.ts";
 import { updateCommand } from "./commands/update.ts";
+import { catalogCommand } from "./commands/catalog.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { getDb } from "../db/schema.ts";
@@ -107,6 +108,7 @@ Usage:
   zond ui               Alias for 'serve --open' (start dashboard & open browser)
   zond ci init          Generate CI/CD workflow (GitHub Actions, GitLab CI)
   zond export postman <path>  Export YAML tests as Postman Collection v2.1
+  zond catalog <spec>   Generate API catalog (compact endpoint reference)
   zond sync <spec>      Detect new/removed endpoints and generate tests for new ones
   zond update           Check for updates and self-update the binary
 
@@ -185,6 +187,9 @@ Options for 'export postman':
   --output <file>      Output file path (default: collection.postman.json)
   --env <file>         Also export .env.yaml as Postman environment
   --collection-name <name>  Collection name (default: derived from path)
+
+Options for 'catalog':
+  --output <dir>       Output directory (default: current directory)
 
 Options for 'sync':
   --tests <dir>        Path to test files directory (required)
@@ -517,6 +522,19 @@ async function main(): Promise<number> {
         output,
         tag: typeof flags["tag"] === "string" ? flags["tag"] : undefined,
         uncoveredOnly: flags["uncovered-only"] === true,
+        json: jsonFlag,
+      });
+    }
+
+    case "catalog": {
+      const specPath = positional[0];
+      if (!specPath) {
+        printError("Missing spec path. Usage: zond catalog <spec> [--output <dir>]");
+        return 2;
+      }
+      return catalogCommand({
+        specPath,
+        output: typeof flags["output"] === "string" ? flags["output"] : undefined,
         json: jsonFlag,
       });
     }

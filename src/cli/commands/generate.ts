@@ -7,6 +7,8 @@ import {
   scanCoveredEndpoints,
   filterUncoveredEndpoints,
   serializeSuite,
+  buildCatalog,
+  serializeCatalog,
 } from "../../core/generator/index.ts";
 import { generateSuites, findUnresolvedVars } from "../../core/generator/suite-generator.ts";
 import { filterByTag } from "../../core/generator/chunker.ts";
@@ -30,9 +32,12 @@ export interface GenerateOptions {
 export async function generateCommand(options: GenerateOptions): Promise<number> {
   try {
     const doc = await readOpenApiSpec(options.specPath);
-    let endpoints = extractEndpoints(doc);
+    const allEndpoints = extractEndpoints(doc);
+    let endpoints = allEndpoints;
     const securitySchemes = extractSecuritySchemes(doc);
     const baseUrl = ((doc as any).servers?.[0]?.url) as string | undefined;
+    const apiName = (doc as any).info?.title as string | undefined;
+    const apiVersion = (doc as any).info?.version as string | undefined;
     const warnings: string[] = [];
 
     // Filter to uncovered only
@@ -91,6 +96,18 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       specHash: hashSpec(specContent),
       files: { ...(existingMeta?.files ?? {}), ...metaFiles },
     });
+
+    // Generate .api-catalog.yaml (always uses full unfiltered endpoint list)
+    const catalog = buildCatalog({
+      endpoints: allEndpoints,
+      securitySchemes,
+      specSource: options.specPath,
+      specHash: hashSpec(specContent),
+      apiName,
+      apiVersion,
+      baseUrl,
+    });
+    await Bun.write(join(options.output, ".api-catalog.yaml"), serializeCatalog(catalog));
 
     // Sync DB collection spec reference if one is registered for this output directory
     try {
