@@ -10,3 +10,5 @@ export type { GuideOptions } from "./guide-builder.ts";
 export type { EndpointWarning, WarningCode } from "./endpoint-warnings.ts";
 export type { EndpointInfo, ResponseInfo, GenerateOptions, SecuritySchemeInfo, CrudGroup } from "./types.ts";
 export { generateSuites, generateStep, detectCrudGroups, generateCrudSuite, generateSanitySuite, findUnresolvedVars } from "./suite-generator.ts";
+export { buildCatalog, serializeCatalog } from "./catalog-builder.ts";
+export type { ApiCatalog, CatalogEndpoint } from "./catalog-builder.ts";

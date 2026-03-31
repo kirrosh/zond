@@ -5,6 +5,8 @@ import {
   extractEndpoints,
   extractSecuritySchemes,
   serializeSuite,
+  buildCatalog,
+  serializeCatalog,
 } from "../../core/generator/index.ts";
 import { generateSuites } from "../../core/generator/suite-generator.ts";
 import { filterByTag } from "../../core/generator/chunker.ts";
@@ -78,6 +80,19 @@ export async function syncCommand(options: SyncOptions): Promise<number> {
     }
 
     if (newEndpoints.length === 0) {
+      // Update catalog even when no new endpoints — spec schema may have changed
+      const allEndpoints = extractEndpoints(doc);
+      const catalog = buildCatalog({
+        endpoints: allEndpoints,
+        securitySchemes,
+        specSource: options.specPath,
+        specHash: currentHash,
+        apiName: (doc as any).info?.title,
+        apiVersion: (doc as any).info?.version,
+        baseUrl: (doc as any).servers?.[0]?.url,
+      });
+      await Bun.write(join(options.testsDir, ".api-catalog.yaml"), serializeCatalog(catalog));
+
       const msg = "Spec changed (hash differs) but no new endpoints detected. Existing tests may need manual review.";
       warnings.push(msg);
       if (options.json) {
@@ -167,6 +182,19 @@ export async function syncCommand(options: SyncOptions): Promise<number> {
       specHash: currentHash,
       files: { ...meta.files, ...updatedMetaFiles },
     });
+
+    // Update .api-catalog.yaml with current spec state
+    const allEndpoints = extractEndpoints(doc);
+    const catalog = buildCatalog({
+      endpoints: allEndpoints,
+      securitySchemes,
+      specSource: options.specPath,
+      specHash: currentHash,
+      apiName: (doc as any).info?.title,
+      apiVersion: (doc as any).info?.version,
+      baseUrl: (doc as any).servers?.[0]?.url,
+    });
+    await Bun.write(join(options.testsDir, ".api-catalog.yaml"), serializeCatalog(catalog));
 
     // Sync DB collection if one is registered for this tests directory
     try {
