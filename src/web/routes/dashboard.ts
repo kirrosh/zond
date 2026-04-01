@@ -5,6 +5,7 @@ import { renderHealthStrip } from "../views/health-strip.ts";
 import { renderEndpointsTab } from "../views/endpoints-tab.ts";
 import { renderSuitesTab } from "../views/suites-tab.ts";
 import { renderRunsTab, renderRunDetail } from "../views/runs-tab.ts";
+import { renderExplorerTab } from "../views/explorer-tab.ts";
 import { buildCollectionState, invalidateCollectionCache } from "../data/collection-state.ts";
 import {
   listCollections,
@@ -79,6 +80,16 @@ dashboard.get("/panels/endpoints", async (c) => {
     method: c.req.query("method") || undefined,
   };
   return c.html(renderEndpointsTab(state, filters));
+});
+
+dashboard.get("/panels/explorer", async (c) => {
+  const collectionId = parseInt(c.req.query("collection_id") ?? "", 10);
+  if (isNaN(collectionId)) return c.html("");
+
+  const collection = getCollectionById(collectionId);
+  if (!collection) return c.html("");
+
+  return c.html(await renderExplorerTab(collection));
 });
 
 dashboard.get("/panels/suites", async (c) => {
@@ -243,6 +254,10 @@ async function renderCollectionContent(collection: CollectionRecord): Promise<st
         hx-get="/panels/runs-tab?collection_id=${collection.id}"
         hx-target="#tab-content" hx-swap="innerHTML"
         onclick="activateTab(this)">Runs <span class="tab-count">${runCount}</span></button>
+      <button class="tab-btn" data-tab="explorer"
+        hx-get="/panels/explorer?collection_id=${collection.id}"
+        hx-target="#tab-content" hx-swap="innerHTML"
+        onclick="activateTab(this)">Explorer</button>
     </div>`;
 
   // Default tab content (endpoints)
