@@ -12,6 +12,7 @@ import {
   RunDetailSchema,
   RunIdParam,
 } from "../schemas.ts";
+import { renderProxyResponse, renderProxyError } from "../views/explorer-tab.ts";
 
 const api = new OpenAPIHono();
 
@@ -111,6 +112,85 @@ api.openapi(runRoute, async (c) => {
     return c.json({ runId }, 200);
   } catch (err) {
     return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+// ──────────────────────────────────────────────
+// POST /api/proxy — Explorer proxy for HTTP requests
+// ──────────────────────────────────────────────
+
+api.post("/api/proxy", async (c) => {
+  const form = await c.req.parseBody();
+  const baseUrl = (form["base_url"] as string) ?? "";
+  const method = ((form["method"] as string) ?? "GET").toUpperCase();
+  let path = (form["path"] as string) ?? "/";
+  const body = (form["body"] as string) || undefined;
+  const contentType = (form["content_type"] as string) || undefined;
+
+  if (!baseUrl) {
+    return c.html(renderProxyError("Base URL is required", 0));
+  }
+
+  // Substitute path parameters
+  for (const [key, value] of Object.entries(form)) {
+    if (typeof key === "string" && key.startsWith("param_path_") && value) {
+      const paramName = key.slice("param_path_".length);
+      path = path.replace(`{${paramName}}`, encodeURIComponent(value as string));
+    }
+  }
+
+  // Build query string
+  const queryParams = new URLSearchParams();
+  for (const [key, value] of Object.entries(form)) {
+    if (typeof key === "string" && key.startsWith("param_query_") && value) {
+      queryParams.set(key.slice("param_query_".length), value as string);
+    }
+  }
+
+  // Build headers
+  const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(form)) {
+    if (typeof key === "string" && key.startsWith("param_header_") && value) {
+      headers[key.slice("param_header_".length)] = value as string;
+    }
+  }
+  // Custom headers
+  for (let i = 0; i < 50; i++) {
+    const k = form[`custom_header_key_${i}`] as string | undefined;
+    const v = form[`custom_header_value_${i}`] as string | undefined;
+    if (!k && !v) break;
+    if (k && v) headers[k] = v;
+  }
+
+  if (contentType && body) {
+    headers["Content-Type"] = contentType;
+  }
+
+  // Build URL
+  let url: URL;
+  try {
+    url = new URL(path, baseUrl.endsWith("/") ? baseUrl : baseUrl + "/");
+    queryParams.forEach((v, k) => url.searchParams.set(k, v));
+  } catch (err) {
+    return c.html(renderProxyError(`Invalid URL: ${baseUrl}${path} — ${(err as Error).message}`, 0));
+  }
+
+  const startTime = performance.now();
+  try {
+    const resp = await fetch(url.toString(), {
+      method,
+      headers,
+      body: ["GET", "HEAD"].includes(method) ? undefined : (body || undefined),
+    });
+    const elapsed = Math.round(performance.now() - startTime);
+    const respBody = await resp.text();
+    const respHeaders: Record<string, string> = {};
+    resp.headers.forEach((v, k) => { respHeaders[k] = v; });
+
+    return c.html(renderProxyResponse(resp.status, respHeaders, respBody, elapsed));
+  } catch (err) {
+    const elapsed = Math.round(performance.now() - startTime);
+    return c.html(renderProxyError((err as Error).message, elapsed));
   }
 });
 
