@@ -51,33 +51,26 @@ claude --dangerously-skip-permissions
 
 ## Шаг 3. Подключить zond
 
-Есть два способа — выберите один.
+Установите бинарь zond (если ещё не установлен):
 
-### Claude Code плагин
-
-Плагин даёт скиллы + slash-команды (`/zond:api-test`, `/zond:api-coverage`):
-
-```
-/plugin marketplace add kirrosh/zond
+```bash
+curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
 ```
 
-Затем установите плагин:
+Пропишите MCP-сервер в Claude Code (или Cursor):
 
+```bash
+zond install --claude          # Claude Code
+zond install --cursor          # Cursor
 ```
-/plugin install zond@zond-marketplace
-```
+
+Команда создаёт/обновляет `~/.claude/mcp.json` (или `~/.cursor/mcp.json`) и сразу запускает sanity-check `tools/list`. После этого перезапустите Claude Code — он подхватит MCP-сервер `zond` со всеми тулзами и ресурсами.
 
 ---
 
 ## Шаг 4. Дать задание агенту
 
-Теперь дайте агенту первое задание. Если установлен плагин (Способ А), можно использовать slash-команду:
-
-```
-/zond:api-test openapi.json
-```
-
-Или дайте задание на естественном языке — сгенерировать безопасные smoke-тесты (только GET-запросы, которые не меняют данные):
+Теперь дайте агенту первое задание на естественном языке — сгенерировать безопасные smoke-тесты (только GET-запросы, которые не меняют данные):
 
 ```
 Покрой API из файла openapi.json безопасными smoke-тестами.
