@@ -139,6 +139,25 @@ describe("MCP tools — registry + zond_run + zond_diagnose", () => {
     expect(toolData).toHaveProperty("failures");
   });
 
+  test("T7: resources/read zond://run/{id}/diagnosis returns markdown digest", async () => {
+    const runId = (globalThis as any).__zondRunId as number;
+    expect(runId).toBeGreaterThan(0);
+
+    const res = await client.readResource({ uri: `zond://run/${runId}/diagnosis` });
+    expect(res.contents).toHaveLength(1);
+    const content = res.contents[0] as { uri: string; mimeType?: string; text?: string };
+    expect(content.uri).toBe(`zond://run/${runId}/diagnosis`);
+    expect(content.mimeType).toBe("text/markdown");
+    expect(content.text).toMatch(new RegExp(`^# Run ${runId} `));
+    expect(content.text).toContain("## Summary");
+  });
+
+  test("T7: resources/read zond://run/{id}/diagnosis errors on bad id", async () => {
+    await expect(
+      client.readResource({ uri: "zond://run/999999/diagnosis" }),
+    ).rejects.toThrow(/Run 999999 not found/);
+  });
+
   test("Unknown tool returns isError without throwing", async () => {
     const res = await client.callTool({
       name: "zond_nonexistent",
