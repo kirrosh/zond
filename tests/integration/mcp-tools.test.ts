@@ -84,19 +84,22 @@ describe("MCP tools — registry + zond_run + zond_diagnose", () => {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   });
 
-  test("tools/list exposes zond_run and zond_diagnose with JSON Schema inputs", async () => {
+  test("AC#1: tools/list returns all 11 zond_* tools, each with object-typed JSON Schema", async () => {
     const res = await client.listTools();
-    const names = res.tools.map((t) => t.name);
-    expect(names).toContain("zond_run");
-    expect(names).toContain("zond_diagnose");
-
-    const runTool = res.tools.find((t) => t.name === "zond_run")!;
-    expect(runTool.inputSchema).toBeDefined();
-    expect((runTool.inputSchema as { type?: string }).type).toBe("object");
-    expect((runTool.inputSchema as { properties?: Record<string, unknown> }).properties).toHaveProperty("testPath");
-
-    const diagTool = res.tools.find((t) => t.name === "zond_diagnose")!;
-    expect((diagTool.inputSchema as { properties?: Record<string, unknown> }).properties).toHaveProperty("runId");
+    const names = new Set(res.tools.map((t) => t.name));
+    for (const expected of [
+      "zond_run", "zond_diagnose", "zond_db_runs", "zond_db_run",
+      "zond_describe", "zond_catalog", "zond_coverage",
+      "zond_validate", "zond_sync", "zond_init", "zond_request",
+    ]) {
+      expect(names.has(expected)).toBe(true);
+    }
+    for (const tool of res.tools) {
+      const schema = tool.inputSchema as { type?: string; properties?: unknown };
+      expect(schema.type).toBe("object");
+      expect(typeof tool.description).toBe("string");
+      expect(tool.description!.length).toBeGreaterThan(0);
+    }
   });
 
   test("AC#2: tools/call zond_run executes tests and returns runId", async () => {
@@ -243,5 +246,39 @@ describe("MCP tools — registry + zond_run + zond_diagnose", () => {
     expect(res.isError).toBe(true);
     const text = (res.content as Array<{ text?: string }>)[0]?.text ?? "";
     expect(text).toContain(".zond-meta.json");
+  });
+
+  test("zond_request hits the inline server and returns status/headers/body", async () => {
+    const res = await client.callTool({
+      name: "zond_request",
+      arguments: { method: "GET", url: `${baseUrl}/ping` },
+    });
+    expect(res.isError).not.toBe(true);
+    const data = res.structuredContent as { status: number; body: unknown; duration_ms: number };
+    expect(data.status).toBe(200);
+    expect((data.body as { ok?: boolean }).ok).toBe(true);
+    expect(typeof data.duration_ms).toBe("number");
+  });
+
+  test("zond_init creates a collection and scaffold dir from spec", async () => {
+    const initDir = join(tmpDir, "init-target");
+    const res = await client.callTool({
+      name: "zond_init",
+      arguments: {
+        name: `test-init-${Date.now()}`,
+        spec: specFile,
+        dir: initDir,
+      },
+    });
+    expect(res.isError).not.toBe(true);
+    const data = res.structuredContent as {
+      created: boolean;
+      collectionId: number;
+      baseDir: string;
+      testPath: string;
+    };
+    expect(data.created).toBe(true);
+    expect(data.collectionId).toBeGreaterThan(0);
+    expect(data.testPath.length).toBeGreaterThan(0);
   });
 });
