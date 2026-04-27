@@ -201,6 +201,8 @@ zond run tests/ --env staging
 - **`.env.yaml`:** add a top-level `rateLimit: <N>` field — picked up automatically when no CLI flag is given. CLI takes precedence.
 - **Auto retry on 429:** the runner respects the `Retry-After` header (seconds or HTTP-date). If the header is missing, it falls back to capped exponential backoff (base = `retry_delay`, cap = 30s). Up to 5 attempts per request, then the 429 is reported as the final response.
 
+> **Tip:** set `--rate-limit` **1 below** the API's documented cap (e.g. use `4` for an API that allows 5 req/s). The throttle paces requests at `1000/N` ms intervals — at exactly N, sliding-window APIs may still return 429 on boundary milliseconds. A small margin avoids it.
+
 ```yaml
 # .env.yaml
 base_url: https://api.resend.com
