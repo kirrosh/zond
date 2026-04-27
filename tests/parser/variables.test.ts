@@ -114,6 +114,32 @@ describe("substituteString", () => {
     const b = substituteString("{{$randomUrl}}", {});
     expect(a).not.toBe(b);
   });
+
+  // T34 — fail-loud on unknown $generator
+  describe("T34 fail-loud on unknown generators", () => {
+    test("unknown $generator (full match) throws with available list", () => {
+      expect(() => substituteString("{{$nopeNope}}", {})).toThrow(/Unknown generator: \{\{\$nopeNope\}\}/);
+      expect(() => substituteString("{{$nopeNope}}", {})).toThrow(/Available:/);
+    });
+
+    test("unknown $generator (embedded) throws too", () => {
+      expect(() => substituteString("name: {{$ohnoes}}-end", {})).toThrow(/Unknown generator: \{\{\$ohnoes\}\}/);
+    });
+
+    test("case-only typo gets a 'did you mean' suggestion", () => {
+      expect(() => substituteString("{{$randomfqdn}}", {})).toThrow(/did you mean \$randomFqdn\?/);
+    });
+
+    test("non-$ unknown var still passes through as literal (existing behavior)", () => {
+      const result = substituteString("{{not_set}}", {});
+      expect(result).toBe("{{not_set}}");
+    });
+
+    test("user-defined $variable in env wins (no error)", () => {
+      const result = substituteString("{{$customKey}}", { "$customKey": "ok" });
+      expect(result).toBe("ok");
+    });
+  });
 });
 
 describe("substituteDeep", () => {

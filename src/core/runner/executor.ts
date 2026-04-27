@@ -124,20 +124,40 @@ export async function runSuite(
       }
     }
 
-    // Process set: on HTTP steps — evaluate generators once before building request
-    if (step.set) {
-      for (const [key, rawDirective] of Object.entries(step.set)) {
-        const substituted = substituteDeep(rawDirective, variables);
-        variables[key] = applyTransform(substituted);
+    // Process set: on HTTP steps — evaluate generators once before building request.
+    // Substitution can throw on unknown {{$generator}} — fail this step, not the suite.
+    let resolved: TestStep;
+    let resolvedBaseUrl: string | undefined;
+    let resolvedSuiteHeaders: Record<string, string> | undefined;
+    try {
+      if (step.set) {
+        for (const [key, rawDirective] of Object.entries(step.set)) {
+          const substituted = substituteDeep(rawDirective, variables);
+          variables[key] = applyTransform(substituted);
+        }
       }
+      resolved = substituteStep(step, variables);
+      resolvedBaseUrl = suite.base_url ? substituteString(suite.base_url, variables) as string : undefined;
+      resolvedSuiteHeaders = suite.headers ? substituteDeep(suite.headers, variables) : undefined;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      steps.push({
+        name: step.name,
+        status: "error",
+        duration_ms: 0,
+        request: { method: step.method, url: step.path, headers: {} },
+        assertions: [],
+        captures: {},
+        error: errorMsg,
+      });
+      // Mark expected captures as failed so dependent steps skip cleanly
+      if (step.expect.body) {
+        for (const rule of Object.values(step.expect.body)) {
+          if (rule.capture) failedCaptures.add(rule.capture);
+        }
+      }
+      continue;
     }
-
-    // Substitute variables
-    const resolved = substituteStep(step, variables);
-
-    // Build request — substitute base_url and suite headers with current variables
-    const resolvedBaseUrl = suite.base_url ? substituteString(suite.base_url, variables) as string : undefined;
-    const resolvedSuiteHeaders = suite.headers ? substituteDeep(suite.headers, variables) : undefined;
     const url = buildUrl(resolvedBaseUrl, resolved.path, resolved.query);
     const headers: Record<string, string> = { ...resolvedSuiteHeaders, ...resolved.headers };
     let body: string | undefined;
