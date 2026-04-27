@@ -92,7 +92,6 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
     await writeMeta(options.output, {
       zondVersion: ZOND_VERSION,
       lastSyncedAt: new Date().toISOString(),
-      specUrl: options.specPath,
       specHash: hashSpec(specContent),
       files: { ...(existingMeta?.files ?? {}), ...metaFiles },
     });

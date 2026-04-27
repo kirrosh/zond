@@ -12,8 +12,6 @@ export interface ZondMeta {
   zondVersion: string;
   /** ISO timestamp of last sync/generate */
   lastSyncedAt: string;
-  /** Spec URL or file path used for last generation */
-  specUrl: string;
   /** SHA-256 hex of spec content at time of last generation */
   specHash: string;
   /** Per-file metadata, keyed by filename (e.g. "smoke-users.yaml") */

@@ -253,17 +253,14 @@ zond sync <spec> --tests <tests-dir> --json             # generate tests for new
 - Never run CRUD tests unless user confirmed staging/test environment
 - If endpoint returns 500, keep `status: 200` in expect — failing test = API bug
 
-## Spec reference: two sources of truth
+## Spec reference
 
-Zond tracks the OpenAPI spec in two places:
+The path/URL of the OpenAPI spec lives in SQLite (`collections.openapi_spec`) —
+that's the single source of truth used by `--api`, `coverage`, and the web UI.
+`zond init`, `zond generate`, and `zond sync` keep it up to date.
 
-| Where | What | Updated by |
-|-------|------|------------|
-| SQLite `collections.openapi_spec` | path/URL used by `--api`, `coverage`, web UI | `zond init`, `zond generate`, `zond sync` |
-| `.zond-meta.json` → `specUrl` + `specHash` | path/URL + SHA-256 hash for drift detection | `zond generate`, `zond sync` |
-
-`zond generate` and `zond sync` keep both in sync automatically when a collection is registered.
-If they diverge (e.g. spec was renamed manually), re-run `zond generate` or `zond sync` to reconcile.
+`.zond-meta.json` only stores `specHash` (SHA-256 of last generated spec content),
+used by `zond sync` to detect spec drift.
 
 ## JSON output format
 All `--json` output follows:
