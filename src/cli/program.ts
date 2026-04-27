@@ -239,6 +239,7 @@ export function buildProgram(): Command {
     .option("--db <path>", "Path to SQLite database file (default: zond.db)")
     .option("--open", "Open dashboard in browser after starting")
     .option("--watch", "Enable dev mode with hot reload (auto-refresh on file changes)")
+    .option("--kill-existing", "Kill any process holding the requested port (DANGEROUS — can terminate your dev server)")
     .action(async (opts) => {
       process.exitCode = await serveCommand({
         port: opts.port,
@@ -246,6 +247,7 @@ export function buildProgram(): Command {
         dbPath: opts.db,
         watch: opts.watch === true,
         open: opts.open === true,
+        killExisting: opts.killExisting === true,
       });
     });
 
