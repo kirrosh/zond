@@ -1,10 +1,14 @@
 import type { HttpRequest, HttpResponse } from "./types.ts";
+import { type RateLimiter, parseRetryAfter } from "./rate-limiter.ts";
 
 export interface FetchOptions {
   timeout: number;
   retries: number;
   retry_delay: number;
   follow_redirects: boolean;
+  rate_limiter?: RateLimiter;
+  rate_limit_retries: number;
+  rate_limit_max_delay_ms: number;
 }
 
 export const DEFAULT_FETCH_OPTIONS: FetchOptions = {
@@ -12,6 +16,8 @@ export const DEFAULT_FETCH_OPTIONS: FetchOptions = {
   retries: 0,
   retry_delay: 1000,
   follow_redirects: true,
+  rate_limit_retries: 5,
+  rate_limit_max_delay_ms: 30000,
 };
 
 export async function executeRequest(
@@ -20,10 +26,12 @@ export async function executeRequest(
 ): Promise<HttpResponse> {
   const opts = { ...DEFAULT_FETCH_OPTIONS, ...options };
   let lastError: Error | undefined;
+  let networkAttempt = 0;
+  let rate429Attempt = 0;
 
-  for (let attempt = 0; attempt <= opts.retries; attempt++) {
-    if (attempt > 0) {
-      await Bun.sleep(opts.retry_delay);
+  while (true) {
+    if (opts.rate_limiter) {
+      await opts.rate_limiter.acquire();
     }
 
     try {
@@ -42,6 +50,20 @@ export async function executeRequest(
 
       clearTimeout(timeoutId);
       const duration_ms = Math.round(performance.now() - start);
+
+      if (response.status === 429 && rate429Attempt < opts.rate_limit_retries) {
+        const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"));
+        const backoffMs = Math.min(
+          opts.retry_delay * 2 ** rate429Attempt,
+          opts.rate_limit_max_delay_ms,
+        );
+        const waitMs = Math.min(retryAfterMs ?? backoffMs, opts.rate_limit_max_delay_ms);
+        rate429Attempt++;
+        // Drain body so the connection can be reused
+        await response.text().catch(() => undefined);
+        await Bun.sleep(waitMs);
+        continue;
+      }
 
       const bodyText = await response.text();
       let body_parsed: unknown = undefined;
@@ -72,8 +94,12 @@ export async function executeRequest(
       return { status: response.status, headers, body: bodyText, body_parsed, duration_ms };
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
+      if (networkAttempt < opts.retries) {
+        networkAttempt++;
+        await Bun.sleep(opts.retry_delay);
+        continue;
+      }
+      throw lastError;
     }
   }
-
-  throw lastError!;
 }

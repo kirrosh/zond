@@ -163,6 +163,7 @@ export function buildProgram(): Command {
         .argParser(parseReporter),
     )
     .option("--timeout <ms>", "Override request timeout", parsePositiveInt("--timeout"))
+    .option("--rate-limit <N>", "Throttle requests to at most N per second", parsePositiveInt("--rate-limit"))
     .option("--bail", "Stop on first suite failure")
     .option("--no-db", "Do not save results to zond.db")
     .option("--db <path>", "Path to SQLite database file (default: zond.db)")
@@ -207,6 +208,7 @@ export function buildProgram(): Command {
         env: opts.env,
         report: opts.report as ReporterName,
         timeout: opts.timeout,
+        rateLimit: opts.rateLimit,
         bail: opts.bail === true,
         // Commander's `--no-db` produces { db: false }; keep semantics: when --no-db given → noDb=true
         noDb: opts.db === false,

@@ -154,5 +154,46 @@ export async function loadEnvironment(envName?: string, searchDir: string = ".")
   const fileVars = await loadEnvFile(`${searchDir}/${fileName}`);
   const parentFileVars = await loadEnvFile(`${dirname(searchDir)}/${fileName}`);
 
-  return { ...parentFileVars, ...fileVars };
+  const merged = { ...parentFileVars, ...fileVars };
+  // Strip reserved meta keys so they don't leak into variable substitution
+  for (const key of META_KEYS) {
+    delete merged[key];
+  }
+  return merged;
+}
+
+const META_KEYS = ["rateLimit"] as const;
+
+export interface EnvMeta {
+  rateLimit?: number;
+}
+
+async function readEnvMetaFile(filePath: string): Promise<EnvMeta | null> {
+  try {
+    const text = await Bun.file(filePath).text();
+    const parsed = Bun.YAML.parse(text);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    const obj = parsed as Record<string, unknown>;
+    const meta: EnvMeta = {};
+    if ("rateLimit" in obj) {
+      const v = obj.rateLimit;
+      if (typeof v === "number" && Number.isFinite(v) && v > 0) {
+        meta.rateLimit = v;
+      } else if (typeof v === "string") {
+        const n = Number.parseFloat(v);
+        if (Number.isFinite(n) && n > 0) meta.rateLimit = n;
+      }
+    }
+    return meta;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") return null;
+    return null;
+  }
+}
+
+export async function loadEnvMeta(envName?: string, searchDir: string = "."): Promise<EnvMeta> {
+  const fileName = envName ? `.env.${envName}.yaml` : ".env.yaml";
+  const parent = await readEnvMetaFile(`${dirname(searchDir)}/${fileName}`);
+  const own = await readEnvMetaFile(`${searchDir}/${fileName}`);
+  return { ...(parent ?? {}), ...(own ?? {}) };
 }
