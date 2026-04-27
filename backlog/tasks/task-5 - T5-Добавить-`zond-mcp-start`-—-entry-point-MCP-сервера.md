@@ -1,9 +1,11 @@
 ---
 id: TASK-5
 title: 'T5: Добавить `zond mcp start` — entry-point MCP-сервера'
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-04-27'
+updated_date: '2026-04-27 10:42'
 labels:
   - T5
   - phase-1
@@ -34,6 +36,6 @@ Codex, Gemini CLI, Kiro.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `echo '{"jsonrpc":"2.0","id":1,"method":"initialize",...}' | zond mcp start` отдаёт корректный response
-- [ ] #2 `tools/list` и `resources/list` работают (пусть с заглушкой)
+- [x] #1 `echo '{"jsonrpc":"2.0","id":1,"method":"initialize",...}' | zond mcp start` отдаёт корректный response
+- [x] #2 `tools/list` и `resources/list` работают (пусть с заглушкой)
 <!-- AC:END -->
