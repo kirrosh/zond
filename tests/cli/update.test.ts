@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
-import { VERSION } from "../../src/cli/index.ts";
+import { VERSION } from "../../src/cli/version.ts";
 
 const originalFetch = globalThis.fetch;
 

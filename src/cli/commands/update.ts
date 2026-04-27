@@ -1,4 +1,4 @@
-import { VERSION } from "../index.ts";
+import { VERSION } from "../version.ts";
 import { isCompiledBinary } from "../runtime.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
