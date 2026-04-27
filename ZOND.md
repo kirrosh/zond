@@ -151,6 +151,32 @@ zond run tests/ --env staging
 
 ---
 
+## Bootstrapping a workspace
+
+In a fresh directory, run `zond init` (no flags) to scaffold a zond workspace:
+
+```bash
+mkdir my-api-tests && cd my-api-tests
+zond init                                    # creates zond.config.yml, apis/, AGENTS.md
+                                             # also configures ~/.claude/mcp.json + ~/.cursor/mcp.json
+```
+
+Three integration modes are available via `--integration`:
+
+| Mode  | Effect |
+|---|---|
+| `mcp` *(default)* | Writes a short `AGENTS.md` nudge pointing agents to MCP resources (`zond://workflow/test-api`, `zond://rules/never`) and configures Claude Code + Cursor MCP servers. |
+| `cli` | Writes a self-contained `AGENTS.md` with the full workflow inline — for clients without MCP support. |
+| `skip` | Creates only `zond.config.yml` + `apis/`. No agent files, no MCP install. |
+
+Combo: `zond init --with-spec <path> --name <api>` bootstraps the workspace **and** registers the first API in one shot.
+
+`AGENTS.md` is written between `<!-- zond:start -->` / `<!-- zond:end -->` markers, so an existing `AGENTS.md` is preserved and re-running `zond init` is idempotent (the block is replaced, surrounding content untouched).
+
+The legacy `zond init --spec <path> --name <api>` keeps registering a single API without bootstrapping — backwards compatible.
+
+---
+
 ## Workspace
 
 zond resolves the workspace root via walk-up from the current directory. The first ancestor containing any of these markers is treated as the root:

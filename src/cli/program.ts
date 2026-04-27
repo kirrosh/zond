@@ -362,14 +362,21 @@ export function buildProgram(): Command {
   // ── init ──
   program
     .command("init [spec]")
-    .description("Register a new API for testing")
+    .description("Bootstrap a workspace, or register an API when --spec is given")
     .option("--name <name>", "API name (auto-detected from spec title if omitted)")
-    .option("--spec <path>", "Path to OpenAPI spec file")
+    .option("--spec <path>", "Path to OpenAPI spec file (registers a single API)")
     .option("--base-url <url>", "Override base URL")
     .option("--dir <path>", "Target directory")
     .option("--force", "Overwrite existing API collection")
     .option("--insecure", "Skip TLS verification when fetching the spec")
     .option("--db <path>", "Path to SQLite database file")
+    .option("--workspace", "Bootstrap a zond workspace (zond.config.yml, apis/, AGENTS.md)")
+    .option("--with-spec <path>", "Bootstrap workspace AND register first API from spec")
+    .addOption(
+      new Option("--integration <mode>", "AI agent integration when bootstrapping")
+        .choices(["mcp", "cli", "skip"])
+        .default("mcp"),
+    )
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       process.exitCode = await initCommand({
         name: opts.name,
@@ -379,6 +386,9 @@ export function buildProgram(): Command {
         force: opts.force === true,
         insecure: opts.insecure === true,
         dbPath: opts.db,
+        workspace: opts.workspace === true,
+        withSpec: opts.withSpec,
+        integration: opts.integration as "mcp" | "cli" | "skip" | undefined,
         json: globalJson(cmd),
       });
     });

@@ -1,0 +1,15 @@
+# zond workspace config
+#
+# The presence of this file marks the workspace root for `zond` walk-up
+# resolution (zond.db, apis/<name>/, .zond-current are anchored here).
+#
+# Schema below is a placeholder — TASK-12 will wire a real config loader.
+# Uncomment and edit as needed.
+
+version: 1
+
+# default_reporter: console     # console | json | junit
+# default_safe: false
+# default_timeout_ms: 30000
+# default_tags: []
+# fail_on_coverage: 0
