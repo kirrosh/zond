@@ -18,7 +18,9 @@ import { catalogCommand } from "./commands/catalog.ts";
 import { completionsCommand, COMPLETION_SHELLS, type CompletionShell } from "./commands/completions.ts";
 import { mcpStartCommand } from "./commands/mcp.ts";
 import { installCommand } from "./commands/install.ts";
+import { useCommand } from "./commands/use.ts";
 
+import { readCurrentApi } from "../core/context/current.ts";
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { VERSION } from "./version.ts";
@@ -173,7 +175,7 @@ export function buildProgram(): Command {
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
     .action(async (pathArg: string | undefined, opts, cmd: Command) => {
       let path = pathArg;
-      const apiFlag = opts.api as string | undefined;
+      const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
       const dbPath = opts.db as string | undefined;
 
       if (!path && apiFlag) {
@@ -191,7 +193,7 @@ export function buildProgram(): Command {
         path = resolved.testPath;
       }
       if (!path) {
-        printError("Missing path argument. Usage: zond run <path> or zond run --api <name>");
+        printError("Missing path argument. Usage: zond run <path> or zond run --api <name> (or set with `zond use`)");
         process.exitCode = 2;
         return;
       }
@@ -278,6 +280,19 @@ export function buildProgram(): Command {
       process.exitCode = await mcpStartCommand({ dbPath: opts.db });
     });
 
+  // ── use ──
+  program
+    .command("use [api]")
+    .description("Set or show the current API for this workspace (.zond-current)")
+    .option("--clear", "Remove .zond-current from the current directory")
+    .action(async (api: string | undefined, opts, cmd: Command) => {
+      process.exitCode = await useCommand({
+        api,
+        clear: opts.clear === true,
+        json: globalJson(cmd),
+      });
+    });
+
   // ── install ──
   program
     .command("install")
@@ -311,7 +326,7 @@ export function buildProgram(): Command {
     .action(async (opts, cmd: Command) => {
       let spec: string | undefined = opts.spec;
       let tests: string | undefined = opts.tests;
-      const apiFlag = opts.api as string | undefined;
+      const apiFlag = (opts.api as string | undefined) ?? (spec || tests ? undefined : readCurrentApi() ?? undefined);
 
       if (apiFlag) {
         const resolved = resolveApiCollection(apiFlag, opts.db);
@@ -478,6 +493,7 @@ export function buildProgram(): Command {
     .option("--db <path>", "Path to SQLite database file")
     .action(async (method: string, url: string, opts, cmd: Command) => {
       const headers = (opts.header as string[] | undefined)?.length ? (opts.header as string[]) : undefined;
+      const api = (opts.api as string | undefined) ?? readCurrentApi() ?? undefined;
       process.exitCode = await requestCommand({
         method,
         url,
@@ -485,7 +501,7 @@ export function buildProgram(): Command {
         body: opts.body,
         timeout: opts.timeout,
         env: opts.env,
-        api: opts.api,
+        api,
         jsonPath: opts.jsonPath,
         dbPath: opts.db,
         json: globalJson(cmd),
