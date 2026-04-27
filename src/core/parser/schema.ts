@@ -92,7 +92,7 @@ const AssertionRuleSchemaInner: z.ZodType<AssertionRule> = z.preprocess(
   },
   z.object({
     capture: z.string().optional(),
-    type: z.enum(["string", "integer", "number", "boolean", "array", "object"]).optional(),
+    type: z.enum(["string", "integer", "number", "boolean", "array", "object", "null"]).optional(),
     equals: z.unknown().optional(),
     not_equals: z.unknown().optional(),
     contains: z.string().optional(),

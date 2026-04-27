@@ -135,6 +135,19 @@ tests:
 
 `equals`, `type`, `capture`, `contains`, `matches`, `gt`, `lt`, `exists` (boolean). Nested: `category.name: { equals: "Dogs" }`. Root body: `_body: { type: "array" }`.
 
+**Type values:** `string | integer | number | boolean | array | object | null`. Use `type: "null"` to assert a field is explicitly null.
+
+**Exists semantics:** `exists: true` means *key is present in the response*, including when the value is `null`. To assert "present and not null", combine: `{ exists: true, not_equals: null }` or use `type: "string"` (or whichever non-null type you expect).
+
+**Field name conflicts with assertion keys:** if your response has a field literally named `type`, `equals`, `length`, etc. — use **quoted dot-notation** so the parser treats it as a path, not a rule:
+
+```yaml
+expect:
+  body:
+    "user.type": { equals: "admin" }   # asserts user.type === "admin"
+    "data.length": { gt: 0 }           # asserts data.length > 0
+```
+
 `status` accepts a single integer (`200`) or an array of allowed codes (`[200, 204]`).
 
 ### Suite Variable Isolation
