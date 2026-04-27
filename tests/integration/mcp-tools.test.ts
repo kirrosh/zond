@@ -15,6 +15,7 @@ describe("MCP tools — registry + zond_run + zond_diagnose", () => {
   const dbPath = join(tmpDir, "zond.db");
   const testsDir = join(tmpDir, "tests");
   const suiteFile = join(testsDir, "ping.yaml");
+  const specFile = join(tmpDir, "spec.json");
 
   let server: ReturnType<typeof Bun.serve>;
   let baseUrl: string;
@@ -47,6 +48,23 @@ describe("MCP tools — registry + zond_run + zond_diagnose", () => {
       `    expect:`,
       `      status: 200`,
     ].join("\n"));
+
+    await writeFile(specFile, JSON.stringify({
+      openapi: "3.0.0",
+      info: { title: "Test API", version: "1.0.0" },
+      servers: [{ url: baseUrl }],
+      paths: {
+        "/ping": {
+          get: { summary: "Ping", responses: { "200": { description: "OK" } } },
+        },
+        "/users/{id}": {
+          get: {
+            parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+            responses: { "200": { description: "OK" } },
+          },
+        },
+      },
+    }));
 
     transport = new StdioClientTransport({
       command: "bun",
@@ -159,5 +177,71 @@ describe("MCP tools — registry + zond_run + zond_diagnose", () => {
     const data = res.structuredContent as { run: { id: number }; results: unknown[] };
     expect(data.run.id).toBe(runId);
     expect(Array.isArray(data.results)).toBe(true);
+  });
+
+  test("zond_describe (compact) lists endpoints from spec", async () => {
+    const res = await client.callTool({
+      name: "zond_describe",
+      arguments: { mode: "compact", specPath: specFile },
+    });
+    expect(res.isError).not.toBe(true);
+    const data = res.structuredContent as { endpoints: Array<{ method: string; path: string }> };
+    expect(data.endpoints.length).toBe(2);
+    expect(data.endpoints.map((e) => e.path)).toContain("/ping");
+  });
+
+  test("zond_describe (endpoint) returns single endpoint detail", async () => {
+    const res = await client.callTool({
+      name: "zond_describe",
+      arguments: { mode: "endpoint", specPath: specFile, method: "GET", path: "/ping" },
+    });
+    expect(res.isError).not.toBe(true);
+    const data = res.structuredContent as { method: string; path: string };
+    expect(data.method.toUpperCase()).toBe("GET");
+    expect(data.path).toBe("/ping");
+  });
+
+  test("zond_catalog builds catalog from spec", async () => {
+    const res = await client.callTool({
+      name: "zond_catalog",
+      arguments: { specPath: specFile },
+    });
+    expect(res.isError).not.toBe(true);
+    const data = res.structuredContent as { endpointCount: number; endpoints: unknown[] };
+    expect(data.endpointCount).toBe(2);
+    expect(Array.isArray(data.endpoints)).toBe(true);
+  });
+
+  test("zond_coverage returns covered/uncovered counts", async () => {
+    const res = await client.callTool({
+      name: "zond_coverage",
+      arguments: { specPath: specFile, testsDir },
+    });
+    expect(res.isError).not.toBe(true);
+    const data = res.structuredContent as { total: number; covered: number; uncovered: number; percentage: number };
+    expect(data.total).toBe(2);
+    expect(data.covered + data.uncovered).toBe(2);
+  });
+
+  test("zond_validate counts suites and tests in YAML dir", async () => {
+    const res = await client.callTool({
+      name: "zond_validate",
+      arguments: { path: testsDir },
+    });
+    expect(res.isError).not.toBe(true);
+    const data = res.structuredContent as { suites: number; tests: number; valid: boolean };
+    expect(data.valid).toBe(true);
+    expect(data.suites).toBeGreaterThan(0);
+    expect(data.tests).toBeGreaterThan(0);
+  });
+
+  test("zond_sync errors with isError when .zond-meta.json missing", async () => {
+    const res = await client.callTool({
+      name: "zond_sync",
+      arguments: { specPath: specFile, testsDir },
+    });
+    expect(res.isError).toBe(true);
+    const text = (res.content as Array<{ text?: string }>)[0]?.text ?? "";
+    expect(text).toContain(".zond-meta.json");
   });
 });
