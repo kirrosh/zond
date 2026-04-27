@@ -34,7 +34,31 @@ CLI: `bunx backlog task list --plain`, `bunx backlog task <id> --plain` и т.д
    репозитория (`feat:` / `refactor:` / `docs:` / `chore:`). Backlog НЕ коммитит
    автоматически (`auto_commit: false` в конфиге).
 
-Для мелких хотфиксов и опечаток задачу заводить не нужно — работай как обычно.
+### Формат коммитов
+
+Если работа закрывает (или продвигает) задачу из backlog —
+**`TASK-<N>: <короткий subject>`**. Префикс `TASK-<N>` даёт прямую связку
+«коммит ↔ задача» при чтении `git log --oneline`. Subject — короткий, в
+повелительном наклонении, на английском (как остальные коммиты репо).
+
+Примеры:
+
+```
+TASK-5: add zond mcp start entry-point
+TASK-1: migrate CLI to commander, preserve all semantics
+TASK-3: remove zond ui alias
+```
+
+Если коммит затрагивает несколько задач — перечисляем через запятую
+(`TASK-5, TASK-7: <subject>`) или выносим список в trailer тела:
+
+```
+Refs: TASK-5, TASK-7
+```
+
+Для мелких хотфиксов, опечаток и работ вне backlog — обычный
+conventional-commits стиль (`feat:` / `refactor:` / `docs:` / `chore:`),
+без `TASK-`.
 
 ## Историческая справка
 

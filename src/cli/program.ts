@@ -16,6 +16,7 @@ import { syncCommand } from "./commands/sync.ts";
 import { updateCommand } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
 import { completionsCommand, COMPLETION_SHELLS, type CompletionShell } from "./commands/completions.ts";
+import { mcpStartCommand } from "./commands/mcp.ts";
 
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
@@ -264,6 +265,16 @@ export function buildProgram(): Command {
         dir: opts.dir,
         json: globalJson(cmd),
       });
+    });
+
+  // ── mcp ──
+  const mcp = program.command("mcp").description("Model Context Protocol server");
+  mcp
+    .command("start")
+    .description("Start MCP server over stdio for AI agents (Claude, Cursor, etc.)")
+    .option("--db <path>", "Path to SQLite database file (default: zond.db)")
+    .action(async (opts) => {
+      process.exitCode = await mcpStartCommand({ dbPath: opts.db });
     });
 
   // ── coverage ──

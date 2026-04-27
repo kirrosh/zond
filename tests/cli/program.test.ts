@@ -82,13 +82,13 @@ describe("buildProgram — registration", () => {
     expect(names).toContain("serve");
   });
 
-  test("registers all 14 user-facing commands", () => {
+  test("registers all user-facing commands", () => {
     const program = buildProgram();
     const names = new Set(program.commands.map((c) => c.name()));
     for (const expected of [
       "run", "validate", "serve", "ci", "coverage", "init",
       "describe", "db", "request", "generate", "catalog", "guide",
-      "export", "update", "sync",
+      "export", "update", "sync", "mcp",
     ]) {
       expect(names.has(expected)).toBe(true);
     }
@@ -120,6 +120,13 @@ describe("buildProgram — registration", () => {
     const program = buildProgram();
     const ci = program.commands.find((c) => c.name() === "ci");
     expect(ci?.commands.map((c) => c.name())).toContain("init");
+  });
+
+  test("mcp has start subcommand", () => {
+    const program = buildProgram();
+    const mcp = program.commands.find((c) => c.name() === "mcp");
+    expect(mcp).toBeDefined();
+    expect(mcp!.commands.map((c) => c.name())).toContain("start");
   });
 });
 
