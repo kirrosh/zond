@@ -129,3 +129,79 @@ describe("extractEndpoints", () => {
     expect(health.security).toEqual([]);
   });
 });
+
+// T33 — media-level example/examples lifted to schema.example
+describe("extractEndpoints — media-level example lifting (T33)", () => {
+  function makeSpec(extra: object): unknown {
+    return {
+      openapi: "3.0.0",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/things": {
+          post: {
+            operationId: "createThing",
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: { type: "object", properties: { name: { type: "string" } } },
+                  ...extra,
+                },
+              },
+            },
+            responses: { "201": { description: "ok" } },
+          },
+        },
+      },
+    };
+  }
+
+  test("media-level example is lifted onto requestBodySchema.example", async () => {
+    const doc = makeSpec({ example: { name: "Acme", region: "us-east-1" } }) as Awaited<ReturnType<typeof readOpenApiSpec>>;
+    const endpoints = extractEndpoints(doc);
+    const ep = endpoints[0]!;
+    expect(ep.requestBodySchema?.example).toEqual({ name: "Acme", region: "us-east-1" });
+  });
+
+  test("first named entry of media.examples is lifted", async () => {
+    const doc = makeSpec({
+      examples: {
+        primary: { value: { name: "Primary", region: "eu-west-1" } },
+        alt: { value: { name: "Alt" } },
+      },
+    }) as Awaited<ReturnType<typeof readOpenApiSpec>>;
+    const endpoints = extractEndpoints(doc);
+    const ep = endpoints[0]!;
+    expect(ep.requestBodySchema?.example).toEqual({ name: "Primary", region: "eu-west-1" });
+  });
+
+  test("schema.example takes precedence over media.example", async () => {
+    const doc = {
+      openapi: "3.0.0",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/things": {
+          post: {
+            operationId: "createThing",
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    example: { name: "schema-wins" },
+                    properties: { name: { type: "string" } },
+                  },
+                  example: { name: "media-loses" },
+                },
+              },
+            },
+            responses: { "201": { description: "ok" } },
+          },
+        },
+      },
+    } as Awaited<ReturnType<typeof readOpenApiSpec>>;
+    const endpoints = extractEndpoints(doc);
+    const ep = endpoints[0]!;
+    expect(ep.requestBodySchema?.example).toEqual({ name: "schema-wins" });
+  });
+});

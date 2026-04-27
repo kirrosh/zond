@@ -200,6 +200,80 @@ describe("generateFromSchema", () => {
     expect(result).toBe("{{$uuid}}");
   });
 
+  // T33 — example > enum > format priority
+  describe("T33 priority: example > enum > format > heuristic", () => {
+    test("primitive schema.example wins over format/heuristic", () => {
+      const result = generateFromSchema(
+        { type: "string", format: "uuid", example: "user-id-from-spec" } as OpenAPIV3.SchemaObject,
+        "id",
+      );
+      expect(result).toBe("user-id-from-spec");
+    });
+
+    test("primitive schema.example wins over enum", () => {
+      const result = generateFromSchema(
+        { type: "string", enum: ["a", "b"], example: "spec-example" } as OpenAPIV3.SchemaObject,
+      );
+      expect(result).toBe("spec-example");
+    });
+
+    test("object-level example is returned as-is for whole body", () => {
+      const result = generateFromSchema({
+        type: "object",
+        example: { name: "Acme", domain: "acme.test", region: "us-east-1" },
+        properties: {
+          name: { type: "string" } as OpenAPIV3.SchemaObject,
+          domain: { type: "string" } as OpenAPIV3.SchemaObject,
+        },
+      } as OpenAPIV3.SchemaObject);
+      expect(result).toEqual({ name: "Acme", domain: "acme.test", region: "us-east-1" });
+    });
+
+    test("nested property example wins over its format", () => {
+      const result = generateFromSchema({
+        type: "object",
+        properties: {
+          endpoint: {
+            type: "string",
+            format: "uri",
+            example: "https://hooks.example.com/abc",
+          } as OpenAPIV3.SchemaObject,
+        },
+      } as OpenAPIV3.SchemaObject) as Record<string, unknown>;
+      expect(result.endpoint).toBe("https://hooks.example.com/abc");
+    });
+
+    test("enum (no example) returns first value", () => {
+      const result = generateFromSchema(
+        { type: "string", enum: ["enforced", "opportunistic"] } as OpenAPIV3.SchemaObject,
+      );
+      expect(result).toBe("enforced");
+    });
+
+    test("format (no example, no enum) falls back to format placeholder", () => {
+      const result = generateFromSchema(
+        { type: "string", format: "uri" } as OpenAPIV3.SchemaObject,
+      );
+      expect(result).toBe("{{$randomUrl}}");
+    });
+
+    test("array example is returned as-is", () => {
+      const result = generateFromSchema({
+        type: "array",
+        example: ["email.sent", "email.delivered"],
+        items: { type: "string" } as OpenAPIV3.SchemaObject,
+      } as OpenAPIV3.SchemaObject);
+      expect(result).toEqual(["email.sent", "email.delivered"]);
+    });
+
+    test("integer example wins over min/max heuristic", () => {
+      const result = generateFromSchema(
+        { type: "integer", minimum: 1, maximum: 100, example: 42 } as OpenAPIV3.SchemaObject,
+      );
+      expect(result).toBe(42);
+    });
+  });
+
   test("nested object", () => {
     const schema: OpenAPIV3.SchemaObject = {
       type: "object",

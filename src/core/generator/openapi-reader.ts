@@ -93,6 +93,24 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
           const chosen = rb.content[requestBodyContentType!];
           if (chosen?.schema) {
             requestBodySchema = chosen.schema as OpenAPIV3.SchemaObject;
+            // OpenAPI allows examples at the media-type level (sibling to schema).
+            // Lift them onto the schema so the generator sees a single signal.
+            if (requestBodySchema.example === undefined) {
+              if ((chosen as OpenAPIV3.MediaTypeObject).example !== undefined) {
+                requestBodySchema = {
+                  ...requestBodySchema,
+                  example: (chosen as OpenAPIV3.MediaTypeObject).example,
+                };
+              } else if (chosen.examples) {
+                const firstNamed = Object.values(chosen.examples)[0];
+                if (firstNamed && typeof firstNamed === "object" && "value" in firstNamed) {
+                  requestBodySchema = {
+                    ...requestBodySchema,
+                    example: (firstNamed as OpenAPIV3.ExampleObject).value,
+                  };
+                }
+              }
+            }
           }
         }
       }
