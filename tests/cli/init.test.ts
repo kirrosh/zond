@@ -1,7 +1,7 @@
 import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
 import { tmpdir } from "os";
 import { join } from "path";
-import { existsSync, unlinkSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, unlinkSync, rmSync } from "fs";
 import { initCommand } from "../../src/cli/commands/init.ts";
 import { closeDb } from "../../src/db/schema.ts";
 
@@ -64,15 +64,68 @@ describe("initCommand", () => {
     expect(existsSync(join(tmpDir, "tests"))).toBe(true);
   });
 
-  test("returns 2 without spec", async () => {
+  test("without spec runs workspace bootstrap (mode=workspace)", async () => {
+    output = suppressOutput();
+    const wsCwd = mkdtempSync(join(tmpdir(), "zond-init-ws-"));
+    const wsHome = mkdtempSync(join(tmpdir(), "zond-init-home-"));
+    try {
+      const code = await initCommand({
+        cwd: wsCwd,
+        home: wsHome,
+        integration: "skip",
+        json: true,
+      });
+      expect(code).toBe(0);
+      const envelope = JSON.parse(output.getCaptured());
+      expect(envelope.ok).toBe(true);
+      expect(envelope.data.mode).toBe("workspace");
+      expect(envelope.data.configAction).toBe("created");
+      expect(envelope.data.apisAction).toBe("created");
+      expect(envelope.data.agentsPath).toBeNull();
+      expect(existsSync(join(wsCwd, "zond.config.yml"))).toBe(true);
+      expect(existsSync(join(wsCwd, "apis"))).toBe(true);
+    } finally {
+      rmSync(wsCwd, { recursive: true, force: true });
+      rmSync(wsHome, { recursive: true, force: true });
+    }
+  });
+
+  test("--with-spec runs bootstrap+register in one call", async () => {
+    output = suppressOutput();
+    const wsCwd = mkdtempSync(join(tmpdir(), "zond-init-combo-"));
+    const wsHome = mkdtempSync(join(tmpdir(), "zond-init-home-"));
+    try {
+      const code = await initCommand({
+        cwd: wsCwd,
+        home: wsHome,
+        integration: "skip",
+        withSpec: `${FIXTURES}/petstore-simple.json`,
+        name: "petstore",
+        dir: join(wsCwd, "apis", "petstore"),
+        dbPath: db,
+        json: true,
+      });
+      expect(code).toBe(0);
+      const envelope = JSON.parse(output.getCaptured());
+      expect(envelope.data.mode).toBe("bootstrap+register");
+      expect(envelope.data.endpoints).toBeGreaterThan(0);
+      expect(existsSync(join(wsCwd, "zond.config.yml"))).toBe(true);
+      expect(existsSync(join(wsCwd, "apis", "petstore", "tests"))).toBe(true);
+    } finally {
+      rmSync(wsCwd, { recursive: true, force: true });
+      rmSync(wsHome, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects --spec combined with --workspace", async () => {
     output = suppressOutput();
     const code = await initCommand({
-      name: "no-spec",
-      dir: tmpDir,
-      dbPath: db,
+      spec: `${FIXTURES}/petstore-simple.json`,
+      workspace: true,
       json: true,
     });
-    // setupApi without spec creates collection with 0 endpoints
-    expect(code).toBe(0);
+    expect(code).toBe(2);
+    const envelope = JSON.parse(output.getCaptured());
+    expect(envelope.ok).toBe(false);
   });
 });
