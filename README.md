@@ -80,6 +80,7 @@ zond completions fish > ~/.config/fish/completions/zond.fish
 - [ZOND.md](ZOND.md) — full CLI reference
 - [docs/quickstart.md](docs/quickstart.md) — step-by-step quickstart (RU)
 - [docs/ci.md](docs/ci.md) — CI/CD integration
+- [backlog/](backlog/) — project tasks (powered by [Backlog.md](https://backlog.md), see [docs/backlog.md](docs/backlog.md))
 
 ## License
 

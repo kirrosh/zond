@@ -44,6 +44,3 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # test playground
 playground/
-
-# local MCP dev config
-.mcp.json
