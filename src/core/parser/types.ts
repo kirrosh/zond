@@ -63,6 +63,12 @@ export interface TestStep {
   retry_until?: RetryUntil;
   for_each?: ForEach;
   set?: Record<string, unknown>;
+  /**
+   * Run this step even when prior steps in the suite have failed assertions
+   * (so their captures are "tainted"). Designed for cleanup steps. Still
+   * skips if a referenced capture is genuinely missing from a response.
+   */
+  always?: boolean;
 }
 
 export interface SuiteConfig {

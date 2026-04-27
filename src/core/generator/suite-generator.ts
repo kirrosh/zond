@@ -384,9 +384,11 @@ export function generateCrudSuite(
       });
     }
 
+    // T44: cleanup must run even if earlier assertions failed (tainted captures)
     const step: RawStep = {
       name: group.delete.operationId ?? `Delete ${group.resource.replace(/s$/, "")}`,
       DELETE: itemPath,
+      always: true,
       expect: {
         status: getExpectedStatus(group.delete),
       },
@@ -396,11 +398,12 @@ export function generateCrudSuite(
     }
     tests.push(step);
 
-    // 5. Verify deleted
+    // 5. Verify deleted — also always, so we confirm cleanup happened
     if (group.read) {
       tests.push({
         name: `Verify ${group.resource.replace(/s$/, "")} deleted`,
         GET: convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`),
+        always: true,
         expect: {
           status: 404,
         },

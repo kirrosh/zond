@@ -42,7 +42,12 @@ export async function runSuite(
   const startedAt = new Date().toISOString();
   const steps: StepResult[] = [];
   const variables: Record<string, unknown> = { ...env };
-  const failedCaptures = new Set<string>();
+  // Captures whose source step's assertions partially failed, but the value
+  // itself was extracted. Cleanup/always steps may still consume them.
+  const taintedCaptures = new Set<string>();
+  // Captures that were never extracted (response missing the field). Even
+  // always-steps can't run if their referenced capture is missing.
+  const missingCaptures = new Set<string>();
 
   const fetchOptions: Partial<FetchOptions> = {
     timeout: suite.config.timeout,
@@ -107,12 +112,20 @@ export async function runSuite(
       continue;
     }
 
-    // Skip check: if step references a failed capture variable, skip it
+    // Skip check: if step references a failed capture, skip — unless
+    // step is `always: true` AND the capture is just tainted (still extracted).
     const referencedVars = extractVariableReferences(step);
-    const missingCapture = referencedVars.find((v) => failedCaptures.has(v));
-    if (missingCapture) {
-      steps.push(makeSkippedResult(step.name, `Depends on missing capture: ${missingCapture}`));
+    const missing = referencedVars.find((v) => missingCaptures.has(v));
+    if (missing) {
+      steps.push(makeSkippedResult(step.name, `Depends on missing capture: ${missing}`));
       continue;
+    }
+    if (!step.always) {
+      const tainted = referencedVars.find((v) => taintedCaptures.has(v));
+      if (tainted) {
+        steps.push(makeSkippedResult(step.name, `Depends on tainted capture: ${tainted} (use always: true on cleanup steps)`));
+        continue;
+      }
     }
 
     // skip_if evaluation
@@ -150,10 +163,10 @@ export async function runSuite(
         captures: {},
         error: errorMsg,
       });
-      // Mark expected captures as failed so dependent steps skip cleanly
+      // Substitution never produced a request → capture truly missing.
       if (step.expect.body) {
         for (const rule of Object.values(step.expect.body)) {
-          if (rule.capture) failedCaptures.add(rule.capture);
+          if (rule.capture) missingCaptures.add(rule.capture);
         }
       }
       continue;
@@ -204,7 +217,7 @@ export async function runSuite(
       });
       if (step.expect.body) {
         for (const rule of Object.values(step.expect.body)) {
-          if (rule.capture) failedCaptures.add(rule.capture);
+          if (rule.capture) missingCaptures.add(rule.capture);
         }
       }
       continue;
@@ -286,11 +299,11 @@ export async function runSuite(
       const captures = extractCaptures(resolved.expect.body, response.body_parsed, resolved.expect.headers, response.headers);
       Object.assign(variables, captures);
 
-      // Track expected captures that weren't obtained
+      // Track expected captures that weren't obtained — these are missing.
       if (resolved.expect.body) {
         for (const rule of Object.values(resolved.expect.body)) {
           if (rule.capture && !(rule.capture in captures)) {
-            failedCaptures.add(rule.capture);
+            missingCaptures.add(rule.capture);
           }
         }
       }
@@ -309,11 +322,13 @@ export async function runSuite(
         captures,
       });
 
-      // If step failed, mark its captures as unreliable
+      // If step failed, captures that did extract are tainted (value is real
+      // but came from a step whose other assertions failed). Always-steps may
+      // still consume them; non-always steps cascade-skip.
       if (!allPassed && resolved.expect.body) {
         for (const rule of Object.values(resolved.expect.body)) {
-          if (rule.capture) {
-            failedCaptures.add(rule.capture);
+          if (rule.capture && rule.capture in captures) {
+            taintedCaptures.add(rule.capture);
           }
         }
       }
@@ -329,10 +344,10 @@ export async function runSuite(
         error: errorMsg,
       });
 
-      // Mark any captures from this step as failed
+      // Network/runtime error → no response → capture truly missing.
       if (step.expect.body) {
         for (const rule of Object.values(step.expect.body)) {
-          if (rule.capture) failedCaptures.add(rule.capture);
+          if (rule.capture) missingCaptures.add(rule.capture);
         }
       }
     }

@@ -184,6 +184,7 @@ const TestStepSchema: z.ZodType<TestStep> = z.preprocess(
     retry_until: RetryUntilSchema.optional(),
     for_each: ForEachSchema.optional(),
     set: z.record(z.string(), z.unknown()).optional(),
+    always: z.boolean().optional(),
   }),
 ) as z.ZodType<TestStep>;
 

@@ -340,6 +340,20 @@ describe("generateCrudSuite", () => {
     expect(suite.tags).toEqual(["crud", "ephemeral"]);
   });
 
+  test("DELETE step in CRUD is marked always: true (T44)", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/orders", method: "POST" }),
+      makeEndpoint({ path: "/orders/{orderId}", method: "GET" }),
+      makeEndpoint({ path: "/orders/{orderId}", method: "DELETE" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    const suite = generateCrudSuite(groups[0]!, noSecurity);
+    const deleteStep = suite.tests.find(t => t["DELETE"] !== undefined)!;
+    expect((deleteStep as any).always).toBe(true);
+    const verifyStep = suite.tests.find(t => /verify.*deleted/i.test(t.name))!;
+    expect((verifyStep as any).always).toBe(true);
+  });
+
   test("CRUD suite WITHOUT delete is tagged persistent-write", () => {
     const endpoints = [
       makeEndpoint({ path: "/orders", method: "POST" }),
