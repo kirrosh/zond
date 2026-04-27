@@ -32,12 +32,13 @@ describe("MCP server (real stdio handshake)", () => {
     expect(info!.version.length).toBeGreaterThan(0);
   });
 
-  test("AC#2: tools/list returns empty array (T5 stub)", async () => {
+  test("tools/list returns registry entries (populated by TASK-6)", async () => {
     const res = await client.listTools();
-    expect(res.tools).toEqual([]);
+    expect(Array.isArray(res.tools)).toBe(true);
+    expect(res.tools.length).toBeGreaterThan(0);
   });
 
-  test("AC#2: resources/list returns empty array (T5 stub)", async () => {
+  test("resources/list returns empty array (T7 stub)", async () => {
     const res = await client.listResources();
     expect(res.resources).toEqual([]);
   });

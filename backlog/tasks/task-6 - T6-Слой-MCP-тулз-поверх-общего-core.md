@@ -1,9 +1,11 @@
 ---
 id: TASK-6
 title: 'T6: Слой MCP-тулз поверх общего core'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-04-27'
+updated_date: '2026-04-27 10:52'
 labels:
   - T6
   - phase-1
