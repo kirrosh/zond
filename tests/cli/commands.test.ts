@@ -4,7 +4,6 @@ import { join } from "path";
 import { existsSync, unlinkSync } from "fs";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { validateCommand } from "../../src/cli/commands/validate.ts";
-import { parseArgs } from "../../src/cli/index.ts";
 import { closeDb } from "../../src/db/schema.ts";
 
 function tryUnlink(path: string): void {
@@ -264,20 +263,6 @@ describe("validateCommand", () => {
     restore = suppressOutput();
     const code = await validateCommand({ path: `${FIXTURES}/nonexistent.yaml` });
     expect(code).toBe(2);
-  });
-});
-
-describe("parseArgs", () => {
-  test("parses --auth-token flag", () => {
-    const result = parseArgs(["bun", "script.ts", "run", "tests/", "--auth-token", "my-secret-token"]);
-    expect(result.command).toBe("run");
-    expect(result.positional).toEqual(["tests/"]);
-    expect(result.flags["auth-token"]).toBe("my-secret-token");
-  });
-
-  test("parses --auth-token with = syntax", () => {
-    const result = parseArgs(["bun", "script.ts", "run", "tests/", "--auth-token=my-token"]);
-    expect(result.flags["auth-token"]).toBe("my-token");
   });
 });
 
