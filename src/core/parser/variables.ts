@@ -50,6 +50,29 @@ export const GENERATORS: Record<string, () => string | number> = {
 
 const VAR_PATTERN = /\{\{(.+?)\}\}/g;
 
+/**
+ * Suggest a known generator close to the misspelled name.
+ * Case-insensitive prefix match first, then case-insensitive exact match.
+ */
+function suggestGenerator(name: string): string | undefined {
+  const lower = name.toLowerCase();
+  const known = Object.keys(GENERATORS);
+  // Case-insensitive exact (catches case-only typos like $randomfqdn → $randomFqdn)
+  const ciExact = known.find((k) => k.toLowerCase() === lower);
+  if (ciExact) return ciExact;
+  // Prefix match
+  return known.find((k) => k.toLowerCase().startsWith(lower.slice(0, 6)));
+}
+
+function unknownGeneratorError(key: string): Error {
+  const suggestion = suggestGenerator(key);
+  const hint = suggestion ? ` (did you mean ${suggestion}?)` : "";
+  const available = Object.keys(GENERATORS).join(", ");
+  return new Error(
+    `Unknown generator: {{${key}}}${hint}. Available: ${available}`,
+  );
+}
+
 export function substituteString(template: string, vars: Record<string, unknown>): unknown {
   // If entire string is a single {{var}}, return raw value (number stays number)
   const singleMatch = template.match(/^\{\{([^{}]+)\}\}$/);
@@ -57,6 +80,7 @@ export function substituteString(template: string, vars: Record<string, unknown>
     const key = singleMatch[1]!;
     if (key in vars) return vars[key];
     if (key in GENERATORS) return GENERATORS[key]!();
+    if (key.startsWith("$")) throw unknownGeneratorError(key);
     return template;
   }
 
@@ -64,6 +88,7 @@ export function substituteString(template: string, vars: Record<string, unknown>
   return template.replace(new RegExp(VAR_PATTERN.source, "g"), (_, key: string) => {
     if (key in vars) return String(vars[key]);
     if (key in GENERATORS) return String(GENERATORS[key]!());
+    if (key.startsWith("$")) throw unknownGeneratorError(key);
     return `{{${key}}}`;
   });
 }

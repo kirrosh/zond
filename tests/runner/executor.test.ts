@@ -773,4 +773,71 @@ describe("header captures", () => {
     expect(result.steps[0]!.captures).toMatchObject({ item_etag: '"abc123"' });
     expect(result.steps[1]!.status).toBe("pass");
   });
+
+  // T34 — unknown $generator surfaces as step error, not silent literal
+  test("unknown {{$generator}} produces step error with available list", async () => {
+    const suite: TestSuite = {
+      name: "T34",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Bogus generator",
+        method: "GET",
+        path: "http://example.com/{{$randomNopeNope}}",
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("error");
+    expect(result.steps[0]!.error).toMatch(/Unknown generator/);
+    expect(result.steps[0]!.error).toMatch(/Available:/);
+  });
+
+  test("case-only typo on generator name suggests correct casing", async () => {
+    const suite: TestSuite = {
+      name: "T34 case",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Wrong case",
+        method: "POST",
+        path: "http://example.com/things",
+        json: { fqdn: "{{$randomfqdn}}" },
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("error");
+    expect(result.steps[0]!.error).toMatch(/did you mean \$randomFqdn/);
+  });
+
+  test("dependent step skips cleanly when {{$generator}} fails on prior step", async () => {
+    const suite: TestSuite = {
+      name: "T34 cascade",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "Create",
+          method: "POST",
+          path: "http://example.com/things",
+          json: { name: "{{$randomNotARealHelper}}" },
+          expect: {
+            status: 200,
+            body: { id: { capture: "thing_id" } },
+          },
+        },
+        {
+          name: "Use captured",
+          method: "GET",
+          path: "http://example.com/things/{{thing_id}}",
+          expect: { status: 200 },
+        },
+      ],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("error");
+    expect(result.steps[1]!.status).toBe("skip");
+    expect(result.steps[1]!.error).toMatch(/missing capture: thing_id/);
+  });
 });
