@@ -408,9 +408,13 @@ export function generateCrudSuite(
     }
   }
 
+  // T28: classify by cleanup behavior. A suite that owns a DELETE leaves the API
+  // in its starting state (ephemeral); without DELETE it leaves residual data.
+  const cleanupTag = group.delete ? "ephemeral" : "persistent-write";
+
   const suite: RawSuite = {
     name: `${group.resource}-crud`,
-    tags: ["crud"],
+    tags: ["crud", cleanupTag],
     fileStem: `crud-${slugify(group.resource)}`,
     base_url: "{{base_url}}",
     tests,

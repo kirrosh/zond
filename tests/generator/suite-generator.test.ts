@@ -279,7 +279,7 @@ describe("generateCrudSuite", () => {
     const suite = generateCrudSuite(groups[0]!, noSecurity);
 
     expect(suite.name).toBe("pets-crud");
-    expect(suite.tags).toEqual(["crud"]);
+    expect(suite.tags).toEqual(["crud", "ephemeral"]);
     expect(suite.base_url).toBe("{{base_url}}");
     expect(suite.tests).toHaveLength(5); // create, read, update, delete, verify
 
@@ -326,6 +326,28 @@ describe("generateCrudSuite", () => {
     const suite = generateCrudSuite(groups[0]!, noSecurity);
 
     expect(suite.tests).toHaveLength(2); // create, read
+  });
+
+  // T28 — ephemeral vs persistent-write classification
+  test("CRUD suite WITH delete is tagged ephemeral", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/orders", method: "POST" }),
+      makeEndpoint({ path: "/orders/{orderId}", method: "GET" }),
+      makeEndpoint({ path: "/orders/{orderId}", method: "DELETE" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    const suite = generateCrudSuite(groups[0]!, noSecurity);
+    expect(suite.tags).toEqual(["crud", "ephemeral"]);
+  });
+
+  test("CRUD suite WITHOUT delete is tagged persistent-write", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/orders", method: "POST" }),
+      makeEndpoint({ path: "/orders/{orderId}", method: "GET" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    const suite = generateCrudSuite(groups[0]!, noSecurity);
+    expect(suite.tags).toEqual(["crud", "persistent-write"]);
   });
 });
 

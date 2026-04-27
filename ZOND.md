@@ -50,6 +50,21 @@ zond run <tests-dir> --tag crud --dry-run   # show requests first, no sending
 zond run <tests-dir> --tag crud --env staging
 ```
 
+CRUD suites are auto-classified by cleanup behavior:
+
+- `[crud, ephemeral]` — suite includes a final `DELETE` step → API state unchanged after the run. Safe default for CI.
+- `[crud, persistent-write]` — suite creates resources without deleting them → leaves residual data. Opt-in only.
+
+Filtering recipes:
+
+```bash
+zond run <tests-dir> --tag crud --exclude-tag persistent-write   # CI default — only ephemeral
+zond run <tests-dir> --tag crud                                  # everything (incl. persistent writes)
+zond run <tests-dir> --tag persistent-write                      # only suites that leave state
+```
+
+`zond ci init` writes templates with `--exclude-tag persistent-write` baked into the CRUD job by default.
+
 **Phase 3 — Regression tracking**
 
 ```bash

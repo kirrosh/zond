@@ -42,13 +42,16 @@ jobs:
       - name: Run smoke tests (read-only, safe for production)
         run: |
           mkdir -p test-results
-          zond run apis/ --tag smoke --safe --report junit --no-db > test-results/smoke.xml
+          # --exclude-tag needs-id skips positive smoke that needs real IDs from .env.yaml
+          zond run apis/ --tag smoke --exclude-tag needs-id --safe --report junit --no-db > test-results/smoke.xml
           # Use --env-var "API_KEY=\${{ secrets.API_KEY }}" to inject secrets without writing to disk
         continue-on-error: true
 
-      - name: Run CRUD tests (staging only)
+      - name: Run CRUD tests (staging only — ephemeral suites only)
         run: |
-          zond run apis/ --tag crud --env staging --report junit --no-db > test-results/crud.xml
+          # --exclude-tag persistent-write keeps only ephemeral CRUD (suites that DELETE what they create).
+          # Drop --exclude-tag persistent-write to opt into write suites that leave residual data.
+          zond run apis/ --tag crud --exclude-tag persistent-write --env staging --report junit --no-db > test-results/crud.xml
           # Add --env-var "BASE_URL=\${{ secrets.STAGING_URL }}" for staging URL
         continue-on-error: true
 
@@ -86,8 +89,9 @@ api-smoke:
     - curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
   script:
     - mkdir -p test-results
-    # Use --env-var to inject secrets without writing to disk
-    - zond run apis/ --tag smoke --safe --report junit --no-db --env-var "API_KEY=$API_KEY" > test-results/smoke.xml
+    # Use --env-var to inject secrets without writing to disk.
+    # --exclude-tag needs-id skips positive smoke that needs real IDs from .env.yaml.
+    - zond run apis/ --tag smoke --exclude-tag needs-id --safe --report junit --no-db --env-var "API_KEY=$API_KEY" > test-results/smoke.xml
   allow_failure:
     exit_codes: 1
   artifacts:
@@ -102,7 +106,9 @@ api-crud:
     - curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
   script:
     - mkdir -p test-results
-    - zond run apis/ --tag crud --env staging --report junit --no-db > test-results/crud.xml
+    # --exclude-tag persistent-write keeps only ephemeral CRUD (suites that DELETE what they create).
+    # Drop --exclude-tag persistent-write to opt into write suites that leave residual data.
+    - zond run apis/ --tag crud --exclude-tag persistent-write --env staging --report junit --no-db > test-results/crud.xml
   allow_failure:
     exit_codes: 1
   artifacts:
