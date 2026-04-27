@@ -2,12 +2,15 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
-  ListToolsRequestSchema,
   ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ListToolsRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import { VERSION } from "../cli/version.ts";
+import { listResourceTemplates, listResources, readResource } from "./resources/index.ts";
 import { TOOL_REGISTRY } from "./tools/index.ts";
 
 // IMPORTANT: stdio transport uses stdout for JSON-RPC. Never write to stdout
@@ -17,6 +20,8 @@ import { TOOL_REGISTRY } from "./tools/index.ts";
 export interface McpServerContext {
   /** Path to SQLite DB. Tools read from here via closure. */
   dbPath?: string;
+  /** Working directory used by resource handlers (e.g. catalog lookup). Defaults to process.cwd() at request time. */
+  cwd?: string;
 }
 
 export interface StartMcpServerOptions extends McpServerContext {
@@ -74,13 +79,23 @@ export function buildMcpServer(ctx: McpServerContext): Server {
     }
   });
 
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: [] }));
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: listResources(),
+  }));
+
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+    resourceTemplates: listResourceTemplates(),
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    return await readResource(request.params.uri, ctx);
+  });
 
   return server;
 }
 
 export async function startMcpServer(options: StartMcpServerOptions): Promise<void> {
-  const server = buildMcpServer({ dbPath: options.dbPath });
+  const server = buildMcpServer({ dbPath: options.dbPath, cwd: options.cwd });
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
