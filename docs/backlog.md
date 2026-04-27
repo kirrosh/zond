@@ -1,5 +1,15 @@
 # zond — Backlog (на основе анализа Backlog.md)
 
+## Статус
+
+| Фаза | Состояние |
+|---|---|
+| **0. Быстрые победы** | ✓ Завершена (ветка `refactor/phase-0-cleanup`) |
+| 1. MCP-фундамент | ⏳ Не начата |
+| 2. Миграция со скиллов и плагина | ⏳ Не начата |
+| 3. Конфиг и DX | ⏳ Не начата |
+| 4. Web UI | ⏳ Не начата |
+
 ## Контекст
 
 Анализ репозитория [MrLesk/Backlog.md](https://github.com/MrLesk/Backlog.md) (Bun + TS, ~5.4k★).
@@ -33,9 +43,14 @@
 
 ---
 
-# Фаза 0 — Быстрые победы (без зависимостей)
+# Фаза 0 — Быстрые победы (без зависимостей) — ✓ DONE
 
-## T1. Заменить ручной parseArgs на commander
+> Все четыре задачи выполнены на ветке `refactor/phase-0-cleanup`. Тесты:
+> 524 → **557 pass / 0 fail / 1 skip** (+33). `src/cli/index.ts` сжался с 627 до
+> 38 LOC, общий код CLI: 627 → 608 LOC (38 + 570 в новом `src/cli/program.ts`).
+> Бинарник собирается через `bun run build`, smoke-проверки проходят.
+
+## T1. Заменить ручной parseArgs на commander — ✓ DONE (100fbb6)
 
 **Зачем.** `src/cli/index.ts` ~600 строк, из них ~300 — кастомный парсер с
 ре-парсингом argv для повторяемых флагов (`--tag`, `--header`, `--env-var`).
@@ -57,7 +72,20 @@
 
 **Размер.** S.
 
-## T2. Канонизировать source-of-truth для OpenAPI-спеки
+**Результат.**
+- `src/cli/index.ts`: 627 → **38 LOC** (лучше плана — оставлен только bootstrap).
+- Новый `src/cli/program.ts` (570 LOC): `buildProgram()` + `preprocessArgv()`.
+- Дополнительно создан `src/cli/version.ts` — чтобы разорвать циркулярку
+  `index.ts ↔ commands/update.ts`.
+- `db` оформлен как **вложенный** subcommand (`db collections`, `db runs`,
+  `db run <id>`, `db diagnose <id>`, `db compare <a> <b>`) — `zond db --help`
+  идиоматичен.
+- Новый класс тестов: `tests/cli/program.test.ts` (unit через `buildProgram()`)
+  + `tests/cli/cli-smoke.test.ts` (real-process spawn). Покрытие repeatable-флагов,
+  MSYS-фикса, числовых валидаций — было нулевым, стало явным.
+- `tests/cli/args.test.ts` удалён вместе с экспортом `parseArgs`.
+
+## T2. Канонизировать source-of-truth для OpenAPI-спеки — ✓ DONE (d279866)
 
 **Зачем.** Сейчас два места: `collections.openapi_spec` (SQLite) и
 `.zond-meta.json → specUrl`. SKILL.md явно описывает «если разъехались —
@@ -80,7 +108,20 @@
 
 **Размер.** S.
 
-## T3. Удалить алиас `zond ui`
+**Результат.**
+- При исследовании выяснилось, что `specUrl` был **полностью write-only**:
+  писался в `generate.ts:95` и `sync.ts:181`, не читался ни в одном модуле.
+  Это упростило миграцию.
+- Поле удалено из `ZondMeta`, перестало писаться. `JSON.parse(...) as ZondMeta`
+  тихо игнорирует лишние поля при чтении старых файлов на диске — явный
+  cleanup-скрипт не нужен (forward-compat подтверждён тестом).
+- Раздел «Spec reference: two sources of truth» в `skills/api-testing/SKILL.md`
+  переписан в «Spec reference» — единственный источник (БД), `specHash`
+  остаётся как drift detector.
+- Новый `tests/core/meta/meta-store.test.ts`: round-trip, чтение legacy-файла
+  с `specUrl`, удаление `specUrl` при перезаписи, детерминизм `hashSpec`.
+
+## T3. Удалить алиас `zond ui` — ✓ DONE (включена в 100fbb6)
 
 **Зачем.** Дублирующее имя для `serve --open`. Когнитивный шум.
 
@@ -94,7 +135,14 @@
 
 **Размер.** S.
 
-## T4. Shell-completions — `zond completions <bash|zsh|fish>`
+**Результат.**
+- Отдельного коммита не потребовалось: `ui` просто не зарегистрирован в новом
+  `src/cli/program.ts`, поэтому commander сразу отдаёт `error: unknown command 'ui'`
+  с дружелюбной подсказкой `(Did you mean ci?)`.
+- Покрытие в `tests/cli/program.test.ts` (`'ui' is treated as unknown command`)
+  и `tests/cli/cli-smoke.test.ts` (real-process spawn).
+
+## T4. Shell-completions — `zond completions <bash|zsh|fish>` — ✓ DONE (5a3b3f1)
 
 **Зачем.** DX. У Backlog.md есть, у zond — нет.
 
@@ -109,6 +157,17 @@
 **Приёмка.** `zond completions zsh > _zond` даёт рабочий completion-скрипт.
 
 **Размер.** S.
+
+**Результат.**
+- Commander v14 не имеет встроенной генерации completions — реализованы
+  вручную, без сторонних `tabtab`/`omelette`. Включены **все три шелла**
+  (bash, zsh, fish).
+- `src/cli/commands/completions.ts` — чистый рендерер, принимает `program`
+  как аргумент (избегает циркулярки `program ↔ completions`).
+- Список команд/флагов извлекается через `extractSpec(program)` из живого
+  commander-дерева — completions всегда в синхронизации с CLI.
+- README получил секцию «Shell completions» с инструкциями установки.
+- Тесты: `tests/cli/completions.test.ts` (4 unit + 5 spawn).
 
 ---
 
