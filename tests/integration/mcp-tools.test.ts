@@ -135,4 +135,29 @@ describe("MCP tools — registry + zond_run + zond_diagnose", () => {
     const text = (res.content as Array<{ text?: string }>)[0]?.text ?? "";
     expect(text.toLowerCase()).toContain("invalid input");
   });
+
+  test("zond_db_runs returns recent runs with the run from AC#2", async () => {
+    const res = await client.callTool({
+      name: "zond_db_runs",
+      arguments: {},
+    });
+    expect(res.isError).not.toBe(true);
+    const data = res.structuredContent as { runs: Array<{ id: number }> };
+    expect(Array.isArray(data.runs)).toBe(true);
+    expect(data.runs.length).toBeGreaterThan(0);
+    const runId = (globalThis as any).__zondRunId as number;
+    expect(data.runs.map((r) => r.id)).toContain(runId);
+  });
+
+  test("zond_db_run returns detail with run + results", async () => {
+    const runId = (globalThis as any).__zondRunId as number;
+    const res = await client.callTool({
+      name: "zond_db_run",
+      arguments: { runId },
+    });
+    expect(res.isError).not.toBe(true);
+    const data = res.structuredContent as { run: { id: number }; results: unknown[] };
+    expect(data.run.id).toBe(runId);
+    expect(Array.isArray(data.results)).toBe(true);
+  });
 });
