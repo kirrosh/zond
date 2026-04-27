@@ -163,7 +163,7 @@ export function buildProgram(): Command {
         .argParser(parseReporter),
     )
     .option("--timeout <ms>", "Override request timeout", parsePositiveInt("--timeout"))
-    .option("--rate-limit <N>", "Throttle requests to at most N per second", parsePositiveInt("--rate-limit"))
+    .option("--rate-limit <N>", "Throttle requests to at most N per second (set 1 below the real API cap to avoid boundary 429s)", parsePositiveInt("--rate-limit"))
     .option("--bail", "Stop on first suite failure")
     .option("--no-db", "Do not save results to zond.db")
     .option("--db <path>", "Path to SQLite database file (default: zond.db)")
