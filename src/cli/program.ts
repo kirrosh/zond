@@ -15,6 +15,7 @@ import { exportCommand } from "./commands/export.ts";
 import { syncCommand } from "./commands/sync.ts";
 import { updateCommand } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
+import { completionsCommand, COMPLETION_SHELLS, type CompletionShell } from "./commands/completions.ts";
 
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
@@ -550,6 +551,19 @@ export function buildProgram(): Command {
         tag: opts.tag,
         json: globalJson(cmd),
       });
+    });
+
+  // ── completions ──
+  program
+    .command("completions <shell>")
+    .description(`Generate shell completion script (${COMPLETION_SHELLS.join(", ")})`)
+    .action((shell: string) => {
+      if (!(COMPLETION_SHELLS as readonly string[]).includes(shell)) {
+        printError(`Unsupported shell: ${shell}. Supported: ${COMPLETION_SHELLS.join(", ")}`);
+        process.exitCode = 2;
+        return;
+      }
+      process.exitCode = completionsCommand({ shell: shell as CompletionShell, program });
     });
 
   return program;

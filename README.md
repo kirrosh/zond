@@ -67,6 +67,14 @@ Claude Code can write pytest from scratch — but it takes 30-60 minutes per flo
 "Set up CI for API tests"
 ```
 
+## Shell completions
+
+```bash
+zond completions bash > ~/.local/share/bash-completion/completions/zond
+zond completions zsh  > ~/.zsh/completions/_zond   # then `compinit`
+zond completions fish > ~/.config/fish/completions/zond.fish
+```
+
 ## Documentation
 
 - [ZOND.md](ZOND.md) — full CLI reference
