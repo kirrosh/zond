@@ -103,6 +103,11 @@ export function serializeSuite(suite: RawSuite): string {
       lines.push(`    skip_if: ${yamlScalar(String(test.skip_if))}`);
     }
 
+    // always (cleanup steps that survive cascade-skip on tainted captures)
+    if (test.always === true) {
+      lines.push("    always: true");
+    }
+
     // retry_until
     if (test.retry_until && typeof test.retry_until === "object") {
       const rt = test.retry_until as Record<string, unknown>;

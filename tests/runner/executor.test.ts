@@ -811,6 +811,125 @@ describe("header captures", () => {
     expect(result.steps[0]!.error).toMatch(/did you mean \$randomFqdn/);
   });
 
+  // T44 — granular cascade-skip + always-step
+  describe("T44 granular cascade-skip + always-step", () => {
+    test("non-always step cascade-skips when prior assertion fails (tainted capture)", async () => {
+      mockFetchResponses([
+        { status: 201, body: { id: "aud-real-id-123" } }, // status mismatch with expect 200
+        { status: 200, body: {} },
+      ]);
+      const suite: TestSuite = {
+        name: "tainted",
+        config: DEFAULT_CONFIG,
+        tests: [
+          {
+            name: "Create",
+            method: "POST",
+            path: "http://example.com/audiences",
+            expect: {
+              status: 200, // wrong: API returns 201 → tainted
+              body: { id: { capture: "audience_id" } },
+            },
+          },
+          {
+            name: "Read",
+            method: "GET",
+            path: "http://example.com/audiences/{{audience_id}}",
+            expect: { status: 200 },
+          },
+        ],
+      };
+      const result = await runSuite(suite);
+      expect(result.steps[0]!.status).toBe("fail");
+      expect(result.steps[1]!.status).toBe("skip");
+      expect(result.steps[1]!.error).toMatch(/tainted capture: audience_id/);
+    });
+
+    test("always:true step runs on tainted capture (cleanup still fires)", async () => {
+      mockFetchResponses([
+        { status: 201, body: { id: "aud-real-id-123" } }, // tainted: status mismatch
+        { status: 200, body: {} }, // DELETE succeeds
+      ]);
+      const suite: TestSuite = {
+        name: "always-cleanup",
+        config: DEFAULT_CONFIG,
+        tests: [
+          {
+            name: "Create",
+            method: "POST",
+            path: "http://example.com/audiences",
+            expect: {
+              status: 200,
+              body: { id: { capture: "audience_id" } },
+            },
+          },
+          {
+            name: "Cleanup",
+            method: "DELETE",
+            path: "http://example.com/audiences/{{audience_id}}",
+            always: true,
+            expect: { status: 200 },
+          },
+        ],
+      };
+      const result = await runSuite(suite);
+      expect(result.steps[0]!.status).toBe("fail");
+      expect(result.steps[1]!.status).toBe("pass");
+    });
+
+    test("always:true step still skips when capture is genuinely missing", async () => {
+      mockFetchResponses([
+        { status: 500, body: {} }, // no id field at all
+        { status: 200, body: {} },
+      ]);
+      const suite: TestSuite = {
+        name: "always-missing",
+        config: DEFAULT_CONFIG,
+        tests: [
+          {
+            name: "Create",
+            method: "POST",
+            path: "http://example.com/audiences",
+            expect: {
+              status: 201,
+              body: { id: { capture: "audience_id" } },
+            },
+          },
+          {
+            name: "Cleanup",
+            method: "DELETE",
+            path: "http://example.com/audiences/{{audience_id}}",
+            always: true,
+            expect: { status: 200 },
+          },
+        ],
+      };
+      const result = await runSuite(suite);
+      expect(result.steps[0]!.status).toBe("fail");
+      expect(result.steps[1]!.status).toBe("skip");
+      expect(result.steps[1]!.error).toMatch(/missing capture: audience_id/);
+    });
+
+    test("always:true respects skip_if (explicit user skip still fires)", async () => {
+      const suite: TestSuite = {
+        name: "always-skip_if",
+        config: DEFAULT_CONFIG,
+        tests: [
+          {
+            name: "Cleanup",
+            method: "DELETE",
+            path: "http://example.com/x/123",
+            always: true,
+            skip_if: "true",
+            expect: { status: 200 },
+          },
+        ],
+      };
+      const result = await runSuite(suite);
+      expect(result.steps[0]!.status).toBe("skip");
+    });
+  });
+
   test("dependent step skips cleanly when {{$generator}} fails on prior step", async () => {
     const suite: TestSuite = {
       name: "T34 cascade",

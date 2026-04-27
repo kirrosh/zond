@@ -131,6 +131,40 @@ tests:
       status: [200, 204]    # single value or array of allowed statuses
 ```
 
+### Cleanup steps (`always: true`)
+
+When a step's assertions fail, captures from that step become **tainted** — their values were extracted from the response, but the step itself failed. By default, downstream steps that reference a tainted capture are cascade-skipped to avoid using values from a broken context.
+
+For cleanup steps (DELETE, teardown), this is the wrong default — you want them to run regardless, so the API isn't left with leaked state. Mark them `always: true`:
+
+```yaml
+- name: Create resource
+  POST: /things
+  expect:
+    status: 201
+    body:
+      id: { capture: thing_id }
+
+- name: Cleanup
+  DELETE: /things/{{thing_id}}
+  always: true            # runs even if Create failed assertions
+  expect:
+    status: 200
+```
+
+Skip semantics with `always: true`:
+
+| Capture state | Non-always | always: true |
+|---|---|---|
+| Extracted, prior assertions passed | runs | runs |
+| Extracted, prior assertions failed (**tainted**) | skip | **runs** |
+| Not in response (**missing**) | skip | skip |
+| Network/runtime error in source step | skip | skip |
+
+`skip_if` is honored independently of `always` — explicit user skips still fire.
+
+`zond generate` automatically marks DELETE and Verify-deleted steps in CRUD suites as `always: true`, so failed CREATE/UPDATE assertions don't leak resources into the API.
+
 ### Assertions
 
 `equals`, `type`, `capture`, `contains`, `matches`, `gt`, `lt`, `exists` (boolean). Nested: `category.name: { equals: "Dogs" }`. Root body: `_body: { type: "array" }`.
