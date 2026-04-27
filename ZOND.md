@@ -151,6 +151,27 @@ zond run tests/ --env staging
 
 ---
 
+## Workspace
+
+zond resolves the workspace root via walk-up from the current directory. The first ancestor containing any of these markers is treated as the root:
+
+1. `zond.config.yml`
+2. `.zond/` directory
+3. `zond.db`
+4. `apis/` directory
+
+The walk stops at `$HOME` to avoid accidentally adopting `~/apis` or `~/zond.db` when zond is invoked from an unrelated directory. If no marker is found, zond falls back to the current directory and prints a one-time warning to stderr — run `zond init` (or create `zond.config.yml`) to anchor the workspace explicitly.
+
+The workspace root is used as the default location for `zond.db`, the `apis/<name>/` directory created by `zond init`, and the `.zond-current` file written by `zond use`. Explicit `--db` and `--dir` flags always win over walk-up.
+
+### `zond serve` port handling
+
+By default, `zond serve` is non-destructive: if the requested port (`--port` or 8080) is busy, it scans the next 10 ports and binds the first free one, printing the chosen port to stderr. If the entire 11-port range is busy, it exits 1 with instructions.
+
+Pass `--kill-existing` to restore the legacy behaviour of terminating whichever process holds the requested port. Use with care — it will kill your dev backend if it happens to listen there.
+
+---
+
 ## CI/CD
 
 `zond ci init` scaffolds GitHub Actions or GitLab CI workflow. Supports schedule, repository_dispatch, manual triggers. See [docs/ci.md](docs/ci.md).

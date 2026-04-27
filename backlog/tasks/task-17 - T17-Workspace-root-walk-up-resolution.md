@@ -1,9 +1,10 @@
 ---
 id: TASK-17
 title: 'T17: Workspace root + walk-up resolution'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-27 12:38'
+updated_date: '2026-04-27 12:50'
 labels:
   - T17
   - phase-4
@@ -39,8 +40,14 @@ Resolution коснётся:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `findWorkspaceRoot(cwd)` walk-up'ом возвращает абсолютный путь до ближайшего маркер-файла, либо null
-- [ ] #2 `zond run` запущенный из subfolder использует `<root>/zond.db` (или путь из config), не `<subfolder>/zond.db`
-- [ ] #3 `zond.db` НЕ создаётся в HOME-директории если рядом есть workspace marker сверху по дереву
-- [ ] #4 Документировано: что считается маркером, что происходит без маркера (warning + fallback)
+- [x] #1 `findWorkspaceRoot(cwd)` walk-up'ом возвращает абсолютный путь до ближайшего маркер-файла, либо null
+- [x] #2 `zond run` запущенный из subfolder использует `<root>/zond.db` (или путь из config), не `<subfolder>/zond.db`
+- [x] #3 `zond.db` НЕ создаётся в HOME-директории если рядом есть workspace marker сверху по дереву
+- [x] #4 Документировано: что считается маркером, что происходит без маркера (warning + fallback)
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented `src/core/workspace/root.ts` with `findWorkspaceRoot(cwd)` walk-up resolution. Markers (in priority order): `zond.config.yml`, `.zond/`, `zond.db`, `apis/`. Walk stops at `$HOME` to avoid adopting `~/zond.db`. Fallback to cwd prints a one-time stderr warning. Wired into `src/db/schema.ts` (default `zond.db` path), `src/core/setup-api.ts` (default `apis/<name>/` location), and `src/core/context/current.ts` (`.zond-current` location). Tests in `tests/core/workspace/root.test.ts`. Documented in `ZOND.md` § Workspace. 615/615 unit tests + typecheck green.
+<!-- SECTION:FINAL_SUMMARY:END -->
