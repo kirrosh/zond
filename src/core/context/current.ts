@@ -1,10 +1,12 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { findWorkspaceRoot } from "../workspace/root.ts";
 
 const FILENAME = ".zond-current";
 
 export function currentApiPath(cwd?: string): string {
-  return join(cwd ?? process.cwd(), FILENAME);
+  const base = cwd ?? findWorkspaceRoot().root;
+  return join(base, FILENAME);
 }
 
 /** Returns the API collection name stored in `.zond-current`, or null when the file is absent or empty. */

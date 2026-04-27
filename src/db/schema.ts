@@ -1,12 +1,15 @@
 import { Database } from "bun:sqlite";
 import { resolve } from "path";
 import { existsSync } from "fs";
+import { findWorkspaceRoot } from "../core/workspace/root.ts";
 
 let _db: Database | null = null;
 let _dbPath: string | null = null;
 
 export function getDb(dbPath?: string): Database {
-  const path = dbPath ? resolve(dbPath) : (_dbPath ?? resolve(process.cwd(), "zond.db"));
+  const path = dbPath
+    ? resolve(dbPath)
+    : (_dbPath ?? resolve(findWorkspaceRoot().root, "zond.db"));
 
   // If cached connection exists, verify the file still exists
   if (_db && _dbPath === path && existsSync(path)) return _db;

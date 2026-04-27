@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync } from "fs";
 import { getDb } from "../db/schema.ts";
 import { createCollection, deleteCollection, findCollectionByNameOrId, normalizePath } from "../db/queries.ts";
 import { readOpenApiSpec, extractEndpoints } from "./generator/index.ts";
+import { findWorkspaceRoot } from "./workspace/root.ts";
 
 function toYaml(vars: Record<string, string>): string {
   const lines: string[] = [];
@@ -90,7 +91,9 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
 
   // Sanitize name for directory use
   const dirName = name.replace(/[^a-zA-Z0-9_\-\.]/g, "-").toLowerCase();
-  const baseDir = resolve(options.dir ?? `./apis/${dirName}/`);
+  const baseDir = options.dir
+    ? resolve(options.dir)
+    : resolve(findWorkspaceRoot().root, `apis/${dirName}/`);
   const testPath = join(baseDir, "tests");
 
   // Create directories
