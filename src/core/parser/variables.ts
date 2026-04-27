@@ -16,6 +16,23 @@ function randomChars(len: number): string {
   return result;
 }
 
+function lowerChars(len: number): string {
+  let result = "";
+  for (let i = 0; i < len; i++) {
+    const idx = Math.floor(Math.random() * 36);
+    result += CHARS[idx]!.toLowerCase();
+  }
+  return result;
+}
+
+function randomOctet(): number {
+  return Math.floor(Math.random() * 254) + 1;
+}
+
+function randomDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export const GENERATORS: Record<string, () => string | number> = {
   "$uuid": () => crypto.randomUUID(),
   "$timestamp": () => Math.floor(Date.now() / 1000),
@@ -24,6 +41,11 @@ export const GENERATORS: Record<string, () => string | number> = {
   "$randomEmail": () => `${randomChars(8).toLowerCase()}@test.com`,
   "$randomInt": () => Math.floor(Math.random() * 10000),
   "$randomString": () => randomChars(8),
+  "$randomUrl": () => `https://example-${lowerChars(8)}.com/path`,
+  "$randomFqdn": () => `test-${lowerChars(8)}.example.com`,
+  "$randomIpv4": () => `10.${randomOctet()}.${randomOctet()}.${randomOctet()}`,
+  "$randomDate": randomDate,
+  "$randomIsoDate": () => new Date().toISOString(),
 };
 
 const VAR_PATTERN = /\{\{(.+?)\}\}/g;

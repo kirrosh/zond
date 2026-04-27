@@ -120,7 +120,7 @@ Use \`json:\` for JSON request bodies. Do NOT use \`body:\` — it is not a vali
 For form-encoded: use \`form:\` instead of \`json:\`.
 
 ### Built-in generators
-\`{{$uuid}}\`, \`{{$randomInt}}\`, \`{{$timestamp}}\`, \`{{$isoTimestamp}}\`, \`{{$randomName}}\`, \`{{$randomEmail}}\`, \`{{$randomString}}\`
+\`{{$uuid}}\`, \`{{$randomInt}}\`, \`{{$timestamp}}\`, \`{{$isoTimestamp}}\`, \`{{$randomName}}\`, \`{{$randomEmail}}\`, \`{{$randomString}}\`, \`{{$randomUrl}}\` (uri/url), \`{{$randomFqdn}}\` (hostname), \`{{$randomIpv4}}\` (ipv4), \`{{$randomDate}}\` (date), \`{{$randomIsoDate}}\` (date-time)
 
 ### Variable capture & interpolation
 \`\`\`yaml

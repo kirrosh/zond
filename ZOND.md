@@ -127,7 +127,22 @@ If-Match and If-None-Match require escaped quotes around the ETag value:
 
 ### Generators
 
-`{{$randomInt}}`, `{{$uuid}}`, `{{$timestamp}}`, `{{$randomEmail}}`, `{{$randomString}}`, `{{$randomName}}`
+| Helper | Output | Maps to OpenAPI `format` |
+|---|---|---|
+| `{{$uuid}}` | UUID v4 | `uuid` |
+| `{{$timestamp}}` | unix seconds (number) | — |
+| `{{$isoTimestamp}}` | ISO 8601 datetime | — |
+| `{{$randomInt}}` | random integer 0–9999 | — |
+| `{{$randomString}}` | 8 random alphanumerics | — |
+| `{{$randomName}}` | random first/last name | — |
+| `{{$randomEmail}}` | `xxxxxxxx@test.com` | `email` |
+| `{{$randomUrl}}` | `https://example-xxxxxxxx.com/path` | `uri`, `url` |
+| `{{$randomFqdn}}` | `test-xxxxxxxx.example.com` | `hostname` |
+| `{{$randomIpv4}}` | `10.x.x.x` | `ipv4` |
+| `{{$randomDate}}` | `YYYY-MM-DD` (today) | `date` |
+| `{{$randomIsoDate}}` | ISO 8601 datetime (now) | `date-time` |
+
+`zond generate` picks the right helper from `format` automatically; falls back to property-name heuristics, then `{{$randomString}}`.
 
 ### Environments
 

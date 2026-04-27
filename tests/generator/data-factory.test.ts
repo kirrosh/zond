@@ -114,24 +114,24 @@ describe("generateFromSchema", () => {
   });
 
   // Format-aware string generation
-  test("string with uri format returns URL", () => {
+  test("string with uri format returns randomUrl placeholder", () => {
     const result = generateFromSchema({ type: "string", format: "uri" } as OpenAPIV3.SchemaObject);
-    expect(result).toBe("https://example.com/test");
+    expect(result).toBe("{{$randomUrl}}");
   });
 
-  test("string with url format returns URL", () => {
+  test("string with url format returns randomUrl placeholder", () => {
     const result = generateFromSchema({ type: "string", format: "url" } as OpenAPIV3.SchemaObject);
-    expect(result).toBe("https://example.com/test");
+    expect(result).toBe("{{$randomUrl}}");
   });
 
-  test("string with hostname format", () => {
+  test("string with hostname format returns randomFqdn placeholder", () => {
     const result = generateFromSchema({ type: "string", format: "hostname" } as OpenAPIV3.SchemaObject);
-    expect(result).toBe("example.com");
+    expect(result).toBe("{{$randomFqdn}}");
   });
 
-  test("string with ipv4 format", () => {
+  test("string with ipv4 format returns randomIpv4 placeholder", () => {
     const result = generateFromSchema({ type: "string", format: "ipv4" } as OpenAPIV3.SchemaObject);
-    expect(result).toBe("192.168.1.1");
+    expect(result).toBe("{{$randomIpv4}}");
   });
 
   test("string with password format", () => {
@@ -142,12 +142,12 @@ describe("generateFromSchema", () => {
   // Name-based heuristics for URL, password, phone
   test("string with url property name", () => {
     const result = generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "image_url");
-    expect(result).toBe("https://example.com/test");
+    expect(result).toBe("{{$randomUrl}}");
   });
 
   test("string with website property name", () => {
     const result = generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "website");
-    expect(result).toBe("https://example.com/test");
+    expect(result).toBe("{{$randomUrl}}");
   });
 
   test("string with password property name", () => {
@@ -182,17 +182,17 @@ describe("generateFromSchema", () => {
     };
     const result = generateFromSchema(schema) as Record<string, unknown>;
     expect(result.price).toBe(29.99);
-    expect(result.image).toBe("https://example.com/test");
+    expect(result.image).toBe("{{$randomUrl}}");
   });
 
-  test("format: date returns date-only string", () => {
+  test("format: date returns randomDate placeholder", () => {
     const result = generateFromSchema({ type: "string", format: "date" } as OpenAPIV3.SchemaObject);
-    expect(result).toBe("2025-01-01");
+    expect(result).toBe("{{$randomDate}}");
   });
 
-  test("format: date-time returns full datetime string", () => {
+  test("format: date-time returns randomIsoDate placeholder", () => {
     const result = generateFromSchema({ type: "string", format: "date-time" } as OpenAPIV3.SchemaObject);
-    expect(result).toBe("2025-01-01T00:00:00Z");
+    expect(result).toBe("{{$randomIsoDate}}");
   });
 
   test("integer with format: uuid returns uuid placeholder", () => {
