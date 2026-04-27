@@ -6,6 +6,7 @@
 | [ZOND.md](../ZOND.md) | Полный справочник — CLI команды, YAML формат, окружения |
 | [GLOSSARY.md](GLOSSARY.md) | Тезаурус сущностей — Collection, Suite, Run, Environment и др. |
 | [ci.md](ci.md) | CI/CD интеграция — GitHub Actions, GitLab CI, Jenkins, триггеры, секреты |
+| [backlog.md](backlog.md) | Указатель на бэклог проекта (`backlog/`, Backlog.md CLI/MCP) |
 
 ## Где обновлять при изменениях
 
