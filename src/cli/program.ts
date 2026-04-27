@@ -17,6 +17,7 @@ import { updateCommand } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
 import { completionsCommand, COMPLETION_SHELLS, type CompletionShell } from "./commands/completions.ts";
 import { mcpStartCommand } from "./commands/mcp.ts";
+import { installCommand } from "./commands/install.ts";
 
 import { printError } from "./output.ts";
 import { getRuntimeInfo } from "./runtime.ts";
@@ -275,6 +276,26 @@ export function buildProgram(): Command {
     .option("--db <path>", "Path to SQLite database file (default: zond.db)")
     .action(async (opts) => {
       process.exitCode = await mcpStartCommand({ dbPath: opts.db });
+    });
+
+  // ── install ──
+  program
+    .command("install")
+    .description("Configure zond MCP server for AI clients (Claude Code, Cursor)")
+    .option("--claude", "Configure ~/.claude/mcp.json")
+    .option("--cursor", "Configure ~/.cursor/mcp.json")
+    .option("--all", "Configure all supported clients")
+    .option("--dry-run", "Show what would be written without modifying any files")
+    .option("--no-sanity", "Skip the in-process tools/list smoke check")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await installCommand({
+        claude: opts.claude,
+        cursor: opts.cursor,
+        all: opts.all,
+        dryRun: opts.dryRun,
+        sanity: opts.sanity,
+        json: globalJson(cmd),
+      });
     });
 
   // ── coverage ──
