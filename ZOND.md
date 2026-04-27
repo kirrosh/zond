@@ -63,7 +63,7 @@ zond ci init
 | `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--report json\|junit` |
 | `validate <path>` | Validate YAML tests | |
 | `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
-| `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch` |
+| `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
 
 ---

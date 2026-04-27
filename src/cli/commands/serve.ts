@@ -1,4 +1,5 @@
 import { startServer } from "../../web/server.ts";
+import { printError } from "../output.ts";
 
 export interface ServeOptions {
   port?: number;
@@ -6,14 +7,18 @@ export interface ServeOptions {
   dbPath?: string;
   watch?: boolean;
   open?: boolean;
+  /** When true, kill any existing process holding `port` before binding (DANGEROUS). */
+  killExisting?: boolean;
 }
 
-/** Kill any existing process listening on the given port (Windows + Unix) */
+/** Range scanned when auto-picking a free port (only when --port is not set). */
+const PORT_SCAN_LENGTH = 11; // 8080..8090 inclusive
+
+/** Kill any existing process listening on the given port (Windows + Unix). */
 async function killPortHolder(port: number): Promise<void> {
   const isWin = process.platform === "win32";
   try {
     if (isWin) {
-      // PowerShell: find PID on port, then kill it
       const find = Bun.spawn(["powershell", "-NoProfile", "-Command",
         `(Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue).OwningProcess`], {
         stdout: "pipe", stderr: "ignore",
@@ -26,12 +31,8 @@ async function killPortHolder(port: number): Promise<void> {
           stdout: "ignore", stderr: "ignore",
         });
       }
-      if (pids.length > 0) {
-        // Give OS time to release the port
-        await Bun.sleep(500);
-      }
+      if (pids.length > 0) await Bun.sleep(500);
     } else {
-      // Unix: lsof + kill
       const find = Bun.spawn(["lsof", "-ti", `:${port}`], {
         stdout: "pipe", stderr: "ignore",
       });
@@ -40,20 +41,54 @@ async function killPortHolder(port: number): Promise<void> {
       for (const pid of pids) {
         Bun.spawn(["kill", "-9", pid], { stdout: "ignore", stderr: "ignore" });
       }
-      if (pids.length > 0) {
-        await Bun.sleep(300);
-      }
+      if (pids.length > 0) await Bun.sleep(300);
     }
   } catch {
-    // Best effort — if we can't kill, startServer will fail with port-in-use
+    // Best effort — if we can't kill, the bind below will fail with port-in-use
   }
 }
 
-export async function serveCommand(options: ServeOptions): Promise<number> {
-  const port = options.port ?? 8080;
+/** Returns true if `port` is free on `host` (best-effort: tries to bind & immediately stops). */
+async function isPortFree(port: number, host: string): Promise<boolean> {
+  try {
+    const srv = Bun.serve({ port, hostname: host, fetch: () => new Response() });
+    srv.stop(true);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  // Kill previous instance on the same port
-  await killPortHolder(port);
+/** Scans `[start, start+count)` and returns the first free port, or null. */
+async function pickAvailablePort(start: number, count: number, host: string): Promise<number | null> {
+  for (let p = start; p < start + count; p++) {
+    if (await isPortFree(p, host)) return p;
+  }
+  return null;
+}
+
+export async function serveCommand(options: ServeOptions): Promise<number> {
+  const requested = options.port ?? 8080;
+  const host = options.host ?? "0.0.0.0";
+
+  let port: number;
+  if (options.killExisting) {
+    await killPortHolder(requested);
+    port = requested;
+  } else {
+    const picked = await pickAvailablePort(requested, PORT_SCAN_LENGTH, host);
+    if (picked === null) {
+      printError(
+        `All ports ${requested}..${requested + PORT_SCAN_LENGTH - 1} are in use. ` +
+        `Use --port <n> to pick another, or --kill-existing to free :${requested}.`,
+      );
+      return 1;
+    }
+    if (picked !== requested) {
+      process.stderr.write(`[zond] port ${requested} busy, using ${picked}\n`);
+    }
+    port = picked;
+  }
 
   await startServer({
     port,
@@ -62,20 +97,18 @@ export async function serveCommand(options: ServeOptions): Promise<number> {
     dev: options.watch,
   });
 
-  // Open browser if requested
   if (options.open) {
-    const host = options.host === "0.0.0.0" || !options.host ? "localhost" : options.host;
-    const url = `http://${host}:${port}`;
+    const openHost = host === "0.0.0.0" ? "localhost" : host;
+    const url = `http://${openHost}:${port}`;
     try {
       const cmd = process.platform === "win32" ? ["cmd", "/c", "start", url]
         : process.platform === "darwin" ? ["open", url]
         : ["xdg-open", url];
       Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore" });
     } catch {
-      // Best effort — if browser can't open, server still runs
+      // Best effort
     }
   }
 
-  // Keep running — Bun.serve keeps the process alive
   return 0;
 }
