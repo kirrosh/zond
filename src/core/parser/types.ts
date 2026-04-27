@@ -2,7 +2,7 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export interface AssertionRule {
   capture?: string;
-  type?: "string" | "integer" | "number" | "boolean" | "array" | "object";
+  type?: "string" | "integer" | "number" | "boolean" | "array" | "object" | "null";
   equals?: unknown;
   not_equals?: unknown;
   contains?: string;

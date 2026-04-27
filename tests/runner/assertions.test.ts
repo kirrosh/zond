@@ -225,6 +225,46 @@ describe("checkAssertions", () => {
       const results = checkAssertions({ body: { name: { exists: false } } }, res);
       expect(results[0]!.passed).toBe(true);
     });
+
+    // T43 — key-presence semantics: null is "present"
+    test("exists: true passes when field is null (key present)", () => {
+      const res = makeResponse({ body_parsed: { schema: null } });
+      const results = checkAssertions({ body: { schema: { exists: true } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("exists: false fails when field is null (key still present)", () => {
+      const res = makeResponse({ body_parsed: { schema: null } });
+      const results = checkAssertions({ body: { schema: { exists: false } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+  });
+
+  // T43 — type: "null"
+  describe("type: null assertion", () => {
+    test("type: null passes on null value", () => {
+      const res = makeResponse({ body_parsed: { schema: null } });
+      const results = checkAssertions({ body: { schema: { type: "null" } } }, res);
+      expect(results[0]!.passed).toBe(true);
+    });
+
+    test("type: null fails on non-null value", () => {
+      const res = makeResponse({ body_parsed: { schema: {} } });
+      const results = checkAssertions({ body: { schema: { type: "null" } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+
+    test("type: null fails on missing key", () => {
+      const res = makeResponse({ body_parsed: {} });
+      const results = checkAssertions({ body: { schema: { type: "null" } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
+
+    test("type: object fails on null (regression check — null is not object)", () => {
+      const res = makeResponse({ body_parsed: { schema: null } });
+      const results = checkAssertions({ body: { schema: { type: "object" } } }, res);
+      expect(results[0]!.passed).toBe(false);
+    });
   });
 
   describe("nested paths", () => {

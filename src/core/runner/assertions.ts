@@ -10,6 +10,7 @@ function checkType(value: unknown, expectedType: string): boolean {
     case "boolean": return typeof value === "boolean";
     case "array": return Array.isArray(value);
     case "object": return typeof value === "object" && value !== null && !Array.isArray(value);
+    case "null": return value === null;
     default: return false;
   }
 }
@@ -37,7 +38,9 @@ function checkRule(path: string, rule: AssertionRule, actual: unknown): Assertio
   const field = `body.${path}`;
 
   if (rule.exists !== undefined) {
-    const doesExist = actual !== undefined && actual !== null;
+    // Key-presence semantics: null counts as "exists" (key present in response).
+    // Use `not_equals: null` or `type: "null"` to assert non-null specifically.
+    const doesExist = actual !== undefined;
     results.push({
       field, rule: `exists ${rule.exists}`,
       passed: doesExist === rule.exists, actual: doesExist, expected: rule.exists,
