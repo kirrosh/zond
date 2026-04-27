@@ -1,11 +1,11 @@
 ---
 id: TASK-6
 title: 'T6: Слой MCP-тулз поверх общего core'
-status: In Progress
+status: Done
 assignee:
   - '@claude'
 created_date: '2026-04-27'
-updated_date: '2026-04-27 10:52'
+updated_date: '2026-04-27 11:10'
 labels:
   - T6
   - phase-1
@@ -53,7 +53,7 @@ dependencies:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `tools/list` возвращает все тулзы со схемами
-- [ ] #2 `tools/call zond_run` исполняет тесты
-- [ ] #3 `tools/call zond_diagnose` отдаёт ту же структуру, что `zond db diagnose --json`
+- [x] #1 `tools/list` возвращает все тулзы со схемами
+- [x] #2 `tools/call zond_run` исполняет тесты
+- [x] #3 `tools/call zond_diagnose` отдаёт ту же структуру, что `zond db diagnose --json`
 <!-- AC:END -->

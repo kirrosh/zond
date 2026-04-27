@@ -8,10 +8,13 @@ import { zondCatalogTool } from "./zond-catalog.ts";
 import { zondCoverageTool } from "./zond-coverage.ts";
 import { zondValidateTool } from "./zond-validate.ts";
 import { zondSyncTool } from "./zond-sync.ts";
+import { zondInitTool } from "./zond-init.ts";
+import { zondRequestTool } from "./zond-request.ts";
 
 /**
- * Registry of all MCP tools exposed by `zond mcp start`.
- * Tools are added incrementally as TASK-6 lands; final 11-tool set is the goal.
+ * Registry of all MCP tools exposed by `zond mcp start`. Each tool is a thin
+ * wrapper over an existing src/core/* function; agents call them via MCP
+ * `tools/call` instead of shelling out to `zond` and parsing stdout.
  */
 export const TOOL_REGISTRY: ReadonlyArray<McpTool<any, any>> = [
   zondRunTool,
@@ -23,6 +26,8 @@ export const TOOL_REGISTRY: ReadonlyArray<McpTool<any, any>> = [
   zondCoverageTool,
   zondValidateTool,
   zondSyncTool,
+  zondInitTool,
+  zondRequestTool,
 ];
 
 export type { McpTool } from "./types.ts";
