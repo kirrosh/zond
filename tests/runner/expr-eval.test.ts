@@ -78,4 +78,17 @@ describe("evaluateExpr", () => {
   test("handles whitespace", () => {
     expect(evaluateExpr("  200 == 200  ")).toBe(true);
   });
+
+  // T27 — placeholder detection for needs-id smoke tests
+  describe("empty-string equality (T27 skip_if)", () => {
+    test("empty == empty (env value unset/empty) → true → step skips", () => {
+      expect(evaluateExpr(" ==")).toBe(true);
+      expect(evaluateExpr("==")).toBe(true);
+    });
+
+    test("non-empty == empty (env value supplied) → false → step runs", () => {
+      expect(evaluateExpr("real-id ==")).toBe(false);
+      expect(evaluateExpr("550e8400-e29b-41d4-a716-446655440000 ==")).toBe(false);
+    });
+  });
 });

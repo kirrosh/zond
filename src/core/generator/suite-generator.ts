@@ -28,6 +28,30 @@ function convertPathWithSeeds(path: string, ep: EndpointInfo): string {
   });
 }
 
+/**
+ * For negative-smoke suites: replace path params with guaranteed-non-existent values.
+ * Picks a value that's syntactically valid for the param's type/format but very
+ * unlikely to match a real resource (zero-UUID, very large int, sentinel string).
+ */
+function getNonexistentSeed(schema: OpenAPIV3.SchemaObject | undefined): string {
+  if (!schema) return "nonexistent_id_zzzzzz";
+  if (schema.format === "uuid") return "00000000-0000-0000-0000-000000000000";
+  if (schema.type === "integer" || schema.type === "number") return "999999999";
+  return "nonexistent_id_zzzzzz";
+}
+
+function convertPathWithBadIds(path: string, ep: EndpointInfo): string {
+  return path.replace(/\{([^}]+)\}/g, (_, name: string) => {
+    const param = ep.parameters.find(p => p.name === name && p.in === "path");
+    const schema = param?.schema as OpenAPIV3.SchemaObject | undefined;
+    return getNonexistentSeed(schema);
+  });
+}
+
+function endpointHasPathParams(ep: EndpointInfo): boolean {
+  return ep.parameters.some(p => p.in === "path");
+}
+
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -634,22 +658,90 @@ export function generateSuites(opts: {
   for (const [tag, tagEndpoints] of byTag) {
     const tagSlug = slugify(tag) || "api";
 
-    // GET endpoints → smoke suite (use seed values for path params — no capture context)
+    // GET endpoints → split into paramless (regular smoke) and path-param (negative+positive smoke)
     const getEndpoints = tagEndpoints.filter(ep => ep.method.toUpperCase() === "GET");
-    if (getEndpoints.length > 0) {
-      const tests = getEndpoints.map(ep => {
+    const paramlessGets = getEndpoints.filter(ep => !endpointHasPathParams(ep));
+    const pathParamGets = getEndpoints.filter(ep => endpointHasPathParams(ep));
+
+    // Regular smoke: paramless GETs (e.g. list endpoints, health checks)
+    if (paramlessGets.length > 0) {
+      const tests = paramlessGets.map(ep => {
         const step = generateStep(ep, securitySchemes);
-        // Replace path param placeholders with seed values so the suite runs out of the box
         const seededPath = convertPathWithSeeds(ep.path, ep);
         (step as any)[ep.method.toUpperCase()] = seededPath;
         return step;
       });
-      const headers = getSuiteHeaders(getEndpoints, securitySchemes);
+      const headers = getSuiteHeaders(paramlessGets, securitySchemes);
 
       const suite: RawSuite = {
         name: `${tagSlug}-smoke`,
         tags: ["smoke"],
         fileStem: `smoke-${tagSlug}`,
+        base_url: "{{base_url}}",
+        tests,
+      };
+
+      if (headers) {
+        suite.headers = headers;
+        for (const t of tests) {
+          if (t.headers && JSON.stringify(t.headers) === JSON.stringify(headers)) {
+            delete (t as any).headers;
+          }
+        }
+      }
+
+      suites.push(suite);
+    }
+
+    // Negative smoke: path-param GETs with guaranteed-bad IDs, expect 400/404/422
+    if (pathParamGets.length > 0) {
+      const tests = pathParamGets.map(ep => {
+        const step = generateStep(ep, securitySchemes);
+        (step as any)[ep.method.toUpperCase()] = convertPathWithBadIds(ep.path, ep);
+        // Negative path: resource doesn't exist. Drop body assertions (response shape varies).
+        step.expect = { status: [400, 404, 422] };
+        return step;
+      });
+      const headers = getSuiteHeaders(pathParamGets, securitySchemes);
+
+      const suite: RawSuite = {
+        name: `${tagSlug}-smoke-negative`,
+        tags: ["smoke", "negative"],
+        fileStem: `smoke-${tagSlug}-negative`,
+        base_url: "{{base_url}}",
+        tests,
+      };
+
+      if (headers) {
+        suite.headers = headers;
+        for (const t of tests) {
+          if (t.headers && JSON.stringify(t.headers) === JSON.stringify(headers)) {
+            delete (t as any).headers;
+          }
+        }
+      }
+
+      suites.push(suite);
+    }
+
+    // Positive smoke: path-param GETs with {{var}} placeholders + skip_if for unset env
+    if (pathParamGets.length > 0) {
+      const tests = pathParamGets.map(ep => {
+        const step = generateStep(ep, securitySchemes);
+        // Path stays as {{param}} so user-provided env values flow in
+        // Pick the first path param for skip_if guard (the resource ID)
+        const firstPathParam = ep.parameters.find(p => p.in === "path");
+        if (firstPathParam) {
+          step.skip_if = `{{${firstPathParam.name}}} ==`;
+        }
+        return step;
+      });
+      const headers = getSuiteHeaders(pathParamGets, securitySchemes);
+
+      const suite: RawSuite = {
+        name: `${tagSlug}-smoke-positive`,
+        tags: ["smoke", "positive", "needs-id"],
+        fileStem: `smoke-${tagSlug}-positive`,
         base_url: "{{base_url}}",
         tests,
       };

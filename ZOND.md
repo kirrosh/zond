@@ -28,6 +28,20 @@ zond run <tests-dir> --safe           # --safe enforces GET-only
 ```
 Stop here if the user hasn't explicitly confirmed a staging/test environment.
 
+For each tag the generator emits up to **three** smoke suites:
+
+- `<tag>-smoke` — paramless GETs (list/health endpoints), runs unconditionally.
+- `<tag>-smoke-negative` — single-resource GETs (`/users/{id}` shape) called with a guaranteed-bad ID. Expects `[400, 404, 422]`. Verifies routing, auth, and base URL are wired up.
+- `<tag>-smoke-positive` — same endpoints called with `{{param}}` from `.env.yaml`. Tagged `[smoke, positive, needs-id]`. Each step has `skip_if: "{{param}} =="` — auto-skips while the env var is empty (default after `zond generate`), runs once you fill it in.
+
+Filtering recipes:
+
+```bash
+zond run apis/x/tests --tag smoke                     # all three (positive auto-skips until IDs set)
+zond run apis/x/tests --tag smoke --exclude-tag needs-id  # only suites that work without real IDs
+zond run apis/x/tests --tag positive                  # opt-in: requires real IDs in env
+```
+
 **Phase 2 — CRUD tests (only with explicit user confirmation + staging env)**
 
 ```bash
