@@ -115,6 +115,85 @@ describe("executeRequest", () => {
     expect(callCount).toBe(1); // Only one call — no retry on HTTP errors
   });
 
+  test("retries on 429 and respects Retry-After (seconds)", async () => {
+    let callCount = 0;
+    globalThis.fetch = mock(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return new Response("rate limited", {
+          status: 429,
+          headers: { "Retry-After": "1" },
+        });
+      }
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const start = Date.now();
+    const response = await executeRequest(
+      { method: "GET", url: "http://example.com", headers: {} },
+      { rate_limit_retries: 3, retry_delay: 1, rate_limit_max_delay_ms: 5000 },
+    );
+    const elapsed = Date.now() - start;
+    expect(response.status).toBe(200);
+    expect(callCount).toBe(2);
+    expect(elapsed).toBeGreaterThanOrEqual(900);
+  });
+
+  test("retries on 429 with exponential backoff when no Retry-After", async () => {
+    let callCount = 0;
+    globalThis.fetch = mock(async () => {
+      callCount++;
+      if (callCount < 3) {
+        return new Response("rate limited", { status: 429, headers: {} });
+      }
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const response = await executeRequest(
+      { method: "GET", url: "http://example.com", headers: {} },
+      { rate_limit_retries: 5, retry_delay: 5, rate_limit_max_delay_ms: 100 },
+    );
+    expect(response.status).toBe(200);
+    expect(callCount).toBe(3);
+  });
+
+  test("returns 429 after exhausting rate-limit retries", async () => {
+    let callCount = 0;
+    globalThis.fetch = mock(async () => {
+      callCount++;
+      return new Response("rate limited", {
+        status: 429,
+        headers: { "Retry-After": "0" },
+      });
+    }) as unknown as typeof fetch;
+
+    const response = await executeRequest(
+      { method: "GET", url: "http://example.com", headers: {} },
+      { rate_limit_retries: 2, retry_delay: 1, rate_limit_max_delay_ms: 50 },
+    );
+    expect(response.status).toBe(429);
+    expect(callCount).toBe(3); // initial + 2 retries
+  });
+
+  test("rate limiter throttles requests", async () => {
+    globalThis.fetch = mock(async () => {
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const { createRateLimiter } = await import("../../src/core/runner/rate-limiter.ts");
+    const limiter = createRateLimiter(10); // 10 req/s → 100ms interval
+
+    const start = Date.now();
+    await Promise.all([
+      executeRequest({ method: "GET", url: "http://example.com", headers: {} }, { rate_limiter: limiter }),
+      executeRequest({ method: "GET", url: "http://example.com", headers: {} }, { rate_limiter: limiter }),
+      executeRequest({ method: "GET", url: "http://example.com", headers: {} }, { rate_limiter: limiter }),
+    ]);
+    const elapsed = Date.now() - start;
+    // 3 requests at 10/s means 3rd starts ~200ms after first
+    expect(elapsed).toBeGreaterThanOrEqual(180);
+  });
+
   test("timeout aborts the request", async () => {
     globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
       // Simulate slow response

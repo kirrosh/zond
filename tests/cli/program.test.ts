@@ -222,6 +222,18 @@ describe("buildProgram — numeric validations (exit 2 via CommanderError)", () 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("commander.invalidArgument");
   });
+
+  test("--rate-limit=abc rejects with exit 2", async () => {
+    const result = await tryParse(["run", "tests/", "--rate-limit", "abc"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("commander.invalidArgument");
+  });
+
+  test("--rate-limit=0 rejects with exit 2", async () => {
+    const result = await tryParse(["run", "tests/", "--rate-limit", "0"]);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("commander.invalidArgument");
+  });
 });
 
 describe("buildProgram — unknown command", () => {

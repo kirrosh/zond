@@ -60,7 +60,7 @@ zond ci init
 
 | Command | Description | Key flags |
 |---------|-------------|-----------|
-| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--report json\|junit` |
+| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--report json\|junit` |
 | `validate <path>` | Validate YAML tests | |
 | `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
@@ -148,6 +148,25 @@ zond run tests/ --env staging
 ```
 
 `zond init` creates a `.gitignore` with `.env*.yaml` in the API directory to prevent secrets from being committed.
+
+### Rate limiting & 429 handling
+
+`zond run` throttles outgoing requests when a limit is configured and automatically retries on `429 Too Many Requests`.
+
+- **CLI:** `--rate-limit <N>` caps the run at N requests per second across all suites.
+- **`.env.yaml`:** add a top-level `rateLimit: <N>` field — picked up automatically when no CLI flag is given. CLI takes precedence.
+- **Auto retry on 429:** the runner respects the `Retry-After` header (seconds or HTTP-date). If the header is missing, it falls back to capped exponential backoff (base = `retry_delay`, cap = 30s). Up to 5 attempts per request, then the 429 is reported as the final response.
+
+```yaml
+# .env.yaml
+base_url: https://api.resend.com
+api_key: re_xxx
+rateLimit: 5  # ≤ 5 req/s
+```
+
+```bash
+zond run apis/resend/tests --rate-limit 5
+```
 
 ---
 

@@ -3,6 +3,7 @@ import type { TestSuite, TestStep, Environment } from "../parser/types.ts";
 import { substituteString, substituteStep, substituteDeep, extractVariableReferences } from "../parser/variables.ts";
 import type { TestRunResult, StepResult, HttpRequest } from "./types.ts";
 import { executeRequest, type FetchOptions } from "./http-client.ts";
+import type { RateLimiter } from "./rate-limiter.ts";
 import { checkAssertions, extractCaptures } from "./assertions.ts";
 import { evaluateExpr } from "./expr-eval.ts";
 import { applyTransform } from "./transforms.ts";
@@ -28,7 +29,16 @@ function makeSkippedResult(stepName: string, reason: string): StepResult {
   };
 }
 
-export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun = false): Promise<TestRunResult> {
+export interface RunSuiteOptions {
+  rateLimiter?: RateLimiter;
+}
+
+export async function runSuite(
+  suite: TestSuite,
+  env: Environment = {},
+  dryRun = false,
+  options: RunSuiteOptions = {},
+): Promise<TestRunResult> {
   const startedAt = new Date().toISOString();
   const steps: StepResult[] = [];
   const variables: Record<string, unknown> = { ...env };
@@ -39,6 +49,7 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
     retries: suite.config.retries,
     retry_delay: suite.config.retry_delay,
     follow_redirects: suite.config.follow_redirects,
+    rate_limiter: options.rateLimiter,
   };
 
   // Expand steps lazily (for_each needs current variables)
@@ -323,6 +334,11 @@ export async function runSuite(suite: TestSuite, env: Environment = {}, dryRun =
   };
 }
 
-export async function runSuites(suites: TestSuite[], env: Environment = {}, dryRun = false): Promise<TestRunResult[]> {
-  return Promise.all(suites.map((suite) => runSuite(suite, env, dryRun)));
+export async function runSuites(
+  suites: TestSuite[],
+  env: Environment = {},
+  dryRun = false,
+  options: RunSuiteOptions = {},
+): Promise<TestRunResult[]> {
+  return Promise.all(suites.map((suite) => runSuite(suite, env, dryRun, options)));
 }

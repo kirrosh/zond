@@ -1,9 +1,10 @@
 import { dirname } from "path";
 import { stat } from "node:fs/promises";
 import { parse } from "../../core/parser/yaml-parser.ts";
-import { loadEnvironment } from "../../core/parser/variables.ts";
+import { loadEnvironment, loadEnvMeta } from "../../core/parser/variables.ts";
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
 import { runSuite } from "../../core/runner/executor.ts";
+import { createRateLimiter } from "../../core/runner/rate-limiter.ts";
 import { getReporter } from "../../core/reporter/index.ts";
 import type { ReporterName } from "../../core/reporter/types.ts";
 import type { TestSuite } from "../../core/parser/types.ts";
@@ -19,6 +20,7 @@ export interface RunOptions {
   env?: string;
   report: ReporterName;
   timeout?: number;
+  rateLimit?: number;
   bail: boolean;
   noDb?: boolean;
   dbPath?: string;
@@ -137,6 +139,17 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
+  // 3b. Resolve rate limit: CLI flag > .env.yaml `rateLimit:` field
+  let rateLimit = options.rateLimit;
+  if (rateLimit === undefined) {
+    try {
+      const envMeta = await loadEnvMeta(options.env, searchDir);
+      rateLimit = envMeta.rateLimit;
+    } catch { /* meta load failure is non-fatal */ }
+  }
+  const rateLimiter = createRateLimiter(rateLimit);
+  const runOpts = { rateLimiter };
+
   // 4. Run suites — setup suites run first (sequentially), their captures flow into regular suites
   const results: TestRunResult[] = [];
   const dryRun = options.dryRun === true;
@@ -146,7 +159,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
   const setupCaptures: Record<string, string> = {};
 
   for (const suite of setupSuites) {
-    const result = await runSuite(suite, env, dryRun);
+    const result = await runSuite(suite, env, dryRun, runOpts);
     results.push(result);
     for (const step of result.steps) {
       for (const [k, v] of Object.entries(step.captures)) {
@@ -160,7 +173,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
   if (options.bail) {
     // Sequential with bail at suite level
     for (const suite of regularSuites) {
-      const result = await runSuite(suite, enrichedEnv, dryRun);
+      const result = await runSuite(suite, enrichedEnv, dryRun, runOpts);
       results.push(result);
       if (!dryRun && (result.failed > 0 || result.steps.some((s) => s.status === "error"))) {
         break;
@@ -168,7 +181,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   } else {
     // Parallel
-    const all = await Promise.all(regularSuites.map((suite) => runSuite(suite, enrichedEnv, dryRun)));
+    const all = await Promise.all(regularSuites.map((suite) => runSuite(suite, enrichedEnv, dryRun, runOpts)));
     results.push(...all);
   }
 
