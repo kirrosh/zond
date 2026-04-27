@@ -178,7 +178,6 @@ export async function syncCommand(options: SyncOptions): Promise<number> {
     await writeMeta(options.testsDir, {
       zondVersion: ZOND_VERSION,
       lastSyncedAt: new Date().toISOString(),
-      specUrl: options.specPath,
       specHash: currentHash,
       files: { ...meta.files, ...updatedMetaFiles },
     });
