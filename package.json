@@ -28,7 +28,7 @@
     "backlog": "bunx backlog",
     "board": "bunx backlog board",
     "test": "bun run test:unit && bun run test:mocked",
-    "test:unit": "bun test tests/db/ tests/parser/ tests/runner/ tests/generator/ tests/core/ tests/core/meta/ tests/diagnostics/ tests/cli/program.test.ts tests/cli/cli-smoke.test.ts tests/cli/completions.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/safe-run.test.ts tests/cli/json-envelope.test.ts tests/cli/describe.test.ts tests/cli/catalog.test.ts tests/cli/db.test.ts tests/cli/request.test.ts tests/cli/init.test.ts tests/cli/guide.test.ts tests/cli/update.test.ts tests/integration/ tests/web/ tests/reporter/ tests/version-sync.test.ts",
+    "test:unit": "bun test tests/db/ tests/parser/ tests/runner/ tests/generator/ tests/core/ tests/core/meta/ tests/diagnostics/ tests/cli/program.test.ts tests/cli/cli-smoke.test.ts tests/cli/completions.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/safe-run.test.ts tests/cli/json-envelope.test.ts tests/cli/describe.test.ts tests/cli/catalog.test.ts tests/cli/db.test.ts tests/cli/request.test.ts tests/cli/init.test.ts tests/cli/install.test.ts tests/cli/guide.test.ts tests/cli/update.test.ts tests/integration/ tests/web/ tests/reporter/ tests/version-sync.test.ts",
     "test:mocked": "bun run scripts/run-mocked-tests.ts",
     "check": "tsc --noEmit --project tsconfig.json",
     "build": "bun build --compile src/cli/index.ts --outfile zond",
