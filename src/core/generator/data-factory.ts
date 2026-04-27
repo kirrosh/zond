@@ -11,6 +11,12 @@ export function generateFromSchema(
 ): unknown {
   if (_depth > 5) return {};
 
+  // Highest-priority signal: explicit example from spec.
+  // Beats enum, format, heuristics — the spec author told us what to send.
+  if (schema.example !== undefined) {
+    return schema.example;
+  }
+
   // allOf: merge all schemas
   if (schema.allOf) {
     const merged: OpenAPIV3.SchemaObject = { type: "object", properties: {} };
@@ -31,7 +37,7 @@ export function generateFromSchema(
     return generateFromSchema(schema.anyOf[0] as OpenAPIV3.SchemaObject, propertyName, _depth + 1);
   }
 
-  // enum: first value
+  // enum: first value (always valid for the API contract)
   if (schema.enum && schema.enum.length > 0) {
     return schema.enum[0];
   }
