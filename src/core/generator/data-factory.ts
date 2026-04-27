@@ -112,14 +112,14 @@ export function generateMultipartFromSchema(
 }
 
 function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): string {
-  // Format-based
+  // Format-based — emit generator placeholders so each call yields a fresh value
   if (schema.format === "email") return "{{$randomEmail}}";
   if (schema.format === "uuid") return "{{$uuid}}";
-  if (schema.format === "date-time") return "2025-01-01T00:00:00Z";
-  if (schema.format === "date") return "2025-01-01";
-  if (schema.format === "uri" || schema.format === "url") return "https://example.com/test";
-  if (schema.format === "hostname") return "example.com";
-  if (schema.format === "ipv4") return "192.168.1.1";
+  if (schema.format === "date-time") return "{{$randomIsoDate}}";
+  if (schema.format === "date") return "{{$randomDate}}";
+  if (schema.format === "uri" || schema.format === "url") return "{{$randomUrl}}";
+  if (schema.format === "hostname") return "{{$randomFqdn}}";
+  if (schema.format === "ipv4") return "{{$randomIpv4}}";
   if (schema.format === "ipv6") return "::1";
   if (schema.format === "password") return "TestPass123!";
 
@@ -136,7 +136,7 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
       return "{{$randomName}}";
     }
     if (lower === "url" || lower.endsWith("_url") || lower === "uri" || lower === "href" || lower === "website") {
-      return "https://example.com/test";
+      return "{{$randomUrl}}";
     }
     if (lower === "password" || lower.endsWith("_password")) {
       return "TestPass123!";

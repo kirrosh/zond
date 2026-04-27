@@ -77,6 +77,43 @@ describe("substituteString", () => {
     expect(typeof result).toBe("string");
     expect(result).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z$/);
   });
+
+  test("resolves $randomUrl generator", () => {
+    const result = substituteString("{{$randomUrl}}", {}) as string;
+    expect(typeof result).toBe("string");
+    expect(result).toMatch(/^https:\/\/example-[a-z0-9]{8}\.com\/path$/);
+  });
+
+  test("resolves $randomFqdn generator", () => {
+    const result = substituteString("{{$randomFqdn}}", {}) as string;
+    expect(result).toMatch(/^test-[a-z0-9]{8}\.example\.com$/);
+  });
+
+  test("resolves $randomIpv4 generator", () => {
+    const result = substituteString("{{$randomIpv4}}", {}) as string;
+    expect(result).toMatch(/^10\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    const octets = result.split(".").slice(1).map((n) => Number(n));
+    for (const o of octets) {
+      expect(o).toBeGreaterThanOrEqual(1);
+      expect(o).toBeLessThanOrEqual(254);
+    }
+  });
+
+  test("resolves $randomDate as YYYY-MM-DD", () => {
+    const result = substituteString("{{$randomDate}}", {}) as string;
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test("resolves $randomIsoDate as ISO 8601 datetime", () => {
+    const result = substituteString("{{$randomIsoDate}}", {}) as string;
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
+  test("$randomUrl yields a different value on each call", () => {
+    const a = substituteString("{{$randomUrl}}", {});
+    const b = substituteString("{{$randomUrl}}", {});
+    expect(a).not.toBe(b);
+  });
 });
 
 describe("substituteDeep", () => {
