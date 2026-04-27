@@ -104,4 +104,42 @@ describe("serializeSuite", () => {
     expect(yaml).toContain("- a");
     expect(yaml).toContain("- b");
   });
+
+  test("status as array serializes inline (T27 negative smoke)", () => {
+    const suite: RawSuite = {
+      name: "neg",
+      tests: [
+        {
+          name: "missing resource",
+          GET: "/users/00000000-0000-0000-0000-000000000000",
+          expect: { status: [400, 404, 422] },
+        },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    expect(yaml).toContain("status: [400, 404, 422]");
+    // Round-trip: parser should accept it as a valid suite
+    const parsed = validateSuite(yamlToObject(yaml));
+    expect(parsed.tests[0]!.expect.status).toEqual([400, 404, 422]);
+  });
+
+  test("skip_if is serialized at step level (T27 positive smoke)", () => {
+    const suite: RawSuite = {
+      name: "pos",
+      tests: [
+        {
+          name: "read by id",
+          GET: "/users/{{user_id}}",
+          skip_if: "{{user_id}} ==",
+          expect: { status: 200 },
+        },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    expect(yaml).toContain('skip_if: "{{user_id}} =="');
+  });
 });
+
+function yamlToObject(yaml: string): unknown {
+  return Bun.YAML.parse(yaml);
+}

@@ -27,7 +27,7 @@ export interface RawStep {
   name: string;
   [methodKey: string]: unknown;
   expect: {
-    status?: number;
+    status?: number | number[];
     body?: Record<string, Record<string, string>>;
     headers?: Record<string, unknown>;
   };
@@ -131,7 +131,11 @@ export function serializeSuite(suite: RawSuite): string {
     if (hasExpect) {
       lines.push("    expect:");
       if (test.expect.status !== undefined) {
-        lines.push(`      status: ${test.expect.status}`);
+        if (Array.isArray(test.expect.status)) {
+          lines.push(`      status: [${test.expect.status.join(", ")}]`);
+        } else {
+          lines.push(`      status: ${test.expect.status}`);
+        }
       }
       if (test.expect.body) {
         lines.push("      body:");

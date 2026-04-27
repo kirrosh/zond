@@ -619,8 +619,8 @@ describe("generateSuites reset tag", () => {
 
 // ── smoke path seeds ──
 
-describe("smoke suite path seeds", () => {
-  test("GET endpoint with path param uses variable placeholder in smoke suite", () => {
+describe("smoke suite path seeds (T27 — positive variant)", () => {
+  test("GET endpoint with path param uses variable placeholder in positive smoke suite", () => {
     const endpoints = [
       makeEndpoint({
         path: "/orders/{orderId}",
@@ -630,24 +630,73 @@ describe("smoke suite path seeds", () => {
       }),
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
-    const smokeSuite = suites.find(s => s.name === "orders-smoke");
-    expect(smokeSuite).toBeDefined();
-    expect(smokeSuite!.tests[0]!["GET"]).toBe("/orders/{{orderId}}");
+    const positiveSuite = suites.find(s => s.name === "orders-smoke-positive");
+    expect(positiveSuite).toBeDefined();
+    expect(positiveSuite!.tags).toEqual(["smoke", "positive", "needs-id"]);
+    expect(positiveSuite!.tests[0]!["GET"]).toBe("/orders/{{orderId}}");
+    expect((positiveSuite!.tests[0] as any).skip_if).toBe("{{orderId}} ==");
   });
 
-  test("GET endpoint with param example uses example value", () => {
+  test("GET endpoint with path param also produces negative smoke with bad ID and 4xx range", () => {
     const endpoints = [
+      makeEndpoint({
+        path: "/orders/{orderId}",
+        method: "GET",
+        tags: ["orders"],
+        parameters: [{ name: "orderId", in: "path", schema: { type: "integer" } } as any],
+      }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
+    const negativeSuite = suites.find(s => s.name === "orders-smoke-negative");
+    expect(negativeSuite).toBeDefined();
+    expect(negativeSuite!.tags).toEqual(["smoke", "negative"]);
+    expect(negativeSuite!.tests[0]!["GET"]).toBe("/orders/999999999");
+    expect(negativeSuite!.tests[0]!.expect.status).toEqual([400, 404, 422]);
+  });
+
+  test("UUID path param uses zero-UUID in negative smoke", () => {
+    const endpoints = [
+      makeEndpoint({
+        path: "/users/{id}",
+        method: "GET",
+        tags: ["users"],
+        parameters: [{ name: "id", in: "path", schema: { type: "string", format: "uuid" } } as any],
+      }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
+    const negativeSuite = suites.find(s => s.name === "users-smoke-negative");
+    expect(negativeSuite).toBeDefined();
+    expect(negativeSuite!.tests[0]!["GET"]).toBe("/users/00000000-0000-0000-0000-000000000000");
+  });
+
+  test("GET endpoint without path params stays in regular smoke (no positive/negative split)", () => {
+    const endpoints = [
+      makeEndpoint({
+        path: "/items",
+        method: "GET",
+        tags: ["items"],
+      }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
+    expect(suites.find(s => s.name === "items-smoke")).toBeDefined();
+    expect(suites.find(s => s.name === "items-smoke-positive")).toBeUndefined();
+    expect(suites.find(s => s.name === "items-smoke-negative")).toBeUndefined();
+  });
+
+  test("paramless and path-param GETs in same tag produce 3 suites (smoke + negative + positive)", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/items", method: "GET", tags: ["items"] }),
       makeEndpoint({
         path: "/items/{sku}",
         method: "GET",
         tags: ["items"],
-        parameters: [{ name: "sku", in: "path", schema: { type: "string" }, example: "ABC-123" } as any],
+        parameters: [{ name: "sku", in: "path", schema: { type: "string" } } as any],
       }),
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
-    const smokeSuite = suites.find(s => s.name === "items-smoke");
-    expect(smokeSuite).toBeDefined();
-    expect(smokeSuite!.tests[0]!["GET"]).toBe("/items/ABC-123");
+    expect(suites.find(s => s.name === "items-smoke")).toBeDefined();
+    expect(suites.find(s => s.name === "items-smoke-negative")).toBeDefined();
+    expect(suites.find(s => s.name === "items-smoke-positive")).toBeDefined();
   });
 });
 
