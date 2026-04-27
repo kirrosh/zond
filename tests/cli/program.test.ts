@@ -1,5 +1,8 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
 import { CommanderError } from "commander";
+import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { buildProgram, preprocessArgv } from "../../src/cli/program.ts";
 
 // Suppress commander stdout/stderr (--help, errors)
@@ -232,5 +235,53 @@ describe("buildProgram — unknown command", () => {
     const result = await tryParse(["ui"]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("commander.unknownCommand");
+  });
+});
+
+describe("T15: zond use → zond run resolves --api from .zond-current", () => {
+  let cwd: string;
+  let originalCwd: string;
+
+  beforeEach(() => {
+    cwd = mkdtempSync(join(tmpdir(), "zond-current-e2e-"));
+    originalCwd = process.cwd();
+    process.chdir(cwd);
+  });
+  afterEach(() => {
+    process.chdir(originalCwd);
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  async function parseCapturingErr(argv: string[]): Promise<string> {
+    const captureErr: string[] = [];
+    const origOut = process.stdout.write;
+    const origErr = process.stderr.write;
+    process.stdout.write = mock(() => true) as typeof process.stdout.write;
+    process.stderr.write = mock((data: any) => {
+      captureErr.push(String(data));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      const program = buildProgram();
+      await program.parseAsync(["bun", "script.ts", ...argv]);
+    } catch { /* CommanderError or action errors already in captureErr */ }
+    process.stdout.write = origOut;
+    process.stderr.write = origErr;
+    return captureErr.join("");
+  }
+
+  test("`zond run` (no args, no --api) falls back to .zond-current and tries to resolve it", async () => {
+    writeFileSync(join(cwd, ".zond-current"), "definitely-not-a-real-api\n", "utf-8");
+    const stderr = await parseCapturingErr(["run", "--db", join(cwd, "zond.db")]);
+    // The collection lookup must have been attempted with the .zond-current value —
+    // i.e. we reached "API '...' not found", not "Missing path argument".
+    expect(stderr).toContain("definitely-not-a-real-api");
+    expect(stderr).not.toContain("Missing path argument");
+  });
+
+  test("explicit path bypasses .zond-current fallback", async () => {
+    writeFileSync(join(cwd, ".zond-current"), "definitely-not-a-real-api\n", "utf-8");
+    const stderr = await parseCapturingErr(["run", "/no/such/dir", "--db", join(cwd, "zond.db")]);
+    expect(stderr).not.toContain("definitely-not-a-real-api");
   });
 });
