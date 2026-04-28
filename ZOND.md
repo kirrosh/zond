@@ -94,6 +94,38 @@ zond ci init
 | `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
+| `probe-validation <spec>` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--output <dir>`, `--tag`, `--max-per-endpoint <N>` |
+
+### `probe-validation` — bug-hunting negative-input probes
+
+A correctly-implemented API returns **4xx** for any malformed client input —
+never **5xx**. `probe-validation` generates a deterministic battery of
+negative-input probes from your OpenAPI spec; any 5xx response from the API
+under test is a bug candidate.
+
+```bash
+zond probe-validation openapi.json --output bugs/probes/
+zond run bugs/probes/                     # any failure with 5xx response → bug
+zond db diagnose <run-id>                 # group failures by root cause
+```
+
+Per endpoint the generator emits probes from these classes (capped by
+`--max-per-endpoint`, default 50):
+
+| Class | What it checks |
+|-------|----------------|
+| Invalid path UUID | Sentinel non-UUIDs (`not-a-uuid`, `12345`, traversal strings) on every UUID-like path param |
+| Empty body | `{}` against endpoints with required fields |
+| Missing required | Drop each required field of the request schema in turn |
+| Type confusion | string↔number, array↔object swaps on every property |
+| Invalid format | Bad `email`/`uri`/`date-time`/`uuid` values per declared format |
+| Boundary string | `""`, 10000-char string, unicode/emoji/RTL on string fields |
+| Invalid enum / array enum | Unknown enum values; arrays of unknown values (catches the events-style bugs) |
+
+Probes are deterministic — same spec → same suites — so generated YAML can be
+committed as a regression test. Each probe expects status in
+`[400, 401, 403, 404, 405, 409, 415, 422]`; a 5xx (or unexpected 2xx) is a
+test failure surfaced via the regular runner / reporter / `zond db diagnose`.
 
 ---
 

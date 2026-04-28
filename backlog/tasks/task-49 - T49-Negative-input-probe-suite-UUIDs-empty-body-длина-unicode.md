@@ -1,9 +1,10 @@
 ---
 id: TASK-49
 title: 'T49: Negative-input probe suite (UUIDs, empty body, длина, unicode)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-27 16:42'
+updated_date: '2026-04-28 06:42'
 labels:
   - bug-hunting
   - generator

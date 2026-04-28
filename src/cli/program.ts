@@ -11,6 +11,7 @@ import { dbCommand } from "./commands/db.ts";
 import { requestCommand } from "./commands/request.ts";
 import { guideCommand } from "./commands/guide.ts";
 import { generateCommand } from "./commands/generate.ts";
+import { probeValidationCommand } from "./commands/probe-validation.ts";
 import { exportCommand } from "./commands/export.ts";
 import { syncCommand } from "./commands/sync.ts";
 import { updateCommand } from "./commands/update.ts";
@@ -535,6 +536,23 @@ export function buildProgram(): Command {
         output: opts.output,
         tag: opts.tag,
         uncoveredOnly: opts.uncoveredOnly === true,
+        json: globalJson(cmd),
+      });
+    });
+
+  // ── probe-validation ──
+  program
+    .command("probe-validation <spec>")
+    .description("Generate negative-input probe suites (catches 5xx-on-bad-input bugs)")
+    .requiredOption("--output <dir>", "Output directory for generated probe files")
+    .option("--tag <tag>", "Probe only endpoints with this tag")
+    .option("--max-per-endpoint <N>", "Cap probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
+    .action(async (specPath: string, opts, cmd: Command) => {
+      process.exitCode = await probeValidationCommand({
+        specPath,
+        output: opts.output,
+        tag: opts.tag,
+        maxPerEndpoint: opts.maxPerEndpoint,
         json: globalJson(cmd),
       });
     });
