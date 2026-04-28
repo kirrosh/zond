@@ -1,0 +1,13 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/cli/index.ts",
+    "src/web/server.ts"
+  ],
+  "project": ["src/**/*.ts"],
+  "ignore": [
+    "src/web/**",
+    "src/core/exporter/postman.ts",
+    "src/cli/commands/init/templates/**"
+  ]
+}
