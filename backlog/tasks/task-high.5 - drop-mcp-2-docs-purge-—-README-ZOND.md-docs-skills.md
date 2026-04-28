@@ -1,10 +1,10 @@
 ---
 id: TASK-HIGH.5
 title: 'drop-mcp 2: docs purge — README, ZOND.md, docs/, skills/'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-28 10:36'
-updated_date: '2026-04-28 11:36'
+updated_date: '2026-04-28 11:39'
 labels:
   - drop-mcp
   - docs
