@@ -1,7 +1,7 @@
 ---
 id: TASK-35
 title: 'T35: Cascade-skip reason inline в console reporter'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-27 15:28'
 updated_date: '2026-04-28 10:22'

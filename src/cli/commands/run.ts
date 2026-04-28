@@ -24,6 +24,8 @@ export interface RunOptions {
   timeout?: number;
   rateLimit?: number;
   bail: boolean;
+  /** Run regular suites sequentially (one after another) instead of in parallel. */
+  sequential?: boolean;
   noDb?: boolean;
   dbPath?: string;
   authToken?: string;
@@ -206,6 +208,12 @@ export async function runCommand(options: RunOptions): Promise<number> {
       if (!dryRun && (result.failed > 0 || result.steps.some((s) => s.status === "error"))) {
         break;
       }
+    }
+  } else if (options.sequential) {
+    // Sequential without bail — run suites one by one
+    for (const suite of regularSuites) {
+      const result = await runSuite(suite, enrichedEnv, dryRun, runOpts);
+      results.push(result);
     }
   } else {
     // Parallel
