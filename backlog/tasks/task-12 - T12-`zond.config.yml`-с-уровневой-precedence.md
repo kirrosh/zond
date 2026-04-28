@@ -4,11 +4,13 @@ title: 'T12: `zond.config.yml` с уровневой precedence'
 status: To Do
 assignee: []
 created_date: '2026-04-27'
+updated_date: '2026-04-28 12:46'
 labels:
   - T12
   - phase-3
   - size-M
 dependencies: []
+priority: medium
 ---
 
 ## Description

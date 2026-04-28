@@ -1,9 +1,10 @@
 ---
 id: TASK-MEDIUM.8
 title: 'cleanup 5: backlog grooming — review TASK-12/14, MEDIUM.2/3, decisions 3+4'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-04-28 12:02'
+updated_date: '2026-04-28 12:46'
 labels:
   - cleanup
   - backlog

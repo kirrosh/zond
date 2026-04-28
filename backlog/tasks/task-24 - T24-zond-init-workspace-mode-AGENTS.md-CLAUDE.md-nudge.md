@@ -4,7 +4,7 @@ title: 'T24: zond init workspace mode + AGENTS.md/CLAUDE.md nudge'
 status: Done
 assignee: []
 created_date: '2026-04-27 13:01'
-updated_date: '2026-04-27 13:14'
+updated_date: '2026-04-28 12:46'
 labels:
   - T24
   - phase-4
@@ -16,7 +16,6 @@ labels:
 milestone: m-0
 dependencies:
   - TASK-12
-  - TASK-14
   - TASK-17
 references:
   - 'https://github.com/MrLesk/Backlog.md'
