@@ -1,10 +1,10 @@
 ---
 id: TASK-MEDIUM.1
 title: 'db runs: classify run with 0 passed / many errors as FAIL not PASS'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-28 07:22'
-updated_date: '2026-04-28 10:18'
+updated_date: '2026-04-28 10:20'
 labels:
   - bug-hunting
   - from-iteration-2
