@@ -6,12 +6,12 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-04-27 13:42'
+updated_date: '2026-04-28 10:35'
 labels:
   - mcp
   - research
 milestone: m-2
-dependencies:
-  - TASK-30
+dependencies: []
 priority: medium
 ---
 

@@ -1,10 +1,10 @@
 ---
 id: TASK-39
 title: 'T39: zond run --sequential (опт-аут параллельных suites)'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-27 15:28'
-updated_date: '2026-04-28 10:23'
+updated_date: '2026-04-28 10:25'
 labels:
   - runner
   - ux
