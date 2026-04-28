@@ -1,10 +1,10 @@
 ---
 id: TASK-MEDIUM.7
 title: 'cleanup 3: dead-code scan and unused exports purge'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-28 12:02'
-updated_date: '2026-04-28 12:43'
+updated_date: '2026-04-28 12:45'
 labels:
   - cleanup
   - tech-debt

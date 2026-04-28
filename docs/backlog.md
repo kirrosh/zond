@@ -23,6 +23,10 @@ bunx backlog sequence list --plain       # граф зависимостей
   в [`decision-1`](../backlog/decisions/decision-1%20-%20Architecture-principles-for-backlog-migration.md).
   Выпил MCP-сервера и переход на CLI-only — в
   [`decision-2`](../backlog/decisions/decision-2%20-%20Drop-MCP-server-—-keep-CLI-agent-skills-as-the-only-integration-surface.md).
+- `.mcp.example.json` — **опциональный** шаблон конфигурации backlog-MCP
+  для агентов, которые хотят работать с backlog через MCP-протокол.
+  Скопируйте в `.mcp.json` (он в `.gitignore`) если вашему клиенту
+  это удобно. zond сам по себе CLI-only — это не его интеграция.
 - `backlog/config.yml` — `auto_commit: false`, `remoteOperations: false`,
   `checkActiveBranches: false` (последние два выключены, чтобы CLI не дёргал
   SSH-fetch на каждом действии).
