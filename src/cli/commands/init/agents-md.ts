@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import cliFull from "./templates/agents-cli-full.md" with { type: "text" };
+import agentsTemplate from "./templates/agents.md" with { type: "text" };
 
 export const START_MARKER = "<!-- zond:start -->";
 export const END_MARKER = "<!-- zond:end -->";
@@ -12,7 +12,7 @@ export interface AgentsBlockResult {
 }
 
 function blockBody(): string {
-  return cliFull.trim();
+  return agentsTemplate.trim();
 }
 
 function wrap(body: string): string {
