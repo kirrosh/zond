@@ -26,8 +26,21 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
 
-      - name: Tests
-        run: bun run test
+      - name: Tests (unit)
+        run: |
+          set +e
+          bun run test:unit
+          ec=$?
+          echo "::notice::test:unit exit code = $ec"
+          exit $ec
+
+      - name: Tests (mocked)
+        run: |
+          set +e
+          bun run test:mocked
+          ec=$?
+          echo "::notice::test:mocked exit code = $ec"
+          exit $ec
 
       - name: Build
         run: bun run build
