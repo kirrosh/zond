@@ -13,19 +13,16 @@
 Все задачи проекта живут в `backlog/` и управляются [Backlog.md](https://backlog.md).
 Конфиг — `backlog/config.yml`.
 
-**Если клиент поддерживает MCP** — читай ресурс `backlog://workflow/overview`
-для полной инструкции (она лежит в самом сервере и обновляется вместе с
-версией backlog). MCP-сервер описан в `.mcp.json`.
-
-**Если MCP недоступен** — выполни `bunx backlog --help` и далее работай через
-CLI: `bunx backlog task list --plain`, `bunx backlog task <id> --plain` и т.д.
+Для работы с бэклогом используй CLI:
+`bunx backlog --help`, `bunx backlog task list --plain`,
+`bunx backlog task <id> --plain` и т.д. CLI — единственная поддерживаемая
+поверхность интеграции (см. [decision-2](backlog/decisions/decision-2%20-%20Drop-MCP-server-—-keep-CLI-agent-skills-as-the-only-integration-surface.md)).
 
 ### Workflow при запросе «возьми задачу» / «следующая задача» / «работай над <T-id>»
 
-1. Загрузи описание процесса (см. выше — MCP-ресурс или CLI-help).
-2. Найди подходящую задачу: `backlog.task_list` (MCP) или
-   `bunx backlog task list --plain --status "To Do"`. Уважай `dependencies` —
-   не бери задачу с незакрытыми блокерами.
+1. Загрузи описание процесса: `bunx backlog --help`.
+2. Найди подходящую задачу: `bunx backlog task list --plain --status "To Do"`.
+   Уважай `dependencies` — не бери задачу с незакрытыми блокерами.
 3. Возьми её в работу: смени статус на `In Progress`, при необходимости
    проставь `assignees: ["@claude"]`.
 4. Работай обычным циклом zond (Read → Plan → Edit → tests → build).
@@ -44,7 +41,7 @@ CLI: `bunx backlog task list --plain`, `bunx backlog task <id> --plain` и т.д
 Примеры:
 
 ```
-TASK-5: add zond mcp start entry-point
+TASK-49: add probe-validation negative-input generator
 TASK-1: migrate CLI to commander, preserve all semantics
 TASK-3: remove zond ui alias
 ```
