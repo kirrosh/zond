@@ -157,7 +157,7 @@ export function extractVariableReferences(step: TestStep): string[] {
   return [...refs];
 }
 
-async function loadEnvFile(filePath: string): Promise<Record<string, string> | null> {
+export async function loadEnvFile(filePath: string): Promise<Record<string, string> | null> {
   try {
     const text = await Bun.file(filePath).text();
     const parsed = Bun.YAML.parse(text);

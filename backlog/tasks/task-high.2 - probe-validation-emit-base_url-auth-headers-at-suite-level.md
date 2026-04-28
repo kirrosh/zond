@@ -1,10 +1,10 @@
 ---
 id: TASK-HIGH.2
 title: 'probe-validation: emit base_url + auth headers at suite level'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-28 07:22'
-updated_date: '2026-04-28 07:35'
+updated_date: '2026-04-28 07:38'
 labels:
   - bug-hunting
   - from-iteration-2

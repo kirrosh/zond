@@ -1,7 +1,7 @@
 import { dirname } from "path";
 import { stat } from "node:fs/promises";
 import { parse } from "../../core/parser/yaml-parser.ts";
-import { loadEnvironment, loadEnvMeta } from "../../core/parser/variables.ts";
+import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
 import { runSuite } from "../../core/runner/executor.ts";
 import { createRateLimiter } from "../../core/runner/rate-limiter.ts";
@@ -110,6 +110,30 @@ export async function runCommand(options: RunOptions): Promise<number> {
   } catch (err) {
     printError(`Failed to load environment: ${(err as Error).message}`);
     return 2;
+  }
+
+  // Auto-load ./.env.yaml from cwd when --env not given and the searchDir env
+  // file produced nothing. Useful when running with absolute test paths from
+  // a collection cwd (e.g. APPLY agents in the auto-loop).
+  if (!options.env && Object.keys(env).length === 0) {
+    const cwd = process.cwd();
+    const cwdEnvPath = `${cwd}/.env.yaml`;
+    // Avoid double-load if cwd is already covered by searchDir or its parent
+    const alreadyCovered = cwd === searchDir || cwd === dirname(searchDir);
+    if (!alreadyCovered) {
+      try {
+        const cwdVars = await loadEnvFile(cwdEnvPath);
+        if (cwdVars && Object.keys(cwdVars).length > 0) {
+          env = { ...cwdVars };
+          if (!options.json) {
+            process.stderr.write(`zond: using ./.env.yaml (cwd fallback)\n`);
+          }
+        }
+      } catch (err) {
+        printError(`Failed to load environment: ${(err as Error).message}`);
+        return 2;
+      }
+    }
   }
 
   // Inject CLI auth token — overrides env file value
