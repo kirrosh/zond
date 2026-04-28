@@ -1,9 +1,10 @@
 ---
 id: TASK-MEDIUM.5
 title: 'drop-mcp 4: test cleanup + CHANGELOG breaking-change entry'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-04-28 10:36'
+updated_date: '2026-04-28 11:39'
 labels:
   - drop-mcp
   - tests
