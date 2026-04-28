@@ -1,9 +1,10 @@
 ---
 id: TASK-HIGH.1
 title: 'Reporter: highlight 5xx responses in probe runs'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-04-28 06:42'
+updated_date: '2026-04-28 10:09'
 labels:
   - reporter
   - bug-hunting
