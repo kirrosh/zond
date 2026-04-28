@@ -26,21 +26,24 @@ jobs:
       - name: Typecheck
         run: bunx tsc --noEmit
 
-      - name: Tests (unit)
+      - name: Tests (chunked diagnostic)
         run: |
           set +e
-          bun run test:unit
-          ec=$?
-          echo "::notice::test:unit exit code = $ec"
-          exit $ec
-
-      - name: Tests (mocked)
-        run: |
-          set +e
-          bun run test:mocked
-          ec=$?
-          echo "::notice::test:mocked exit code = $ec"
-          exit $ec
+          run() {
+            bun test "$@" >/dev/null 2>&1
+            echo "::notice::exit=$? args=$*"
+          }
+          run tests/db/
+          run tests/parser/
+          run tests/runner/
+          run tests/generator/
+          run tests/core/
+          run tests/diagnostics/
+          run tests/cli/program.test.ts tests/cli/cli-smoke.test.ts tests/cli/completions.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/safe-run.test.ts tests/cli/json-envelope.test.ts tests/cli/describe.test.ts tests/cli/catalog.test.ts tests/cli/db.test.ts tests/cli/request.test.ts tests/cli/init.test.ts tests/cli/init/agents-md.test.ts tests/cli/init/bootstrap.test.ts tests/cli/use.test.ts tests/cli/guide.test.ts tests/cli/update.test.ts
+          run tests/cli/serve.test.ts
+          run tests/integration/
+          run tests/web/
+          run tests/reporter/
 
       - name: Build
         run: bun run build
