@@ -33,5 +33,6 @@ parent_task_id: TASK-MEDIUM
 - В CHANGELOG строка "### Internal — dead code purge".
 
 ## Не в скоупе
-- web/ и postman.ts — у них судьба в decisions 3/4, не трогаем тут.
+- **`src/web/`** — оставляем целиком, согласно decision-3 (zond serve keep). knip не должен помечать его символы как unused. Конфигурация: добавить `entry: ["src/web/server.ts"]` или `ignore: ["src/web/**"]`.
+- **`src/core/exporter/postman.ts`** — оставляем, согласно decision-4. То же — exclude из pruning.
 <!-- SECTION:DESCRIPTION:END -->
