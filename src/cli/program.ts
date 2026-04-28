@@ -549,6 +549,7 @@ export function buildProgram(): Command {
     .description("Generate negative-input probe suites (catches 5xx-on-bad-input bugs)")
     .requiredOption("--output <dir>", "Output directory for generated probe files")
     .option("--tag <tag>", "Probe only endpoints with this tag")
+    .option("--list-tags", "List available tags from spec and exit")
     .option("--max-per-endpoint <N>", "Cap probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
     .action(async (specPath: string, opts, cmd: Command) => {
       process.exitCode = await probeValidationCommand({
@@ -557,6 +558,7 @@ export function buildProgram(): Command {
         tag: opts.tag,
         maxPerEndpoint: opts.maxPerEndpoint,
         json: globalJson(cmd),
+        listTags: opts.listTags,
       });
     });
 
