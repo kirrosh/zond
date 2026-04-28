@@ -324,16 +324,14 @@ In a fresh directory, run `zond init` (no flags) to scaffold a zond workspace:
 ```bash
 mkdir my-api-tests && cd my-api-tests
 zond init                                    # creates zond.config.yml, apis/, AGENTS.md
-                                             # also configures ~/.claude/mcp.json + ~/.cursor/mcp.json
 ```
 
-Three integration modes are available via `--integration`:
+Two integration modes are available via `--integration`:
 
 | Mode  | Effect |
 |---|---|
-| `mcp` *(default)* | Writes a short `AGENTS.md` nudge pointing agents to MCP resources (`zond://workflow/test-api`, `zond://rules/never`) and configures Claude Code + Cursor MCP servers. |
-| `cli` | Writes a self-contained `AGENTS.md` with the full workflow inline — for clients without MCP support. |
-| `skip` | Creates only `zond.config.yml` + `apis/`. No agent files, no MCP install. |
+| `cli` *(default)* | Writes a self-contained `AGENTS.md` with the full workflow inline — agents call `zond` commands directly. |
+| `skip` | Creates only `zond.config.yml` + `apis/`. No agent files. |
 
 Combo: `zond init --with-spec <path> --name <api>` bootstraps the workspace **and** registers the first API in one shot.
 

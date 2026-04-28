@@ -3,10 +3,10 @@ id: TASK-HIGH.6
 title: >-
   drop-mcp 3: cleanup zond init / zond install (remove --integration mcp default
   and install --claude/--cursor)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-28 10:36'
-updated_date: '2026-04-28 11:26'
+updated_date: '2026-04-28 11:36'
 labels:
   - drop-mcp
   - cli
