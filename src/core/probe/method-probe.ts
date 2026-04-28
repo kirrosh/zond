@@ -170,7 +170,6 @@ export function generateMethodProbes(opts: MethodProbeOptions): MethodProbeResul
         [method]: convertPath(concretePath),
         expect: { status: ACCEPTABLE_STATUSES },
       };
-      if (headers) step.headers = headers;
       // Body-bearing methods on an undeclared route — send a minimal valid
       // JSON object to provoke any body-parsing path while the router is
       // still expected to reject the method first.
@@ -188,6 +187,8 @@ export function generateMethodProbes(opts: MethodProbeOptions): MethodProbeResul
       name: `probe methods ${bucket.path}`,
       tags: ["probe-methods", "negative-method", "no-5xx", "smoke"],
       fileStem: `probe-methods-${stem}`,
+      base_url: "{{base_url}}",
+      ...(headers ? { headers } : {}),
       tests: steps,
     });
   }
