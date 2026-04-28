@@ -11,13 +11,13 @@ import { dbCommand } from "./commands/db.ts";
 import { requestCommand } from "./commands/request.ts";
 import { guideCommand } from "./commands/guide.ts";
 import { generateCommand } from "./commands/generate.ts";
+import { probeValidationCommand } from "./commands/probe-validation.ts";
+import { probeMethodsCommand } from "./commands/probe-methods.ts";
 import { exportCommand } from "./commands/export.ts";
 import { syncCommand } from "./commands/sync.ts";
 import { updateCommand } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
 import { completionsCommand, COMPLETION_SHELLS, type CompletionShell } from "./commands/completions.ts";
-import { mcpStartCommand } from "./commands/mcp.ts";
-import { installCommand } from "./commands/install.ts";
 import { useCommand } from "./commands/use.ts";
 
 import { readCurrentApi } from "../core/context/current.ts";
@@ -165,6 +165,7 @@ export function buildProgram(): Command {
     .option("--timeout <ms>", "Override request timeout", parsePositiveInt("--timeout"))
     .option("--rate-limit <N>", "Throttle requests to at most N per second (set 1 below the real API cap to avoid boundary 429s)", parsePositiveInt("--rate-limit"))
     .option("--bail", "Stop on first suite failure")
+    .option("--sequential", "Run regular suites one after another instead of in parallel (opt-out of Promise.all)")
     .option("--no-db", "Do not save results to zond.db")
     .option("--db <path>", "Path to SQLite database file (default: zond.db)")
     .option("--auth-token <token>", "Auth token injected as {{auth_token}} variable")
@@ -174,6 +175,7 @@ export function buildProgram(): Command {
     .option("--method <method>", "Filter tests by HTTP method (e.g. GET, POST)")
     .option("--env-var <KEY=VALUE>", "Inject env variable (repeatable, overrides env file)", collect, [])
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
+    .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
     .action(async (pathArg: string | undefined, opts, cmd: Command) => {
       let path = pathArg;
       const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
@@ -210,6 +212,7 @@ export function buildProgram(): Command {
         timeout: opts.timeout,
         rateLimit: opts.rateLimit,
         bail: opts.bail === true,
+        sequential: opts.sequential === true,
         // Commander's `--no-db` produces { db: false }; keep semantics: when --no-db given → noDb=true
         noDb: opts.db === false,
         dbPath: typeof opts.db === "string" ? opts.db : undefined,
@@ -220,6 +223,7 @@ export function buildProgram(): Command {
         method: opts.method,
         envVars,
         dryRun: opts.dryRun === true,
+        reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
         json: globalJson(cmd),
       });
     });
@@ -274,16 +278,6 @@ export function buildProgram(): Command {
       });
     });
 
-  // ── mcp ──
-  const mcp = program.command("mcp").description("Model Context Protocol server");
-  mcp
-    .command("start")
-    .description("Start MCP server over stdio for AI agents (Claude, Cursor, etc.)")
-    .option("--db <path>", "Path to SQLite database file (default: zond.db)")
-    .action(async (opts) => {
-      process.exitCode = await mcpStartCommand({ dbPath: opts.db });
-    });
-
   // ── use ──
   program
     .command("use [api]")
@@ -293,26 +287,6 @@ export function buildProgram(): Command {
       process.exitCode = await useCommand({
         api,
         clear: opts.clear === true,
-        json: globalJson(cmd),
-      });
-    });
-
-  // ── install ──
-  program
-    .command("install")
-    .description("Configure zond MCP server for AI clients (Claude Code, Cursor)")
-    .option("--claude", "Configure ~/.claude/mcp.json")
-    .option("--cursor", "Configure ~/.cursor/mcp.json")
-    .option("--all", "Configure all supported clients")
-    .option("--dry-run", "Show what would be written without modifying any files")
-    .option("--no-sanity", "Skip the in-process tools/list smoke check")
-    .action(async (opts, cmd: Command) => {
-      process.exitCode = await installCommand({
-        claude: opts.claude,
-        cursor: opts.cursor,
-        all: opts.all,
-        dryRun: opts.dryRun,
-        sanity: opts.sanity,
         json: globalJson(cmd),
       });
     });
@@ -374,11 +348,7 @@ export function buildProgram(): Command {
     .option("--db <path>", "Path to SQLite database file")
     .option("--workspace", "Bootstrap a zond workspace (zond.config.yml, apis/, AGENTS.md)")
     .option("--with-spec <path>", "Bootstrap workspace AND register first API from spec")
-    .addOption(
-      new Option("--integration <mode>", "AI agent integration when bootstrapping")
-        .choices(["mcp", "cli", "skip"])
-        .default("mcp"),
-    )
+    .option("--no-agents-md", "Skip writing AGENTS.md when bootstrapping")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       process.exitCode = await initCommand({
         name: opts.name,
@@ -390,7 +360,7 @@ export function buildProgram(): Command {
         dbPath: opts.db,
         workspace: opts.workspace === true,
         withSpec: opts.withSpec,
-        integration: opts.integration as "mcp" | "cli" | "skip" | undefined,
+        noAgents: opts.agentsMd === false,
         json: globalJson(cmd),
       });
     });
@@ -535,6 +505,40 @@ export function buildProgram(): Command {
         output: opts.output,
         tag: opts.tag,
         uncoveredOnly: opts.uncoveredOnly === true,
+        json: globalJson(cmd),
+      });
+    });
+
+  // ── probe-validation ──
+  program
+    .command("probe-validation <spec>")
+    .description("Generate negative-input probe suites (catches 5xx-on-bad-input bugs)")
+    .requiredOption("--output <dir>", "Output directory for generated probe files")
+    .option("--tag <tag>", "Probe only endpoints with this tag")
+    .option("--list-tags", "List available tags from spec and exit")
+    .option("--max-per-endpoint <N>", "Cap probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
+    .action(async (specPath: string, opts, cmd: Command) => {
+      process.exitCode = await probeValidationCommand({
+        specPath,
+        output: opts.output,
+        tag: opts.tag,
+        maxPerEndpoint: opts.maxPerEndpoint,
+        json: globalJson(cmd),
+        listTags: opts.listTags,
+      });
+    });
+
+  // ── probe-methods ──
+  program
+    .command("probe-methods <spec>")
+    .description("Generate negative-method probe suites (catches 5xx/2xx on undeclared HTTP methods)")
+    .requiredOption("--output <dir>", "Output directory for generated probe files")
+    .option("--tag <tag>", "Probe only endpoints with this tag")
+    .action(async (specPath: string, opts, cmd: Command) => {
+      process.exitCode = await probeMethodsCommand({
+        specPath,
+        output: opts.output,
+        tag: opts.tag,
         json: globalJson(cmd),
       });
     });

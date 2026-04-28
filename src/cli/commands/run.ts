@@ -1,12 +1,14 @@
 import { dirname } from "path";
 import { stat } from "node:fs/promises";
 import { parse } from "../../core/parser/yaml-parser.ts";
-import { loadEnvironment, loadEnvMeta } from "../../core/parser/variables.ts";
+import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
 import { runSuite } from "../../core/runner/executor.ts";
 import { createRateLimiter } from "../../core/runner/rate-limiter.ts";
-import { getReporter } from "../../core/reporter/index.ts";
+import { getReporter, generateJsonReport, generateJunitXml } from "../../core/reporter/index.ts";
 import type { ReporterName } from "../../core/reporter/types.ts";
+import { writeFile, mkdir } from "node:fs/promises";
+import { dirname as pathDirname, isAbsolute, resolve as pathResolve } from "node:path";
 import type { TestSuite } from "../../core/parser/types.ts";
 import type { TestRunResult } from "../../core/runner/types.ts";
 import { printError, printWarning } from "../output.ts";
@@ -22,6 +24,8 @@ export interface RunOptions {
   timeout?: number;
   rateLimit?: number;
   bail: boolean;
+  /** Run regular suites sequentially (one after another) instead of in parallel. */
+  sequential?: boolean;
   noDb?: boolean;
   dbPath?: string;
   authToken?: string;
@@ -32,6 +36,8 @@ export interface RunOptions {
   envVars?: string[];
   dryRun?: boolean;
   json?: boolean;
+  /** Write the report to a file instead of stdout. */
+  reportOut?: string;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -112,6 +118,30 @@ export async function runCommand(options: RunOptions): Promise<number> {
     return 2;
   }
 
+  // Auto-load ./.env.yaml from cwd when --env not given and the searchDir env
+  // file produced nothing. Useful when running with absolute test paths from
+  // a collection cwd (e.g. APPLY agents in the auto-loop).
+  if (!options.env && Object.keys(env).length === 0) {
+    const cwd = process.cwd();
+    const cwdEnvPath = `${cwd}/.env.yaml`;
+    // Avoid double-load if cwd is already covered by searchDir or its parent
+    const alreadyCovered = cwd === searchDir || cwd === dirname(searchDir);
+    if (!alreadyCovered) {
+      try {
+        const cwdVars = await loadEnvFile(cwdEnvPath);
+        if (cwdVars && Object.keys(cwdVars).length > 0) {
+          env = { ...cwdVars };
+          if (!options.json) {
+            process.stderr.write(`zond: using ./.env.yaml (cwd fallback)\n`);
+          }
+        }
+      } catch (err) {
+        printError(`Failed to load environment: ${(err as Error).message}`);
+        return 2;
+      }
+    }
+  }
+
   // Inject CLI auth token — overrides env file value
   if (options.authToken) {
     env.auth_token = options.authToken;
@@ -179,6 +209,12 @@ export async function runCommand(options: RunOptions): Promise<number> {
         break;
       }
     }
+  } else if (options.sequential) {
+    // Sequential without bail — run suites one by one
+    for (const suite of regularSuites) {
+      const result = await runSuite(suite, enrichedEnv, dryRun, runOpts);
+      results.push(result);
+    }
   } else {
     // Parallel
     const all = await Promise.all(regularSuites.map((suite) => runSuite(suite, enrichedEnv, dryRun, runOpts)));
@@ -195,10 +231,45 @@ export async function runCommand(options: RunOptions): Promise<number> {
 
   // 5b. Report
   if (!options.json) {
-    const reporter = getReporter(options.report);
-    reporter.report(results);
-    for (const w of warnings) {
-      printWarning(w);
+    if (options.reportOut) {
+      // Write report to a file via fs (bypass stdout). Console reporter falls
+      // back to a single-line summary on stdout; json/junit produce no stdout.
+      const outPath = isAbsolute(options.reportOut)
+        ? options.reportOut
+        : pathResolve(process.cwd(), options.reportOut);
+      let content: string;
+      let label: string;
+      switch (options.report) {
+        case "json":
+          content = generateJsonReport(results);
+          label = "JSON";
+          break;
+        case "junit":
+          content = generateJunitXml(results);
+          label = "JUnit XML";
+          break;
+        default: // "console" — fall back to JSON in the file (most useful)
+          content = generateJsonReport(results);
+          label = "JSON";
+          break;
+      }
+      try {
+        await mkdir(pathDirname(outPath), { recursive: true });
+        await writeFile(outPath, content, "utf-8");
+        process.stderr.write(`zond: ${label} report written to ${outPath}\n`);
+      } catch (err) {
+        printError(`Failed to write --report-out file ${outPath}: ${(err as Error).message}`);
+        return 2;
+      }
+      for (const w of warnings) {
+        printWarning(w);
+      }
+    } else {
+      const reporter = getReporter(options.report);
+      reporter.report(results);
+      for (const w of warnings) {
+        printWarning(w);
+      }
     }
   }
 
@@ -239,10 +310,13 @@ export async function runCommand(options: RunOptions): Promise<number> {
         test: s.name,
         ...(r.suite_file ? { file: r.suite_file } : {}),
         status: s.status,
+        ...(typeof s.response?.status === "number" ? { http_status: s.response.status } : {}),
+        ...(typeof s.response?.status === "number" && s.response.status >= 500 && s.response.status < 600 ? { is_5xx: true } : {}),
         error: s.error,
       }))
     );
-    printJson(jsonOk("run", { summary: { total, passed, failed }, failures, warnings, runId: savedRunId }));
+    const fiveXx = failures.filter(f => f.is_5xx).length;
+    printJson(jsonOk("run", { summary: { total, passed, failed, fiveXx }, failures, warnings, runId: savedRunId }));
   }
 
   return hasFailures ? 1 : 0;

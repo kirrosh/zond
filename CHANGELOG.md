@@ -6,8 +6,25 @@ All notable changes to this project will be documented in this file.
 
 ### Breaking changes
 
-- **MCP layer removed** — `zond mcp` command and `@modelcontextprotocol/sdk` dependency deleted.
-  The agent interface is now exclusively the CLI + skills in `skills/`. No migration path needed.
+- **MCP layer removed** (see [decision-2](backlog/decisions/decision-2%20-%20Drop-MCP-server-—-keep-CLI-agent-skills-as-the-only-integration-surface.md)) —
+  CLI is the only integration surface; agent skills in `skills/*/SKILL.md`
+  are read directly. Specifically:
+  - `zond mcp start` removed.
+  - `zond install --claude/--cursor` removed (was only used to write
+    `~/.claude/mcp.json` / `~/.cursor/mcp.json` for the MCP transport).
+  - `--integration mcp` flag of `zond init` removed; default integration
+    is now `cli` (writes a self-contained `AGENTS.md` with full workflow
+    inline). `--integration skip` still works.
+  - `@modelcontextprotocol/sdk` runtime dependency dropped.
+  - `src/mcp/` deleted entirely (~817 LOC).
+  - `src/cli/commands/install.ts` and `src/cli/commands/mcp.ts` deleted.
+  - `tests/integration/mcp*.test.ts` removed.
+  - All MCP references purged from README, ZOND.md, docs/, skills/,
+    AGENTS.md, CLAUDE.md.
+  - Migration: existing `~/.claude/mcp.json` / `~/.cursor/mcp.json` keep
+    referencing a `zond` server that no longer responds; remove the
+    `zond` entry from your client config. New flow — see updated
+    `AGENTS.md`: agents call `zond` commands directly.
 
 - **`zond migrate` removed** — the migration system was added and then removed in the same branch.
   Format changes in zond are backward-compatible or require a clean `zond generate`.
@@ -99,6 +116,59 @@ All notable changes to this project will be documented in this file.
 - **Soft delete hint** — when a GET returns `200` with a `status`/`state`/`deleted` field instead
   of the expected `404` (after a DELETE), the diagnostic now surfaces a "likely soft delete" hint
   with a concrete suggestion to assert the status field value.
+
+- **5xx response highlighting** — console reporter now flags failed steps with HTTP 5xx
+  responses with a yellow `[5xx <status>]` tag, and the suite/grand-total lines show a
+  separate `<N> 5xx` count. The `--json` envelope adds `http_status` and `is_5xx` per
+  failure plus a top-level `summary.fiveXx` count, so probe-validation runs surface
+  bug candidates at a glance.
+
+- **`--report-out <file>`** on `zond run` — writes the JSON or JUnit report directly to a
+  file (with `mkdir -p`) instead of to stdout, logging `zond: <FORMAT> report written to
+  <path>` on stderr. Decouples the report from any wrapper banner that prefixes stdout
+  (notably `bun run zond -- run …`), so downstream JSON parsers don't break.
+
+#### Bug-hunting probes
+
+- **`zond probe-validation <spec>`** — generates deterministic negative-input probe
+  suites that catch the 5xx-on-bad-input class of bugs (the contract: any malformed
+  client input must produce a 4xx, never a 5xx). Per endpoint emits probes for: invalid
+  path UUIDs, empty body, missing required fields, type confusion, invalid format
+  (`email`/`uri`/`date-time`/`uuid`), boundary strings (empty, 10000-char,
+  unicode/emoji/RTL), invalid enum values and array-of-string-enum (catches the
+  webhooks-events bug shape). `--max-per-endpoint` caps probe count, `--tag` filters
+  endpoints. Generated suites embed suite-level `base_url`/auth and are runnable as-is.
+
+- **`zond probe-methods <spec>`** — HTTP method completeness sweep. For every path,
+  emits one probe per `{GET, POST, PUT, PATCH, DELETE}` method that is *not* declared
+  in the spec, expecting a 4xx (`401/403/404/405`). Path placeholders are substituted
+  with valid-shape sentinels so the request reaches the router. Catches "PUT on a
+  POST-only endpoint returns 500" bugs.
+
+- **`probe-validation --list-tags`** — lists all tags from the OpenAPI spec without
+  generating anything. `--tag X` is now case-insensitive and trims whitespace; matching
+  zero endpoints exits 2 with a clear error and the available-tags list.
+
+#### Runner
+
+- **`zond run --sequential`** — opt-out of parallel suite execution. Forces
+  sequential runs of all suites (useful when a setup token must propagate or when
+  rate-limits make parallel suites trigger 429s).
+
+- **Auto-load `./.env.yaml`** — `zond run` now also tries `$PWD/.env.yaml` when
+  `--env` is not given and neither searchDir nor its parent has one. Logs
+  `zond: using ./.env.yaml (cwd fallback)` on stderr. Unblocks running absolute test
+  paths from a collection cwd.
+
+#### Reporter / DB
+
+- **Cascade-skip reason inline** — console reporter now prints
+  `(skipped: <error>)` instead of just `(skipped)`, surfacing the underlying
+  capture/auth failure on the very same line.
+
+- **Run classification** — `zond db runs` now classifies a run with `total > 0`,
+  `passed == 0`, and many errors as **FAIL** instead of PASS. Prevents a probe run
+  with all 5xx responses from looking green in the runs listing.
 
 ---
 

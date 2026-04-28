@@ -72,7 +72,7 @@ describe("initCommand", () => {
       const code = await initCommand({
         cwd: wsCwd,
         home: wsHome,
-        integration: "skip",
+        noAgents: true,
         json: true,
       });
       expect(code).toBe(0);
@@ -98,7 +98,7 @@ describe("initCommand", () => {
       const code = await initCommand({
         cwd: wsCwd,
         home: wsHome,
-        integration: "skip",
+        noAgents: true,
         withSpec: `${FIXTURES}/petstore-simple.json`,
         name: "petstore",
         dir: join(wsCwd, "apis", "petstore"),

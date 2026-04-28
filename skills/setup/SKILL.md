@@ -9,7 +9,8 @@ allowed-tools: [Bash(zond *), Bash(which zond), Bash(curl *), Bash(powershell *)
 
 # Zond Setup
 
-This skill is **self-contained** — it runs when zond is not yet installed, so MCP resources are not available. Once zond is installed, fetch `zond://workflow/setup` for the canonical version.
+This skill is **self-contained** — it runs when zond is not yet installed.
+Once zond is installed, run `zond --help` for the canonical CLI reference.
 
 ## Step 1: Check current installation
 !`which zond 2>/dev/null && zond --version --json 2>/dev/null || echo "NOT_INSTALLED"`

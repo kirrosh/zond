@@ -1,9 +1,10 @@
 ---
 id: TASK-48
 title: 'T48: HTTP method completeness sweep — 405 probe'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-27 16:42'
+updated_date: '2026-04-28 07:08'
 labels:
   - bug-hunting
   - generator
