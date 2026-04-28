@@ -462,6 +462,14 @@ function hasJsonBody(ep: EndpointInfo): boolean {
   );
 }
 
+function headersEqual(a: Record<string, string>, b: Record<string, string>): boolean {
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) if (a[k] !== b[k]) return false;
+  return true;
+}
+
 // ──────────────────────────────────────────────
 // Public API
 // ──────────────────────────────────────────────
@@ -502,11 +510,26 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
     probedEndpoints++;
     totalProbes += steps.length;
 
+    // Hoist auth headers to suite level — every probe in this suite hits the
+    // same endpoint, so per-step headers are pure duplication. Dropping them
+    // here keeps generated YAML small and makes suite-level overrides
+    // (e.g. switching auth tokens) work as expected.
+    const suiteHeaders = getAuthHeaders(ep, securitySchemes);
+    if (suiteHeaders) {
+      for (const step of steps) {
+        if (step.headers && headersEqual(step.headers as Record<string, string>, suiteHeaders)) {
+          delete (step as { headers?: unknown }).headers;
+        }
+      }
+    }
+
     const stem = endpointStem(ep);
     const suite: RawSuite = {
       name: `probe ${ep.method} ${ep.path}`,
       tags: ["probe-validation", "negative-input", "no-5xx"],
       fileStem: `probe-${stem}`,
+      base_url: "{{base_url}}",
+      ...(suiteHeaders ? { headers: suiteHeaders } : {}),
       tests: steps,
     };
     suites.push(suite);

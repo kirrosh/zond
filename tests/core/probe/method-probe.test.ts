@@ -99,7 +99,7 @@ describe("generateMethodProbes", () => {
     expect(url).toBe("/webhooks/00000000-0000-0000-0000-000000000000");
   });
 
-  it("attaches auth headers when the endpoint declares security", () => {
+  it("attaches auth headers at suite level when the endpoint declares security", () => {
     const result = generateMethodProbes({
       endpoints: [ep({ method: "GET", path: "/secret", security: ["bearer"] })],
       securitySchemes: [
@@ -107,9 +107,18 @@ describe("generateMethodProbes", () => {
       ],
     });
     const suite = result.suites[0]!;
-    expect(suite.tests[0]!.headers).toEqual({
+    expect(suite.headers).toEqual({
       Authorization: "Bearer {{auth_token}}",
     });
+    expect(suite.tests[0]!.headers).toBeUndefined();
+  });
+
+  it("emits suite-level base_url so generated YAML is runnable as-is", () => {
+    const result = generateMethodProbes({
+      endpoints: [ep({ method: "GET", path: "/items" })],
+      securitySchemes: [],
+    });
+    expect(result.suites[0]!.base_url).toBe("{{base_url}}");
   });
 
   it("emits a `smoke` and `negative-method` tagged suite with json body for body-bearing methods", () => {

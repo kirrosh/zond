@@ -148,7 +148,7 @@ describe("generateNegativeProbes", () => {
     expect(result.probedEndpoints).toBe(0);
   });
 
-  it("attaches Bearer auth header when endpoint has bearer security", () => {
+  it("attaches Bearer auth header at suite level when endpoint has bearer security", () => {
     const result = generateNegativeProbes({
       endpoints: [ep({
         method: "GET", path: "/x/{id}", security: ["BearerAuth"],
@@ -156,7 +156,20 @@ describe("generateNegativeProbes", () => {
       })],
       securitySchemes: [{ name: "BearerAuth", type: "http", scheme: "bearer" }],
     });
-    const t = result.suites[0]!.tests[0]!;
-    expect(t.headers).toEqual({ Authorization: "Bearer {{auth_token}}" });
+    const suite = result.suites[0]!;
+    expect(suite.headers).toEqual({ Authorization: "Bearer {{auth_token}}" });
+    // And per-step headers are dropped (they would duplicate the suite-level ones).
+    expect(suite.tests[0]!.headers).toBeUndefined();
+  });
+
+  it("emits suite-level base_url so generated YAML is runnable as-is", () => {
+    const result = generateNegativeProbes({
+      endpoints: [ep({
+        method: "GET", path: "/x/{id}",
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } } as any],
+      })],
+      securitySchemes: [],
+    });
+    expect(result.suites[0]!.base_url).toBe("{{base_url}}");
   });
 });
