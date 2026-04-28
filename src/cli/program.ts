@@ -167,6 +167,7 @@ export function buildProgram(): Command {
     .option("--timeout <ms>", "Override request timeout", parsePositiveInt("--timeout"))
     .option("--rate-limit <N>", "Throttle requests to at most N per second (set 1 below the real API cap to avoid boundary 429s)", parsePositiveInt("--rate-limit"))
     .option("--bail", "Stop on first suite failure")
+    .option("--sequential", "Run regular suites one after another instead of in parallel (opt-out of Promise.all)")
     .option("--no-db", "Do not save results to zond.db")
     .option("--db <path>", "Path to SQLite database file (default: zond.db)")
     .option("--auth-token <token>", "Auth token injected as {{auth_token}} variable")
@@ -213,6 +214,7 @@ export function buildProgram(): Command {
         timeout: opts.timeout,
         rateLimit: opts.rateLimit,
         bail: opts.bail === true,
+        sequential: opts.sequential === true,
         // Commander's `--no-db` produces { db: false }; keep semantics: when --no-db given → noDb=true
         noDb: opts.db === false,
         dbPath: typeof opts.db === "string" ? opts.db : undefined,
