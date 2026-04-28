@@ -46,7 +46,8 @@ export async function dbCommand(options: DbOptions): Promise<number> {
           } else {
             for (const r of runs) {
               const run = r as any;
-              const status = run.failed > 0 ? "FAIL" : "PASS";
+              const isFail = run.failed > 0 || (run.total > 0 && run.passed === 0);
+              const status = isFail ? "FAIL" : "PASS";
               console.log(`#${run.id} ${status} ${run.passed}/${run.total} passed (${run.started_at})`);
             }
           }
