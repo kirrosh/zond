@@ -1,10 +1,10 @@
 ---
 id: TASK-MEDIUM.4
 title: 'probe-validation: warn (not silently emit 0) when --tag matches no endpoints'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-28 08:15'
-updated_date: '2026-04-28 10:16'
+updated_date: '2026-04-28 10:18'
 labels:
   - bug-hunting
   - from-iteration-3
