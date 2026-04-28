@@ -57,14 +57,14 @@ claude --dangerously-skip-permissions
 curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
 ```
 
-Пропишите MCP-сервер в Claude Code (или Cursor):
+Создайте в проекте `AGENTS.md` (если его ещё нет) — `zond init` уже сделал
+это, агенты подхватят инструкции автоматически. Либо просто откройте
+проект в Claude Code / Cursor — они прочитают `AGENTS.md` и будут вызывать
+CLI напрямую (`zond run`, `zond probe-validation`, `zond db diagnose`, …).
 
-```bash
-zond install --claude          # Claude Code
-zond install --cursor          # Cursor
-```
-
-Команда создаёт/обновляет `~/.claude/mcp.json` (или `~/.cursor/mcp.json`) и сразу запускает sanity-check `tools/list`. После этого перезапустите Claude Code — он подхватит MCP-сервер `zond` со всеми тулзами и ресурсами.
+Никакого дополнительного конфигурирования не требуется — CLI это
+единственная поверхность интеграции (см.
+[decision-2](../backlog/decisions/decision-2%20-%20Drop-MCP-server-—-keep-CLI-agent-skills-as-the-only-integration-surface.md)).
 
 ---
 

@@ -89,11 +89,65 @@ zond ci init
 
 | Command | Description | Key flags |
 |---------|-------------|-----------|
-| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--report json\|junit` |
+| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--report json\|junit`, `--report-out <file>` |
 | `validate <path>` | Validate YAML tests | |
 | `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
+| `probe-validation <spec>` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--output <dir>`, `--tag`, `--max-per-endpoint <N>` |
+| `probe-methods <spec>` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--output <dir>`, `--tag` |
+
+### `probe-validation` — bug-hunting negative-input probes
+
+A correctly-implemented API returns **4xx** for any malformed client input —
+never **5xx**. `probe-validation` generates a deterministic battery of
+negative-input probes from your OpenAPI spec; any 5xx response from the API
+under test is a bug candidate.
+
+```bash
+zond probe-validation openapi.json --output bugs/probes/
+zond run bugs/probes/                     # any failure with 5xx response → bug
+zond db diagnose <run-id>                 # group failures by root cause
+```
+
+Per endpoint the generator emits probes from these classes (capped by
+`--max-per-endpoint`, default 50):
+
+| Class | What it checks |
+|-------|----------------|
+| Invalid path UUID | Sentinel non-UUIDs (`not-a-uuid`, `12345`, traversal strings) on every UUID-like path param |
+| Empty body | `{}` against endpoints with required fields |
+| Missing required | Drop each required field of the request schema in turn |
+| Type confusion | string↔number, array↔object swaps on every property |
+| Invalid format | Bad `email`/`uri`/`date-time`/`uuid` values per declared format |
+| Boundary string | `""`, 10000-char string, unicode/emoji/RTL on string fields |
+| Invalid enum / array enum | Unknown enum values; arrays of unknown values (catches the events-style bugs) |
+
+Probes are deterministic — same spec → same suites — so generated YAML can be
+committed as a regression test. Each probe expects status in
+`[400, 401, 403, 404, 405, 409, 415, 422]`; a 5xx (or unexpected 2xx) is a
+test failure surfaced via the regular runner / reporter / `zond db diagnose`.
+
+### `probe-methods` — bug-hunting HTTP method completeness sweep
+
+A correctly-implemented API returns **405 Method Not Allowed** (or 404) for
+HTTP methods not declared on a path — never **5xx** (unhandled exception) and
+never **2xx** (forgotten/shadowed route). `probe-methods` generates one suite
+per path that probes every method in `{GET, POST, PUT, PATCH, DELETE}` not
+declared in the spec.
+
+```bash
+zond probe-methods openapi.json --output bugs/method-probes/
+zond run bugs/method-probes/              # any 5xx or 2xx failure → bug
+zond db diagnose <run-id>
+```
+
+Path placeholders are substituted with valid-shape sentinels (zero-UUID for
+`format: uuid`, etc.) so the request reaches the routing layer rather than
+being rejected purely on path syntax. Body-bearing methods carry a minimal
+`{}` JSON body. Each probe expects status in `[401, 403, 404, 405]`; anything
+else is a test failure. Probes are deterministic — same spec → same suites —
+so generated YAML can be committed as a regression test.
 
 ---
 
@@ -226,7 +280,7 @@ Environments are file-only. `loadEnvironment(envName?, searchDir)` looks for:
 - `.env.yaml` (when no `envName` given)
 - `.env.<envName>.yaml` (when `envName` given)
 
-Search order: `searchDir`, then parent directory.
+Search order: `searchDir`, then parent directory. As a final fallback for `zond run`, when `--env` is **not** given and neither directory above contains `.env.yaml`, the runner also tries `$PWD/.env.yaml` (with a one-line `zond: using ./.env.yaml (cwd fallback)` notice on stderr). This lets you `cd` into a collection and run an absolute-path test file without `--env-var base_url=…` boilerplate.
 
 ```yaml
 # .env.staging.yaml
@@ -270,16 +324,9 @@ In a fresh directory, run `zond init` (no flags) to scaffold a zond workspace:
 ```bash
 mkdir my-api-tests && cd my-api-tests
 zond init                                    # creates zond.config.yml, apis/, AGENTS.md
-                                             # also configures ~/.claude/mcp.json + ~/.cursor/mcp.json
 ```
 
-Three integration modes are available via `--integration`:
-
-| Mode  | Effect |
-|---|---|
-| `mcp` *(default)* | Writes a short `AGENTS.md` nudge pointing agents to MCP resources (`zond://workflow/test-api`, `zond://rules/never`) and configures Claude Code + Cursor MCP servers. |
-| `cli` | Writes a self-contained `AGENTS.md` with the full workflow inline — for clients without MCP support. |
-| `skip` | Creates only `zond.config.yml` + `apis/`. No agent files, no MCP install. |
+Pass `--no-agents-md` to skip writing `AGENTS.md` (only `zond.config.yml` + `apis/` will be created).
 
 Combo: `zond init --with-spec <path> --name <api>` bootstraps the workspace **and** registers the first API in one shot.
 

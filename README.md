@@ -4,9 +4,7 @@ AI-powered API testing for Claude Code, Cursor, and CI/CD.
 
 Say "test my API" — get working tests, coverage dashboard, and CI config in minutes.
 
-<!-- TODO: add demo GIF (15 sec: zond install --claude → "cover openapi.json with tests" → 42/47 endpoints covered → dashboard) -->
-
-Zond reads your OpenAPI spec and gives your AI agent everything it needs to test your API: structured tools, safety guardrails, coverage tracking, and run history. You don't need to learn anything new — just describe what you want and the agent handles the rest.
+Zond reads your OpenAPI spec and gives your AI agent everything it needs to test your API: a focused CLI, safety guardrails, coverage tracking, and run history. You don't need to learn anything new — just describe what you want and the agent runs `zond` commands.
 
 ## Quick Start
 
@@ -17,27 +15,23 @@ curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
 iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex        # Windows
 ```
 
-Wire it into your AI client (writes/merges `~/.claude/mcp.json` and/or `~/.cursor/mcp.json`):
+Bootstrap a workspace and register your first API:
 
 ```bash
-zond install --claude          # Claude Code
-zond install --cursor          # Cursor
-zond install --all             # both
+zond init --workspace --with-spec ./openapi.json
 ```
 
-Restart your client, then say: _"Safely cover the API from openapi.json with tests."_ The agent picks up zond's MCP tools (`zond_run`, `zond_diagnose`, …) and resources (`zond://workflow/test-api`, …) automatically.
+`zond init` writes a self-contained [`AGENTS.md`](AGENTS.md) — agents read it
+and use the CLI directly (`zond run`, `zond probe-validation`,
+`zond db diagnose`, …). No daemon, no transport, no extra configuration.
+
+Then say to your agent: _"Safely cover the API from openapi.json with tests."_
 
 <details>
-<summary>Other installation methods (npx, manual MCP config)</summary>
+<summary>Other installation methods (npx)</summary>
 
 ```bash
 npx -y @kirrosh/zond --version
-```
-
-If you'd rather edit MCP config by hand, point your client's `mcpServers` at:
-
-```json
-{ "mcpServers": { "zond": { "command": "zond", "args": ["mcp", "start"] } } }
 ```
 
 See [ZOND.md](ZOND.md) for the full CLI reference.

@@ -19,8 +19,14 @@ bunx backlog sequence list --plain       # граф зависимостей
 ## Структура
 
 - `backlog/tasks/` — активные задачи (T-номер закодирован в `labels`).
-- `backlog/decisions/` — архитектурные решения. Принципы миграции на MCP
-  лежат в [`decision-1`](../backlog/decisions/decision-1%20-%20Architecture-principles-for-backlog-migration.md).
+- `backlog/decisions/` — архитектурные решения. Принципы миграции бэклога —
+  в [`decision-1`](../backlog/decisions/decision-1%20-%20Architecture-principles-for-backlog-migration.md).
+  Выпил MCP-сервера и переход на CLI-only — в
+  [`decision-2`](../backlog/decisions/decision-2%20-%20Drop-MCP-server-—-keep-CLI-agent-skills-as-the-only-integration-surface.md).
+- `.mcp.example.json` — **опциональный** шаблон конфигурации backlog-MCP
+  для агентов, которые хотят работать с backlog через MCP-протокол.
+  Скопируйте в `.mcp.json` (он в `.gitignore`) если вашему клиенту
+  это удобно. zond сам по себе CLI-only — это не его интеграция.
 - `backlog/config.yml` — `auto_commit: false`, `remoteOperations: false`,
   `checkActiveBranches: false` (последние два выключены, чтобы CLI не дёргал
   SSH-fetch на каждом действии).
@@ -30,7 +36,7 @@ bunx backlog sequence list --plain       # граф зависимостей
 | T | TASK | Фаза | Статус |
 |---|------|------|--------|
 | T1–T4 | TASK-1…4 | Phase 0 (быстрые победы) | Done |
-| T5–T8 | TASK-5…8 | Phase 1 (MCP-фундамент) | To Do |
+| T5–T8 | TASK-5…8 | Phase 1 (MCP-фундамент, выпилен в decision-2) | Done (archived) |
 | T9–T11 | TASK-9…11 | Phase 2 (миграция со скиллов и плагина) | To Do |
 | T12–T15 | TASK-12…15 | Phase 3 (конфиг и DX) | To Do |
 | T16 | TASK-16 | Phase 4 (Web UI) | To Do |

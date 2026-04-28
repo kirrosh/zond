@@ -8,16 +8,12 @@ allowed-tools: [Read, Write, Bash(zond *)]
 
 # Diagnose Test Failures
 
-Thin orchestrator. Full workflow in MCP resources.
+CLI-only skill.
 
-## Resources to fetch
-- `zond://workflow/diagnosis` — full step-by-step diagnosis workflow
-- `zond://run/{id}/diagnosis` — markdown digest for a specific run id
-
-## MCP tools
-- `zond_db_runs` — list recent runs (find the failed `runId`)
-- `zond_diagnose` — full DiagnoseResult (json) for a `runId`
-- `zond_db_run` — filter results within a run (`--status 403`, `--method POST`)
+## CLI commands
+- `zond db runs --limit 5 --json` — list recent runs (find the failed `runId`)
+- `zond db diagnose <run-id> --json` — full DiagnoseResult
+- `zond db run <id> [--status 403] [--method POST] --json` — filter results within a run
 
 ## Critical rules
 - **Always check `agent_directive` first** — if present, follow it literally
@@ -32,4 +28,5 @@ zond db diagnose <run-id> --json
 zond run <path> --safe --json
 ```
 
-For full workflow and recommended_action semantics, fetch `zond://workflow/diagnosis`.
+For `recommended_action` semantics and YAML editing patterns, read `ZOND.md`
+at the repo root.

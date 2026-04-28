@@ -10,28 +10,21 @@ allowed-tools: [Read, Write, Bash(zond *)]
 
 # API Scenario Testing
 
-Thin orchestrator. Full content lives in MCP resources.
+CLI-only skill. zond is invoked directly via shell.
 
 ## Setup
 Run `/zond:setup` first if zond is not installed.
 
-## Resources to fetch
-- `zond://workflow/scenarios` — full scenario authoring workflow
-- `zond://rules/never` — MANDATORY NEVER
-- `zond://reference/yaml` — assertions, generators, captures, flow control
-- `zond://reference/auth-patterns` — `setup.yaml`, multi-user scenarios
-- `zond://catalog/{api}` — endpoint reference for the target API
-
-## MCP tools
-- `zond_init` — register API collection (once per API)
-- `zond_catalog` — generate `.api-catalog.yaml`
-- `zond_run` — execute single scenario file or by tag
-- `zond_diagnose` — failure analysis (or read `zond://run/{id}/diagnosis`)
-- `zond_request` — ad-hoc HTTP for debugging
+## CLI commands
+- `zond init --name <name> --spec <path>` — register API collection (once)
+- `zond catalog <spec> --output <tests-dir>` — emit `.api-catalog.yaml`
+- `zond run <path> --json` — execute a single scenario file or by tag
+- `zond db diagnose <run-id> --json` — failure analysis
+- `zond request <method> <url>` — ad-hoc HTTP for debugging
 
 ## Critical rules
-- **NEVER use `zond generate` for scenarios** — write scenarios manually based on the catalog
-- **NEVER read OpenAPI/Swagger spec files** — use `.api-catalog.yaml` or `zond_describe`
+- **NEVER use `zond generate` for scenarios** — write scenarios manually based on `.api-catalog.yaml`
+- **NEVER read OpenAPI/Swagger spec files** — use `.api-catalog.yaml` or `zond describe`
 - **NEVER invent endpoints** — only use what's in the catalog
 - **Captures are file-scoped** — variables don't propagate across files unless `setup: true`
 - Tag every scenario `[scenario, <name>]` so it runs via `--tag scenario` or `--tag <name>,setup`
@@ -39,9 +32,10 @@ Run `/zond:setup` first if zond is not installed.
 ## Quickstart
 ```bash
 zond catalog <spec> --output <tests-dir>
-# write scenario.yaml manually (see zond://reference/yaml)
+# write scenario.yaml manually (see ZOND.md for YAML format)
 zond run <tests-dir>/scenario.yaml --json
 zond db diagnose <run-id> --json   # on failure
 ```
 
-For full patterns and YAML structure, fetch `zond://workflow/scenarios` and `zond://reference/yaml`.
+For full YAML structure, read the YAML format section of `ZOND.md` at the
+repo root.

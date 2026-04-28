@@ -102,4 +102,27 @@ describe("dbCommand", () => {
     });
     expect(code).toBe(2);
   });
+
+  test("runs prints FAIL when 0 passed despite failed=0 (errors only)", async () => {
+    db = tmpDb();
+    output = suppressOutput();
+    getDb(db);
+    const runId = createRun({ started_at: new Date().toISOString() });
+    // Manually finalize with passed=0, failed=0, total>0 to simulate all-errored run
+    const dbh = getDb(db);
+    dbh.prepare(`
+      UPDATE runs SET finished_at = ?, total = 5, passed = 0, failed = 0, skipped = 0, duration_ms = 0
+      WHERE id = ?
+    `).run(new Date().toISOString(), runId);
+
+    const code = await dbCommand({
+      subcommand: "runs",
+      positional: [],
+      dbPath: db,
+      json: false,
+    });
+    expect(code).toBe(0);
+    expect(output.getCaptured()).toContain("FAIL");
+    expect(output.getCaptured()).not.toContain(`#${runId} PASS`);
+  });
 });

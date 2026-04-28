@@ -1,21 +1,18 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import mcpNudge from "./templates/agents-mcp-nudge.md" with { type: "text" };
-import cliFull from "./templates/agents-cli-full.md" with { type: "text" };
+import agentsTemplate from "./templates/agents.md" with { type: "text" };
 
 export const START_MARKER = "<!-- zond:start -->";
 export const END_MARKER = "<!-- zond:end -->";
-
-export type AgentsIntegration = "mcp" | "cli";
 
 export interface AgentsBlockResult {
   path: string;
   action: "created" | "updated" | "noop";
 }
 
-function blockBody(integration: AgentsIntegration): string {
-  return integration === "mcp" ? mcpNudge.trim() : cliFull.trim();
+function blockBody(): string {
+  return agentsTemplate.trim();
 }
 
 function wrap(body: string): string {
@@ -38,12 +35,9 @@ function escapeRe(s: string): string {
  * - File with existing markers → replace the body between them.
  * - File whose existing block already matches → noop.
  */
-export function upsertAgentsBlock(
-  cwd: string,
-  integration: AgentsIntegration,
-): AgentsBlockResult {
+export function upsertAgentsBlock(cwd: string): AgentsBlockResult {
   const path = join(cwd, "AGENTS.md");
-  const next = wrap(blockBody(integration));
+  const next = wrap(blockBody());
 
   if (!existsSync(path)) {
     writeFileSync(path, next + "\n", "utf-8");
