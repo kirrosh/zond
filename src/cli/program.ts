@@ -176,6 +176,7 @@ export function buildProgram(): Command {
     .option("--method <method>", "Filter tests by HTTP method (e.g. GET, POST)")
     .option("--env-var <KEY=VALUE>", "Inject env variable (repeatable, overrides env file)", collect, [])
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
+    .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
     .action(async (pathArg: string | undefined, opts, cmd: Command) => {
       let path = pathArg;
       const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
@@ -222,6 +223,7 @@ export function buildProgram(): Command {
         method: opts.method,
         envVars,
         dryRun: opts.dryRun === true,
+        reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
         json: globalJson(cmd),
       });
     });

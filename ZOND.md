@@ -89,7 +89,7 @@ zond ci init
 
 | Command | Description | Key flags |
 |---------|-------------|-----------|
-| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--report json\|junit` |
+| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--report json\|junit`, `--report-out <file>` |
 | `validate <path>` | Validate YAML tests | |
 | `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
