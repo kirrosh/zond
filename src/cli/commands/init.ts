@@ -42,7 +42,7 @@ export async function initCommand(options: InitOptions): Promise<number> {
   }
 
   const mode = resolveMode(options);
-  const integration: Integration = options.integration ?? "mcp";
+  const integration: Integration = options.integration ?? "cli";
 
   try {
     if (mode === "register") {
@@ -67,7 +67,6 @@ export async function initCommand(options: InitOptions): Promise<number> {
         apisAction: bootstrap.apisAction,
         agentsPath: bootstrap.agents?.path ?? null,
         agentsAction: bootstrap.agents?.action ?? null,
-        mcpInstalled: bootstrap.mcpInstalled,
         integration,
       };
       if (register) {
@@ -128,17 +127,12 @@ function printBootstrapResult(b: BootstrapResult, integration: Integration): voi
   lines.push(`  ${verb(b.configAction)} zond.config.yml`);
   lines.push(`  ${verb(b.apisAction)} apis/`);
   if (b.agents) lines.push(`  ${verb(b.agents.action)} AGENTS.md (${integration})`);
-  for (const r of b.mcpInstalled) {
-    lines.push(`  ${verb(r.action)} ${r.configPath}`);
-  }
   for (const w of b.warnings) {
     process.stderr.write(`Warning: ${w}\n`);
   }
   process.stdout.write(lines.join("\n") + "\n");
   if (integration === "skip") {
     printSuccess("Workspace ready. Run `zond init --spec <path>` to register your first API.");
-  } else if (integration === "mcp") {
-    printSuccess("Workspace ready. Restart your MCP client (Claude Code / Cursor) to pick up the zond server.");
   } else {
     printSuccess("Workspace ready. See AGENTS.md for the CLI workflow.");
   }

@@ -1,9 +1,10 @@
 ---
 id: TASK-HIGH.4
 title: 'drop-mcp 1: remove src/mcp/ and SDK dependency'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-04-28 10:36'
+updated_date: '2026-04-28 11:26'
 labels:
   - drop-mcp
   - refactor
