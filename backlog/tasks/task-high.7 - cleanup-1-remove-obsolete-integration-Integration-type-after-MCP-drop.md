@@ -1,10 +1,10 @@
 ---
 id: TASK-HIGH.7
 title: 'cleanup 1: remove obsolete --integration / Integration type after MCP drop'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-28 12:02'
-updated_date: '2026-04-28 12:37'
+updated_date: '2026-04-28 12:39'
 labels:
   - cleanup
   - refactor
