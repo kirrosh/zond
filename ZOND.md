@@ -326,12 +326,7 @@ mkdir my-api-tests && cd my-api-tests
 zond init                                    # creates zond.config.yml, apis/, AGENTS.md
 ```
 
-Two integration modes are available via `--integration`:
-
-| Mode  | Effect |
-|---|---|
-| `cli` *(default)* | Writes a self-contained `AGENTS.md` with the full workflow inline — agents call `zond` commands directly. |
-| `skip` | Creates only `zond.config.yml` + `apis/`. No agent files. |
+Pass `--no-agents-md` to skip writing `AGENTS.md` (only `zond.config.yml` + `apis/` will be created).
 
 Combo: `zond init --with-spec <path> --name <api>` bootstraps the workspace **and** registers the first API in one shot.
 

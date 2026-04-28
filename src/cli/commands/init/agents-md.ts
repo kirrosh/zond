@@ -6,14 +6,12 @@ import cliFull from "./templates/agents-cli-full.md" with { type: "text" };
 export const START_MARKER = "<!-- zond:start -->";
 export const END_MARKER = "<!-- zond:end -->";
 
-export type AgentsIntegration = "cli";
-
 export interface AgentsBlockResult {
   path: string;
   action: "created" | "updated" | "noop";
 }
 
-function blockBody(_integration: AgentsIntegration): string {
+function blockBody(): string {
   return cliFull.trim();
 }
 
@@ -37,12 +35,9 @@ function escapeRe(s: string): string {
  * - File with existing markers → replace the body between them.
  * - File whose existing block already matches → noop.
  */
-export function upsertAgentsBlock(
-  cwd: string,
-  integration: AgentsIntegration,
-): AgentsBlockResult {
+export function upsertAgentsBlock(cwd: string): AgentsBlockResult {
   const path = join(cwd, "AGENTS.md");
-  const next = wrap(blockBody(integration));
+  const next = wrap(blockBody());
 
   if (!existsSync(path)) {
     writeFileSync(path, next + "\n", "utf-8");
