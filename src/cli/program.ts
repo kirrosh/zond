@@ -348,11 +348,7 @@ export function buildProgram(): Command {
     .option("--db <path>", "Path to SQLite database file")
     .option("--workspace", "Bootstrap a zond workspace (zond.config.yml, apis/, AGENTS.md)")
     .option("--with-spec <path>", "Bootstrap workspace AND register first API from spec")
-    .addOption(
-      new Option("--integration <mode>", "AI agent integration when bootstrapping")
-        .choices(["cli", "skip"])
-        .default("cli"),
-    )
+    .option("--no-agents-md", "Skip writing AGENTS.md when bootstrapping")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       process.exitCode = await initCommand({
         name: opts.name,
@@ -364,7 +360,7 @@ export function buildProgram(): Command {
         dbPath: opts.db,
         workspace: opts.workspace === true,
         withSpec: opts.withSpec,
-        integration: opts.integration as "cli" | "skip" | undefined,
+        noAgents: opts.agentsMd === false,
         json: globalJson(cmd),
       });
     });

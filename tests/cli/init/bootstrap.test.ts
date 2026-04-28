@@ -20,7 +20,7 @@ describe("bootstrapWorkspace", () => {
   });
 
   test("integration=skip: only zond.config.yml + apis/, no AGENTS.md", () => {
-    const r = bootstrapWorkspace({ cwd, home, integration: "skip" });
+    const r = bootstrapWorkspace({ cwd, home, writeAgents: false });
     expect(r.configAction).toBe("created");
     expect(r.apisAction).toBe("created");
     expect(r.agents).toBeNull();
@@ -30,22 +30,22 @@ describe("bootstrapWorkspace", () => {
   });
 
   test("integration=cli: AGENTS.md created", () => {
-    const r = bootstrapWorkspace({ cwd, home, integration: "cli" });
+    const r = bootstrapWorkspace({ cwd, home });
     expect(r.agents?.action).toBe("created");
     const agents = readFileSync(join(cwd, "AGENTS.md"), "utf-8");
     expect(agents).toContain("Mandatory rules");
   });
 
   test("repeated bootstrap is idempotent", () => {
-    bootstrapWorkspace({ cwd, home, integration: "cli" });
-    const r = bootstrapWorkspace({ cwd, home, integration: "cli" });
+    bootstrapWorkspace({ cwd, home });
+    const r = bootstrapWorkspace({ cwd, home });
     expect(r.configAction).toBe("noop");
     expect(r.apisAction).toBe("noop");
     expect(r.agents?.action).toBe("noop");
   });
 
   test("dryRun does not write files", () => {
-    const r = bootstrapWorkspace({ cwd, home, integration: "cli", dryRun: true });
+    const r = bootstrapWorkspace({ cwd, home, dryRun: true });
     expect(r.configAction).toBe("created");
     expect(existsSync(join(cwd, "zond.config.yml"))).toBe(false);
     expect(existsSync(join(cwd, "apis"))).toBe(false);

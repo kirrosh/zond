@@ -1,7 +1,7 @@
 import { setupApi, type SetupApiResult } from "../../core/setup-api.ts";
 import { printError, printSuccess } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
-import { bootstrapWorkspace, type BootstrapResult, type Integration } from "./init/bootstrap.ts";
+import { bootstrapWorkspace, type BootstrapResult } from "./init/bootstrap.ts";
 
 export interface InitOptions {
   // register-an-API options (existing)
@@ -17,7 +17,8 @@ export interface InitOptions {
   // workspace bootstrap (new)
   workspace?: boolean;
   withSpec?: string;
-  integration?: Integration;
+  /** Skip writing AGENTS.md. */
+  noAgents?: boolean;
   /** Override cwd for bootstrap (used by tests; CLI always uses process.cwd()). */
   cwd?: string;
   /** Override $HOME for MCP install (used by tests). */
@@ -42,7 +43,7 @@ export async function initCommand(options: InitOptions): Promise<number> {
   }
 
   const mode = resolveMode(options);
-  const integration: Integration = options.integration ?? "cli";
+  const writeAgents = !options.noAgents;
 
   try {
     if (mode === "register") {
@@ -51,7 +52,7 @@ export async function initCommand(options: InitOptions): Promise<number> {
       return 0;
     }
 
-    const bootstrap = bootstrapWorkspace({ integration, cwd: options.cwd, home: options.home });
+    const bootstrap = bootstrapWorkspace({ writeAgents, cwd: options.cwd, home: options.home });
     let register: SetupApiResult | null = null;
 
     if (mode === "bootstrap+register") {
@@ -67,7 +68,6 @@ export async function initCommand(options: InitOptions): Promise<number> {
         apisAction: bootstrap.apisAction,
         agentsPath: bootstrap.agents?.path ?? null,
         agentsAction: bootstrap.agents?.action ?? null,
-        integration,
       };
       if (register) {
         data.collectionId = register.collectionId;
@@ -77,7 +77,7 @@ export async function initCommand(options: InitOptions): Promise<number> {
       }
       printJson(jsonOk("init", data, [...bootstrap.warnings, ...(register?.warnings ?? [])]));
     } else {
-      printBootstrapResult(bootstrap, integration);
+      printBootstrapResult(bootstrap, writeAgents);
       if (register) printRegisterResult(options, register);
     }
     return 0;
@@ -122,16 +122,16 @@ function printRegisterResult(options: InitOptions, result: SetupApiResult): void
   }
 }
 
-function printBootstrapResult(b: BootstrapResult, integration: Integration): void {
+function printBootstrapResult(b: BootstrapResult, writeAgents: boolean): void {
   const lines: string[] = [];
   lines.push(`  ${verb(b.configAction)} zond.config.yml`);
   lines.push(`  ${verb(b.apisAction)} apis/`);
-  if (b.agents) lines.push(`  ${verb(b.agents.action)} AGENTS.md (${integration})`);
+  if (b.agents) lines.push(`  ${verb(b.agents.action)} AGENTS.md`);
   for (const w of b.warnings) {
     process.stderr.write(`Warning: ${w}\n`);
   }
   process.stdout.write(lines.join("\n") + "\n");
-  if (integration === "skip") {
+  if (!writeAgents) {
     printSuccess("Workspace ready. Run `zond init --spec <path>` to register your first API.");
   } else {
     printSuccess("Workspace ready. See AGENTS.md for the CLI workflow.");

@@ -11,7 +11,7 @@ describe("upsertAgentsBlock", () => {
   afterEach(() => { rmSync(cwd, { recursive: true, force: true }); });
 
   test("creates AGENTS.md when missing", () => {
-    const r = upsertAgentsBlock(cwd, "cli");
+    const r = upsertAgentsBlock(cwd);
     expect(r.action).toBe("created");
     const body = readFileSync(r.path, "utf-8");
     expect(body).toContain(START_MARKER);
@@ -22,7 +22,7 @@ describe("upsertAgentsBlock", () => {
   test("appends block to existing AGENTS.md without markers", () => {
     const path = join(cwd, "AGENTS.md");
     writeFileSync(path, "# Existing project guide\n\nSome notes.\n");
-    const r = upsertAgentsBlock(cwd, "cli");
+    const r = upsertAgentsBlock(cwd);
     expect(r.action).toBe("updated");
     const body = readFileSync(path, "utf-8");
     expect(body).toContain("# Existing project guide");
@@ -36,7 +36,7 @@ describe("upsertAgentsBlock", () => {
     const path = join(cwd, "AGENTS.md");
     writeFileSync(path,
       `# Project\n\n${START_MARKER}\nstale content\n${END_MARKER}\n\nMore notes.\n`);
-    const r = upsertAgentsBlock(cwd, "cli");
+    const r = upsertAgentsBlock(cwd);
     expect(r.action).toBe("updated");
     const body = readFileSync(path, "utf-8");
     expect(body).not.toContain("stale content");
@@ -45,8 +45,8 @@ describe("upsertAgentsBlock", () => {
   });
 
   test("repeated call is noop", () => {
-    upsertAgentsBlock(cwd, "cli");
-    const r = upsertAgentsBlock(cwd, "cli");
+    upsertAgentsBlock(cwd);
+    const r = upsertAgentsBlock(cwd);
     expect(r.action).toBe("noop");
   });
 });
