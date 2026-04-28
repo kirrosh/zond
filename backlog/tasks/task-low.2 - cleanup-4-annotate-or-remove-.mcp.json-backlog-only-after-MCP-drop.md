@@ -1,10 +1,10 @@
 ---
 id: TASK-LOW.2
 title: 'cleanup 4: annotate or remove .mcp.json (backlog-only after MCP drop)'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-28 12:02'
-updated_date: '2026-04-28 12:45'
+updated_date: '2026-04-28 12:46'
 labels:
   - cleanup
   - docs

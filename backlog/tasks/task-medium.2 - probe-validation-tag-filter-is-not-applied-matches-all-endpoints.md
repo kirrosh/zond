@@ -1,10 +1,10 @@
 ---
 id: TASK-MEDIUM.2
 title: 'probe-validation: --tag filter is not applied (matches all endpoints)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-28 07:22'
-updated_date: '2026-04-28 10:14'
+updated_date: '2026-04-28 12:46'
 labels:
   - bug-hunting
   - from-iteration-2
