@@ -39,7 +39,9 @@ jobs:
           run tests/generator/
           run tests/core/
           run tests/diagnostics/
-          run tests/cli/program.test.ts tests/cli/cli-smoke.test.ts tests/cli/completions.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/safe-run.test.ts tests/cli/json-envelope.test.ts tests/cli/describe.test.ts tests/cli/catalog.test.ts tests/cli/db.test.ts tests/cli/request.test.ts tests/cli/init.test.ts tests/cli/init/agents-md.test.ts tests/cli/init/bootstrap.test.ts tests/cli/use.test.ts tests/cli/guide.test.ts tests/cli/update.test.ts
+          for f in tests/cli/program.test.ts tests/cli/cli-smoke.test.ts tests/cli/completions.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/safe-run.test.ts tests/cli/json-envelope.test.ts tests/cli/describe.test.ts tests/cli/catalog.test.ts tests/cli/db.test.ts tests/cli/request.test.ts tests/cli/init.test.ts tests/cli/init/agents-md.test.ts tests/cli/init/bootstrap.test.ts tests/cli/use.test.ts tests/cli/guide.test.ts tests/cli/update.test.ts; do
+            run "$f"
+          done
           run tests/cli/serve.test.ts
           run tests/integration/
           run tests/web/
