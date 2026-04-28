@@ -28,15 +28,17 @@
     "backlog": "bunx backlog",
     "board": "bunx backlog board",
     "test": "bun run test:unit && bun run test:mocked",
-    "test:unit": "bun test tests/db/ tests/parser/ tests/runner/ tests/generator/ tests/core/ tests/core/meta/ tests/diagnostics/ tests/cli/program.test.ts tests/cli/cli-smoke.test.ts tests/cli/completions.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/safe-run.test.ts tests/cli/json-envelope.test.ts tests/cli/describe.test.ts tests/cli/catalog.test.ts tests/cli/db.test.ts tests/cli/request.test.ts tests/cli/init.test.ts tests/cli/init/agents-md.test.ts tests/cli/init/bootstrap.test.ts tests/cli/install.test.ts tests/cli/use.test.ts tests/cli/guide.test.ts tests/cli/update.test.ts tests/cli/serve.test.ts tests/integration/ tests/web/ tests/reporter/",
+    "test:unit": "bun test tests/db/ tests/parser/ tests/runner/ tests/generator/ tests/core/ tests/core/meta/ tests/diagnostics/ tests/cli/program.test.ts tests/cli/cli-smoke.test.ts tests/cli/completions.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/safe-run.test.ts tests/cli/json-envelope.test.ts tests/cli/describe.test.ts tests/cli/catalog.test.ts tests/cli/db.test.ts tests/cli/request.test.ts tests/cli/init.test.ts tests/cli/init/agents-md.test.ts tests/cli/init/bootstrap.test.ts tests/cli/use.test.ts tests/cli/guide.test.ts tests/cli/update.test.ts tests/cli/serve.test.ts tests/integration/ tests/web/ tests/reporter/",
     "test:mocked": "bun run scripts/run-mocked-tests.ts",
     "check": "tsc --noEmit --project tsconfig.json",
+    "lint:dead": "knip --reporter compact",
     "build": "bun build --compile src/cli/index.ts --outfile zond",
     "bench:api": "bun benchmarks/api/server.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "backlog.md": "^1.44.0"
+    "backlog.md": "^1.44.0",
+    "knip": "^6.7.0"
   },
   "engines": {
     "bun": ">=1.1.0"
@@ -46,7 +48,6 @@
   },
   "dependencies": {
     "@hono/zod-openapi": "^1.2.2",
-    "@humanwhocodes/momoa": "^2.0.3",
     "@readme/openapi-parser": "^5.5.0",
     "commander": "^14.0.0",
     "hono": "^4.12.2",
