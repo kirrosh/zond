@@ -155,8 +155,4 @@ describe("Auth flow integration", () => {
     expect(spec.openapi).toBe("3.0.0");
     expect(spec.components.securitySchemes.bearerAuth).toBeDefined();
   });
-
-  test.skip("generate auth-aware tests from live spec, then run them", () => {
-    // skeleton.ts was removed; this test needs to be rewritten
-  });
 });
