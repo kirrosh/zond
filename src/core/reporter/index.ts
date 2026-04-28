@@ -1,7 +1,7 @@
 export type { Reporter, ReporterOptions, ReporterName } from "./types.ts";
 export { consoleReporter, formatDuration, formatStep, formatFailures, formatSuiteResult, formatGrandTotal } from "./console.ts";
-export { jsonReporter } from "./json.ts";
-export { junitReporter } from "./junit.ts";
+export { jsonReporter, generateJsonReport } from "./json.ts";
+export { junitReporter, generateJunitXml } from "./junit.ts";
 
 import type { Reporter, ReporterName } from "./types.ts";
 import { consoleReporter } from "./console.ts";

@@ -1,10 +1,10 @@
 ---
 id: TASK-HIGH.3
 title: 'zond run: auto-load ./.env.yaml from cwd when --env not given'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-28 08:14'
-updated_date: '2026-04-28 08:35'
+updated_date: '2026-04-28 08:40'
 labels:
   - bug-hunting
   - from-iteration-3

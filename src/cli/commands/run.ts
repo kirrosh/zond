@@ -5,8 +5,10 @@ import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/var
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
 import { runSuite } from "../../core/runner/executor.ts";
 import { createRateLimiter } from "../../core/runner/rate-limiter.ts";
-import { getReporter } from "../../core/reporter/index.ts";
+import { getReporter, generateJsonReport, generateJunitXml } from "../../core/reporter/index.ts";
 import type { ReporterName } from "../../core/reporter/types.ts";
+import { writeFile, mkdir } from "node:fs/promises";
+import { dirname as pathDirname, isAbsolute, resolve as pathResolve } from "node:path";
 import type { TestSuite } from "../../core/parser/types.ts";
 import type { TestRunResult } from "../../core/runner/types.ts";
 import { printError, printWarning } from "../output.ts";
@@ -32,6 +34,8 @@ export interface RunOptions {
   envVars?: string[];
   dryRun?: boolean;
   json?: boolean;
+  /** Write the report to a file instead of stdout. */
+  reportOut?: string;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -219,10 +223,45 @@ export async function runCommand(options: RunOptions): Promise<number> {
 
   // 5b. Report
   if (!options.json) {
-    const reporter = getReporter(options.report);
-    reporter.report(results);
-    for (const w of warnings) {
-      printWarning(w);
+    if (options.reportOut) {
+      // Write report to a file via fs (bypass stdout). Console reporter falls
+      // back to a single-line summary on stdout; json/junit produce no stdout.
+      const outPath = isAbsolute(options.reportOut)
+        ? options.reportOut
+        : pathResolve(process.cwd(), options.reportOut);
+      let content: string;
+      let label: string;
+      switch (options.report) {
+        case "json":
+          content = generateJsonReport(results);
+          label = "JSON";
+          break;
+        case "junit":
+          content = generateJunitXml(results);
+          label = "JUnit XML";
+          break;
+        default: // "console" — fall back to JSON in the file (most useful)
+          content = generateJsonReport(results);
+          label = "JSON";
+          break;
+      }
+      try {
+        await mkdir(pathDirname(outPath), { recursive: true });
+        await writeFile(outPath, content, "utf-8");
+        process.stderr.write(`zond: ${label} report written to ${outPath}\n`);
+      } catch (err) {
+        printError(`Failed to write --report-out file ${outPath}: ${(err as Error).message}`);
+        return 2;
+      }
+      for (const w of warnings) {
+        printWarning(w);
+      }
+    } else {
+      const reporter = getReporter(options.report);
+      reporter.report(results);
+      for (const w of warnings) {
+        printWarning(w);
+      }
     }
   }
 
