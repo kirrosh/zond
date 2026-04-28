@@ -6,9 +6,9 @@ import {
   extractSecuritySchemes,
   serializeSuite,
 } from "../../core/generator/index.ts";
-import { filterByTag } from "../../core/generator/chunker.ts";
+import { filterByTag, collectTags } from "../../core/generator/chunker.ts";
 import { generateNegativeProbes } from "../../core/probe/negative-probe.ts";
-import { printError, printSuccess } from "../output.ts";
+import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 
 export interface ProbeValidationOptions {
@@ -17,6 +17,7 @@ export interface ProbeValidationOptions {
   tag?: string;
   maxPerEndpoint?: number;
   json?: boolean;
+  listTags?: boolean;
 }
 
 export async function probeValidationCommand(
@@ -24,10 +25,38 @@ export async function probeValidationCommand(
 ): Promise<number> {
   try {
     const doc = await readOpenApiSpec(options.specPath);
-    let endpoints = extractEndpoints(doc);
+    const allEndpoints = extractEndpoints(doc);
     const securitySchemes = extractSecuritySchemes(doc);
 
-    if (options.tag) endpoints = filterByTag(endpoints, options.tag);
+    if (options.listTags) {
+      const tags = collectTags(allEndpoints);
+      if (options.json) {
+        printJson(jsonOk("probe-validation", { tags }));
+      } else {
+        if (tags.length === 0) {
+          console.log("No tags found in spec.");
+        } else {
+          console.log("Available tags:");
+          for (const t of tags) console.log(`  - ${t}`);
+        }
+      }
+      return 0;
+    }
+
+    let endpoints = allEndpoints;
+    if (options.tag) {
+      endpoints = filterByTag(allEndpoints, options.tag);
+      if (endpoints.length === 0) {
+        const available = collectTags(allEndpoints);
+        const msg = `No endpoints tagged "${options.tag}". Available tags: ${available.length ? available.join(", ") : "(none)"}`;
+        if (options.json) {
+          printJson(jsonError("probe-validation", [msg]));
+        } else {
+          printWarning(msg);
+        }
+        return 2;
+      }
+    }
 
     if (endpoints.length === 0) {
       const message = "No endpoints to probe.";
