@@ -280,7 +280,7 @@ Environments are file-only. `loadEnvironment(envName?, searchDir)` looks for:
 - `.env.yaml` (when no `envName` given)
 - `.env.<envName>.yaml` (when `envName` given)
 
-Search order: `searchDir`, then parent directory.
+Search order: `searchDir`, then parent directory. As a final fallback for `zond run`, when `--env` is **not** given and neither directory above contains `.env.yaml`, the runner also tries `$PWD/.env.yaml` (with a one-line `zond: using ./.env.yaml (cwd fallback)` notice on stderr). This lets you `cd` into a collection and run an absolute-path test file without `--env-var base_url=…` boilerplate.
 
 ```yaml
 # .env.staging.yaml
