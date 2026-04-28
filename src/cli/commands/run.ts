@@ -302,10 +302,13 @@ export async function runCommand(options: RunOptions): Promise<number> {
         test: s.name,
         ...(r.suite_file ? { file: r.suite_file } : {}),
         status: s.status,
+        ...(typeof s.response?.status === "number" ? { http_status: s.response.status } : {}),
+        ...(typeof s.response?.status === "number" && s.response.status >= 500 && s.response.status < 600 ? { is_5xx: true } : {}),
         error: s.error,
       }))
     );
-    printJson(jsonOk("run", { summary: { total, passed, failed }, failures, warnings, runId: savedRunId }));
+    const fiveXx = failures.filter(f => f.is_5xx).length;
+    printJson(jsonOk("run", { summary: { total, passed, failed, fiveXx }, failures, warnings, runId: savedRunId }));
   }
 
   return hasFailures ? 1 : 0;

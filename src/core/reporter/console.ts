@@ -8,10 +8,24 @@ const DIM = "\x1b[2m";
 const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
 const GRAY = "\x1b[90m";
+const YELLOW = "\x1b[33m";
 
 const PASS_ICON = "\u2713"; // ✓
 const FAIL_ICON = "\u2717"; // ✗
 const SKIP_ICON = "\u25CB"; // ○
+
+export function is5xx(step: StepResult): boolean {
+  const status = step.response?.status;
+  return typeof status === "number" && status >= 500 && status < 600;
+}
+
+export function count5xx(steps: StepResult[]): number {
+  let n = 0;
+  for (const s of steps) {
+    if ((s.status === "fail" || s.status === "error") && is5xx(s)) n++;
+  }
+  return n;
+}
 
 export function formatDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -33,7 +47,8 @@ export function formatStep(step: StepResult, color: boolean): string {
     case "fail": {
       const icon = color ? `${RED}${FAIL_ICON}${RESET}` : FAIL_ICON;
       const dim = color ? `${DIM}(${duration})${RESET}` : `(${duration})`;
-      return `  ${icon} ${step.name} ${dim}`;
+      const tag = is5xx(step) ? (color ? ` ${BOLD}${YELLOW}[5xx ${step.response?.status}]${RESET}` : ` [5xx ${step.response?.status}]`) : "";
+      return `  ${icon} ${step.name}${tag} ${dim}`;
     }
     case "skip": {
       const icon = color ? `${GRAY}${SKIP_ICON}${RESET}` : SKIP_ICON;
@@ -105,6 +120,11 @@ export function formatSuiteResult(result: TestRunResult, color: boolean): string
   if (result.failed > 0) {
     parts.push(color ? `${RED}${result.failed} failed${RESET}` : `${result.failed} failed`);
   }
+  const fiveXx = count5xx(result.steps);
+  if (fiveXx > 0) {
+    const label = `${fiveXx} 5xx`;
+    parts.push(color ? `${BOLD}${YELLOW}${label}${RESET}` : label);
+  }
   if (result.skipped > 0) {
     parts.push(color ? `${GRAY}${result.skipped} skipped${RESET}` : `${result.skipped} skipped`);
   }
@@ -119,7 +139,7 @@ export function formatSuiteResult(result: TestRunResult, color: boolean): string
 }
 
 export function formatGrandTotal(results: TestRunResult[], color: boolean): string {
-  const totals = { passed: 0, failed: 0, skipped: 0, total: 0 };
+  const totals = { passed: 0, failed: 0, skipped: 0, total: 0, fiveXx: 0 };
   let minStart = Infinity;
   let maxEnd = -Infinity;
 
@@ -128,6 +148,7 @@ export function formatGrandTotal(results: TestRunResult[], color: boolean): stri
     totals.failed += r.failed;
     totals.skipped += r.skipped;
     totals.total += r.total;
+    totals.fiveXx += count5xx(r.steps);
     const start = Date.parse(r.started_at);
     const end = Date.parse(r.finished_at);
     if (start < minStart) minStart = start;
@@ -143,6 +164,10 @@ export function formatGrandTotal(results: TestRunResult[], color: boolean): stri
   }
   if (totals.failed > 0) {
     parts.push(color ? `${RED}${totals.failed} failed${RESET}` : `${totals.failed} failed`);
+  }
+  if (totals.fiveXx > 0) {
+    const label = `${totals.fiveXx} 5xx`;
+    parts.push(color ? `${BOLD}${YELLOW}${label}${RESET}` : label);
   }
   if (totals.skipped > 0) {
     parts.push(color ? `${GRAY}${totals.skipped} skipped${RESET}` : `${totals.skipped} skipped`);
