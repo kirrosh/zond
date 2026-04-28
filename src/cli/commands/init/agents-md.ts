@@ -1,21 +1,20 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import mcpNudge from "./templates/agents-mcp-nudge.md" with { type: "text" };
 import cliFull from "./templates/agents-cli-full.md" with { type: "text" };
 
 export const START_MARKER = "<!-- zond:start -->";
 export const END_MARKER = "<!-- zond:end -->";
 
-export type AgentsIntegration = "mcp" | "cli";
+export type AgentsIntegration = "cli";
 
 export interface AgentsBlockResult {
   path: string;
   action: "created" | "updated" | "noop";
 }
 
-function blockBody(integration: AgentsIntegration): string {
-  return integration === "mcp" ? mcpNudge.trim() : cliFull.trim();
+function blockBody(_integration: AgentsIntegration): string {
+  return cliFull.trim();
 }
 
 function wrap(body: string): string {

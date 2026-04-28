@@ -47,16 +47,4 @@ describe("CLI smoke (real process)", () => {
     expect(exitCode).toBe(2);
     expect(stderr.toLowerCase()).toContain("unknown command");
   });
-
-  test("'mcp --help' lists 'start' subcommand, exit 0", async () => {
-    const { exitCode, stdout } = await runCli(["mcp", "--help"]);
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("start");
-  });
-
-  test("'mcp start --help' shows --db option, exit 0", async () => {
-    const { exitCode, stdout } = await runCli(["mcp", "start", "--help"]);
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("--db");
-  });
 });

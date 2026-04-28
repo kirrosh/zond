@@ -18,8 +18,6 @@ import { syncCommand } from "./commands/sync.ts";
 import { updateCommand } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
 import { completionsCommand, COMPLETION_SHELLS, type CompletionShell } from "./commands/completions.ts";
-import { mcpStartCommand } from "./commands/mcp.ts";
-import { installCommand } from "./commands/install.ts";
 import { useCommand } from "./commands/use.ts";
 
 import { readCurrentApi } from "../core/context/current.ts";
@@ -280,16 +278,6 @@ export function buildProgram(): Command {
       });
     });
 
-  // ── mcp ──
-  const mcp = program.command("mcp").description("Model Context Protocol server");
-  mcp
-    .command("start")
-    .description("Start MCP server over stdio for AI agents (Claude, Cursor, etc.)")
-    .option("--db <path>", "Path to SQLite database file (default: zond.db)")
-    .action(async (opts) => {
-      process.exitCode = await mcpStartCommand({ dbPath: opts.db });
-    });
-
   // ── use ──
   program
     .command("use [api]")
@@ -299,26 +287,6 @@ export function buildProgram(): Command {
       process.exitCode = await useCommand({
         api,
         clear: opts.clear === true,
-        json: globalJson(cmd),
-      });
-    });
-
-  // ── install ──
-  program
-    .command("install")
-    .description("Configure zond MCP server for AI clients (Claude Code, Cursor)")
-    .option("--claude", "Configure ~/.claude/mcp.json")
-    .option("--cursor", "Configure ~/.cursor/mcp.json")
-    .option("--all", "Configure all supported clients")
-    .option("--dry-run", "Show what would be written without modifying any files")
-    .option("--no-sanity", "Skip the in-process tools/list smoke check")
-    .action(async (opts, cmd: Command) => {
-      process.exitCode = await installCommand({
-        claude: opts.claude,
-        cursor: opts.cursor,
-        all: opts.all,
-        dryRun: opts.dryRun,
-        sanity: opts.sanity,
         json: globalJson(cmd),
       });
     });
@@ -382,8 +350,8 @@ export function buildProgram(): Command {
     .option("--with-spec <path>", "Bootstrap workspace AND register first API from spec")
     .addOption(
       new Option("--integration <mode>", "AI agent integration when bootstrapping")
-        .choices(["mcp", "cli", "skip"])
-        .default("mcp"),
+        .choices(["cli", "skip"])
+        .default("cli"),
     )
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       process.exitCode = await initCommand({
@@ -396,7 +364,7 @@ export function buildProgram(): Command {
         dbPath: opts.db,
         workspace: opts.workspace === true,
         withSpec: opts.withSpec,
-        integration: opts.integration as "mcp" | "cli" | "skip" | undefined,
+        integration: opts.integration as "cli" | "skip" | undefined,
         json: globalJson(cmd),
       });
     });
