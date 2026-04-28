@@ -12,6 +12,7 @@ import { requestCommand } from "./commands/request.ts";
 import { guideCommand } from "./commands/guide.ts";
 import { generateCommand } from "./commands/generate.ts";
 import { probeValidationCommand } from "./commands/probe-validation.ts";
+import { probeMethodsCommand } from "./commands/probe-methods.ts";
 import { exportCommand } from "./commands/export.ts";
 import { syncCommand } from "./commands/sync.ts";
 import { updateCommand } from "./commands/update.ts";
@@ -553,6 +554,21 @@ export function buildProgram(): Command {
         output: opts.output,
         tag: opts.tag,
         maxPerEndpoint: opts.maxPerEndpoint,
+        json: globalJson(cmd),
+      });
+    });
+
+  // ── probe-methods ──
+  program
+    .command("probe-methods <spec>")
+    .description("Generate negative-method probe suites (catches 5xx/2xx on undeclared HTTP methods)")
+    .requiredOption("--output <dir>", "Output directory for generated probe files")
+    .option("--tag <tag>", "Probe only endpoints with this tag")
+    .action(async (specPath: string, opts, cmd: Command) => {
+      process.exitCode = await probeMethodsCommand({
+        specPath,
+        output: opts.output,
+        tag: opts.tag,
         json: globalJson(cmd),
       });
     });

@@ -95,6 +95,7 @@ zond ci init
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
 | `probe-validation <spec>` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--output <dir>`, `--tag`, `--max-per-endpoint <N>` |
+| `probe-methods <spec>` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--output <dir>`, `--tag` |
 
 ### `probe-validation` — bug-hunting negative-input probes
 
@@ -126,6 +127,27 @@ Probes are deterministic — same spec → same suites — so generated YAML can
 committed as a regression test. Each probe expects status in
 `[400, 401, 403, 404, 405, 409, 415, 422]`; a 5xx (or unexpected 2xx) is a
 test failure surfaced via the regular runner / reporter / `zond db diagnose`.
+
+### `probe-methods` — bug-hunting HTTP method completeness sweep
+
+A correctly-implemented API returns **405 Method Not Allowed** (or 404) for
+HTTP methods not declared on a path — never **5xx** (unhandled exception) and
+never **2xx** (forgotten/shadowed route). `probe-methods` generates one suite
+per path that probes every method in `{GET, POST, PUT, PATCH, DELETE}` not
+declared in the spec.
+
+```bash
+zond probe-methods openapi.json --output bugs/method-probes/
+zond run bugs/method-probes/              # any 5xx or 2xx failure → bug
+zond db diagnose <run-id>
+```
+
+Path placeholders are substituted with valid-shape sentinels (zero-UUID for
+`format: uuid`, etc.) so the request reaches the routing layer rather than
+being rejected purely on path syntax. Body-bearing methods carry a minimal
+`{}` JSON body. Each probe expects status in `[401, 403, 404, 405]`; anything
+else is a test failure. Probes are deterministic — same spec → same suites —
+so generated YAML can be committed as a regression test.
 
 ---
 
