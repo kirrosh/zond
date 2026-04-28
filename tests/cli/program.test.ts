@@ -5,6 +5,13 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { buildProgram, preprocessArgv } from "../../src/cli/program.ts";
 
+afterEach(() => {
+  // CLI handlers set process.exitCode = 2 on failures; leaking that to the
+  // bun test runner makes the whole suite exit 2 on linux-hosted CI even
+  // though all assertions passed.
+  process.exitCode = 0;
+});
+
 // Suppress commander stdout/stderr (--help, errors)
 function suppressOutput(): () => void {
   const origOut = process.stdout.write;
