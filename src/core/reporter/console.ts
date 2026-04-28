@@ -52,7 +52,8 @@ export function formatStep(step: StepResult, color: boolean): string {
     }
     case "skip": {
       const icon = color ? `${GRAY}${SKIP_ICON}${RESET}` : SKIP_ICON;
-      const label = color ? `${GRAY}(skipped)${RESET}` : "(skipped)";
+      const reason = step.error ? `skipped: ${step.error}` : "skipped";
+      const label = color ? `${GRAY}(${reason})${RESET}` : `(${reason})`;
       return `  ${icon} ${step.name} ${label}`;
     }
     case "error": {

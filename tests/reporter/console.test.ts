@@ -88,6 +88,14 @@ describe("formatStep", () => {
     expect(out).toContain("(skipped)");
   });
 
+  test("skip step shows reason inline when error is set", () => {
+    const out = formatStep(
+      makeStep({ name: "Get domain", status: "skip", duration_ms: 0, error: "depends on missing capture: domain_id" }),
+      false,
+    );
+    expect(out).toContain("(skipped: depends on missing capture: domain_id)");
+  });
+
   test("error step shows cross with error label", () => {
     const out = formatStep(makeStep({ name: "Broken", status: "error", duration_ms: 0 }), false);
     expect(out).toContain("\u2717");
