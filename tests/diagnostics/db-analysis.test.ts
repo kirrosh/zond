@@ -73,8 +73,9 @@ describe("groupFailures", () => {
     expect(g401!.count).toBe(5);
     expect(g500!.count).toBe(4);
 
-    // Compact: one per group
-    expect(result.compactFailures).toHaveLength(2);
+    // Compact: 1 representative for the 401 group + all 4 api_error 500s
+    // (TASK-69: 5xx must never be silently truncated).
+    expect(result.compactFailures).toHaveLength(5);
   });
 
   test("does not group when no group has > 2 items", () => {
@@ -116,5 +117,56 @@ describe("groupFailures", () => {
     const result = groupFailures(failures);
     expect(result.grouped_failures).toBeDefined();
     expect(result.grouped_failures![0]!.recommended_action).toBe("report_backend_bug");
+  });
+
+  // TASK-69: silent data loss — diagnose previously kept only 1 of N 5xx
+  // failures in compactFailures, hiding real backend bugs.
+  test("api_error (5xx) failures are never collapsed — all surface in compactFailures + examples", () => {
+    const failures = Array.from({ length: 11 }, (_, i) =>
+      makeFailure({
+        suite_name: `s_${i}`,
+        test_name: `t_${i}`,
+        response_status: 500,
+        failure_type: "api_error",
+        recommended_action: "report_backend_bug",
+      })
+    );
+    const result = groupFailures(failures);
+
+    expect(result.grouped_failures).toBeDefined();
+    expect(result.grouped_failures).toHaveLength(1);
+    expect(result.grouped_failures![0]!.count).toBe(11);
+    // All 11 examples must be listed, not a 2-item sample.
+    expect(result.grouped_failures![0]!.examples).toHaveLength(11);
+    // And every 5xx must remain in compactFailures so `data.failures` is complete.
+    expect(result.compactFailures).toHaveLength(11);
+  });
+
+  test("mixed 5xx + assertion: 5xx kept fully, assertion still collapses", () => {
+    const failures = [
+      ...Array.from({ length: 8 }, (_, i) =>
+        makeFailure({
+          suite_name: `srv_${i}`, test_name: `t_${i}`,
+          response_status: 503, failure_type: "api_error",
+        })
+      ),
+      ...Array.from({ length: 6 }, (_, i) =>
+        makeFailure({
+          suite_name: `auth_${i}`, test_name: `t_${i}`,
+          response_status: 401, failure_type: "assertion_failed",
+        })
+      ),
+    ];
+    const result = groupFailures(failures);
+
+    const g503 = result.grouped_failures!.find(g => g.response_status === 503)!;
+    const g401 = result.grouped_failures!.find(g => g.response_status === 401)!;
+    expect(g503.count).toBe(8);
+    expect(g503.examples).toHaveLength(8); // 5xx full
+    expect(g401.count).toBe(6);
+    expect(g401.examples).toHaveLength(2); // assertion still sampled
+
+    // compactFailures: 8 (all 5xx) + 1 (representative of 401 group) = 9
+    expect(result.compactFailures).toHaveLength(9);
   });
 });

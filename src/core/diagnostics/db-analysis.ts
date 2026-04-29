@@ -335,16 +335,25 @@ export function groupFailures<T extends FailureItem>(failures: T[], maxExamples 
     const pattern = group.response_status
       ? `${group.response_status} ${group.failure_type}`
       : group.failure_type;
+    // 5xx (api_error) are critical backend bugs — never collapse them.
+    // Diagnose must surface every 5xx, otherwise users miss real
+    // regressions hidden behind a single sample.
+    const isApiError = group.failure_type === "api_error";
+    const showAll = isApiError || maxExamples === 0;
     grouped_failures.push({
       pattern,
       count: group.items.length,
       failure_type: group.failure_type,
       recommended_action: group.items[0]!.recommended_action,
       hint: group.hint,
-      examples: (maxExamples === 0 ? group.items : group.items.slice(0, maxExamples)).map(f => `${f.suite_name}/${f.test_name}`),
+      examples: (showAll ? group.items : group.items.slice(0, maxExamples)).map(f => `${f.suite_name}/${f.test_name}`),
       response_status: group.response_status,
     });
-    compactFailures.push(group.items[0]!);
+    if (isApiError) {
+      compactFailures.push(...group.items);
+    } else {
+      compactFailures.push(group.items[0]!);
+    }
   }
 
   return { grouped_failures, compactFailures };
