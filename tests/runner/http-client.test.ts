@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { executeRequest } from "../../src/core/runner/http-client.ts";
+import { createAdaptiveRateLimiter } from "../../src/core/runner/rate-limiter.ts";
 
 describe("executeRequest", () => {
   const originalFetch = globalThis.fetch;
@@ -214,4 +215,61 @@ describe("executeRequest", () => {
       ),
     ).rejects.toThrow();
   });
+
+  test("TASK-88: adaptive limiter survives window-based RateLimit-Policy without 429", async () => {
+    const originalFetch = globalThis.fetch;
+    // Window: max 5 requests per 1000ms. Server replies 429 if a 6th arrives
+    // before the window slides; otherwise 200 with RateLimit-Policy header.
+    const arrivals: number[] = [];
+    const WINDOW_MS = 1000;
+    const LIMIT = 5;
+    globalThis.fetch = (async () => {
+      const now = Date.now();
+      // Drop arrivals outside the trailing window
+      while (arrivals.length > 0 && now - arrivals[0]! >= WINDOW_MS) arrivals.shift();
+      if (arrivals.length >= LIMIT) {
+        return new Response(JSON.stringify({ error: "rate limited" }), {
+          status: 429,
+          headers: {
+            "content-type": "application/json",
+            "retry-after": "1",
+            "ratelimit-policy": `${LIMIT};w=${WINDOW_MS / 1000}`,
+            "ratelimit-limit": String(LIMIT),
+            "ratelimit-remaining": "0",
+            "ratelimit-reset": "1",
+          },
+        });
+      }
+      arrivals.push(now);
+      const remaining = LIMIT - arrivals.length;
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "ratelimit-policy": `${LIMIT};w=${WINDOW_MS / 1000}`,
+          "ratelimit-limit": String(LIMIT),
+          "ratelimit-remaining": String(remaining),
+          "ratelimit-reset": "1",
+        },
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      const limiter = createAdaptiveRateLimiter();
+      // 8 sequential requests: at policy spacing of 250ms each, total ~1.75s.
+      // Without spacing, first 5 burst then 429 storm.
+      const responses: number[] = [];
+      for (let i = 0; i < 8; i++) {
+        const resp = await executeRequest(
+          { method: "GET", url: "http://example.com/x", headers: {} },
+          { rate_limiter: limiter, retries: 0, rate_limit_retries: 0 },
+        );
+        responses.push(resp.status);
+      }
+      // Every request must be 200; no 429 should reach the caller.
+      expect(responses).toEqual([200, 200, 200, 200, 200, 200, 200, 200]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }, 10_000);
 });
