@@ -42,10 +42,21 @@ export function generateFromSchema(
     return schema.enum[0];
   }
 
-  // uuid format overrides type (e.g. integer fields with format: uuid)
-  if (schema.format === "uuid") return "{{$uuid}}";
+  // Format-based placeholders override type resolution. Schemas in the wild
+  // commonly carry `format` without an explicit `type` (loosely-defined specs)
+  // or with `type: ["string", "null"]` (OpenAPI 3.1 nullable). Falling through
+  // to the type switch in those cases dropped us into the default branch and
+  // produced `{{$randomString}}` for `format: email` — TASK-86 regression.
+  const formatPlaceholder = formatToPlaceholder(schema.format);
+  if (formatPlaceholder !== undefined) return formatPlaceholder;
 
-  switch (schema.type) {
+  // OpenAPI 3.1: type can be `["string", "null"]`. Collapse to the first
+  // non-null entry so the switch below routes correctly.
+  const effectiveType = Array.isArray(schema.type)
+    ? (schema.type as string[]).find(t => t !== "null") as OpenAPIV3.SchemaObject["type"] | undefined
+    : schema.type;
+
+  switch (effectiveType) {
     case "string":
       return guessStringPlaceholder(schema, propertyName);
 
@@ -59,8 +70,9 @@ export function generateFromSchema(
       return true;
 
     case "array": {
-      if (schema.items) {
-        const item = generateFromSchema(schema.items as OpenAPIV3.SchemaObject, undefined, _depth + 1);
+      const arr = schema as OpenAPIV3.ArraySchemaObject;
+      if (arr.items) {
+        const item = generateFromSchema(arr.items as OpenAPIV3.SchemaObject, undefined, _depth + 1);
         return [item];
       }
       return [];
@@ -85,11 +97,32 @@ export function generateFromSchema(
         return { key1: "value1", key2: "value2" };
       }
       // Bare object with no properties
-      if (schema.type === "object") {
+      if (effectiveType === "object") {
         return {};
       }
       return "{{$randomString}}";
     }
+  }
+}
+
+/**
+ * Map an OpenAPI `format` value to a zond generator placeholder. Returns
+ * undefined when the format is unknown or absent so callers can fall back
+ * to type / property-name heuristics. Exported for tests.
+ */
+export function formatToPlaceholder(format: string | undefined): string | undefined {
+  switch (format) {
+    case "email": return "{{$randomEmail}}";
+    case "uuid": return "{{$uuid}}";
+    case "date-time": return "{{$randomIsoDate}}";
+    case "date": return "{{$randomDate}}";
+    case "uri":
+    case "url": return "{{$randomUrl}}";
+    case "hostname": return "{{$randomFqdn}}";
+    case "ipv4": return "{{$randomIpv4}}";
+    case "ipv6": return "::1";
+    case "password": return "TestPass123!";
+    default: return undefined;
   }
 }
 
@@ -118,16 +151,8 @@ export function generateMultipartFromSchema(
 }
 
 function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): string {
-  // Format-based — emit generator placeholders so each call yields a fresh value
-  if (schema.format === "email") return "{{$randomEmail}}";
-  if (schema.format === "uuid") return "{{$uuid}}";
-  if (schema.format === "date-time") return "{{$randomIsoDate}}";
-  if (schema.format === "date") return "{{$randomDate}}";
-  if (schema.format === "uri" || schema.format === "url") return "{{$randomUrl}}";
-  if (schema.format === "hostname") return "{{$randomFqdn}}";
-  if (schema.format === "ipv4") return "{{$randomIpv4}}";
-  if (schema.format === "ipv6") return "::1";
-  if (schema.format === "password") return "TestPass123!";
+  // Format-based dispatch already happened earlier in generateFromSchema;
+  // this branch only sees strings whose format is empty or unrecognised.
 
   // Name-based heuristics
   if (name) {

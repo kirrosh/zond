@@ -1,9 +1,10 @@
 ---
 id: TASK-86
 title: 'T86: zond generate — формат format: игнорируется (регрессия T26)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:42'
+updated_date: '2026-04-29 09:38'
 labels:
   - bug
   - generator
@@ -33,7 +34,7 @@ Top-5 ROI fix. TASK-26 (Done) маппит format → generators. Round 2: по�
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Generator подставляет $randomEmail для format: email (а не $randomString)
-- [ ] #2 Покрытие: email, uri, uuid, hostname, ipv4, date, date-time как в TASK-26 (Done)
-- [ ] #3 Тест регрессии: generate на spec с format: email → YAML содержит $randomEmail
+- [x] #1 Generator подставляет $randomEmail для format: email (а не $randomString)
+- [x] #2 Покрытие: email, uri, uuid, hostname, ipv4, date, date-time как в TASK-26 (Done)
+- [x] #3 Тест регрессии: generate на spec с format: email → YAML содержит $randomEmail
 <!-- AC:END -->
