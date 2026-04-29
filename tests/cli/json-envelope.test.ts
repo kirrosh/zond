@@ -30,4 +30,14 @@ describe("jsonError", () => {
     expect(env.warnings).toEqual(["warn"]);
     expect(env.errors).toEqual(["err"]);
   });
+
+  test("TASK-89: error envelope carries exit_code (default 2)", () => {
+    const env = jsonError("test", ["err"]);
+    expect(env.exit_code).toBe(2);
+  });
+
+  test("TASK-89: exit_code can be overridden (e.g. 3 for internal errors)", () => {
+    const env = jsonError("test", ["boom"], undefined, 3);
+    expect(env.exit_code).toBe(3);
+  });
 });

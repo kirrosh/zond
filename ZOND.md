@@ -515,6 +515,38 @@ Pass `--kill-existing` to restore the legacy behaviour of terminating whichever 
 
 ---
 
+## Exit codes
+
+zond uses a small, stable taxonomy so CI and oncall scripts can branch on `$?`
+without grepping logs.
+
+| Code | Meaning |
+|------|---------|
+| `0`  | success |
+| `1`  | assertion / probe failure (test artifact, **not** a zond bug) |
+| `2`  | usage, config, or spec error (zond couldn't run the test) |
+| `3`  | internal zond error — uncaught throw, escapes command handler. Always prefixed with `[zond:internal]` and includes version + stack hash |
+| `4+` | reserved for future classes (network, schema, …) |
+
+Codes ≥ `128` come from the OS, not zond — typically `137` (SIGKILL: OOM
+killer / Gatekeeper / sandbox) or `143` (SIGTERM). Anything in this range
+means the process was killed externally:
+
+```bash
+zond run apis/foo/tests
+rc=$?
+if   [ $rc -eq 0   ]; then echo "ok"
+elif [ $rc -eq 1   ]; then echo "test failure"
+elif [ $rc -eq 2   ]; then echo "usage/config error"
+elif [ $rc -eq 3   ]; then echo "zond internal bug — file an issue"
+elif [ $rc -ge 128 ]; then echo "killed by signal $((rc - 128))"
+fi
+```
+
+JSON envelopes from `--json` carry the same code in `exit_code` on errors.
+
+---
+
 ## `--json` envelope
 
 Most subcommands accept `--json` (or, for `run`, `--report json`) and emit a

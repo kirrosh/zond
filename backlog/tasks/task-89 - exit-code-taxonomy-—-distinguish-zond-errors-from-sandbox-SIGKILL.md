@@ -1,9 +1,10 @@
 ---
 id: TASK-89
 title: exit-code taxonomy — distinguish zond errors from sandbox/SIGKILL
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 11:39'
+updated_date: '2026-04-29 14:38'
 labels:
   - cli
   - errors
