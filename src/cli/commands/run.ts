@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises";
 import { parseSafe } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
+import { preflightCheckVars, formatMissingVarLine } from "../../core/runner/preflight-vars.ts";
 import { runSuite } from "../../core/runner/executor.ts";
 import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
 import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
@@ -36,6 +37,8 @@ export interface RunOptions {
   excludeTag?: string[];
   method?: string;
   envVars?: string[];
+  /** Hard-fail (exit 2) on undefined {{var}} references instead of warning. */
+  strictVars?: boolean;
   dryRun?: boolean;
   json?: boolean;
   /** Write the report to a file instead of stdout. */
@@ -238,6 +241,17 @@ export async function runCommand(options: RunOptions): Promise<number> {
   const regularSuites = suites.filter(s => !s.setup);
   const setupCaptures: Record<string, string> = {};
 
+  // 3d. Pre-flight variable check on setup suites — only `env` is known
+  //     (their captures don't exist yet).
+  {
+    const setupHits = preflightCheckVars(setupSuites, env);
+    for (const hit of setupHits) printWarning(formatMissingVarLine(hit));
+    if (options.strictVars && setupHits.length > 0) {
+      printError(`--strict-vars: ${setupHits.length} undefined variable reference(s) in setup suites`);
+      return 2;
+    }
+  }
+
   for (const suite of setupSuites) {
     const result = await runSuite(suite, env, dryRun, runOpts);
     results.push(result);
@@ -249,6 +263,17 @@ export async function runCommand(options: RunOptions): Promise<number> {
   }
 
   const enrichedEnv = { ...env, ...setupCaptures };
+
+  // 3e. Pre-flight variable check on regular suites — env + setup captures
+  //     are known producers; per-suite captures/sets/parameterize handled inside.
+  {
+    const hits = preflightCheckVars(regularSuites, enrichedEnv);
+    for (const hit of hits) printWarning(formatMissingVarLine(hit));
+    if (options.strictVars && hits.length > 0) {
+      printError(`--strict-vars: ${hits.length} undefined variable reference(s)`);
+      return 2;
+    }
+  }
 
   if (options.bail) {
     // Sequential with bail at suite level

@@ -189,6 +189,7 @@ export function buildProgram(): Command {
     .option("--exclude-tag <tag>", "Exclude suites by tag (repeatable, comma-separated)", collect, [])
     .option("--method <method>", "Filter tests by HTTP method (e.g. GET, POST)")
     .option("--env-var <KEY=VALUE>", "Inject env variable (repeatable, overrides env file)", collect, [])
+    .option("--strict-vars", "Hard-fail (exit 2) when a {{var}} reference has no producer (default: warn and continue)")
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
     .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
     .option("--validate-schema", "Validate JSON responses against the OpenAPI response schema (requires --spec or a collection with openapi_spec set)")
@@ -239,6 +240,7 @@ export function buildProgram(): Command {
         excludeTag: excludeTags,
         method: opts.method,
         envVars,
+        strictVars: opts.strictVars === true,
         dryRun: opts.dryRun === true,
         reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
         validateSchema: opts.validateSchema === true,
