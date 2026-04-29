@@ -16,6 +16,7 @@ export interface ProbeValidationOptions {
   output: string;
   tag?: string;
   maxPerEndpoint?: number;
+  noCleanup?: boolean;
   json?: boolean;
   listTags?: boolean;
 }
@@ -72,6 +73,7 @@ export async function probeValidationCommand(
       endpoints,
       securitySchemes,
       maxProbesPerEndpoint: options.maxPerEndpoint,
+      noCleanup: options.noCleanup,
     });
 
     await mkdir(options.output, { recursive: true });
@@ -92,6 +94,7 @@ export async function probeValidationCommand(
           skippedEndpoints: result.skippedEndpoints,
           totalProbes: result.totalProbes,
           outputDir: options.output,
+          warnings: result.warnings,
         }),
       );
     } else {
@@ -101,6 +104,7 @@ export async function probeValidationCommand(
       console.log(
         `  ${result.probedEndpoints} endpoint(s) probed, ${result.skippedEndpoints} skipped (no probable surface)`,
       );
+      for (const w of result.warnings) printWarning(w);
       console.log("");
       console.log("Next steps:");
       console.log(`  zond run ${options.output} --report json   # any 5xx → bug candidate`);
