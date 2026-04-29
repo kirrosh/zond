@@ -4,6 +4,8 @@ import { parse } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
 import { runSuite } from "../../core/runner/executor.ts";
+import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
+import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
 import { createRateLimiter, createAdaptiveRateLimiter } from "../../core/runner/rate-limiter.ts";
 import { getReporter, generateJsonReport, generateJunitXml } from "../../core/reporter/index.ts";
 import type { ReporterName } from "../../core/reporter/types.ts";
@@ -38,6 +40,10 @@ export interface RunOptions {
   json?: boolean;
   /** Write the report to a file instead of stdout. */
   reportOut?: string;
+  /** Validate every JSON response against the OpenAPI response schema. */
+  validateSchema?: boolean;
+  /** Explicit OpenAPI spec path/URL (overrides collection.openapi_spec). */
+  specPath?: string;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -180,7 +186,32 @@ export async function runCommand(options: RunOptions): Promise<number> {
   const rateLimiter = rateLimit === "auto"
     ? createAdaptiveRateLimiter()
     : createRateLimiter(rateLimit);
-  const runOpts = { rateLimiter };
+
+  // 3c. Resolve OpenAPI spec for --validate-schema:
+  //     explicit --spec wins; otherwise fall back to the collection record.
+  let schemaValidator: ReturnType<typeof createSchemaValidator> | undefined;
+  if (options.validateSchema) {
+    let specPath = options.specPath;
+    if (!specPath) {
+      try {
+        const collection = findCollectionByTestPath(options.path);
+        if (collection?.openapi_spec) specPath = collection.openapi_spec;
+      } catch { /* DB not available — fall through to error below */ }
+    }
+    if (!specPath) {
+      printError("--validate-schema requires --spec <path|url> or a collection with openapi_spec set");
+      return 2;
+    }
+    try {
+      const doc = await readOpenApiSpec(specPath);
+      schemaValidator = createSchemaValidator(doc);
+    } catch (err) {
+      printError(`Failed to load OpenAPI spec '${specPath}': ${(err as Error).message}`);
+      return 2;
+    }
+  }
+
+  const runOpts = { rateLimiter, schemaValidator };
 
   // 4. Run suites — setup suites run first (sequentially), their captures flow into regular suites
   const results: TestRunResult[] = [];

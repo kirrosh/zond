@@ -190,6 +190,8 @@ export function buildProgram(): Command {
     .option("--env-var <KEY=VALUE>", "Inject env variable (repeatable, overrides env file)", collect, [])
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
     .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
+    .option("--validate-schema", "Validate JSON responses against the OpenAPI response schema (requires --spec or a collection with openapi_spec set)")
+    .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
     .action(async (pathArg: string | undefined, opts, cmd: Command) => {
       let path = pathArg;
       const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
@@ -238,6 +240,8 @@ export function buildProgram(): Command {
         envVars,
         dryRun: opts.dryRun === true,
         reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
+        validateSchema: opts.validateSchema === true,
+        specPath: typeof opts.spec === "string" ? opts.spec : undefined,
         json: globalJson(cmd),
       });
     });

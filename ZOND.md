@@ -89,7 +89,7 @@ zond ci init
 
 | Command | Description | Key flags |
 |---------|-------------|-----------|
-| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--report json\|junit`, `--report-out <file>` |
+| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--report json\|junit`, `--report-out <file>` |
 | `validate <path>` | Validate YAML tests | |
 | `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
@@ -358,6 +358,34 @@ rateLimit: 5  # ≤ 5 req/s
 ```bash
 zond run apis/resend/tests --rate-limit 5
 ```
+
+### Response-schema validation (`--validate-schema`)
+
+`zond run --validate-schema` validates every JSON response body against the
+declared OpenAPI response schema (matched by path + method + status). Any
+mismatch surfaces as an extra assertion failure on the step — alongside your
+explicit YAML expectations — and follows the normal reporter / DB / `--report`
+pipeline.
+
+What's checked: `type`, `required`, `enum`, `format` (`email`, `uri`, `uuid`,
+`date-time`), `additionalProperties` (only when the spec sets it), `oneOf` /
+`anyOf`, plus every nested `$ref`. OpenAPI 3.0 (`nullable: true`) and 3.1
+(`type: ["string", "null"]`) are both supported.
+
+```bash
+# explicit spec
+zond run apis/resend/tests --spec apis/resend/openapi.json --validate-schema
+
+# spec resolved from the collection (set during `zond generate` / `zond use`)
+zond run --api resend --validate-schema
+```
+
+For 4xx / 5xx responses zond falls back to `responses.<NXX>` then
+`responses.default` if a status-specific schema isn't declared. Endpoints
+without a JSON response schema are skipped silently.
+
+If `--validate-schema` is passed without `--spec` and the active collection has
+no `openapi_spec`, the run exits with code 2.
 
 ---
 

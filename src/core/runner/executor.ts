@@ -7,6 +7,7 @@ import type { RateLimiter } from "./rate-limiter.ts";
 import { checkAssertions, extractCaptures } from "./assertions.ts";
 import { evaluateExpr } from "./expr-eval.ts";
 import { applyTransform } from "./transforms.ts";
+import type { SchemaValidator } from "./schema-validator.ts";
 
 function buildUrl(baseUrl: string | undefined, path: string, query?: Record<string, string>): string {
   let url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}${path}` : path;
@@ -67,6 +68,10 @@ export function expandParameterize(params?: Record<string, unknown[]>): Record<s
 
 export interface RunSuiteOptions {
   rateLimiter?: RateLimiter;
+  /** Optional OpenAPI response-schema validator. When provided, every step's
+   *  parsed JSON body is validated against the matching schema; failures are
+   *  appended to the step's `assertions`. */
+  schemaValidator?: SchemaValidator;
 }
 
 export async function runSuite(
@@ -291,6 +296,9 @@ export async function runSuite(
           const response = await executeRequest(request, fetchOptions);
           const captures = extractCaptures(resolved.expect.body, response.body_parsed, resolved.expect.headers, response.headers);
           const assertions = checkAssertions(resolved.expect, response);
+          if (options.schemaValidator && response.body_parsed !== undefined) {
+            assertions.push(...options.schemaValidator.validate(resolved.method, resolved.path, response.status, response.body_parsed));
+          }
           const allPassed = assertions.every((a) => a.passed);
 
           lastStepResult = {
@@ -353,6 +361,9 @@ export async function runSuite(
 
       // Run assertions
       const assertions = checkAssertions(resolved.expect, response);
+      if (options.schemaValidator && response.body_parsed !== undefined) {
+        assertions.push(...options.schemaValidator.validate(resolved.method, resolved.path, response.status, response.body_parsed));
+      }
       const allPassed = assertions.every((a) => a.passed);
 
       steps.push({
