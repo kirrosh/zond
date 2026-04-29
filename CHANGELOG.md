@@ -2,7 +2,44 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] — fix/generator-quality-improvements
+## [0.22.0] — 2026-04-29
+
+### Round-2 papercuts (TASK-68 → TASK-86)
+
+- **TASK-68: `zond run --safe` (no path) no longer crashes with `paths[0] must be of type string, got boolean`.**
+  Commander's auto-negation `--no-db` defaulted `opts.db` to `true`; the boolean leaked into `path.resolve()` via a lazy
+  cast. dbPath is now normalised the same way as elsewhere; the no-path / no-`.zond-current` error is explicit and
+  mentions both `zond use <api>` and `--api`.
+
+- **TASK-69: `zond db diagnose` no longer hides 5xx failures behind cluster summaries.**
+  `groupFailures` previously kept only the first item per group plus 2 examples — for `assertion_failed` clusters that's
+  fine, but for `api_error` (5xx) it silently dropped backend-bug evidence. 5xx groups are now always preserved in full
+  in `data.failures` and `examples`; assertion/network groups continue to fold.
+
+- **TASK-71: YAML parse errors now report `file:line:col` plus a snippet with a column pointer.**
+  `Bun.YAML.parse` exposes JS-stack coordinates, not YAML positions — on failure we re-parse with `yaml` (eemeli) just
+  for diagnostics and surface `linePos` in the error. Pre-checks for embedded NUL bytes and points at the
+  `{{$nullByte}}` generator. Adds `yaml@2.8.3` dependency.
+
+- **TASK-77: suite-level `parameterize: { key: [val, …] }` cross-product.**
+  Replaces copy-pasting one test across N endpoints. Multiple keys produce the cross-product. Captures and
+  tainted/missing-capture state are reset between iterations so values from one binding never leak into the next; step
+  names are interpolated through `{{var}}` so reporters and `db diagnose` can tell iterations apart.
+
+- **TASK-79: `probe-validation` now pairs every mutating probe with a cleanup-DELETE.**
+  When a probe accidentally returns 2xx (the bug class probe-validation hunts for), the new follow-up `DELETE` step
+  (`always: true`) consumes a `leaked_id_<i>` capture and removes the resource. When the probe correctly gets 4xx, no id
+  is captured and the cleanup is skipped automatically. If the spec defines no DELETE counterpart, the generator emits a
+  warning instead. New `--no-cleanup` flag opts out for namespace-isolated test envs.
+
+- **TASK-81: `--rate-limit auto` reads `RateLimit-*` response headers and adapts.**
+  Implements RFC `draft-ietf-httpapi-ratelimit-headers` plus the GitHub/Stripe `X-RateLimit-*` aliases. When `remaining`
+  drops to ≤5, subsequent requests pause until reset (relative-seconds vs Unix-timestamp distinguished by magnitude).
+  Static `--rate-limit N` benefits from the same hook — the cap is a floor, headers can push pauses out further.
+
+- **TASK-86: `zond generate` honours `format` even when `type` is absent or array (OpenAPI 3.1 nullable).**
+  `format: email` on a schema with no `type` (or `type: ["string", "null"]`) used to fall through to the default branch
+  and produce `{{$randomString}}`. Format-to-placeholder mapping is now dispatched before the type switch.
 
 ### Breaking changes
 
