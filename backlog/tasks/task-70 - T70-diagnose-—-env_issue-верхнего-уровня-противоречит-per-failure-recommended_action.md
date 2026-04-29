@@ -3,9 +3,10 @@ id: TASK-70
 title: >-
   T70: diagnose — env_issue верхнего уровня противоречит per-failure
   recommended_action
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:38'
+updated_date: '2026-04-29 14:22'
 labels:
   - bug
   - diagnose

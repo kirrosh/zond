@@ -41,7 +41,8 @@ export type RecommendedAction =
   | "report_backend_bug"
   | "fix_auth_config"
   | "fix_test_logic"
-  | "fix_network_config";
+  | "fix_network_config"
+  | "fix_env";
 
 export function recommendedAction(
   failureType: "api_error" | "assertion_failed" | "network_error",
