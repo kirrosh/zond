@@ -215,6 +215,20 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
 
   const sharedEnvHint = computeSharedEnvIssue(failures, envFilePath);
 
+  // TASK-70: when env_issue is detected at run-level, per-failure
+  // recommended_action ("fix_test_logic") and per-failure hints contradict
+  // the real fix (env). Override the action to `fix_env` for all non-5xx
+  // failures and drop the misleading per-failure hint/schema_hint so the
+  // user reads one consistent story.
+  if (sharedEnvHint) {
+    for (const f of failures) {
+      if (f.failure_type === "api_error") continue; // real backend bug — keep
+      f.recommended_action = "fix_env";
+      delete f.hint;
+      delete f.schema_hint;
+    }
+  }
+
   let apiErrors = 0, assertionFailures = 0, networkErrors = 0;
   let authFailureCount = 0;
   for (const f of failures) {
