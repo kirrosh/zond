@@ -71,6 +71,12 @@ export interface ProbeOptions {
   securitySchemes: SecuritySchemeInfo[];
   /** Cap probes per endpoint (default 50). Hard cutoff for huge schemas. */
   maxProbesPerEndpoint?: number;
+  /**
+   * Skip emission of follow-up DELETE cleanup steps for mutating probes
+   * (POST/PUT/PATCH). Useful for namespace-isolated test environments
+   * (staging dump-and-reset) where cleanup is handled out of band.
+   */
+  noCleanup?: boolean;
 }
 
 export interface ProbeResult {
@@ -81,6 +87,12 @@ export interface ProbeResult {
   skippedEndpoints: number;
   /** Total generated probe steps. */
   totalProbes: number;
+  /**
+   * Generation-time warnings — typically about mutating endpoints whose
+   * probes might leak resources because the spec defines no DELETE
+   * counterpart. CLI surfaces these to the user.
+   */
+  warnings: string[];
 }
 
 // ──────────────────────────────────────────────
@@ -462,6 +474,79 @@ function hasJsonBody(ep: EndpointInfo): boolean {
   );
 }
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function isMutating(method: string): boolean {
+  const m = method.toUpperCase();
+  return m === "POST" || m === "PUT" || m === "PATCH";
+}
+
+/**
+ * Find the DELETE endpoint that owns resources created by `ep`:
+ *  - POST /collection            → DELETE /collection/{id}
+ *  - PUT  /collection/{id}       → DELETE /collection/{id}    (same path)
+ *  - PATCH /collection/{id}      → DELETE /collection/{id}    (same path)
+ */
+function findDeleteCounterpart(
+  ep: EndpointInfo,
+  all: EndpointInfo[],
+): EndpointInfo | undefined {
+  const m = ep.method.toUpperCase();
+  if (m === "POST") {
+    const re = new RegExp(`^${escapeRegex(ep.path)}/\\{[^}]+\\}$`);
+    return all.find(e => e.method.toUpperCase() === "DELETE" && !e.deprecated && re.test(e.path));
+  }
+  if (m === "PUT" || m === "PATCH") {
+    return all.find(e => e.method.toUpperCase() === "DELETE" && !e.deprecated && e.path === ep.path);
+  }
+  return undefined;
+}
+
+/**
+ * Pick the response field that holds the new resource's id. Defaults to "id";
+ * falls back to the first integer / uuid property when no `id` field exists.
+ */
+function captureFieldFor(ep: EndpointInfo): string {
+  const success = ep.responses.find(r => r.statusCode >= 200 && r.statusCode < 300 && r.schema);
+  const schema = success?.schema;
+  if (schema?.properties) {
+    if ("id" in schema.properties) return "id";
+    for (const [name, propSchema] of Object.entries(schema.properties)) {
+      const s = propSchema as OpenAPIV3.SchemaObject;
+      if (s.type === "integer" || s.format === "uuid") return name;
+    }
+  }
+  return "id";
+}
+
+/** Build a cleanup-DELETE step for a single mutating probe. The capture var
+ *  must come from the paired probe step. If the probe didn't capture (e.g.
+ *  the API correctly returned 4xx and no resource was created), the runner
+ *  skips this step via the standard "missing capture" path — exactly the
+ *  semantics we want. */
+function buildCleanupStep(
+  deleteEp: EndpointInfo,
+  schemes: SecuritySchemeInfo[],
+  captureVar: string,
+  probeStepName: string,
+): RawStep {
+  // Replace the DELETE's path-id placeholder with our captured var.
+  const path = convertPath(deleteEp.path).replace(/\{\{[^}]+\}\}/, `{{${captureVar}}}`);
+  const headers = getAuthHeaders(deleteEp, schemes);
+  const step: RawStep = {
+    name: `cleanup leaked resource from "${probeStepName}"`,
+    always: true,
+    DELETE: path,
+    expect: {
+      status: [200, 202, 204, 404],
+    },
+  };
+  if (headers) step.headers = headers;
+  return step;
+}
+
 function headersEqual(a: Record<string, string>, b: Record<string, string>): boolean {
   const ka = Object.keys(a);
   const kb = Object.keys(b);
@@ -477,8 +562,10 @@ function headersEqual(a: Record<string, string>, b: Record<string, string>): boo
 export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
   const { endpoints, securitySchemes } = opts;
   const cap = opts.maxProbesPerEndpoint ?? 50;
+  const noCleanup = opts.noCleanup === true;
 
   const suites: RawSuite[] = [];
+  const warnings: string[] = [];
   let probedEndpoints = 0;
   let skippedEndpoints = 0;
   let totalProbes = 0;
@@ -505,6 +592,37 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
     if (steps.length === 0) {
       skippedEndpoints++;
       continue;
+    }
+
+    // T79: Cleanup for mutating probes. If a probe accidentally returns 2xx
+    // (the bug class probe-validation hunts for), the resource sticks around
+    // unless we follow up with a DELETE. We pair each probe step with a
+    // cleanup-DELETE marked `always: true`; the runner skips the DELETE
+    // automatically when no id was captured (i.e. the probe correctly got 4xx).
+    const cleanupSteps: RawStep[] = [];
+    if (isMutating(ep.method) && !noCleanup) {
+      const deleteEp = findDeleteCounterpart(ep, endpoints);
+      if (deleteEp) {
+        const idField = captureFieldFor(ep);
+        for (let i = 0; i < steps.length; i++) {
+          const probeStep = steps[i]!;
+          const captureVar = `leaked_id_${i}`;
+          const probeExpect = probeStep.expect as { body?: Record<string, unknown> };
+          if (!probeExpect.body) probeExpect.body = {};
+          // capture-only rule: doesn't add an assertion, just extracts the id
+          // when the response body has one. extractCaptures is a no-op when
+          // the field is absent (the typical 4xx case).
+          probeExpect.body[idField] = { capture: captureVar };
+          cleanupSteps.push(buildCleanupStep(deleteEp, securitySchemes, captureVar, probeStep.name));
+        }
+      } else {
+        warnings.push(
+          `${ep.method.toUpperCase()} ${ep.path}: probe-validation may create resources but spec defines no DELETE counterpart — manual cleanup required if any probe unexpectedly returns 2xx`,
+        );
+      }
+    }
+    if (cleanupSteps.length > 0) {
+      steps.push(...cleanupSteps);
     }
 
     probedEndpoints++;
@@ -535,5 +653,5 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
     suites.push(suite);
   }
 
-  return { suites, probedEndpoints, skippedEndpoints, totalProbes };
+  return { suites, probedEndpoints, skippedEndpoints, totalProbes, warnings };
 }

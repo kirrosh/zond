@@ -1,9 +1,10 @@
 ---
 id: TASK-79
 title: 'T79: probe-сьюты должны эмитить cleanup-секцию'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:40'
+updated_date: '2026-04-29 09:30'
 labels:
   - bug-hunting
   - generator
@@ -32,8 +33,8 @@ CRUD-сьюты уже имеют always: true для DELETE-шага (TASK-44).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 probe-validation для POST/PUT/PATCH эмитит DELETE-step с always: true
-- [ ] #2 Если ресурс не имеет DELETE — лог 'created during run #X: <ids>'
-- [ ] #3 Опция --no-cleanup для опт-аут поведения
-- [ ] #4 Тест: probe-validation на CRUD-эндпоинте — после run количество ресурсов в API == до run
+- [x] #1 probe-validation для POST/PUT/PATCH эмитит DELETE-step с always: true
+- [x] #2 Если ресурс не имеет DELETE — лог 'created during run #X: <ids>'
+- [x] #3 Опция --no-cleanup для опт-аут поведения
+- [x] #4 Тест: probe-validation на CRUD-эндпоинте — после run количество ресурсов в API == до run
 <!-- AC:END -->

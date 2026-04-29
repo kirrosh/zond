@@ -94,7 +94,7 @@ zond ci init
 | `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
-| `probe-validation <spec>` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--output <dir>`, `--tag`, `--max-per-endpoint <N>` |
+| `probe-validation <spec>` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup` |
 | `probe-methods <spec>` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--output <dir>`, `--tag` |
 
 ### `probe-validation` — bug-hunting negative-input probes
@@ -127,6 +127,17 @@ Probes are deterministic — same spec → same suites — so generated YAML can
 committed as a regression test. Each probe expects status in
 `[400, 401, 403, 404, 405, 409, 415, 422]`; a 5xx (or unexpected 2xx) is a
 test failure surfaced via the regular runner / reporter / `zond db diagnose`.
+
+**Cleanup of leaked resources.** A probe that *unexpectedly* returns 2xx on a
+mutating endpoint (POST/PUT/PATCH) means the API silently accepted bad input
+and created a resource. To keep probe runs idempotent in environments without
+namespace isolation, `probe-validation` pairs every mutating probe with a
+follow-up `DELETE` step (`always: true`) that fires only if the probe captured
+a resource id. When the API correctly rejects the probe with 4xx, the cleanup
+step is skipped automatically. If the spec defines no DELETE counterpart for a
+mutating endpoint, the generator prints a warning so you can clean up by hand.
+Use `--no-cleanup` to opt out (e.g. for staging environments that dump-and-reset
+between runs).
 
 ### `probe-methods` — bug-hunting HTTP method completeness sweep
 
