@@ -132,9 +132,12 @@ function flatSplit(values: string[] | undefined): string[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
-// Helper: read a global option from any command in the tree
+// TASK-73: --json is a per-command option (not a top-level global) so that
+// `run --json` does not collide with `run --report json`. Subcommands that
+// support an envelope output add `.option("--json", ...)` themselves and we
+// read it from local opts.
 function globalJson(cmd: Command): boolean {
-  return cmd.optsWithGlobals().json === true;
+  return cmd.opts().json === true;
 }
 
 // Resolve API collection → returns { spec?, testPath? } or null when not found
@@ -161,7 +164,6 @@ export function buildProgram(): Command {
     .description("API Testing Platform")
     .version(`${VERSION} (${getRuntimeInfo()})`, "-v, --version", "Show version")
     .helpOption("-h, --help", "Show this help")
-    .option("--json", "Output in JSON envelope format")
     .showHelpAfterError("(run 'zond --help' for usage)")
     .exitOverride();
 
@@ -245,7 +247,7 @@ export function buildProgram(): Command {
         reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
         validateSchema: opts.validateSchema === true,
         specPath: typeof opts.spec === "string" ? opts.spec : undefined,
-        json: globalJson(cmd),
+        json: false,
       });
     });
 
@@ -685,6 +687,20 @@ export function buildProgram(): Command {
       }
       process.exitCode = completionsCommand({ shell: shell as CompletionShell, program });
     });
+
+  // TASK-73: previously `--json` was a top-level/global option that propagated
+  // to every subcommand, which collided with `run --report json` (and broke
+  // `run --json` outright). Now it is per-command. Attach `--json` to every
+  // subcommand that previously read it via globalJson(), EXCEPT `run` —
+  // run's only JSON output path is `--report json`.
+  const skipJson = new Set(["run", "completions", "serve", "ci"]);
+  const attachJson = (cmd: Command): void => {
+    if (!skipJson.has(cmd.name())) {
+      cmd.option("--json", "Output in JSON envelope format");
+    }
+    for (const sub of cmd.commands) attachJson(sub);
+  };
+  for (const sub of program.commands) attachJson(sub);
 
   return program;
 }
