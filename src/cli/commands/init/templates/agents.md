@@ -8,12 +8,12 @@ server is **not** configured for this workspace, so use the CLI directly.
 Detailed task-specific playbooks live in `.claude/skills/` and are auto-discovered by
 Claude Code. Other agents (Codex, Cursor, Aider) can read them as plain markdown:
 
-- `.claude/skills/zond-coverage/SKILL.md` — generate tests from an OpenAPI spec and
-  raise endpoint coverage (catalog → generate → run → coverage → sync).
-- `.claude/skills/zond-diagnose/SKILL.md` — diagnose failing runs and hunt typical
-  backend bugs via probe suites (`probe-validation`, `probe-methods`).
+- `.claude/skills/zond/SKILL.md` — end-to-end API testing: generate from OpenAPI,
+  run, diagnose failures, hunt bugs via probes, report coverage. Has explicit
+  entry points so narrow requests (only diagnose, only probe) skip earlier phases.
 - `.claude/skills/zond-scenarios/SKILL.md` — author multi-step user-journey tests
-  (hand-written YAML with captures, `setup: true`, `always: true`).
+  and fixture creation via the API (hand-written YAML with captures,
+  `setup: true`, `always: true`). NOT for spec coverage or bug hunting.
 
 ### Mandatory rules (always-on)
 

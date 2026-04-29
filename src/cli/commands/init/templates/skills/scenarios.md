@@ -90,8 +90,8 @@ Put login in `apis/<name>/tests/setup.yaml` with `setup: true`; scenarios refere
 `{{auth_token}}` directly. Run with `--tag <flow>,setup`.
 
 ## When to hand off
-- Need broad endpoint coverage, not a flow → `zond-coverage`.
-- Scenario fails and you don't know why → `zond-diagnose`.
+- Need broad endpoint coverage, bug hunting, or run diagnosis → `zond`.
+- This skill is **only** for hand-written multi-step flows / fixture creation.
 
 For full YAML structure (assertions, flow control, generators, conditional steps),
 see the YAML format section of `ZOND.md` at the repo root.
