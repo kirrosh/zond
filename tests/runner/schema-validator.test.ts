@@ -174,4 +174,48 @@ describe("schema-validator", () => {
     expect(v.validate("GET", "/x", 200, { name: null })).toHaveLength(0);
     expect(v.validate("GET", "/x", 200, { name: 5 })).toHaveLength(1);
   });
+
+  describe("strict RFC3339 date-time format", () => {
+    function timestampValidator() {
+      return buildValidator({
+        type: "object",
+        required: ["created_at"],
+        properties: { created_at: { type: "string", format: "date-time" } },
+      });
+    }
+
+    test("accepts canonical RFC3339 with Z", () => {
+      const v = timestampValidator();
+      expect(v.validate("GET", "/emails", 200, { created_at: "2026-04-29T07:10:44.674675Z" })).toHaveLength(0);
+    });
+
+    test("accepts RFC3339 with explicit offset", () => {
+      const v = timestampValidator();
+      expect(v.validate("GET", "/emails", 200, { created_at: "2026-04-29T07:10:44.674675+00:00" })).toHaveLength(0);
+      expect(v.validate("GET", "/emails", 200, { created_at: "2026-04-29T07:10:44+03:30" })).toHaveLength(0);
+    });
+
+    test("rejects PostgreSQL-style timestamp with space separator (B12)", () => {
+      // Resend B12: server returns "2026-04-29 07:10:44.674675+00" while spec
+      // declares format: date-time. Schemathesis catches this; ajv-formats
+      // default does not. zond must.
+      const v = timestampValidator();
+      const errors = v.validate("GET", "/emails", 200, { created_at: "2026-04-29 07:10:44.674675+00" });
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.rule).toBe("schema.format");
+      expect(errors[0]?.field).toBe("body.created_at");
+    });
+
+    test("rejects RFC3339 with short offset (+00 instead of +00:00)", () => {
+      const v = timestampValidator();
+      const errors = v.validate("GET", "/emails", 200, { created_at: "2026-04-29T07:10:44.674675+00" });
+      expect(errors).toHaveLength(1);
+      expect(errors[0]?.rule).toBe("schema.format");
+    });
+
+    test("rejects calendar nonsense (month 13)", () => {
+      const v = timestampValidator();
+      expect(v.validate("GET", "/emails", 200, { created_at: "2026-13-29T07:10:44Z" })).toHaveLength(1);
+    });
+  });
 });

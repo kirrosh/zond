@@ -446,6 +446,12 @@ What's checked: `type`, `required`, `enum`, `format` (`email`, `uri`, `uuid`,
 `anyOf`, plus every nested `$ref`. OpenAPI 3.0 (`nullable: true`) and 3.1
 (`type: ["string", "null"]`) are both supported.
 
+`format: date-time` is enforced strictly per RFC3339 §5.6: `T` is required as
+the separator (space is rejected), and the offset must be `Z` or `±HH:MM` with
+an explicit colon. PostgreSQL-style values like `"2026-04-29 07:10:44.674675+00"`
+fail validation — they break strict RFC3339 clients (e.g. Go `time.RFC3339`)
+even when JS `new Date()` accepts them.
+
 ```bash
 # explicit spec
 zond run apis/resend/tests --spec apis/resend/openapi.json --validate-schema
