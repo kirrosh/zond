@@ -1,9 +1,10 @@
 ---
 id: TASK-58
 title: 'T58: Mass-assignment probe'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:34'
+updated_date: '2026-04-29 11:34'
 labels:
   - bug-hunting
   - security

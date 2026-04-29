@@ -96,6 +96,7 @@ zond ci init
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
 | `probe-validation <spec>` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup` |
 | `probe-methods <spec>` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--output <dir>`, `--tag` |
+| `probe-mass-assignment <spec>` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--timeout <ms>` |
 
 ### `probe-validation` — bug-hunting negative-input probes
 
@@ -159,6 +160,66 @@ being rejected purely on path syntax. Body-bearing methods carry a minimal
 `{}` JSON body. Each probe expects status in `[401, 403, 404, 405]`; anything
 else is a test failure. Probes are deterministic — same spec → same suites —
 so generated YAML can be committed as a regression test.
+
+### `probe-mass-assignment` — privilege-escalation hunt
+
+Mass assignment is the class where an API silently accepts client-supplied
+fields that should be server-controlled — `is_admin`, `role`, `account_id`,
+`owner_id` — and either *applies* them (privilege escalation) or *ignores*
+them (silent acceptance, latent risk). Unlike the other probes,
+`probe-mass-assignment` runs **live** against a real API: the only way to
+distinguish "applied" from "ignored" is to read back the resource via a
+follow-up GET.
+
+```bash
+zond probe-mass-assignment openapi.json \
+  --env .env.yaml \
+  --output digest.md \
+  --emit-tests probes/mass-assignment/
+```
+
+For every POST endpoint (and PATCH/PUT when env supplies path-param values)
+the probe sends one request whose body is the spec-baseline payload merged
+with two extra-field families:
+
+| Family | Examples | Why |
+|--------|----------|-----|
+| Suspected | `is_admin: true`, `role: "admin"`, `is_system: true`, `verified: true`, `account_id`, `owner_id`, `user_id` | Classic mass-assignment vectors — fields that, if writable, escalate privileges |
+| Server-assigned | `id`, `created_at`, `updated_at`, `object` (lifted from the 2xx response schema if absent in the request schema) | If the server uses the client-supplied value here instead of generating its own, that's a takeover/forgery bug |
+
+The response (and follow-up GET, when a `GET /resource/{id}` counterpart
+exists) classifies each endpoint into one of:
+
+| Severity | Outcome | Meaning |
+|----------|---------|---------|
+| 🚨 HIGH | accepted-and-applied | Suspicious value persisted — privilege escalation candidate. Or 5xx — unhandled exception. |
+| ⚠️ MEDIUM | inconclusive | 2xx but no GET counterpart to verify persistence. |
+| ℹ️ LOW | accepted-and-ignored | 2xx, but follow-up GET shows the field was silently dropped. Soft-warn — server should reject explicitly. |
+| ✅ OK | rejected (4xx) | Best behaviour. Bonus credit when request schema declares `additionalProperties: false`. |
+| ⏭ SKIPPED | — | No JSON body, or PATCH/PUT without a resolvable path id. |
+
+Output is a Markdown digest grouped by severity (stdout by default; `--output
+<file>` writes to disk). Exit code is non-zero (`1`) when at least one HIGH
+finding exists — useful for CI gating.
+
+**Cleanup.** When a 2xx response leaks a real resource and the spec defines a
+`DELETE /resource/{id}` counterpart, the probe issues a follow-up DELETE
+automatically. Use `--no-cleanup` for namespace-isolated test environments
+that dump-and-reset.
+
+**`--emit-tests <dir>`** writes a YAML regression suite that locks in the
+*observed safe* behaviour: rejected endpoints get a probe asserting `status ∈
+[400,401,403,409,415,422]`; ignored endpoints get a POST + GET pair asserting
+the suspicious field did not echo back, plus an `always: true` cleanup
+DELETE. Endpoints classified HIGH or MEDIUM are deliberately not emitted —
+those are bugs to fix, not baselines to lock. Run the resulting suite via
+`zond run <dir> --env .env.yaml` on CI.
+
+**Auth / config.** Live probing requires `--env <file>`; the YAML must at
+least set `base_url`. Bearer / API-key tokens are read from `auth_token` /
+`api_key` (matching `zond run`'s convention). Path-param placeholders
+(e.g. `{orgId}`) are substituted from the same env — set them explicitly to
+unlock PATCH/PUT probing.
 
 ---
 

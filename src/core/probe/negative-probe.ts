@@ -17,6 +17,17 @@ import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
+import {
+  convertPath,
+  endpointStem,
+  getAuthHeaders,
+  pathWithPlaceholders,
+  isMutating,
+  findDeleteCounterpart,
+  captureFieldFor,
+  headersEqual,
+  hasJsonBody,
+} from "./shared.ts";
 
 // ──────────────────────────────────────────────
 // Constants
@@ -98,66 +109,6 @@ export interface ProbeResult {
 // ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
-
-function convertPath(path: string): string {
-  return path.replace(/\{([^}]+)\}/g, "{{$1}}");
-}
-
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-function endpointStem(ep: EndpointInfo): string {
-  const path = ep.path
-    .replace(/\{[^}]+\}/g, "by-id")
-    .replace(/^\//, "")
-    .replace(/\//g, "-");
-  return slugify(`${ep.method.toLowerCase()}-${path}`);
-}
-
-function getAuthHeaders(
-  ep: EndpointInfo,
-  schemes: SecuritySchemeInfo[],
-): Record<string, string> | undefined {
-  if (ep.security.length === 0) return undefined;
-  for (const secName of ep.security) {
-    const scheme = schemes.find((s) => s.name === secName);
-    if (!scheme) continue;
-    if (scheme.type === "http") {
-      if (scheme.scheme === "bearer" || !scheme.scheme) {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      if (scheme.scheme === "basic") {
-        return { Authorization: "Basic {{auth_token}}" };
-      }
-    }
-    if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
-      if (scheme.apiKeyName === "Authorization") {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      return { [scheme.apiKeyName]: "{{api_key}}" };
-    }
-  }
-  return undefined;
-}
-
-/** Path with placeholders replaced by valid-but-nonexistent IDs (for body probes
- *  on PUT/PATCH/DELETE — we don't want path validation to mask body errors). */
-function pathWithPlaceholders(ep: EndpointInfo, badId: string): string {
-  return ep.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
-    const param = ep.parameters.find((p) => p.name === name && p.in === "path");
-    const schema = param?.schema as OpenAPIV3.SchemaObject | undefined;
-    if (badId === "valid-shape") {
-      if (schema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
-      if (schema?.type === "integer" || schema?.type === "number") return "999999999";
-      return "nonexistent-zzzzz";
-    }
-    return badId;
-  });
-}
 
 function findUuidPathParams(ep: EndpointInfo): OpenAPIV3.ParameterObject[] {
   return ep.parameters.filter((p) => {
@@ -465,62 +416,6 @@ function describeType(schema: OpenAPIV3.SchemaObject): string {
   return schema.type ?? "any";
 }
 
-function hasJsonBody(ep: EndpointInfo): boolean {
-  return (
-    ep.method !== "GET" &&
-    ep.method !== "DELETE" &&
-    ep.requestBodyContentType === "application/json" &&
-    ep.requestBodySchema !== undefined
-  );
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function isMutating(method: string): boolean {
-  const m = method.toUpperCase();
-  return m === "POST" || m === "PUT" || m === "PATCH";
-}
-
-/**
- * Find the DELETE endpoint that owns resources created by `ep`:
- *  - POST /collection            → DELETE /collection/{id}
- *  - PUT  /collection/{id}       → DELETE /collection/{id}    (same path)
- *  - PATCH /collection/{id}      → DELETE /collection/{id}    (same path)
- */
-function findDeleteCounterpart(
-  ep: EndpointInfo,
-  all: EndpointInfo[],
-): EndpointInfo | undefined {
-  const m = ep.method.toUpperCase();
-  if (m === "POST") {
-    const re = new RegExp(`^${escapeRegex(ep.path)}/\\{[^}]+\\}$`);
-    return all.find(e => e.method.toUpperCase() === "DELETE" && !e.deprecated && re.test(e.path));
-  }
-  if (m === "PUT" || m === "PATCH") {
-    return all.find(e => e.method.toUpperCase() === "DELETE" && !e.deprecated && e.path === ep.path);
-  }
-  return undefined;
-}
-
-/**
- * Pick the response field that holds the new resource's id. Defaults to "id";
- * falls back to the first integer / uuid property when no `id` field exists.
- */
-function captureFieldFor(ep: EndpointInfo): string {
-  const success = ep.responses.find(r => r.statusCode >= 200 && r.statusCode < 300 && r.schema);
-  const schema = success?.schema;
-  if (schema?.properties) {
-    if ("id" in schema.properties) return "id";
-    for (const [name, propSchema] of Object.entries(schema.properties)) {
-      const s = propSchema as OpenAPIV3.SchemaObject;
-      if (s.type === "integer" || s.format === "uuid") return name;
-    }
-  }
-  return "id";
-}
-
 /** Build a cleanup-DELETE step for a single mutating probe. The capture var
  *  must come from the paired probe step. If the probe didn't capture (e.g.
  *  the API correctly returned 4xx and no resource was created), the runner
@@ -545,14 +440,6 @@ function buildCleanupStep(
   };
   if (headers) step.headers = headers;
   return step;
-}
-
-function headersEqual(a: Record<string, string>, b: Record<string, string>): boolean {
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  if (ka.length !== kb.length) return false;
-  for (const k of ka) if (a[k] !== b[k]) return false;
-  return true;
 }
 
 // ──────────────────────────────────────────────

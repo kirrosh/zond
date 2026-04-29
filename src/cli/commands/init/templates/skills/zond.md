@@ -142,6 +142,13 @@ zond run apis/<name>/probes/validation --json
 zond probe-methods <spec> --output apis/<name>/probes/methods
 zond run apis/<name>/probes/methods --json
 
+# Mass-assignment — privilege escalation via extra fields (live, needs --env)
+# Hits POST endpoints with is_admin/role/account_id/... and verifies via follow-up GET.
+# Emits a markdown digest (HIGH/MED/LOW/OK) + optional regression YAML for CI.
+zond probe-mass-assignment <spec> --env apis/<name>/.env.yaml \
+  --output apis/<name>/probes/mass-assignment-digest.md \
+  --emit-tests apis/<name>/probes/mass-assignment
+
 # Triage
 zond db diagnose <run-id> --json
 ```
@@ -151,11 +158,13 @@ Typical findings:
 - **5xx on wrong type** (string for int, etc.) → unguarded coercion.
 - **2xx on undeclared method** → contract drift (spec lies, or method is unprotected).
 - **5xx on missing required field** → uncaught NPE on the server.
+- **`is_admin: true` / `role: "admin"` echoed in response** → mass-assignment vulnerability (HIGH from `probe-mass-assignment`).
 
 Filter probe scope when an API is large:
 ```bash
 zond probe-validation <spec> --tag <spec-tag> --max-per-endpoint 20
 zond probe-methods <spec> --tag <spec-tag>
+zond probe-mass-assignment <spec> --env <env> --tag <spec-tag>
 ```
 
 ## Phase 6 — Coverage report & spec drift
