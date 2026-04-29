@@ -108,6 +108,21 @@ fi
 
 echo "Installed to $INSTALL_DIR/zond"
 
+# macOS: `cp` adds a `com.apple.provenance` xattr that invalidates the adhoc
+# codesign baked into the binary, which makes Gatekeeper SIGKILL the freshly
+# installed file with exit 137 (no useful error). Strip the xattr and re-sign
+# in place — adhoc is enough to satisfy Gatekeeper for local execution.
+if [ "$PLATFORM" = "darwin" ]; then
+  if command -v xattr >/dev/null 2>&1; then
+    xattr -c "$INSTALL_DIR/zond" 2>/dev/null || sudo xattr -c "$INSTALL_DIR/zond" 2>/dev/null || true
+  fi
+  if command -v codesign >/dev/null 2>&1; then
+    codesign --force --sign - "$INSTALL_DIR/zond" 2>/dev/null \
+      || sudo codesign --force --sign - "$INSTALL_DIR/zond" 2>/dev/null \
+      || echo "Warning: failed to re-sign $INSTALL_DIR/zond — may be SIGKILL'd by Gatekeeper on first run."
+  fi
+fi
+
 # Verify
 "$INSTALL_DIR/zond" --version
 echo "Done! Run 'zond init' to set up a new project."

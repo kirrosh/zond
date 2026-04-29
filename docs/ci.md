@@ -293,3 +293,12 @@ xcrun stapler staple ./zond
 CI release jobs that produce macOS binaries should run those steps
 after `bun run build`. The local adhoc step is a no-op on linux/windows
 and degrades gracefully (warn-only) when `codesign` isn't on PATH.
+
+> **Why install.sh re-signs after `cp`.** macOS attaches a
+> `com.apple.provenance` extended attribute to any file copied via `cp`
+> (and `com.apple.quarantine` to anything downloaded). Both invalidate
+> the adhoc signature baked into the build, and the kernel SIGKILL's the
+> binary on first execution with exit `137` and no diagnostic. `install.sh`
+> strips xattrs (`xattr -c`) and re-signs (`codesign --force --sign -`)
+> in place — without that, the binary works in the build directory but
+> dies as soon as it's installed.
