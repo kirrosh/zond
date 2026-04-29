@@ -4,7 +4,7 @@ title: 'T17: Workspace root + walk-up resolution'
 status: Done
 assignee: []
 created_date: '2026-04-27 12:38'
-updated_date: '2026-04-27 12:50'
+updated_date: '2026-04-29 14:06'
 labels:
   - T17
   - phase-4
@@ -12,8 +12,7 @@ labels:
   - priority-p0
   - workspace
 milestone: m-0
-dependencies:
-  - TASK-12
+dependencies: []
 priority: high
 ---
 
