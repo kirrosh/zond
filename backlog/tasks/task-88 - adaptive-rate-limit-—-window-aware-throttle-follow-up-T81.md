@@ -1,9 +1,10 @@
 ---
 id: TASK-88
 title: adaptive rate-limit — window-aware throttle (follow-up T81)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 11:39'
+updated_date: '2026-04-29 11:52'
 labels:
   - runner
   - rate-limit
