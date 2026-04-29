@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { generateFromSchema } from "../../src/core/generator/data-factory.ts";
+import { generateFromSchema, formatToPlaceholder } from "../../src/core/generator/data-factory.ts";
 import type { OpenAPIV3 } from "openapi-types";
 
 describe("generateFromSchema", () => {
@@ -290,6 +290,36 @@ describe("generateFromSchema", () => {
     const result = generateFromSchema(schema) as Record<string, any>;
     expect(result.owner.name).toBe("{{$randomName}}");
     expect(result.owner.email).toBe("{{$randomEmail}}");
+  });
+});
+
+describe("TASK-86 regression — format honoured even when type is missing or array", () => {
+  test("format: email with no type still produces $randomEmail (not $randomString)", () => {
+    expect(generateFromSchema({ format: "email" } as OpenAPIV3.SchemaObject)).toBe("{{$randomEmail}}");
+  });
+
+  test("OpenAPI 3.1 nullable: type=['string','null'] + format=email", () => {
+    expect(generateFromSchema({ type: ["string", "null"], format: "email" } as unknown as OpenAPIV3.SchemaObject)).toBe("{{$randomEmail}}");
+  });
+
+  test("OpenAPI 3.1 nullable string with no format falls back to randomString", () => {
+    expect(generateFromSchema({ type: ["string", "null"] } as unknown as OpenAPIV3.SchemaObject)).toBe("{{$randomString}}");
+  });
+
+  test("full format coverage from TASK-26 still maps correctly without explicit type", () => {
+    expect(generateFromSchema({ format: "uuid" } as OpenAPIV3.SchemaObject)).toBe("{{$uuid}}");
+    expect(generateFromSchema({ format: "uri" } as OpenAPIV3.SchemaObject)).toBe("{{$randomUrl}}");
+    expect(generateFromSchema({ format: "url" } as OpenAPIV3.SchemaObject)).toBe("{{$randomUrl}}");
+    expect(generateFromSchema({ format: "hostname" } as OpenAPIV3.SchemaObject)).toBe("{{$randomFqdn}}");
+    expect(generateFromSchema({ format: "ipv4" } as OpenAPIV3.SchemaObject)).toBe("{{$randomIpv4}}");
+    expect(generateFromSchema({ format: "date" } as OpenAPIV3.SchemaObject)).toBe("{{$randomDate}}");
+    expect(generateFromSchema({ format: "date-time" } as OpenAPIV3.SchemaObject)).toBe("{{$randomIsoDate}}");
+  });
+
+  test("formatToPlaceholder helper exposes the mapping for reuse", () => {
+    expect(formatToPlaceholder("email")).toBe("{{$randomEmail}}");
+    expect(formatToPlaceholder(undefined)).toBeUndefined();
+    expect(formatToPlaceholder("not-a-format")).toBeUndefined();
   });
 });
 
