@@ -1,9 +1,10 @@
 ---
 id: TASK-68
 title: 'T68: zond run без пути не подхватывает .zond-current и крашится с криптикой'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:38'
+updated_date: '2026-04-29 08:55'
 labels:
   - bug
   - cli
@@ -30,7 +31,7 @@ Workaround на всю сессию: `zond run apis/resend/tests --safe`. Top-5 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond run --safe (без пути) использует .zond-current если он выставлен
-- [ ] #2 Понятная ошибка если .zond-current не задан и пути нет (вместо 'paths[0] must be of type string, got boolean')
-- [ ] #3 Тип-чек на boolean флагах перед resolveApi
+- [x] #1 zond run --safe (без пути) использует .zond-current если он выставлен
+- [x] #2 Понятная ошибка если .zond-current не задан и пути нет (вместо 'paths[0] must be of type string, got boolean')
+- [x] #3 Тип-чек на boolean флагах перед resolveApi
 <!-- AC:END -->
