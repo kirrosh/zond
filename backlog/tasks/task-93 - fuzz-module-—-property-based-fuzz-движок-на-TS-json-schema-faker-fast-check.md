@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-04-29 13:29'
+updated_date: '2026-04-29 14:06'
 labels:
   - generator
   - probes
@@ -13,7 +14,7 @@ labels:
 dependencies:
   - TASK-58
   - TASK-92
-priority: high
+priority: medium
 ---
 
 ## Description

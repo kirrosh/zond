@@ -4,6 +4,7 @@ title: 'T23: docs/filesystem-layout.md — раскладка файлов и с
 status: To Do
 assignee: []
 created_date: '2026-04-27 12:39'
+updated_date: '2026-04-29 14:06'
 labels:
   - T23
   - phase-4
@@ -15,7 +16,6 @@ milestone: m-0
 dependencies:
   - TASK-17
   - TASK-18
-  - TASK-19
 priority: low
 ---
 
