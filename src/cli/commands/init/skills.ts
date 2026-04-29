@@ -1,8 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-import coverageSkill from "./templates/skills/coverage.md" with { type: "text" };
-import diagnoseSkill from "./templates/skills/diagnose.md" with { type: "text" };
+import zondSkill from "./templates/skills/zond.md" with { type: "text" };
 import scenariosSkill from "./templates/skills/scenarios.md" with { type: "text" };
 
 export interface SkillResult {
@@ -17,8 +16,7 @@ interface SkillTemplate {
 }
 
 const SKILLS: SkillTemplate[] = [
-  { name: "zond-coverage", body: coverageSkill },
-  { name: "zond-diagnose", body: diagnoseSkill },
+  { name: "zond", body: zondSkill },
   { name: "zond-scenarios", body: scenariosSkill },
 ];
 

@@ -34,8 +34,7 @@ describe("bootstrapWorkspace", () => {
   test("writes Claude Code skills under .claude/skills/", () => {
     const r = bootstrapWorkspace({ cwd, home, writeAgents: false });
     expect(r.skills.map((s) => s.name).sort()).toEqual([
-      "zond-coverage",
-      "zond-diagnose",
+      "zond",
       "zond-scenarios",
     ]);
     expect(r.skills.every((s) => s.action === "created")).toBe(true);
