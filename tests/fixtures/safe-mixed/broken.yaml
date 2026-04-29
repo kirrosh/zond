@@ -1,3 +1,0 @@
-name: B
-tests:
-  - this is: { not valid yaml
