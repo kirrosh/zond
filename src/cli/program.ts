@@ -129,6 +129,9 @@ function globalJson(cmd: Command): boolean {
 function resolveApiCollection(apiName: string, dbPath: string | undefined):
   | { spec: string | null; testPath: string | null }
   | { error: string } {
+  if (typeof apiName !== "string" || apiName.length === 0) {
+    return { error: "Internal: --api received non-string value" };
+  }
   try {
     getDb(dbPath);
     const col = findCollectionByNameOrId(apiName);
@@ -179,7 +182,7 @@ export function buildProgram(): Command {
     .action(async (pathArg: string | undefined, opts, cmd: Command) => {
       let path = pathArg;
       const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
-      const dbPath = opts.db as string | undefined;
+      const dbPath = typeof opts.db === "string" ? opts.db : undefined;
 
       if (!path && apiFlag) {
         const resolved = resolveApiCollection(apiFlag, dbPath);
@@ -196,7 +199,7 @@ export function buildProgram(): Command {
         path = resolved.testPath;
       }
       if (!path) {
-        printError("Missing path argument. Usage: zond run <path> or zond run --api <name> (or set with `zond use`)");
+        printError("No path given and .zond-current not set; run `zond use <api>` or pass path explicitly (or use --api <name>)");
         process.exitCode = 2;
         return;
       }
