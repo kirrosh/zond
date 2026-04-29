@@ -133,3 +133,23 @@ export async function parse(path: string): Promise<TestSuite[]> {
   // Not a file, try as directory
   return parseDirectory(path);
 }
+
+/**
+ * Like {@link parse}, but never silently drops files. Returns both successfully
+ * parsed suites and per-file parse errors so callers (run, validate, tag-filter)
+ * can surface failures instead of pretending the file did not exist.
+ */
+export async function parseSafe(path: string): Promise<ParseDirectoryResult> {
+  const file = Bun.file(path);
+  const exists = await file.exists();
+
+  if (exists) {
+    try {
+      return { suites: [await parseFile(path)], errors: [] };
+    } catch (err) {
+      return { suites: [], errors: [{ file: path, error: (err as Error).message }] };
+    }
+  }
+
+  return parseDirectorySafe(path);
+}

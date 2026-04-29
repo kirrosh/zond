@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { parseFile, parseDirectory, parse } from "../../src/core/parser/yaml-parser.ts";
+import { parseFile, parseDirectory, parse, parseSafe } from "../../src/core/parser/yaml-parser.ts";
 
 const fixturesDir = `${import.meta.dir}/../fixtures`;
 
@@ -65,5 +65,34 @@ describe("parse", () => {
     const suites = await parse(`${fixturesDir}/simple.yaml`);
     expect(suites).toHaveLength(1);
     expect(suites[0]!.name).toBe("Health Check");
+  });
+});
+
+describe("parseSafe", () => {
+  test("returns parse errors instead of silently dropping bad files", async () => {
+    const tmpDir = `${fixturesDir}/safe-mixed`;
+    const { mkdirSync, existsSync, rmSync } = await import("node:fs");
+    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
+    mkdirSync(tmpDir, { recursive: true });
+    await Bun.write(`${tmpDir}/ok.yaml`, "name: OK\ntests:\n  - name: T\n    GET: /x\n    expect: {}\n");
+    await Bun.write(`${tmpDir}/broken.yaml`, "name: B\ntests:\n  - this is: { not valid yaml\n");
+
+    const result = await parseSafe(tmpDir);
+    expect(result.suites).toHaveLength(1);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]!.file).toContain("broken.yaml");
+  });
+
+  test("single file: parse error surfaces in errors, suites empty", async () => {
+    const tmpDir = `${fixturesDir}/safe-single`;
+    const { mkdirSync, existsSync, rmSync } = await import("node:fs");
+    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
+    mkdirSync(tmpDir, { recursive: true });
+    const broken = `${tmpDir}/bad.yaml`;
+    await Bun.write(broken, ":\n: invalid\n");
+
+    const result = await parseSafe(broken);
+    expect(result.suites).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
   });
 });

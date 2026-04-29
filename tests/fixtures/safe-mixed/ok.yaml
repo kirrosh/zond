@@ -1,0 +1,5 @@
+name: OK
+tests:
+  - name: T
+    GET: /x
+    expect: {}
