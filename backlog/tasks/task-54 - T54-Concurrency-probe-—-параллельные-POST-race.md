@@ -4,6 +4,7 @@ title: 'T54: Concurrency probe — параллельные POST race'
 status: To Do
 assignee: []
 created_date: '2026-04-27 16:43'
+updated_date: '2026-04-29 08:36'
 labels:
   - bug-hunting
   - concurrency
@@ -41,3 +42,8 @@ Race conditions на write-операциях (одновременное POST �
 - Output: список endpoints с подозрительным concurrent поведением.
 - Документация.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 CLI flag --parallel <N> для probe-concurrency: выстреливает N параллельных копий одной мутации без ручного дублирования YAML-теста
+<!-- AC:END -->
