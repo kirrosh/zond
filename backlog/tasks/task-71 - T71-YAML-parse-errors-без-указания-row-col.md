@@ -1,9 +1,10 @@
 ---
 id: TASK-71
 title: 'T71: YAML parse errors без указания row:col'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:38'
+updated_date: '2026-04-29 09:07'
 labels:
   - bug
   - parser
@@ -32,7 +33,7 @@ bun имеет встроенный YAML; либо использовать ег
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Сообщение содержит file:line:col
-- [ ] #2 Поведение на колоне внутри test-name (note: ...): понятный pointer на строку
-- [ ] #3 NUL-байт в YAML: показать file:line + suggest $nullByte generator
+- [x] #1 Сообщение содержит file:line:col
+- [x] #2 Поведение на колоне внутри test-name (note: ...): понятный pointer на строку
+- [x] #3 NUL-байт в YAML: показать file:line + suggest $nullByte generator
 <!-- AC:END -->

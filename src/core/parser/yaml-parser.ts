@@ -1,7 +1,45 @@
 import { Glob } from "bun";
 import { resolve } from "node:path";
+import YAML from "yaml";
 import { validateSuite } from "./schema.ts";
 import type { TestSuite } from "./types.ts";
+
+/** Convert a 0-based byte offset into a 1-based (line, col) position. */
+function offsetToLineCol(text: string, offset: number): { line: number; col: number } {
+  let line = 1;
+  let col = 1;
+  for (let i = 0; i < offset && i < text.length; i++) {
+    if (text.charCodeAt(i) === 0x0a) {
+      line++;
+      col = 1;
+    } else {
+      col++;
+    }
+  }
+  return { line, col };
+}
+
+/**
+ * Format a YAML parse error as `file:line:col: <reason>` plus a snippet with
+ * a column pointer. Bun.YAML's SyntaxError exposes JS stack coordinates, not
+ * YAML positions, so on parse failure we re-parse with eemeli/yaml (which
+ * provides accurate `linePos`) just for diagnostics.
+ *
+ * Exported for tests.
+ */
+export function formatYamlParseError(filePath: string, text: string, primary: Error): Error {
+  const doc = YAML.parseDocument(text);
+  const e = doc.errors[0];
+  if (e?.linePos?.[0]) {
+    const { line, col } = e.linePos[0];
+    // eemeli's message reads "<reason> at line X, column Y:\n\n<snippet>".
+    // Strip the "at line ..." part since we surface line:col in the prefix.
+    const cleaned = e.message.replace(/\s+at line \d+, column \d+:/, ":");
+    return new Error(`Invalid YAML in ${filePath}:${line}:${col}: ${cleaned}`);
+  }
+  // eemeli accepted but Bun rejected — fall back to original message.
+  return new Error(`Invalid YAML in ${filePath}: ${primary.message}`);
+}
 
 export async function parseFile(filePath: string): Promise<TestSuite> {
   let text: string;
@@ -11,11 +49,22 @@ export async function parseFile(filePath: string): Promise<TestSuite> {
     throw new Error(`Failed to read file ${filePath}: ${(err as Error).message}`);
   }
 
+  // Both Bun.YAML and eemeli/yaml accept NUL bytes silently, but they corrupt
+  // downstream consumers (sqlite TEXT, JSON, terminals). Surface explicitly.
+  const nulIdx = text.indexOf("\x00");
+  if (nulIdx >= 0) {
+    const { line, col } = offsetToLineCol(text, nulIdx);
+    throw new Error(
+      `Invalid YAML in ${filePath}:${line}:${col}: NUL byte (\\x00) in source — ` +
+      `if you need a NUL in a request body, use the {{$nullByte}} generator instead of inlining the byte`
+    );
+  }
+
   let raw: unknown;
   try {
     raw = Bun.YAML.parse(text);
   } catch (err) {
-    throw new Error(`Invalid YAML in ${filePath}: ${(err as Error).message}`);
+    throw formatYamlParseError(filePath, text, err as Error);
   }
 
   try {
