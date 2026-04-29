@@ -1,9 +1,10 @@
 ---
 id: TASK-87
 title: macOS adhoc codesign zond binary in build pipeline
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 11:38'
+updated_date: '2026-04-29 11:44'
 labels:
   - build
   - macos
