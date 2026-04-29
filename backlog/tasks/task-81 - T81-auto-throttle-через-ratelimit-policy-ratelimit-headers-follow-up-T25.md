@@ -3,9 +3,10 @@ id: TASK-81
 title: >-
   T81: auto-throttle через ratelimit-policy / ratelimit-* headers (follow-up
   T25)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:41'
+updated_date: '2026-04-29 09:35'
 labels:
   - runner
   - robustness
@@ -37,8 +38,8 @@ Round 2: 154 из 612 probe-validation запросов поймали 429 по�
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Runner парсит ratelimit-limit, ratelimit-remaining, ratelimit-reset (RFC draft-ietf-httpapi-ratelimit-headers)
-- [ ] #2 Авто-throttle: при remaining<5 паузить до reset
-- [ ] #3 --rate-limit auto — стартует без limit, читает headers, подстраивается
-- [ ] #4 Документация
+- [x] #1 Runner парсит ratelimit-limit, ratelimit-remaining, ratelimit-reset (RFC draft-ietf-httpapi-ratelimit-headers)
+- [x] #2 Авто-throttle: при remaining<5 паузить до reset
+- [x] #3 --rate-limit auto — стартует без limit, читает headers, подстраивается
+- [x] #4 Документация
 <!-- AC:END -->

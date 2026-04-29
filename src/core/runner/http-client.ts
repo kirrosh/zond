@@ -1,5 +1,5 @@
 import type { HttpRequest, HttpResponse } from "./types.ts";
-import { type RateLimiter, parseRetryAfter } from "./rate-limiter.ts";
+import { type RateLimiter, parseRetryAfter, parseRateLimitHeaders } from "./rate-limiter.ts";
 
 export interface FetchOptions {
   timeout: number;
@@ -90,6 +90,15 @@ export async function executeRequest(
       response.headers.forEach((v, k) => {
         headers[k] = v;
       });
+
+      // Feed ratelimit-* headers back into the limiter so it can pause the
+      // stream proactively when the window is nearly exhausted (TASK-81).
+      if (opts.rate_limiter?.note) {
+        const meta = parseRateLimitHeaders(headers);
+        if (meta.remaining !== undefined || meta.reset !== undefined) {
+          opts.rate_limiter.note(meta);
+        }
+      }
 
       return { status: response.status, headers, body: bodyText, body_parsed, duration_ms };
     } catch (err) {

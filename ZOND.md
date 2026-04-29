@@ -344,8 +344,9 @@ zond run tests/ --env staging
 - **CLI:** `--rate-limit <N>` caps the run at N requests per second across all suites.
 - **`.env.yaml`:** add a top-level `rateLimit: <N>` field — picked up automatically when no CLI flag is given. CLI takes precedence.
 - **Auto retry on 429:** the runner respects the `Retry-After` header (seconds or HTTP-date). If the header is missing, it falls back to capped exponential backoff (base = `retry_delay`, cap = 30s). Up to 5 attempts per request, then the 429 is reported as the final response.
+- **Adaptive throttling from response headers (`--rate-limit auto`):** zond reads the standard `RateLimit-Remaining` / `RateLimit-Reset` headers (RFC draft `draft-ietf-httpapi-ratelimit-headers`) plus the GitHub/Stripe-style `X-RateLimit-*` aliases on every response. When `remaining` drops to ≤5, subsequent requests are paused until the window resets. `--rate-limit auto` starts with no static cap and lets the API's headers do the throttling — useful for `zond probe-validation` runs against production APIs where the right cap isn't known up front. A static `--rate-limit N` still benefits from the same headers (the cap is the floor; headers can push pauses out further).
 
-> **Tip:** set `--rate-limit` **1 below** the API's documented cap (e.g. use `4` for an API that allows 5 req/s). The throttle paces requests at `1000/N` ms intervals — at exactly N, sliding-window APIs may still return 429 on boundary milliseconds. A small margin avoids it.
+> **Tip:** set `--rate-limit` **1 below** the API's documented cap (e.g. use `4` for an API that allows 5 req/s). The throttle paces requests at `1000/N` ms intervals — at exactly N, sliding-window APIs may still return 429 on boundary milliseconds. A small margin avoids it. If the API exposes `RateLimit-*` headers, prefer `--rate-limit auto` and skip the guesswork.
 
 ```yaml
 # .env.yaml
