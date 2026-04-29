@@ -4,7 +4,7 @@ import { parse } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
 import { runSuite } from "../../core/runner/executor.ts";
-import { createRateLimiter } from "../../core/runner/rate-limiter.ts";
+import { createRateLimiter, createAdaptiveRateLimiter } from "../../core/runner/rate-limiter.ts";
 import { getReporter, generateJsonReport, generateJunitXml } from "../../core/reporter/index.ts";
 import type { ReporterName } from "../../core/reporter/types.ts";
 import { writeFile, mkdir } from "node:fs/promises";
@@ -22,7 +22,7 @@ export interface RunOptions {
   env?: string;
   report: ReporterName;
   timeout?: number;
-  rateLimit?: number;
+  rateLimit?: number | "auto";
   bail: boolean;
   /** Run regular suites sequentially (one after another) instead of in parallel. */
   sequential?: boolean;
@@ -170,14 +170,16 @@ export async function runCommand(options: RunOptions): Promise<number> {
   }
 
   // 3b. Resolve rate limit: CLI flag > .env.yaml `rateLimit:` field
-  let rateLimit = options.rateLimit;
+  let rateLimit: number | "auto" | undefined = options.rateLimit;
   if (rateLimit === undefined) {
     try {
       const envMeta = await loadEnvMeta(options.env, searchDir);
       rateLimit = envMeta.rateLimit;
     } catch { /* meta load failure is non-fatal */ }
   }
-  const rateLimiter = createRateLimiter(rateLimit);
+  const rateLimiter = rateLimit === "auto"
+    ? createAdaptiveRateLimiter()
+    : createRateLimiter(rateLimit);
   const runOpts = { rateLimiter };
 
   // 4. Run suites — setup suites run first (sequentially), their captures flow into regular suites

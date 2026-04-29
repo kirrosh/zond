@@ -84,6 +84,17 @@ function parsePositiveInt(name: string): (raw: string) => number {
   };
 }
 
+/** `--rate-limit` accepts a positive integer (req/sec cap) or the literal
+ *  string `auto` (no static cap; throttle adaptively from ratelimit-* headers). */
+function parseRateLimit(raw: string): number | "auto" {
+  if (raw.toLowerCase() === "auto") return "auto";
+  const n = Number.parseInt(raw, 10);
+  if (Number.isNaN(n) || n <= 0) {
+    throw new InvalidArgumentError(`Invalid --rate-limit value: ${raw} (expected a positive integer or "auto")`);
+  }
+  return n;
+}
+
 function parseInteger(name: string): (raw: string) => number {
   return (raw: string) => {
     const n = Number.parseInt(raw, 10);
@@ -166,7 +177,7 @@ export function buildProgram(): Command {
         .argParser(parseReporter),
     )
     .option("--timeout <ms>", "Override request timeout", parsePositiveInt("--timeout"))
-    .option("--rate-limit <N>", "Throttle requests to at most N per second (set 1 below the real API cap to avoid boundary 429s)", parsePositiveInt("--rate-limit"))
+    .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers", parseRateLimit)
     .option("--bail", "Stop on first suite failure")
     .option("--sequential", "Run regular suites one after another instead of in parallel (opt-out of Promise.all)")
     .option("--no-db", "Do not save results to zond.db")
