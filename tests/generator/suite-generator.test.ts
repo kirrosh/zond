@@ -81,8 +81,30 @@ describe("generateStep", () => {
     expect(step.expect.status).toBe(302);
   });
 
-  test("defaults to 200 if no responses", () => {
+  test("defaults to 200 if no responses (GET)", () => {
     const ep = makeEndpoint({ path: "/pets", method: "GET", responses: [] });
+    const step = generateStep(ep, noSecurity);
+    expect(step.expect.status).toBe(200);
+  });
+
+  test("TASK-42: defaults to 201 for POST without declared 2xx response", () => {
+    const ep = makeEndpoint({ path: "/audiences", method: "POST", responses: [] });
+    const step = generateStep(ep, noSecurity);
+    expect(step.expect.status).toBe(201);
+  });
+
+  test("TASK-42: defaults to 204 for DELETE without declared 2xx response", () => {
+    const ep = makeEndpoint({ path: "/audiences/{id}", method: "DELETE", responses: [] });
+    const step = generateStep(ep, noSecurity);
+    expect(step.expect.status).toBe(204);
+  });
+
+  test("TASK-42: declared 2xx still wins over the method-aware default", () => {
+    const ep = makeEndpoint({
+      path: "/audiences",
+      method: "POST",
+      responses: [{ statusCode: 200, description: "OK (some specs do return 200 on POST)" }],
+    });
     const step = generateStep(ep, noSecurity);
     expect(step.expect.status).toBe(200);
   });
