@@ -1,9 +1,10 @@
 ---
 id: TASK-69
 title: 'T69: zond db diagnose теряет данные (показал 1 из 11 5xx)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:38'
+updated_date: '2026-04-29 08:59'
 labels:
   - bug
   - diagnose
@@ -33,7 +34,7 @@ Round 2: в run #5 (probe-validation) реально 11 5xx, но `zond db diagn
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond db diagnose <id> показывает все 5xx-failures, не sample
-- [ ] #2 Если применяется кластеризация — общий счётчик показывается отдельно от cluster-summary
-- [ ] #3 Тест регрессии: diagnose count == db run --json count для класса 5xx
+- [x] #1 zond db diagnose <id> показывает все 5xx-failures, не sample
+- [x] #2 Если применяется кластеризация — общий счётчик показывается отдельно от cluster-summary
+- [x] #3 Тест регрессии: diagnose count == db run --json count для класса 5xx
 <!-- AC:END -->
