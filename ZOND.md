@@ -242,6 +242,38 @@ expect:
 
 Each suite runs in its own variable scope. Captured variables do **not** propagate between suites. If multiple suites need `auth_token`, each must include its own login step or use a pre-set value from `.env.yaml`.
 
+### Parameterize (suite-level cross-product)
+
+Run the same suite body once per binding in `parameterize` instead of copy-pasting tests. Each key contributes one variable; multiple keys produce the cross-product.
+
+```yaml
+name: list-shape contract
+parameterize:
+  endpoint: [/emails, /domains, /webhooks, /broadcasts, /contacts]
+tests:
+  - name: "list shape on {{endpoint}}"
+    GET: "{{endpoint}}"
+    expect:
+      status: 200
+      body:
+        object: { equals: list }
+        data:   { type: array }
+        has_more: { type: boolean }
+```
+
+The example expands to five test runs (one per `endpoint`). Test names are interpolated, so reporters and `zond db diagnose` can distinguish iterations.
+
+Multiple keys → cross-product:
+
+```yaml
+parameterize:
+  endpoint: [/emails, /domains]
+  variant:  [GET, HEAD]
+# 4 iterations: /emails+GET, /emails+HEAD, /domains+GET, /domains+HEAD
+```
+
+Captures and tainted/missing-capture state are reset between iterations — values captured in iteration 1 are not visible in iteration 2. This matches `zond use`-style isolation but applied per binding inside a single suite. Use `parameterize` for read-only contract checks across many endpoints; for data-driven CRUD inside one HTTP step, prefer `for_each` on the step.
+
 ### ETag / Conditional Requests
 
 If-Match and If-None-Match require escaped quotes around the ETag value:
