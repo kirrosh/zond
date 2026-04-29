@@ -75,6 +75,14 @@ zond sync <spec> --tests apis/<name>/tests
   in the same run. See `apis/<name>/tests/setup.yaml` examples emitted by `zond generate`.
 - `zond run --env <name>` loads `.env.<name>.yaml` from the API directory.
 
+## Stub generators
+`zond generate` fills bodies with `{{$randomString}}`. Format-strict APIs reject
+these with 400/422 — that's a test-fix, not a backend bug. Swap to the typed
+generator (`$randomEmail`, `$randomFqdn`, `$randomUrl`, `$randomIpv4`, `$uuid`,
+`$randomInt`, `$randomIsoDate`, `$randomDate`, `$randomName`); fall back to a
+hardcoded literal if a typed generator still fails. See `zond-diagnose` for the
+full fix flow.
+
 ## When to hand off
 - A failing run with mixed root causes → `zond-diagnose`.
 - A user-journey or multi-step flow that `generate` can't express → `zond-scenarios`.

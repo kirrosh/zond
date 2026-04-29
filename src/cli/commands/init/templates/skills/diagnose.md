@@ -41,6 +41,41 @@ DiagnoseResult guide:
   - `update_expectation` → only if the user confirms the new contract is correct.
 - `root_cause` groups identical failures so one fix covers many cases.
 
+## Fixing 4xx caused by stub generators (`$randomString` everywhere)
+
+`zond generate` fills bodies with `{{$randomString}}` for every field. APIs that
+strictly validate formats (email, FQDN, UUID, IPv4, ISO date) will reject these
+with **400/422** — `recommended_action: fix_test_logic`. This is **not** a backend
+bug. Fix flow:
+
+1. Read the failure body (`zond db run <id> --status 422 --json`) — it usually
+   names the offending field and the expected format.
+2. **First pass** — swap `{{$randomString}}` for the matching generator:
+
+   | API expects   | Use                  |
+   |---------------|----------------------|
+   | email         | `{{$randomEmail}}`   |
+   | hostname/FQDN | `{{$randomFqdn}}`    |
+   | URL           | `{{$randomUrl}}`     |
+   | IPv4          | `{{$randomIpv4}}`    |
+   | UUID          | `{{$uuid}}`          |
+   | integer       | `{{$randomInt}}`     |
+   | ISO date      | `{{$randomIsoDate}}` |
+   | date          | `{{$randomDate}}`    |
+   | person name   | `{{$randomName}}`    |
+
+3. **Second pass** — if a typed generator still fails (regex too strict, enum,
+   business constraint), drop to a hardcoded literal that is known to satisfy
+   the contract (e.g. `"https://example.com"`, `"info@example.com"`,
+   `"2026-01-01T00:00:00Z"`).
+4. **Dependent IDs** (`audience_id`, `topic_id`, anything that must reference an
+   existing resource) — generators cannot help. Either capture the ID from a
+   prior `create_*` step in the same suite, or move that creation into a
+   `setup: true` suite and reference the captured variable.
+
+After each fix re-run `zond run <path> --safe --json` and re-diagnose; do not
+batch many edits without verifying.
+
 ## Mode 2 — proactive bug hunting (probes)
 Run on a passing API to surface latent bugs.
 
