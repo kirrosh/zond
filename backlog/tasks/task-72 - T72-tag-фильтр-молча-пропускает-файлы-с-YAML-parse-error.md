@@ -1,9 +1,10 @@
 ---
 id: TASK-72
 title: 'T72: --tag фильтр молча пропускает файлы с YAML parse error'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:38'
+updated_date: '2026-04-29 14:15'
 labels:
   - bug
   - parser
@@ -32,7 +33,7 @@ Tag-discovery должен:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Если файл не парсится — warning с file:reason, не silent skip
-- [ ] #2 Если все файлы с тэгом упали при парсе — отдельное сообщение, не 'No suites match'
-- [ ] #3 Exit-код 1 на parse-error (как validate)
+- [x] #1 Если файл не парсится — warning с file:reason, не silent skip
+- [x] #2 Если все файлы с тэгом упали при парсе — отдельное сообщение, не 'No suites match'
+- [x] #3 Exit-код 1 на parse-error (как validate)
 <!-- AC:END -->

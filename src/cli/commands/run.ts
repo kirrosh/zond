@@ -1,6 +1,6 @@
 import { dirname } from "path";
 import { stat } from "node:fs/promises";
-import { parse } from "../../core/parser/yaml-parser.ts";
+import { parseSafe } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
 import { runSuite } from "../../core/runner/executor.ts";
@@ -47,16 +47,27 @@ export interface RunOptions {
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
-  // 1. Parse test files
+  // 1. Parse test files (collect parse errors instead of silently skipping)
   let suites: TestSuite[];
+  let parseErrors: { file: string; error: string }[];
   try {
-    suites = await parse(options.path);
+    const parsed = await parseSafe(options.path);
+    suites = parsed.suites;
+    parseErrors = parsed.errors;
   } catch (err) {
     printError(err instanceof Error ? err.message : String(err));
     return 2;
   }
 
+  for (const pe of parseErrors) {
+    printWarning(`Skipped ${pe.file}: ${pe.error}`);
+  }
+
   if (suites.length === 0) {
+    if (parseErrors.length > 0) {
+      printError(`All ${parseErrors.length} test file(s) in ${options.path} failed to parse`);
+      return 2;
+    }
     printWarning(`No test files found in ${options.path}`);
     return 0;
   }
@@ -65,6 +76,12 @@ export async function runCommand(options: RunOptions): Promise<number> {
   if (options.tag && options.tag.length > 0) {
     suites = filterSuitesByTags(suites, options.tag);
     if (suites.length === 0) {
+      if (parseErrors.length > 0) {
+        printError(
+          `No suites match tags [${options.tag.join(", ")}] — but ${parseErrors.length} file(s) failed to parse (see warnings above). Fix parse errors and retry.`
+        );
+        return 1;
+      }
       printWarning("No suites match the specified tags");
       return 0;
     }
