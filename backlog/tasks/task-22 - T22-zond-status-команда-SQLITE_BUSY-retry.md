@@ -4,6 +4,7 @@ title: 'T22: zond status команда + SQLITE_BUSY retry'
 status: To Do
 assignee: []
 created_date: '2026-04-27 12:39'
+updated_date: '2026-04-29 08:42'
 labels:
   - T22
   - phase-4
@@ -36,4 +37,5 @@ priority: low
 - [ ] #1 `zond status` печатает workspace root (или 'not found'), DB path, current API, count of suites, MCP sanity
 - [ ] #2 `zond status --json` возвращает структурированные данные в стандартном envelope
 - [ ] #3 Параллельный `zond run` x2 на одну БД больше не падает с SQLITE_BUSY (тест: spawn двух процессов одновременно)
+- [ ] #4 WAL mode включён по умолчанию для zond.db чтобы два параллельных run не дрались за лок
 <!-- AC:END -->

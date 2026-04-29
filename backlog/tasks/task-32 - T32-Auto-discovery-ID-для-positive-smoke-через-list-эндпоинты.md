@@ -4,6 +4,7 @@ title: 'T32: Auto-discovery ID для positive-smoke через list-эндпо�
 status: To Do
 assignee: []
 created_date: '2026-04-27 14:09'
+updated_date: '2026-04-29 08:42'
 labels:
   - generator
   - robustness
@@ -55,3 +56,8 @@ priority: medium
 
 - T27 (нужны positive-сьюты с тегом needs-id)
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 FK detection: распознавать поля типа audience_id / domain_id через $ref на schema другого ресурса или name-эвристику; помечать smoke skip: needs-fixture с явным сообщением 'fixture_audience_id required'
+<!-- AC:END -->

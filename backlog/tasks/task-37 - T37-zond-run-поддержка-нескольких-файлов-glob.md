@@ -4,12 +4,13 @@ title: 'T37: zond run поддержка нескольких файлов / glo
 status: To Do
 assignee: []
 created_date: '2026-04-27 15:28'
+updated_date: '2026-04-29 08:42'
 labels:
   - cli
   - ux
 milestone: m-3
 dependencies: []
-priority: low
+priority: medium
 ---
 
 ## Description
