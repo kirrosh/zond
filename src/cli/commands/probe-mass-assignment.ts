@@ -136,6 +136,11 @@ export async function probeMassAssignmentCommand(
       if (counts.high > 0) {
         printWarning(`${counts.high} HIGH-severity finding(s) — privilege escalation candidates. Review the digest.`);
       }
+      if (counts.inconclusiveBaseline > 0) {
+        printWarning(
+          `${counts.inconclusiveBaseline} endpoint(s) had baseline POST failures — fix env fixtures (FK ids / path-params) and re-run. These are excluded from --emit-tests on purpose.`,
+        );
+      }
     }
 
     // Non-zero exit when HIGH findings — useful for CI gating.
@@ -148,18 +153,39 @@ export async function probeMassAssignmentCommand(
   }
 }
 
-function countBuckets(verdicts: Array<{ severity: string }>): {
-  high: number; medium: number; low: number; ok: number; skipped: number;
-} {
-  const out: Record<string, number> = { high: 0, medium: 0, low: 0, ok: 0, skipped: 0 };
-  for (const v of verdicts) {
-    if (v.severity in out) out[v.severity] = (out[v.severity] ?? 0) + 1;
-  }
-  return out as { high: number; medium: number; low: number; ok: number; skipped: number };
+interface BucketCounts {
+  high: number;
+  inconclusiveBaseline: number;
+  medium: number;
+  low: number;
+  ok: number;
+  skipped: number;
 }
 
-function printSeverityLine(c: { high: number; medium: number; low: number; ok: number; skipped: number }): void {
+function countBuckets(verdicts: Array<{ severity: string }>): BucketCounts {
+  const out: BucketCounts = {
+    high: 0,
+    inconclusiveBaseline: 0,
+    medium: 0,
+    low: 0,
+    ok: 0,
+    skipped: 0,
+  };
+  for (const v of verdicts) {
+    switch (v.severity) {
+      case "high": out.high++; break;
+      case "inconclusive-baseline": out.inconclusiveBaseline++; break;
+      case "medium": out.medium++; break;
+      case "low": out.low++; break;
+      case "ok": out.ok++; break;
+      case "skipped": out.skipped++; break;
+    }
+  }
+  return out;
+}
+
+function printSeverityLine(c: BucketCounts): void {
   console.log(
-    `Summary: HIGH ${c.high} · MED ${c.medium} · LOW ${c.low} · OK ${c.ok} · SKIPPED ${c.skipped}`,
+    `Summary: HIGH ${c.high} · INCONCLUSIVE ${c.inconclusiveBaseline} · MED ${c.medium} · LOW ${c.low} · OK ${c.ok} · SKIPPED ${c.skipped}`,
   );
 }

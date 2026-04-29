@@ -109,6 +109,13 @@ interface MockResponseSpec {
   body?: unknown;
 }
 
+/** Discriminator: a request body is the "baseline" probe (no extras) when
+ *  none of our suspected fields are present. */
+function isBaseline(body: unknown): boolean {
+  if (typeof body !== "object" || body === null) return true;
+  return !Object.keys(SUSPECTED_FIELDS).some(k => k in (body as Record<string, unknown>));
+}
+
 let originalFetch: typeof fetch;
 let calls: FetchCall[] = [];
 let responder: (req: FetchCall) => MockResponseSpec;
@@ -144,29 +151,78 @@ afterEach(() => {
 // ──────────────────────────────────────────────
 
 describe("runMassAssignmentProbes", () => {
-  it("classifies rejected (4xx) as OK", async () => {
-    responder = () => ({ status: 400, body: { error: "bad request" } });
+  it("classifies rejected (4xx) as OK when baseline is 2xx (TASK-91)", async () => {
+    responder = (req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      // injected → reject
+      return { status: 400, body: { error: "additional property not allowed" } };
+    };
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint(), deleteUserEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("ok");
+    expect(v.summary).toMatch(/extras refused/);
+    // Two POSTs: baseline + injected; one DELETE for baseline cleanup.
+    const posts = calls.filter(c => c.method === "POST");
+    expect(posts).toHaveLength(2);
+    expect(isBaseline(posts[0]!.body)).toBe(true);
+    expect(isBaseline(posts[1]!.body)).toBe(false);
+    // Injected body must include all suspected fields
+    for (const key of Object.keys(SUSPECTED_FIELDS)) {
+      expect(posts[1]!.body as Record<string, unknown>).toHaveProperty(key);
+    }
+  });
+
+  it("classifies INCONCLUSIVE-baseline when both baseline and injected return 4xx (TASK-91)", async () => {
+    responder = () => ({ status: 404, body: { message: "Domain not found" } });
     const result = await runMassAssignmentProbes({
       endpoints: [postUsersEndpoint()],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
     });
-    expect(result.verdicts).toHaveLength(1);
     const v = result.verdicts[0]!;
-    expect(v.severity).toBe("ok");
-    expect(v.summary).toMatch(/rejected 400/);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.method).toBe("POST");
-    // Body must include all suspected fields
-    const body = calls[0]!.body as Record<string, unknown>;
-    for (const key of Object.keys(SUSPECTED_FIELDS)) {
-      expect(body).toHaveProperty(key);
-    }
+    expect(v.severity).toBe("inconclusive-baseline");
+    expect(v.summary).toMatch(/baseline body invalid/);
+    expect(v.summary).toMatch(/Domain not found/);
+    expect(v.summary).toMatch(/fix fixture/);
+    expect(v.baseline?.status).toBe(404);
+  });
+
+  it("classifies extras-bypass as HIGH when baseline 4xx but injected 2xx (TASK-91)", async () => {
+    responder = (req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 422, body: { error: "missing required field" } };
+      }
+      return {
+        status: 201,
+        body: { id: "bypass-id", name: "alice", is_admin: true, role: "admin" },
+      };
+    };
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint(), getUserByIdEndpoint(), deleteUserEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("high");
+    expect(v.summary).toMatch(/extras-bypass/);
+    expect(v.baseline?.status).toBe(422);
+    expect(v.response?.status).toBe(201);
   });
 
   it("flags accepted-and-applied (HIGH) when GET echoes our injected sentinel", async () => {
     let createdId = "11111111-1111-1111-1111-111111111111";
     responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
       if (req.method === "POST") {
         // Server echoes back is_admin: true (the sentinel we injected)
         return {
@@ -216,6 +272,9 @@ describe("runMassAssignmentProbes", () => {
   it("flags accepted-and-ignored (LOW) when extras silently dropped", async () => {
     let createdId = "22222222-2222-2222-2222-222222222222";
     responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
       if (req.method === "POST") {
         // Body echo without our suspicious extras → still need GET to confirm
         return { status: 201, body: { id: createdId, name: "alice" } };
@@ -242,7 +301,12 @@ describe("runMassAssignmentProbes", () => {
   });
 
   it("flags inconclusive (MEDIUM) when no GET counterpart exists", async () => {
-    responder = () => ({ status: 201, body: { id: "abc", name: "alice" } });
+    responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      return { status: 201, body: { id: "abc", name: "alice" } };
+    };
 
     const result = await runMassAssignmentProbes({
       endpoints: [postUsersEndpoint()], // no GET, no DELETE
@@ -256,13 +320,19 @@ describe("runMassAssignmentProbes", () => {
   });
 
   it("notes strict contract when additionalProperties:false and 4xx", async () => {
-    responder = () => ({ status: 422, body: { error: "additional property not allowed" } });
+    responder = (req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      return { status: 422, body: { error: "additional property not allowed" } };
+    };
     const strictSchema: OpenAPIV3.SchemaObject = {
       ...userSchema,
       additionalProperties: false,
     };
     const result = await runMassAssignmentProbes({
-      endpoints: [postUsersEndpoint({ requestBodySchema: strictSchema })],
+      endpoints: [postUsersEndpoint({ requestBodySchema: strictSchema }), deleteUserEndpoint()],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
     });
@@ -273,11 +343,17 @@ describe("runMassAssignmentProbes", () => {
   });
 
   it("flags 5xx as HIGH", async () => {
-    responder = () => ({ status: 500, body: { error: "boom" } });
+    responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      return { status: 500, body: { error: "boom" } };
+    };
     const result = await runMassAssignmentProbes({
       endpoints: [postUsersEndpoint()],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
+      noCleanup: true,
     });
     const v = result.verdicts[0]!;
     expect(v.severity).toBe("high");
@@ -304,7 +380,12 @@ describe("runMassAssignmentProbes", () => {
   });
 
   it("auth header injected from vars", async () => {
-    responder = () => ({ status: 400 });
+    responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      return { status: 400 };
+    };
     await runMassAssignmentProbes({
       endpoints: [postUsersEndpoint({
         security: ["bearerAuth"],
@@ -320,9 +401,15 @@ describe("runMassAssignmentProbes", () => {
 
 describe("formatDigestMarkdown", () => {
   it("groups verdicts by severity with headers and counts", async () => {
-    responder = () => ({ status: 400 });
+    responder = (req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      return { status: 400 };
+    };
     const result = await runMassAssignmentProbes({
-      endpoints: [postUsersEndpoint()],
+      endpoints: [postUsersEndpoint(), deleteUserEndpoint()],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
     });
@@ -332,12 +419,31 @@ describe("formatDigestMarkdown", () => {
     expect(md).toMatch(/✅ OK — rejected 4xx/);
     expect(md).toMatch(/POST \/users/);
   });
+
+  it("renders INCONCLUSIVE-baseline section with hint (TASK-91)", async () => {
+    responder = () => ({ status: 404, body: { message: "Domain not found" } });
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const md = formatDigestMarkdown(result, "spec.yaml");
+    expect(md).toMatch(/INCONCLUSIVE — baseline body invalid/);
+    expect(md).toMatch(/Domain not found/);
+    expect(md).toMatch(/set the right fixture/);
+  });
 });
 
 describe("emitRegressionSuites", () => {
   it("emits rejected-baseline suite for OK verdicts", async () => {
-    responder = () => ({ status: 422, body: { error: "no" } });
-    const eps = [postUsersEndpoint()];
+    responder = (req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      return { status: 422, body: { error: "no" } };
+    };
+    const eps = [postUsersEndpoint(), deleteUserEndpoint()];
     const result = await runMassAssignmentProbes({
       endpoints: eps,
       securitySchemes: [],
@@ -352,6 +458,9 @@ describe("emitRegressionSuites", () => {
   it("emits ignored-baseline suite with follow-up GET assertion + cleanup", async () => {
     let createdId = "33333333-3333-3333-3333-333333333333";
     responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
       if (req.method === "POST") return { status: 201, body: { id: createdId, name: "alice" } };
       if (req.method === "GET") return { status: 200, body: { id: createdId, name: "alice" } };
       if (req.method === "DELETE") return { status: 204 };
@@ -375,6 +484,9 @@ describe("emitRegressionSuites", () => {
 
   it("does NOT emit suites for HIGH (applied) verdicts", async () => {
     responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
       if (req.method === "POST") return { status: 201, body: { id: "x", is_admin: true } };
       if (req.method === "GET") return { status: 200, body: { id: "x", is_admin: true } };
       if (req.method === "DELETE") return { status: 204 };
@@ -386,6 +498,21 @@ describe("emitRegressionSuites", () => {
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
     });
+    const suites = emitRegressionSuites(result, eps, []);
+    expect(suites).toHaveLength(0);
+  });
+
+  it("does NOT emit suites for INCONCLUSIVE-baseline verdicts (TASK-91)", async () => {
+    // Both baseline and injected return 4xx — fixture problem, not a security
+    // signal. Emitting a regression test would make CI 404 every run.
+    responder = () => ({ status: 404, body: { message: "Domain not found" } });
+    const eps = [postUsersEndpoint()];
+    const result = await runMassAssignmentProbes({
+      endpoints: eps,
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    expect(result.verdicts[0]!.severity).toBe("inconclusive-baseline");
     const suites = emitRegressionSuites(result, eps, []);
     expect(suites).toHaveLength(0);
   });

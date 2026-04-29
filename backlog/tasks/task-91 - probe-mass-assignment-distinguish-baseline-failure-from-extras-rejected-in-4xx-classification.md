@@ -3,9 +3,10 @@ id: TASK-91
 title: >-
   probe-mass-assignment: distinguish baseline-failure from extras-rejected in
   4xx classification
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 12:19'
+updated_date: '2026-04-29 12:38'
 labels:
   - probe
   - follow-up
