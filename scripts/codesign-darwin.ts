@@ -36,6 +36,10 @@ if (which.status !== 0) {
   process.exit(0);
 }
 
+// Strip xattrs first — `com.apple.provenance` (added on download/cp) and
+// `com.apple.quarantine` invalidate the signature we're about to apply.
+spawnSync("xattr", ["-c", BINARY], { stdio: "ignore" });
+
 const result = spawnSync("codesign", ["--force", "--sign", "-", BINARY], {
   stdio: "inherit",
 });
