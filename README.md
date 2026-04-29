@@ -58,6 +58,7 @@ Claude Code can write pytest from scratch — but it takes 30-60 minutes per flo
 | **Spec-Grounded** | Tests are derived from your OpenAPI schema, not invented from scratch. The spec is the source of truth. |
 | **Full Visibility** | Every run is stored in SQLite. Compare runs, track regressions, see exactly what the server returned. |
 | **Coverage Tracking** | See which endpoints are tested, which aren't, and what broke since last run. |
+| **Schema Validation** | `--validate-schema` checks every JSON response against the OpenAPI schema (types, required, enum, format, `$ref`) — catches contract drift the YAML expectations miss. |
 | **CI-Ready** | One command generates GitHub Actions or GitLab CI workflow. Tests in YAML, in git, with code review. |
 
 ## Try It
