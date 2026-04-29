@@ -1,9 +1,10 @@
 ---
 id: TASK-74
 title: 'T74: --json envelope inconsistency между db-командами'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:40'
+updated_date: '2026-04-29 14:30'
 labels:
   - bug
   - cli

@@ -693,14 +693,21 @@ export function buildProgram(): Command {
   // `run --json` outright). Now it is per-command. Attach `--json` to every
   // subcommand that previously read it via globalJson(), EXCEPT `run` —
   // run's only JSON output path is `--report json`.
-  const skipJson = new Set(["run", "completions", "serve", "ci"]);
-  const attachJson = (cmd: Command): void => {
-    if (!skipJson.has(cmd.name())) {
+  // Skip by fully-qualified path so `db run` (inner) keeps --json while
+  // top-level `run` does not.
+  const skipJson = new Set(["run", "completions", "serve"]);
+  const attachJson = (cmd: Command, parentPath: string): void => {
+    const path = parentPath ? `${parentPath} ${cmd.name()}` : cmd.name();
+    // Only leaf commands (those with action handlers) get --json — parent
+    // namespace commands like `db` and `ci` would otherwise shadow the option
+    // on their children and `cmd.opts()` on the leaf would not see --json.
+    const hasAction = (cmd as unknown as { _actionHandler?: unknown })._actionHandler != null;
+    if (hasAction && !skipJson.has(path)) {
       cmd.option("--json", "Output in JSON envelope format");
     }
-    for (const sub of cmd.commands) attachJson(sub);
+    for (const sub of cmd.commands) attachJson(sub, path);
   };
-  for (const sub of program.commands) attachJson(sub);
+  for (const sub of program.commands) attachJson(sub, "");
 
   return program;
 }
