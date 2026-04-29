@@ -32,7 +32,7 @@
     "test:mocked": "bun run scripts/run-mocked-tests.ts",
     "check": "tsc --noEmit --project tsconfig.json",
     "lint:dead": "knip --reporter compact",
-    "build": "bun build --compile src/cli/index.ts --outfile zond",
+    "build": "bun build --compile src/cli/index.ts --outfile zond && bun run scripts/codesign-darwin.ts ./zond",
     "bench:api": "bun benchmarks/api/server.ts"
   },
   "devDependencies": {

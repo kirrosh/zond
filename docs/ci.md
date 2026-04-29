@@ -272,3 +272,24 @@ gh workflow run api-tests.yml --repo OWNER/zond-tests
 | `--safe` | Run only GET tests (read-only mode) |
 | `--tag <tag>` | Filter suites by tag |
 | `--auth-token <token>` | Inject bearer token as `{{auth_token}}` |
+
+## Building for distribution (macOS)
+
+`bun run build` compiles `./zond` and, on macOS, applies an **adhoc**
+codesign so Gatekeeper doesn't SIGKILL the freshly-built binary on first
+run (`code or signature have been modified`). Adhoc is enough for local
+development but **not for distribution**: users on other Macs will hit
+Gatekeeper rejection.
+
+For published release artefacts (Homebrew, install.sh tarballs, GitHub
+Releases) re-sign with a real Developer ID + notarisation:
+
+```bash
+codesign --force --options runtime --sign "Developer ID Application: <Team>" ./zond
+xcrun notarytool submit ./zond.zip --apple-id <id> --team-id <team> --wait
+xcrun stapler staple ./zond
+```
+
+CI release jobs that produce macOS binaries should run those steps
+after `bun run build`. The local adhoc step is a no-op on linux/windows
+and degrades gracefully (warn-only) when `codesign` isn't on PATH.
