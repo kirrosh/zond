@@ -19,14 +19,31 @@ describe("bootstrapWorkspace", () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  test("integration=skip: only zond.config.yml + apis/, no AGENTS.md", () => {
-    const r = bootstrapWorkspace({ cwd, home, writeAgents: false });
+  test("integration=skip: only zond.config.yml + apis/, no AGENTS.md, no skills", () => {
+    const r = bootstrapWorkspace({ cwd, home, writeAgents: false, writeSkills: false });
     expect(r.configAction).toBe("created");
     expect(r.apisAction).toBe("created");
     expect(r.agents).toBeNull();
+    expect(r.skills).toEqual([]);
     expect(existsSync(join(cwd, "zond.config.yml"))).toBe(true);
     expect(existsSync(join(cwd, "apis"))).toBe(true);
     expect(existsSync(join(cwd, "AGENTS.md"))).toBe(false);
+    expect(existsSync(join(cwd, ".claude"))).toBe(false);
+  });
+
+  test("writes Claude Code skills under .claude/skills/", () => {
+    const r = bootstrapWorkspace({ cwd, home, writeAgents: false });
+    expect(r.skills.map((s) => s.name).sort()).toEqual([
+      "zond-coverage",
+      "zond-diagnose",
+      "zond-scenarios",
+    ]);
+    expect(r.skills.every((s) => s.action === "created")).toBe(true);
+    for (const s of r.skills) {
+      expect(existsSync(s.path)).toBe(true);
+      const body = readFileSync(s.path, "utf-8");
+      expect(body).toContain(`name: ${s.name}`);
+    }
   });
 
   test("integration=cli: AGENTS.md created", () => {
@@ -42,6 +59,7 @@ describe("bootstrapWorkspace", () => {
     expect(r.configAction).toBe("noop");
     expect(r.apisAction).toBe("noop");
     expect(r.agents?.action).toBe("noop");
+    expect(r.skills.every((s) => s.action === "noop")).toBe(true);
   });
 
   test("dryRun does not write files", () => {
@@ -49,5 +67,6 @@ describe("bootstrapWorkspace", () => {
     expect(r.configAction).toBe("created");
     expect(existsSync(join(cwd, "zond.config.yml"))).toBe(false);
     expect(existsSync(join(cwd, "apis"))).toBe(false);
+    expect(existsSync(join(cwd, ".claude"))).toBe(false);
   });
 });

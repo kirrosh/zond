@@ -349,6 +349,7 @@ export function buildProgram(): Command {
     .option("--workspace", "Bootstrap a zond workspace (zond.config.yml, apis/, AGENTS.md)")
     .option("--with-spec <path>", "Bootstrap workspace AND register first API from spec")
     .option("--no-agents-md", "Skip writing AGENTS.md when bootstrapping")
+    .option("--no-skills", "Skip writing Claude Code skills under .claude/skills/")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       process.exitCode = await initCommand({
         name: opts.name,
@@ -361,6 +362,7 @@ export function buildProgram(): Command {
         workspace: opts.workspace === true,
         withSpec: opts.withSpec,
         noAgents: opts.agentsMd === false,
+        noSkills: opts.skills === false,
         json: globalJson(cmd),
       });
     });
