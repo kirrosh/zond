@@ -19,6 +19,8 @@ export interface InitOptions {
   withSpec?: string;
   /** Skip writing AGENTS.md. */
   noAgents?: boolean;
+  /** Skip writing Claude Code skills under .claude/skills/. */
+  noSkills?: boolean;
   /** Override cwd for bootstrap (used by tests; CLI always uses process.cwd()). */
   cwd?: string;
   /** Override $HOME for MCP install (used by tests). */
@@ -44,6 +46,7 @@ export async function initCommand(options: InitOptions): Promise<number> {
 
   const mode = resolveMode(options);
   const writeAgents = !options.noAgents;
+  const writeSkills = !options.noSkills;
 
   try {
     if (mode === "register") {
@@ -52,7 +55,7 @@ export async function initCommand(options: InitOptions): Promise<number> {
       return 0;
     }
 
-    const bootstrap = bootstrapWorkspace({ writeAgents, cwd: options.cwd, home: options.home });
+    const bootstrap = bootstrapWorkspace({ writeAgents, writeSkills, cwd: options.cwd, home: options.home });
     let register: SetupApiResult | null = null;
 
     if (mode === "bootstrap+register") {
@@ -68,6 +71,7 @@ export async function initCommand(options: InitOptions): Promise<number> {
         apisAction: bootstrap.apisAction,
         agentsPath: bootstrap.agents?.path ?? null,
         agentsAction: bootstrap.agents?.action ?? null,
+        skills: bootstrap.skills.map((s) => ({ name: s.name, path: s.path, action: s.action })),
       };
       if (register) {
         data.collectionId = register.collectionId;
@@ -127,6 +131,9 @@ function printBootstrapResult(b: BootstrapResult, writeAgents: boolean): void {
   lines.push(`  ${verb(b.configAction)} zond.config.yml`);
   lines.push(`  ${verb(b.apisAction)} apis/`);
   if (b.agents) lines.push(`  ${verb(b.agents.action)} AGENTS.md`);
+  for (const s of b.skills) {
+    lines.push(`  ${verb(s.action)} .claude/skills/${s.name}/SKILL.md`);
+  }
   for (const w of b.warnings) {
     process.stderr.write(`Warning: ${w}\n`);
   }
