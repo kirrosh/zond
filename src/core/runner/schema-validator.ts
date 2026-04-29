@@ -26,6 +26,7 @@ export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator 
     ? new (Ajv2020 as unknown as typeof Ajv)({ strict: false, allErrors: true })
     : new Ajv({ strict: false, allErrors: true });
   addFormats(ajv);
+  applyStrictFormats(ajv);
 
   const endpoints: EndpointEntry[] = [];
   if (doc.paths) {
@@ -144,6 +145,18 @@ function getByJsonPointer(obj: unknown, pointer: string): unknown {
     }
   }
   return cur;
+}
+
+// RFC3339 §5.6: date-time = full-date "T" full-time. T (or t) is required as
+// separator; offset is "Z" or "[+-]HH:MM" with explicit colon. ajv-formats
+// accepts " " as separator and "+HH" without colon, which lets PostgreSQL-style
+// timestamps ("2026-04-29 07:10:44.674675+00") slip through.
+const STRICT_RFC3339_DATE_TIME =
+  /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])[Tt](?:[01]\d|2[0-3]):[0-5]\d:(?:[0-5]\d|60)(?:\.\d+)?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+
+function applyStrictFormats(ajv: Ajv): void {
+  // Override ajv-formats' lax date-time with strict RFC3339.
+  ajv.addFormat("date-time", { type: "string", validate: STRICT_RFC3339_DATE_TIME });
 }
 
 /**

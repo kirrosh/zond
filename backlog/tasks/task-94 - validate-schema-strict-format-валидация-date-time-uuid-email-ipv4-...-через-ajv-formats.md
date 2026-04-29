@@ -3,9 +3,10 @@ id: TASK-94
 title: >-
   validate-schema: strict format-валидация (date-time, uuid, email, ipv4, ...)
   через ajv-formats
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 13:44'
+updated_date: '2026-04-29 13:52'
 labels:
   - validator
   - quality
