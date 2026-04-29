@@ -192,11 +192,20 @@ exists) classifies each endpoint into one of:
 
 | Severity | Outcome | Meaning |
 |----------|---------|---------|
-| 🚨 HIGH | accepted-and-applied | Suspicious value persisted — privilege escalation candidate. Or 5xx — unhandled exception. |
-| ⚠️ MEDIUM | inconclusive | 2xx but no GET counterpart to verify persistence. |
-| ℹ️ LOW | accepted-and-ignored | 2xx, but follow-up GET shows the field was silently dropped. Soft-warn — server should reject explicitly. |
-| ✅ OK | rejected (4xx) | Best behaviour. Bonus credit when request schema declares `additionalProperties: false`. |
+| 🚨 HIGH | accepted-and-applied | Suspicious value persisted — privilege escalation candidate. Or 5xx — unhandled exception. Also covers **extras-bypass** (baseline 4xx but injected 2xx — extras opened a code path the baseline never reached). |
+| ⚠️ INCONCLUSIVE | baseline-failure | Both the no-extras baseline POST *and* the with-extras POST returned 4xx — the API rejected the request before validation reached the extras. Almost always a missing fixture (FK id, scope, path-param). The digest surfaces the server's error message verbatim so you know which value to set. Excluded from `--emit-tests` on purpose: locking in a baseline-broken endpoint would make CI 404 every run and mask real regressions. |
+| ⚠️ MEDIUM | inconclusive (no-GET) | 2xx but no GET counterpart in the spec to verify persistence. |
+| ℹ️ LOW | accepted-and-ignored | 2xx, follow-up GET shows the field was silently dropped. Soft-warn — server should reject explicitly. |
+| ✅ OK | rejected (4xx) | Baseline 2xx + injected 4xx — extras genuinely refused. Bonus credit when request schema declares `additionalProperties: false`. |
 | ⏭ SKIPPED | — | No JSON body, or PATCH/PUT without a resolvable path id. |
+
+**Why the baseline probe.** Without it, a 4xx caused by FK miss / bad
+fixture / scope mismatch is indistinguishable from a 4xx that actually
+rejected our extras — false-OK on FK-heavy SaaS APIs (Stripe / Linear /
+GitHub / Resend, anywhere POSTs reference parent resources). Each
+endpoint pays one extra request: baseline first, then injected. If
+baseline 2xx, the resource is auto-DELETE'd before the injected probe
+fires (so the second POST doesn't trip a unique-constraint).
 
 Output is a Markdown digest grouped by severity (stdout by default; `--output
 <file>` writes to disk). Exit code is non-zero (`1`) when at least one HIGH

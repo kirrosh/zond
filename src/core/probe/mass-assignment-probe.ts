@@ -71,7 +71,16 @@ const SERVER_FIELD_SENTINEL = {
 // Types
 // ──────────────────────────────────────────────
 
-export type Severity = "high" | "medium" | "low" | "ok" | "skipped";
+export type Severity =
+  | "high"
+  | "medium"
+  /** Baseline POST itself failed — we never reached extras-validation, so the
+   *  4xx-with-extras was a false signal. User must fix fixture / FK / scope
+   *  before this endpoint can be probed (TASK-91). */
+  | "inconclusive-baseline"
+  | "low"
+  | "ok"
+  | "skipped";
 
 export interface FieldVerdict {
   field: string;
@@ -99,6 +108,13 @@ export interface EndpointVerdict {
   };
   followUpGet?: {
     url: string;
+    status: number;
+    body?: unknown;
+  };
+  /** Result of the baseline (no-extras) probe — present whenever we sent it
+   *  (always, except for skipped endpoints). Used to disambiguate
+   *  «extras refused» from «baseline body invalid» (TASK-91). */
+  baseline?: {
     status: number;
     body?: unknown;
   };
@@ -359,13 +375,6 @@ async function probeEndpoint(
     ...authHeadersLive(ep, schemes, vars),
   };
 
-  const request: HttpRequest = {
-    method: m,
-    url,
-    headers,
-    body: JSON.stringify(body),
-  };
-
   const verdict: EndpointVerdict = {
     method: m,
     path: ep.path,
@@ -380,12 +389,44 @@ async function probeEndpoint(
     strictContract: strict,
   };
 
+  // ── Baseline probe (TASK-91) ─────────────────────────────────────────────
+  // Send the *clean* baseline body first. Without this, a 4xx caused by FK
+  // miss / bad fixture / scope mismatch is indistinguishable from a 4xx that
+  // actually rejected our extras — false-OK on FK-heavy SaaS APIs (Stripe /
+  // Linear / GitHub-shaped). The baseline lets us classify:
+  //   • baseline 4xx + injected 4xx → INCONCLUSIVE-baseline (fixture bug).
+  //   • baseline 2xx + injected 4xx → OK (real extras rejection).
+  //   • baseline 4xx + injected 2xx → HIGH (extras opened a code path the
+  //     baseline never reached — privilege/auth bypass).
+  //   • baseline 2xx + injected 2xx → existing applied/ignored flow.
+  let baselineResp;
+  try {
+    baselineResp = await executeRequest(
+      { method: m, url, headers, body: JSON.stringify(baseline) },
+      { timeout: opts.timeoutMs ?? 30000, retries: 0 },
+    );
+  } catch (err) {
+    verdict.severity = "high";
+    verdict.summary = `baseline network error: ${err instanceof Error ? err.message : String(err)}`;
+    return verdict;
+  }
+  const baselineBody = baselineResp.body_parsed ?? baselineResp.body;
+  verdict.baseline = { status: baselineResp.status, body: baselineBody };
+  const baselineOk = baselineResp.status >= 200 && baselineResp.status < 300;
+  // If baseline created a resource, DELETE it before issuing the injected
+  // probe so the second POST doesn't trip a unique-constraint and so we
+  // don't leak resources.
+  if (baselineOk && !opts.noCleanup) {
+    await tryCleanupBaseline(ep, allEndpoints, schemes, vars, baselineBody, opts);
+  }
+
+  // ── Injected probe ──────────────────────────────────────────────────────
   let resp;
   try {
-    resp = await executeRequest(request, {
-      timeout: opts.timeoutMs ?? 30000,
-      retries: 0,
-    });
+    resp = await executeRequest(
+      { method: m, url, headers, body: JSON.stringify(body) },
+      { timeout: opts.timeoutMs ?? 30000, retries: 0 },
+    );
   } catch (err) {
     verdict.severity = "high";
     verdict.summary = `network error: ${err instanceof Error ? err.message : String(err)}`;
@@ -399,13 +440,38 @@ async function probeEndpoint(
     return verdict;
   }
 
-  if (resp.status >= 400) {
+  const injectedOk = resp.status >= 200 && resp.status < 300;
+
+  // Matrix dispatch on baseline×injected (TASK-91):
+  if (resp.status >= 400 && !injectedOk) {
+    if (!baselineOk) {
+      // Baseline body itself invalid — extras never reached validation.
+      verdict.severity = "inconclusive-baseline";
+      verdict.summary = inconclusiveBaselineSummary(baselineResp.status, baselineBody);
+      for (const f of verdict.fields) f.outcome = "unknown";
+      return verdict;
+    }
+    // Baseline succeeded, injected rejected → real extras rejection.
     verdict.severity = "ok";
     verdict.summary = strict
       ? `rejected ${resp.status} — strict contract honoured`
-      : `rejected ${resp.status} — extras refused`;
+      : `rejected ${resp.status} — extras refused (baseline ${baselineResp.status})`;
     for (const f of verdict.fields) f.outcome = "absent";
     return verdict;
+  }
+
+  if (injectedOk && !baselineOk) {
+    // Extras-as-bypass: baseline didn't make it through, but adding extras did.
+    // The extra fields opened a code path that baseline didn't reach (auth
+    // scope, FK shadowing, etc.). Treat as HIGH — likely a real bug —
+    // and continue to body-classification so per-field outcomes are still
+    // recorded for the digest.
+    verdict.severity = "high";
+    verdict.summary = `extras-bypass: baseline ${baselineResp.status} → injected ${resp.status} (extras opened a code path baseline didn't reach)`;
+    // Fall through to the 2xx classification below; finaliseSeverity won't
+    // overwrite "high" once it's set — but we also want to still mark
+    // applied/ignored fields. We skip finaliseSeverity at the end for this
+    // case to preserve the bypass summary.
   }
 
   // 2xx — analyse the response body for echoed values, then maybe GET.
@@ -492,8 +558,87 @@ async function probeEndpoint(
     }
   }
 
-  finaliseSeverity(verdict, strict);
+  // Preserve "high" already set by the extras-bypass branch; otherwise
+  // derive severity from per-field outcomes.
+  if (verdict.severity !== "high") finaliseSeverity(verdict, strict);
   return verdict;
+}
+
+async function tryCleanupBaseline(
+  ep: EndpointInfo,
+  allEndpoints: EndpointInfo[],
+  schemes: SecuritySchemeInfo[],
+  vars: Record<string, string>,
+  baselineBody: unknown,
+  opts: { timeoutMs?: number },
+): Promise<void> {
+  const body =
+    typeof baselineBody === "object" && baselineBody !== null
+      ? (baselineBody as Record<string, unknown>)
+      : undefined;
+  if (!body) return;
+  const idField = captureFieldFor(ep);
+  const id = body[idField];
+  if (id === undefined) return;
+  const delEp = findDeleteCounterpart(ep, allEndpoints);
+  if (!delEp) return;
+  const delVars = { ...vars, [findIdParam(delEp)]: String(id), id: String(id) };
+  const delUrl = buildUrl(delEp, delVars);
+  if (delUrl.unresolved.length > 0) return;
+  try {
+    await executeRequest(
+      {
+        method: "DELETE",
+        url: delUrl.url,
+        headers: {
+          accept: "application/json",
+          ...authHeadersLive(delEp, schemes, vars),
+        },
+      },
+      { timeout: opts.timeoutMs ?? 30000, retries: 0 },
+    );
+  } catch {
+    // best-effort — if cleanup fails we'll leak a baseline resource, but
+    // that's a deployment problem, not a probe bug.
+  }
+}
+
+/**
+ * Build a one-line summary for INCONCLUSIVE-baseline verdicts. We surface
+ * the server's error code/name when present so the user can immediately
+ * see *which* FK / scope / fixture failed and fix it before re-probing.
+ */
+function inconclusiveBaselineSummary(status: number, body: unknown): string {
+  const hint = extractBaselineHint(body);
+  const base = `baseline body invalid — server returned ${status}`;
+  const tail = " — fix fixture / FK value / path-params and re-probe";
+  return hint ? `${base} (${hint})${tail}` : `${base}${tail}`;
+}
+
+function extractBaselineHint(body: unknown): string | undefined {
+  if (typeof body === "string") {
+    const trimmed = body.trim();
+    if (trimmed.length === 0) return undefined;
+    return trimmed.length > 120 ? `${trimmed.slice(0, 120)}…` : trimmed;
+  }
+  if (typeof body !== "object" || body === null) return undefined;
+  const obj = body as Record<string, unknown>;
+  // Common error-envelope fields across SaaS APIs.
+  const candidates = [
+    obj.message,
+    obj.error,
+    (obj.error as Record<string, unknown> | undefined)?.message,
+    obj.detail,
+    obj.title,
+    obj.name,
+    obj.code,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.length > 0) {
+      return c.length > 120 ? `${c.slice(0, 120)}…` : c;
+    }
+  }
+  return undefined;
 }
 
 function needsFollowUp(verdict: EndpointVerdict): boolean {
@@ -566,10 +711,18 @@ function finaliseSeverity(v: EndpointVerdict, strict: boolean) {
 // Markdown digest
 // ──────────────────────────────────────────────
 
-const SEVERITY_ORDER: Severity[] = ["high", "medium", "low", "ok", "skipped"];
+const SEVERITY_ORDER: Severity[] = [
+  "high",
+  "inconclusive-baseline",
+  "medium",
+  "low",
+  "ok",
+  "skipped",
+];
 
 const SEVERITY_HEADER: Record<Severity, string> = {
   high: "🚨 HIGH — privilege escalation candidates",
+  "inconclusive-baseline": "⚠️  INCONCLUSIVE — baseline body invalid (fix fixture / FK / scope and re-probe)",
   medium: "⚠️  MEDIUM — inconclusive (no follow-up GET available)",
   low: "ℹ️  LOW — accepted-and-ignored (silent acceptance)",
   ok: "✅ OK — rejected 4xx (best behaviour)",
@@ -605,8 +758,11 @@ export function formatDigestMarkdown(
       }
       lines.push(`- ${v.summary}`);
       lines.push(`- Injected: ${v.request.injectedFields.map(n => `\`${n}\``).join(", ")}`);
+      if (v.baseline) {
+        lines.push(`- Baseline (no extras): ${v.baseline.status}`);
+      }
       if (v.response) {
-        lines.push(`- Response: ${v.response.status}`);
+        lines.push(`- With extras: ${v.response.status}`);
       }
       if (v.followUpGet) {
         lines.push(`- Follow-up GET → ${v.followUpGet.status}`);
@@ -632,6 +788,11 @@ export function formatDigestMarkdown(
       if (v.severity === "high") {
         lines.push(`- **Action:** treat as P0 — server should reject or strip these fields.`);
       }
+      if (v.severity === "inconclusive-baseline") {
+        lines.push(
+          `- **Action:** the baseline POST itself failed — set the right fixture / FK / path-params in your env (e.g. \`domain_id\`, \`account_id\`) and re-run.`,
+        );
+      }
       lines.push("");
     }
   }
@@ -647,7 +808,7 @@ export function formatDigestMarkdown(
 
 function groupBySeverity(verdicts: EndpointVerdict[]): Record<Severity, EndpointVerdict[]> {
   const out: Record<Severity, EndpointVerdict[]> = {
-    high: [], medium: [], low: [], ok: [], skipped: [],
+    high: [], "inconclusive-baseline": [], medium: [], low: [], ok: [], skipped: [],
   };
   for (const v of verdicts) out[v.severity].push(v);
   return out;
