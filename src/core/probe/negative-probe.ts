@@ -389,6 +389,88 @@ function probeInvalidPathId(
   return out;
 }
 
+/** TASK-67: numeric coercion probes for integer/number params (query + path).
+ *  Round-2 found `GET /emails?limit=1.5` → 500 — the bug class probe-validation
+ *  exists for. T49 covered numeric type-confusion in body, this extends to
+ *  query/path. */
+const NUMERIC_BAD_VALUES: Array<{ value: string; label: string }> = [
+  { value: "1.5", label: "float on integer" },
+  { value: "-1", label: "negative" },
+  { value: "0", label: "zero" },
+  { value: "abc", label: "non-numeric" },
+  { value: "", label: "empty string" },
+  // null on a query param means literal "null" string — most parsers treat it as bad input
+  { value: "null", label: "literal null" },
+  // Number.MAX_SAFE_INTEGER + 1 = 9007199254740992
+  { value: "9007199254740992", label: "MAX_SAFE_INTEGER+1" },
+];
+
+function isNumericSchema(schema: OpenAPIV3.SchemaObject | undefined): boolean {
+  return schema?.type === "integer" || schema?.type === "number";
+}
+
+function probeNumericQueryParams(
+  ep: EndpointInfo,
+  schemes: SecuritySchemeInfo[],
+  budget: number,
+): RawStep[] {
+  const numericQuery = ep.parameters.filter(
+    (p) => p.in === "query" && isNumericSchema(p.schema as OpenAPIV3.SchemaObject | undefined),
+  );
+  if (numericQuery.length === 0) return [];
+
+  const out: RawStep[] = [];
+  for (const param of numericQuery) {
+    for (const { value, label } of NUMERIC_BAD_VALUES) {
+      if (out.length >= budget) break;
+      const basePath = pathWithPlaceholders(ep, "valid-shape");
+      const sep = basePath.includes("?") ? "&" : "?";
+      const pathWithQuery = `${basePath}${sep}${param.name}=${encodeURIComponent(value)}`;
+      out.push(
+        buildStep(ep, schemes, {
+          name: `query ${param.name}=${JSON.stringify(value)} (${label}) — must reject (no 5xx)`,
+          pathOverride: pathWithQuery,
+        }),
+      );
+    }
+  }
+  return out;
+}
+
+function probeNumericPathParams(
+  ep: EndpointInfo,
+  schemes: SecuritySchemeInfo[],
+  budget: number,
+): RawStep[] {
+  const numericPath = ep.parameters.filter(
+    (p) => p.in === "path" && isNumericSchema(p.schema as OpenAPIV3.SchemaObject | undefined),
+  );
+  if (numericPath.length === 0) return [];
+
+  const out: RawStep[] = [];
+  for (const param of numericPath) {
+    for (const { value, label } of NUMERIC_BAD_VALUES) {
+      if (value === "") continue; // empty path segment yields a different endpoint
+      if (out.length >= budget) break;
+      const overriddenPath = ep.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
+        if (name === param.name) return value;
+        const other = ep.parameters.find((p) => p.name === name && p.in === "path");
+        const otherSchema = other?.schema as OpenAPIV3.SchemaObject | undefined;
+        if (otherSchema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
+        if (isNumericSchema(otherSchema)) return "1";
+        return "valid-shape";
+      });
+      out.push(
+        buildStep(ep, schemes, {
+          name: `path param ${param.name}=${JSON.stringify(value)} (${label}) — must reject (no 5xx)`,
+          pathOverride: overriddenPath,
+        }),
+      );
+    }
+  }
+  return out;
+}
+
 // ──────────────────────────────────────────────
 // Type-confusion helpers
 // ──────────────────────────────────────────────
@@ -466,6 +548,14 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
     // 1. Path-id probes (cheap, deterministic)
     steps.push(...probeInvalidPathId(ep, securitySchemes, remaining()));
 
+    // 1b. Numeric query / path coercion probes (T67) — float-on-integer,
+    //     negative, non-numeric, etc. Catches `GET /x?limit=1.5` → 500.
+    const numericQueryProbes = probeNumericQueryParams(ep, securitySchemes, remaining());
+    steps.push(...numericQueryProbes);
+    const numericPathProbes = probeNumericPathParams(ep, securitySchemes, remaining());
+    steps.push(...numericPathProbes);
+    const hasNumericCoercion = numericQueryProbes.length + numericPathProbes.length > 0;
+
     // 2. Body probes (only for body-bearing methods)
     const empty = probeEmptyBody(ep, securitySchemes);
     if (empty && steps.length < cap) steps.push(empty);
@@ -531,7 +621,12 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
     const stem = endpointStem(ep);
     const suite: RawSuite = {
       name: `probe ${ep.method} ${ep.path}`,
-      tags: ["probe-validation", "negative-input", "no-5xx"],
+      tags: [
+        "probe-validation",
+        "negative-input",
+        "no-5xx",
+        ...(hasNumericCoercion ? ["query-coercion"] : []),
+      ],
       fileStem: `probe-${stem}`,
       base_url: "{{base_url}}",
       ...(suiteHeaders ? { headers: suiteHeaders } : {}),

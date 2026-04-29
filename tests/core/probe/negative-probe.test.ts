@@ -116,6 +116,55 @@ describe("generateNegativeProbes", () => {
     expect(names.some(n => /unicode\/emoji\/RTL/.test(n))).toBe(true);
   });
 
+  it("TASK-67: probes numeric query params (float, negative, non-numeric, etc.)", () => {
+    const result = generateNegativeProbes({
+      endpoints: [
+        ep({
+          method: "GET",
+          path: "/emails",
+          parameters: [
+            { name: "limit", in: "query", required: false, schema: { type: "integer" } } as any,
+          ],
+        }),
+      ],
+      securitySchemes: [],
+    });
+    expect(result.probedEndpoints).toBe(1);
+    const suite = result.suites[0]!;
+    const queryProbes = suite.tests.filter(t => t.name.startsWith("query limit="));
+    // 7 bad-value variants (float, neg, zero, non-numeric, empty, null literal, MAX_SAFE_INTEGER+1)
+    expect(queryProbes.length).toBe(7);
+    // Catches the documented Resend bug: GET /emails?limit=1.5 → 500
+    const floatProbe = queryProbes.find(t => /1\.5/.test(t.name));
+    expect(floatProbe).toBeDefined();
+    expect(floatProbe!.GET).toContain("limit=1.5");
+    // No probe expects 500 in the acceptable status set
+    expect((floatProbe!.expect.status as number[]).includes(500)).toBe(false);
+    // Suite carries the new query-coercion tag
+    expect(suite.tags).toContain("query-coercion");
+  });
+
+  it("TASK-67: probes numeric path params for non-UUID integer ids", () => {
+    const result = generateNegativeProbes({
+      endpoints: [
+        ep({
+          method: "GET",
+          path: "/items/{itemId}",
+          parameters: [
+            { name: "itemId", in: "path", required: true, schema: { type: "integer" } } as any,
+          ],
+        }),
+      ],
+      securitySchemes: [],
+    });
+    const suite = result.suites[0]!;
+    const pathProbes = suite.tests.filter(t => t.name.startsWith("path param itemId="));
+    // 7 - 1 (skip empty value for path) = 6
+    expect(pathProbes.length).toBe(6);
+    expect(pathProbes.some(t => /1\.5/.test(t.name))).toBe(true);
+    expect(suite.tags).toContain("query-coercion");
+  });
+
   it("respects maxProbesPerEndpoint cap", () => {
     const result = generateNegativeProbes({
       endpoints: [
