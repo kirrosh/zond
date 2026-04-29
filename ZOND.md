@@ -515,6 +515,32 @@ Pass `--kill-existing` to restore the legacy behaviour of terminating whichever 
 
 ---
 
+## `--json` envelope
+
+Most subcommands accept `--json` (or, for `run`, `--report json`) and emit a
+single uniform envelope so a downstream parser only needs one shape:
+
+```jsonc
+{
+  "ok": true,            // false on errors[].length > 0
+  "command": "db diagnose",
+  "data": { /* command-specific payload */ },
+  "warnings": [ /* string[], non-fatal */ ],
+  "errors":   [ /* string[], populated when ok=false */ ]
+}
+```
+
+Holds for `db collections|runs|run|diagnose|compare`, `validate`, `coverage`,
+`generate`, `probe-*`, `request`, `init`, `describe`, `use`, `sync`, `update`,
+`postman`, `catalog`, `guide`. The `data` payload shape varies by command (e.g.
+`db run`'s `data` is `{ run, results }`); the envelope itself does not.
+
+`run` (test execution) is the exception — historically `--json` collided with
+`--report json`. Use `--report json` for the report payload; `--report-out
+<file>` writes it to disk.
+
+---
+
 ## Principles
 
 1. **One file** — download binary, run. No Docker, no npm.
