@@ -87,6 +87,9 @@ export interface TestSuite {
   tags?: string[];
   base_url?: string;
   headers?: Record<string, string>;
+  /** Cross-product parameterisation: each key contributes one variable
+   *  binding per array entry. Suite body runs once per combination. */
+  parameterize?: Record<string, unknown[]>;
   config: SuiteConfig;
   tests: TestStep[];
   /** Absolute path to the source file, set by yaml-parser */

@@ -29,6 +29,42 @@ function makeSkippedResult(stepName: string, reason: string): StepResult {
   };
 }
 
+/** Interpolate {{var}} placeholders inside a test/step name. Falls back to
+ *  the raw name string if substitution returns a non-string value. */
+function interpolateName(name: string, vars: Record<string, unknown>): string {
+  try {
+    const out = substituteString(name, vars);
+    return typeof out === "string" ? out : String(out);
+  } catch {
+    return name;
+  }
+}
+
+/**
+ * Expand a `parameterize: { key: [val, ...] }` map into the cross-product of
+ * iteration variable bindings. No `parameterize` (or an empty map) yields a
+ * single empty iteration so the existing single-pass behaviour is preserved.
+ *
+ * Exported for tests.
+ */
+export function expandParameterize(params?: Record<string, unknown[]>): Record<string, unknown>[] {
+  if (!params) return [{}];
+  const keys = Object.keys(params).filter(k => Array.isArray(params[k]) && (params[k] as unknown[]).length > 0);
+  if (keys.length === 0) return [{}];
+  let combos: Record<string, unknown>[] = [{}];
+  for (const k of keys) {
+    const values = params[k] as unknown[];
+    const next: Record<string, unknown>[] = [];
+    for (const combo of combos) {
+      for (const v of values) {
+        next.push({ ...combo, [k]: v });
+      }
+    }
+    combos = next;
+  }
+  return combos;
+}
+
 export interface RunSuiteOptions {
   rateLimiter?: RateLimiter;
 }
@@ -41,13 +77,6 @@ export async function runSuite(
 ): Promise<TestRunResult> {
   const startedAt = new Date().toISOString();
   const steps: StepResult[] = [];
-  const variables: Record<string, unknown> = { ...env };
-  // Captures whose source step's assertions partially failed, but the value
-  // itself was extracted. Cleanup/always steps may still consume them.
-  const taintedCaptures = new Set<string>();
-  // Captures that were never extracted (response missing the field). Even
-  // always-steps can't run if their referenced capture is missing.
-  const missingCaptures = new Set<string>();
 
   const fetchOptions: Partial<FetchOptions> = {
     timeout: suite.config.timeout,
@@ -56,6 +85,20 @@ export async function runSuite(
     follow_redirects: suite.config.follow_redirects,
     rate_limiter: options.rateLimiter,
   };
+
+  // parameterize cross-product → N iterations of the suite body.
+  // Captures and tainted/missing sets are reset per iteration so that
+  // values from one binding never leak into the next.
+  const iterations = expandParameterize(suite.parameterize);
+
+  for (const iterVars of iterations) {
+  const variables: Record<string, unknown> = { ...env, ...iterVars };
+  // Captures whose source step's assertions partially failed, but the value
+  // itself was extracted. Cleanup/always steps may still consume them.
+  const taintedCaptures = new Set<string>();
+  // Captures that were never extracted (response missing the field). Even
+  // always-steps can't run if their referenced capture is missing.
+  const missingCaptures = new Set<string>();
 
   // Expand steps lazily (for_each needs current variables)
   let stepIndex = 0;
@@ -102,7 +145,7 @@ export async function runSuite(
         variables[key] = applyTransform(substituted);
       }
       steps.push({
-        name: step.name,
+        name: interpolateName(step.name, variables),
         status: "pass",
         duration_ms: 0,
         request: { method: "", url: "", headers: {} },
@@ -117,13 +160,13 @@ export async function runSuite(
     const referencedVars = extractVariableReferences(step);
     const missing = referencedVars.find((v) => missingCaptures.has(v));
     if (missing) {
-      steps.push(makeSkippedResult(step.name, `Depends on missing capture: ${missing}`));
+      steps.push(makeSkippedResult(interpolateName(step.name, variables), `Depends on missing capture: ${missing}`));
       continue;
     }
     if (!step.always) {
       const tainted = referencedVars.find((v) => taintedCaptures.has(v));
       if (tainted) {
-        steps.push(makeSkippedResult(step.name, `Depends on tainted capture: ${tainted} (use always: true on cleanup steps)`));
+        steps.push(makeSkippedResult(interpolateName(step.name, variables), `Depends on tainted capture: ${tainted} (use always: true on cleanup steps)`));
         continue;
       }
     }
@@ -132,7 +175,7 @@ export async function runSuite(
     if (step.skip_if) {
       const exprAfterSubst = String(substituteString(step.skip_if, variables));
       if (evaluateExpr(exprAfterSubst)) {
-        steps.push(makeSkippedResult(step.name, `Skipped: ${step.skip_if}`));
+        steps.push(makeSkippedResult(interpolateName(step.name, variables), `Skipped: ${step.skip_if}`));
         continue;
       }
     }
@@ -155,7 +198,7 @@ export async function runSuite(
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       steps.push({
-        name: step.name,
+        name: interpolateName(step.name, variables),
         status: "error",
         duration_ms: 0,
         request: { method: step.method, url: step.path, headers: {} },
@@ -207,7 +250,7 @@ export async function runSuite(
     // Validate absolute URL before attempting fetch
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
       steps.push({
-        name: step.name,
+        name: interpolateName(step.name, variables),
         status: "error",
         duration_ms: 0,
         request,
@@ -228,7 +271,7 @@ export async function runSuite(
         ? ` [multipart: ${[...formData.keys()].length} field(s)]`
         : body ? ` ${body.slice(0, 200)}` : "";
       steps.push({
-        name: step.name,
+        name: interpolateName(step.name, variables),
         status: "pass",
         duration_ms: 0,
         request,
@@ -251,7 +294,7 @@ export async function runSuite(
           const allPassed = assertions.every((a) => a.passed);
 
           lastStepResult = {
-            name: step.name,
+            name: interpolateName(step.name, variables),
             status: allPassed ? "pass" : "fail",
             duration_ms: response.duration_ms,
             request,
@@ -278,7 +321,7 @@ export async function runSuite(
           }
         } catch (err) {
           lastStepResult = {
-            name: step.name,
+            name: interpolateName(step.name, variables),
             status: "error",
             duration_ms: 0,
             request,
@@ -313,7 +356,7 @@ export async function runSuite(
       const allPassed = assertions.every((a) => a.passed);
 
       steps.push({
-        name: step.name,
+        name: interpolateName(step.name, variables),
         status: allPassed ? "pass" : "fail",
         duration_ms: response.duration_ms,
         request,
@@ -335,7 +378,7 @@ export async function runSuite(
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       steps.push({
-        name: step.name,
+        name: interpolateName(step.name, variables),
         status: "error",
         duration_ms: 0,
         request,
@@ -352,6 +395,7 @@ export async function runSuite(
       }
     }
   }
+  } // end of parameterize iteration loop
 
   const finishedAt = new Date().toISOString();
   return {

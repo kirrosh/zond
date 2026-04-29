@@ -1,9 +1,10 @@
 ---
 id: TASK-77
 title: 'T77: parameterize — параметризация тестов'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:40'
+updated_date: '2026-04-29 09:20'
 labels:
   - feature
   - runner
@@ -42,8 +43,8 @@ tests:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 parameterize: { endpoint: [/a, /b, /c] } на уровне сьюта или test'а — разворачивает в N тестов
-- [ ] #2 Имя теста интерполируется: 'list shape on {{endpoint}}'
-- [ ] #3 Несколько параметров → cross-product
-- [ ] #4 Документация в ZOND.md
+- [x] #1 parameterize: { endpoint: [/a, /b, /c] } на уровне сьюта или test'а — разворачивает в N тестов
+- [x] #2 Имя теста интерполируется: 'list shape on {{endpoint}}'
+- [x] #3 Несколько параметров → cross-product
+- [x] #4 Документация в ZOND.md
 <!-- AC:END -->

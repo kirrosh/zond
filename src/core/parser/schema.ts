@@ -221,6 +221,7 @@ const TestSuiteSchema = z.preprocess(
     tags: z.array(z.string()).optional(),
     base_url: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),
+    parameterize: z.record(z.string(), z.array(z.unknown()).min(1)).optional(),
     config: SuiteConfigSchema,
     tests: z.array(TestStepSchema).min(1),
   }),
