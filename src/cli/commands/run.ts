@@ -19,6 +19,7 @@ import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { getDb } from "../../db/schema.ts";
 import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from "../../db/queries.ts";
 import { AUTH_PATH_RE } from "../../core/runner/execute-run.ts";
+import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
 
 export interface RunOptions {
   path: string;
@@ -207,27 +208,37 @@ export async function runCommand(options: RunOptions): Promise<number> {
     ? createAdaptiveRateLimiter()
     : createRateLimiter(rateLimit);
 
-  // 3c. Resolve OpenAPI spec for --validate-schema:
-  //     explicit --spec wins; otherwise fall back to the collection record.
+  // 3c. Resolve OpenAPI spec. Explicit --spec wins; otherwise fall back to the
+  // collection record. The doc is reused for --validate-schema (TASK-50) and
+  // for spec_pointer/spec_excerpt frozen evidence (TASK-102).
   let schemaValidator: ReturnType<typeof createSchemaValidator> | undefined;
-  if (options.validateSchema) {
+  let openApiDoc: unknown | undefined;
+  {
     let specPath = options.specPath;
     if (!specPath) {
       try {
         const collection = findCollectionByTestPath(options.path);
         if (collection?.openapi_spec) specPath = collection.openapi_spec;
-      } catch { /* DB not available — fall through to error below */ }
+      } catch { /* DB not available — fall through */ }
     }
-    if (!specPath) {
-      printError("--validate-schema requires --spec <path|url> or a collection with openapi_spec set");
-      return 2;
+    if (specPath) {
+      try {
+        openApiDoc = await readOpenApiSpec(specPath);
+      } catch (err) {
+        if (options.validateSchema) {
+          printError(`Failed to load OpenAPI spec '${specPath}': ${(err as Error).message}`);
+          return 2;
+        }
+        // spec_pointer is best-effort — non-fatal when spec can't be loaded.
+        printWarning(`Failed to load OpenAPI spec '${specPath}' for spec_pointer evidence: ${(err as Error).message}`);
+      }
     }
-    try {
-      const doc = await readOpenApiSpec(specPath);
-      schemaValidator = createSchemaValidator(doc);
-    } catch (err) {
-      printError(`Failed to load OpenAPI spec '${specPath}': ${(err as Error).message}`);
-      return 2;
+    if (options.validateSchema) {
+      if (!openApiDoc) {
+        printError("--validate-schema requires --spec <path|url> or a collection with openapi_spec set");
+        return 2;
+      }
+      schemaValidator = createSchemaValidator(openApiDoc as Parameters<typeof createSchemaValidator>[0]);
     }
   }
 
@@ -348,6 +359,23 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
+  // 5b. Resolve spec_pointer + spec_excerpt for steps with provenance.
+  // Frozen evidence: pointer and excerpt are computed once, against the spec
+  // doc loaded at run time, and saved into the DB so later spec edits don't
+  // rewrite history.
+  if (openApiDoc) {
+    for (const r of results) {
+      for (const s of r.steps) {
+        if (!s.provenance) continue;
+        const ptr = buildSpecPointer(s.provenance, openApiDoc);
+        if (ptr) {
+          s.spec_pointer = ptr.pointer;
+          s.spec_excerpt = ptr.excerpt;
+        }
+      }
+    }
+  }
+
   // 6. Save to DB
   let savedRunId: number | undefined;
   if (!options.noDb) {
@@ -390,6 +418,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
         error: s.error,
         ...(s.failure_class ? { failure_class: s.failure_class, failure_class_reason: s.failure_class_reason } : {}),
         ...(s.provenance ? { provenance: s.provenance } : {}),
+        ...(s.spec_pointer ? { spec_pointer: s.spec_pointer, spec_excerpt: s.spec_excerpt } : {}),
       }))
     );
     const fiveXx = failures.filter(f => f.is_5xx).length;

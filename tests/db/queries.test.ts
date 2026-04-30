@@ -199,6 +199,22 @@ describe("saveResults", () => {
     expect(passed.failure_class_reason).toBeNull();
   });
 
+  test("spec_pointer + spec_excerpt round-trip", () => {
+    const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    const suite = makeSuiteResult();
+    suite.steps[1]!.spec_pointer = "#/paths/~1users~1{id}/delete/responses/204";
+    suite.steps[1]!.spec_excerpt = "{ \"description\": \"No Content\" }";
+    saveResults(id, [suite]);
+
+    const results = getResultsByRunId(id);
+    const failed = results.find((r) => r.test_name === "Delete user")!;
+    expect(failed.spec_pointer).toBe("#/paths/~1users~1{id}/delete/responses/204");
+    expect(failed.spec_excerpt).toContain("No Content");
+    const passed = results.find((r) => r.test_name === "Get user")!;
+    expect(passed.spec_pointer).toBeNull();
+    expect(passed.spec_excerpt).toBeNull();
+  });
+
   test("provenance round-trip — saved as JSON, parsed back", () => {
     const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
     const suiteWithProv = makeSuiteResult();

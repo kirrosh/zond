@@ -1,9 +1,10 @@
 ---
 id: TASK-102
 title: failure-evidence — JSON pointer в OpenAPI рядом с каждым failure
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 09:36'
+updated_date: '2026-04-30 10:12'
 labels:
   - trust-loop
   - decision-5
@@ -60,8 +61,8 @@ UI должен показать backend-у не «у тебя баг в /webhoo
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 buildSpecPointer корректно строит pointer для openapi-generated и probe steps
-- [ ] #2 spec_excerpt — вырезка из спеки (200-500 байт) на момент run-а
-- [ ] #3 Manual YAML (без provenance) → spec_pointer/excerpt = null, без error
-- [ ] #4 DB-миграция results.spec_pointer + spec_excerpt + round-trip
+- [x] #1 buildSpecPointer корректно строит pointer для openapi-generated и probe steps
+- [x] #2 spec_excerpt — вырезка из спеки (200-500 байт) на момент run-а
+- [x] #3 Manual YAML (без provenance) → spec_pointer/excerpt = null, без error
+- [x] #4 DB-миграция results.spec_pointer + spec_excerpt + round-trip
 <!-- AC:END -->

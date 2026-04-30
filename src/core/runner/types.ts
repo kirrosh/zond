@@ -38,6 +38,11 @@ export interface StepResult {
    *  likely_bug, quirk, env_issue. `null` for passed/skipped/unclassifiable. */
   failure_class?: import("../diagnostics/failure-class.ts").FailureClass | null;
   failure_class_reason?: string | null;
+  /** TASK-102: JSON Pointer into the OpenAPI doc + frozen excerpt of the
+   *  schema at that pointer. Captured at run time so later spec edits don't
+   *  rewrite history. `null` for manual YAML or when spec isn't available. */
+  spec_pointer?: string | null;
+  spec_excerpt?: string | null;
 }
 
 export interface TestRunResult {
