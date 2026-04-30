@@ -22,6 +22,7 @@ const FAILURE_CLASS_META: Record<FailureClass, { label: string; cls: string; emo
   likely_bug: { label: "Likely bug", cls: "warn", emoji: "⚠️" },
   quirk: { label: "Quirk", cls: "info", emoji: "·" },
   env_issue: { label: "Env issue", cls: "info", emoji: "🌐" },
+  cascade: { label: "Cascade", cls: "info", emoji: "↳" },
 };
 
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {

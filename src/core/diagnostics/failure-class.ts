@@ -9,7 +9,15 @@
 import type { StepResult, AssertionResult } from "../runner/types.ts";
 import type { SourceMetadata } from "../parser/types.ts";
 
-export type FailureClass = "definitely_bug" | "likely_bug" | "quirk" | "env_issue";
+export type FailureClass =
+  | "definitely_bug"
+  | "likely_bug"
+  | "quirk"
+  | "env_issue"
+  /** Step was skipped because an upstream step failed to produce a required
+   *  capture (or produced a tainted one). Not a failure on its own — render
+   *  collapsed under the root failure to avoid drowning the user. */
+  | "cascade";
 
 export interface FailureClassification {
   failure_class: FailureClass;

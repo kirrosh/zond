@@ -16,6 +16,7 @@ const CLASS_HUMAN: Record<FailureClass, string> = {
   likely_bug: "likely_bug",
   quirk: "quirk",
   env_issue: "env_issue",
+  cascade: "cascade",
 };
 
 const TODO = (hint: string): string => `<TODO: ${hint}>`;

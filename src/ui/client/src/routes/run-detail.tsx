@@ -19,7 +19,9 @@ export function RunDetailPage() {
   const { runId } = useParams({ from: "/runs/$runId" });
   const { data } = useSuspenseQuery(runDetailQueryOptions(runId));
   const { run, results } = data;
-  const failures = results.filter((r) => r.status !== "pass");
+  const nonPassing = results.filter((r) => r.status !== "pass");
+  const cascadeSkips = nonPassing.filter((r) => r.failure_class === "cascade");
+  const realFailures = nonPassing.filter((r) => r.failure_class !== "cascade");
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-8 space-y-6">
@@ -30,7 +32,12 @@ export function RunDetailPage() {
         ← All runs
       </Link>
 
-      <RunHeader run={run} failureCount={failures.length} totalCount={results.length} />
+      <RunHeader
+        run={run}
+        failureCount={realFailures.length}
+        cascadeCount={cascadeSkips.length}
+        totalCount={results.length}
+      />
 
       <LiveProgressStrip runId={runId} total={Math.max(run.total, 1)} />
 
@@ -38,22 +45,53 @@ export function RunDetailPage() {
         <div className="flex items-baseline justify-between">
           <h2 className="text-lg font-semibold">Failures</h2>
           <span className="text-xs text-muted-foreground">
-            {failures.length} of {results.length} step{results.length === 1 ? "" : "s"}
+            {realFailures.length} of {results.length} step{results.length === 1 ? "" : "s"}
           </span>
         </div>
-        {failures.length === 0 ? (
+        {realFailures.length === 0 ? (
           <div className="rounded-md border bg-muted p-6 text-sm text-muted-foreground">
-            All steps passed — nothing to investigate.
+            {cascadeSkips.length > 0
+              ? "No failures of their own — only cascade skips below."
+              : "All steps passed — nothing to investigate."}
           </div>
         ) : (
           <ul className="space-y-2">
-            {failures.map((step) => (
+            {realFailures.map((step) => (
               <FailureCard key={step.id} step={step} />
             ))}
           </ul>
         )}
       </section>
+
+      {cascadeSkips.length > 0 && <CascadeGroup steps={cascadeSkips} />}
     </main>
+  );
+}
+
+function CascadeGroup({ steps }: { steps: StoredStepResult[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="space-y-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-left text-sm hover:bg-muted"
+      >
+        <ChevronRight className={cn("size-4 transition-transform", open && "rotate-90")} />
+        <span className="font-medium">Cascade skips</span>
+        <Badge variant="muted">{steps.length}</Badge>
+        <span className="ml-auto text-xs text-muted-foreground">
+          Skipped because an upstream step didn't produce a required capture.
+        </span>
+      </button>
+      {open && (
+        <ul className="space-y-2">
+          {steps.map((step) => (
+            <FailureCard key={step.id} step={step} />
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -106,13 +144,15 @@ function LiveProgressStrip({ runId, total }: { runId: string; total: number }) {
 function RunHeader({
   run,
   failureCount,
+  cascadeCount,
   totalCount,
 }: {
   run: RunRecord;
   failureCount: number;
+  cascadeCount: number;
   totalCount: number;
 }) {
-  const overallFailed = run.failed > 0;
+  const overallFailed = failureCount > 0;
   return (
     <header className="space-y-3 rounded-md border p-4">
       <div className="flex items-center gap-3">
@@ -129,7 +169,8 @@ function RunHeader({
         <Meta label="Total" value={String(totalCount)} />
         <Meta label="Passed" value={String(run.passed)} />
         <Meta label="Failed" value={String(failureCount)} />
-        <Meta label="Skipped" value={String(run.skipped)} />
+        <Meta label="Cascade" value={String(cascadeCount)} />
+        <Meta label="Skipped" value={String(Math.max(run.skipped - cascadeCount, 0))} />
         <Meta label="Branch" value={run.branch ?? "—"} />
         <Meta label="Commit" value={run.commit_sha ? run.commit_sha.slice(0, 8) : "—"} />
         <Meta className="col-span-2" label="Environment" value={run.environment ?? "—"} mono />
