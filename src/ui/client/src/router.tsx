@@ -12,7 +12,7 @@ import { Suspense } from "react";
 import { RunsListPage } from "./routes/runs-list";
 import { RunDetailPage } from "./routes/run-detail";
 import { SuitesListPage, type SuiteSourceFilter } from "./routes/suites-list";
-import { runDetailQueryOptions, runsListQueryOptions, suitesListQueryOptions, type StatusFilter } from "./lib/api";
+import { runDetailQueryOptions, runsListQueryOptions, sessionsListQueryOptions, suitesListQueryOptions, type StatusFilter } from "./lib/api";
 
 export interface RouterContext {
   queryClient: QueryClient;
@@ -67,8 +67,11 @@ const indexRoute = createRoute({
   },
 });
 
+type RunsView = "sessions" | "runs";
+
 interface RunsSearch {
   status: StatusFilter;
+  view: RunsView;
 }
 
 const runsListRoute = createRoute({
@@ -76,10 +79,13 @@ const runsListRoute = createRoute({
   path: "/runs",
   validateSearch: (search: Record<string, unknown>): RunsSearch => ({
     status: search.status === "passed" || search.status === "failed" ? search.status : "all",
+    view: search.view === "runs" ? "runs" : "sessions",
   }),
-  loaderDeps: ({ search: { status } }) => ({ status }),
+  loaderDeps: ({ search: { status, view } }) => ({ status, view }),
   loader: ({ context, deps }) =>
-    context.queryClient.ensureQueryData(runsListQueryOptions({ status: deps.status })),
+    deps.view === "sessions"
+      ? context.queryClient.ensureQueryData(sessionsListQueryOptions())
+      : context.queryClient.ensureQueryData(runsListQueryOptions({ status: deps.status })),
   component: RunsListPage,
 });
 

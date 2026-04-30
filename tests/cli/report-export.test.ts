@@ -120,7 +120,7 @@ describe("renderHtmlReport (TASK-107)", () => {
         branch: "main",
         environment: "staging",
         duration_ms: 1234,
-        collection_id: null,
+        collection_id: null, session_id: null,
       },
       // @ts-expect-error — partial StoredStepResult shape, OK for snapshot-style assertions
       results: results[0]!.steps.map((s, i) => ({
@@ -187,7 +187,7 @@ describe("renderHtmlReport (TASK-107)", () => {
         finished_at: null,
         total: 1, passed: 0, failed: 1, skipped: 0,
         trigger: "manual", commit_sha: null, branch: null, environment: null,
-        duration_ms: null, collection_id: null,
+        duration_ms: null, collection_id: null, session_id: null,
       },
       results: [{
         id: 1, run_id: 1, suite_name: "x", test_name: "<script>alert('xss')</script>",
@@ -212,7 +212,7 @@ describe("renderHtmlReport (TASK-107)", () => {
         id: 7, started_at: "2026-04-30T12:00:00Z", finished_at: "2026-04-30T12:00:01Z",
         total: 2, passed: 2, failed: 0, skipped: 0,
         trigger: "ci", commit_sha: null, branch: "main", environment: "prod",
-        duration_ms: 1000, collection_id: null,
+        duration_ms: 1000, collection_id: null, session_id: null,
       },
       results: [
         { id: 1, run_id: 7, suite_name: "x", test_name: "ok1", status: "pass", duration_ms: 10,

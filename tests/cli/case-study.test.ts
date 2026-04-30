@@ -76,7 +76,7 @@ describe("renderCaseStudy (TASK-110)", () => {
         id: 42, started_at: results[0]!.started_at, finished_at: results[0]!.finished_at,
         total: 1, passed: 0, failed: 1, skipped: 0,
         trigger: "manual", commit_sha: "abcdef12", branch: "main",
-        environment: "staging", duration_ms: 1234, collection_id: 1,
+        environment: "staging", duration_ms: 1234, collection_id: 1, session_id: null,
       },
       specTitle: "Pets API",
       specVersion: "v1.0.0",
@@ -127,7 +127,7 @@ describe("renderCaseStudy (TASK-110)", () => {
         id: 1, started_at: "2026-04-30T12:00:00Z", finished_at: null,
         total: 1, passed: 0, failed: 1, skipped: 0,
         trigger: "manual", commit_sha: null, branch: null, environment: null,
-        duration_ms: null, collection_id: null,
+        duration_ms: null, collection_id: null, session_id: null,
       },
       zondVersion: "v",
     });
@@ -153,7 +153,7 @@ describe("renderCaseStudy (TASK-110)", () => {
         id: 1, started_at: "2026-04-30T12:00:00Z", finished_at: null,
         total: 1, passed: 0, failed: 1, skipped: 0,
         trigger: "manual", commit_sha: null, branch: null,
-        environment: null, duration_ms: null, collection_id: null,
+        environment: null, duration_ms: null, collection_id: null, session_id: null,
       },
       zondVersion: "v",
     });

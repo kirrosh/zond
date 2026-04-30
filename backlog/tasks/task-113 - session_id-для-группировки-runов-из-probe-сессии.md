@@ -1,9 +1,10 @@
 ---
 id: TASK-113
 title: session_id для группировки run'ов из probe-сессии
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 14:18'
+updated_date: '2026-04-30 14:33'
 labels:
   - ui
   - db

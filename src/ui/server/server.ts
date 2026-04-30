@@ -3,12 +3,15 @@ import { resolve } from "node:path";
 import { getDb } from "../../db/schema.ts";
 import {
   countRuns,
+  countSessions,
   getCollectionById,
   getLatestRunForSuite,
   getResultById,
   getResultsByRunId,
   getRunById,
   listRuns,
+  listRunsBySession,
+  listSessions,
 } from "../../db/queries.ts";
 import { renderCaseStudy } from "../../core/exporter/case-study/index.ts";
 import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
@@ -52,6 +55,31 @@ export function createApp() {
       const runs = listRuns(limit, offset, filters);
       const total = countRuns(filters);
       return c.json({ runs, total, limit, offset });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.get("/api/sessions", (c) => {
+    const limitRaw = Number(c.req.query("limit") ?? DEFAULT_LIMIT);
+    const offsetRaw = Number(c.req.query("offset") ?? 0);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(1, limitRaw), MAX_LIMIT) : DEFAULT_LIMIT;
+    const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
+    try {
+      const sessions = listSessions(limit, offset);
+      const total = countSessions();
+      return c.json({ sessions, total, limit, offset });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.get("/api/sessions/:id/runs", (c) => {
+    const sessionId = c.req.param("id");
+    if (!sessionId) return c.json({ error: "missing session id" }, 400);
+    try {
+      const runs = listRunsBySession(sessionId);
+      return c.json({ session_id: sessionId, runs });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }

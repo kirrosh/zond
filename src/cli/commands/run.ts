@@ -48,6 +48,8 @@ export interface RunOptions {
   validateSchema?: boolean;
   /** Explicit OpenAPI spec path/URL (overrides collection.openapi_spec). */
   specPath?: string;
+  /** Group this run under a session id (multi-run campaigns). */
+  sessionId?: string;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -386,6 +388,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
         started_at: results[0]?.started_at ?? new Date().toISOString(),
         environment: options.env,
         collection_id: collection?.id,
+        session_id: options.sessionId,
       });
       finalizeRun(savedRunId, results);
       saveResults(savedRunId, results);

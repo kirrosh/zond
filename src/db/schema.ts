@@ -51,7 +51,7 @@ export function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -67,7 +67,8 @@ const SCHEMA = `
     branch        TEXT,
     environment   TEXT,
     duration_ms   INTEGER,
-    collection_id INTEGER REFERENCES collections(id)
+    collection_id INTEGER REFERENCES collections(id),
+    session_id    TEXT
   );
 
   CREATE TABLE IF NOT EXISTS results (
@@ -148,6 +149,7 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_runs_started      ON runs(started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_runs_collection    ON runs(collection_id);
+  CREATE INDEX IF NOT EXISTS idx_runs_session       ON runs(session_id, started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_results_run        ON results(run_id);
   CREATE INDEX IF NOT EXISTS idx_results_status     ON results(status);
   CREATE INDEX IF NOT EXISTS idx_results_name       ON results(suite_name, test_name);
@@ -218,6 +220,12 @@ function runMigrations(db: Database): void {
         );
         CREATE INDEX IF NOT EXISTS idx_lint_runs_spec ON lint_runs(spec_path, started_at DESC);
       `);
+    }
+    if (ver >= 6 && ver < 7) {
+      // Migration v6→v7: add session_id column to runs for grouping CLI invocations
+      // (e.g. `zond hunt`, scripted post-init runs) into one campaign.
+      db.exec("ALTER TABLE runs ADD COLUMN session_id TEXT");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id, started_at DESC)");
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

@@ -21,6 +21,7 @@ export interface CreateRunOpts {
   commit_sha?: string;
   branch?: string;
   collection_id?: number;
+  session_id?: string;
 }
 
 export interface RunRecord {
@@ -37,6 +38,7 @@ export interface RunRecord {
   environment: string | null;
   duration_ms: number | null;
   collection_id: number | null;
+  session_id: string | null;
 }
 
 export interface RunSummary {
@@ -50,6 +52,20 @@ export interface RunSummary {
   environment: string | null;
   duration_ms: number | null;
   collection_id: number | null;
+  session_id: string | null;
+}
+
+export interface SessionSummary {
+  session_id: string;
+  started_at: string;
+  finished_at: string | null;
+  run_count: number;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration_ms: number | null;
+  environment: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -118,8 +134,8 @@ export interface StoredStepResult {
 export function createRun(opts: CreateRunOpts): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch, collection_id)
-    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch, $collection_id)
+    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch, collection_id, session_id)
+    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch, $collection_id, $session_id)
   `);
   const result = stmt.run({
     $started_at: opts.started_at,
@@ -128,6 +144,7 @@ export function createRun(opts: CreateRunOpts): number {
     $commit_sha: opts.commit_sha ?? null,
     $branch: opts.branch ?? null,
     $collection_id: opts.collection_id ?? null,
+    $session_id: opts.session_id ?? null,
   });
   return Number(result.lastInsertRowid);
 }
@@ -216,7 +233,7 @@ export function listRuns(limit = 20, offset = 0, filters?: RunFilters): RunSumma
   if (filters && Object.values(filters).some(Boolean)) {
     const { where, params } = buildRunFilterSQL(filters);
     return db.query(`
-      SELECT r.id, r.started_at, r.finished_at, r.total, r.passed, r.failed, r.skipped, r.environment, r.duration_ms, r.collection_id
+      SELECT r.id, r.started_at, r.finished_at, r.total, r.passed, r.failed, r.skipped, r.environment, r.duration_ms, r.collection_id, r.session_id
       FROM runs r
       ${where}
       ORDER BY r.started_at DESC
@@ -224,11 +241,51 @@ export function listRuns(limit = 20, offset = 0, filters?: RunFilters): RunSumma
     `).all(...(params as (string | number)[]), limit, offset) as RunSummary[];
   }
   return db.query(`
-    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id
+    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id, session_id
     FROM runs
     ORDER BY started_at DESC
     LIMIT ? OFFSET ?
   `).all(limit, offset) as RunSummary[];
+}
+
+export function listSessions(limit = 20, offset = 0): SessionSummary[] {
+  const db = getDb();
+  return db.query(`
+    SELECT
+      session_id,
+      MIN(started_at)        AS started_at,
+      MAX(finished_at)       AS finished_at,
+      COUNT(*)               AS run_count,
+      COALESCE(SUM(total), 0)   AS total,
+      COALESCE(SUM(passed), 0)  AS passed,
+      COALESCE(SUM(failed), 0)  AS failed,
+      COALESCE(SUM(skipped), 0) AS skipped,
+      SUM(duration_ms)       AS duration_ms,
+      MAX(environment)       AS environment
+    FROM runs
+    WHERE session_id IS NOT NULL
+    GROUP BY session_id
+    ORDER BY started_at DESC
+    LIMIT ? OFFSET ?
+  `).all(limit, offset) as SessionSummary[];
+}
+
+export function countSessions(): number {
+  const db = getDb();
+  const row = db.query(
+    "SELECT COUNT(DISTINCT session_id) AS cnt FROM runs WHERE session_id IS NOT NULL"
+  ).get() as { cnt: number };
+  return row.cnt;
+}
+
+export function listRunsBySession(sessionId: string): RunSummary[] {
+  const db = getDb();
+  return db.query(`
+    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id, session_id
+    FROM runs
+    WHERE session_id = ?
+    ORDER BY started_at ASC
+  `).all(sessionId) as RunSummary[];
 }
 
 export function deleteRun(runId: number): boolean {
@@ -565,7 +622,7 @@ export function findCollectionBySpec(spec: string): CollectionRecord | null {
 export function listRunsByCollection(collectionId: number, limit = 20, offset = 0): RunSummary[] {
   const db = getDb();
   return db.query(`
-    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id
+    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id, session_id
     FROM runs
     WHERE collection_id = ?
     ORDER BY started_at DESC
