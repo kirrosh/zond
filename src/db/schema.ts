@@ -51,7 +51,7 @@ export function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -89,7 +89,9 @@ const SCHEMA = `
     suite_file       TEXT,
     provenance       TEXT,
     failure_class    TEXT,
-    failure_class_reason TEXT
+    failure_class_reason TEXT,
+    spec_pointer     TEXT,
+    spec_excerpt     TEXT
   );
 
   CREATE TABLE IF NOT EXISTS collections (
@@ -176,6 +178,11 @@ function runMigrations(db: Database): void {
       // Migration v3→v4: add failure classification columns
       db.exec("ALTER TABLE results ADD COLUMN failure_class TEXT");
       db.exec("ALTER TABLE results ADD COLUMN failure_class_reason TEXT");
+    }
+    if (ver >= 4 && ver < 5) {
+      // Migration v4→v5: add spec_pointer + spec_excerpt (frozen OpenAPI evidence)
+      db.exec("ALTER TABLE results ADD COLUMN spec_pointer TEXT");
+      db.exec("ALTER TABLE results ADD COLUMN spec_excerpt TEXT");
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();
