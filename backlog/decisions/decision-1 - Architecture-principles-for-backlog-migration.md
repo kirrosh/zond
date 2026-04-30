@@ -2,8 +2,16 @@
 id: decision-1
 title: Architecture principles for backlog migration
 date: '2026-04-27 10:10'
-status: accepted
+status: superseded
+superseded_by: decision-2
 ---
+
+> **Superseded by [decision-2](decision-2%20-%20Drop-MCP-server-—-keep-CLI-agent-skills-as-the-only-integration-surface.md)** (2026-04-28).
+> Принципы 1, 3, 4, 5 опирались на MCP-сервер как один из двух entry-point поверх
+> общего core. MCP-слой удалён целиком (v0.22.0), surface теперь — CLI + agent
+> skills. Принцип 2 («write остаётся за агентом») сохраняется и в новой модели.
+> Документ сохранён как исторический контекст миграции бэклога.
+
 ## Context
 
 Анализ репозитория [MrLesk/Backlog.md](https://github.com/MrLesk/Backlog.md)

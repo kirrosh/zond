@@ -6,9 +6,10 @@ AI-агент (Claude Code) + zond = автоматическое покрыти
 
 ## Что понадобится
 
-- **Node.js 18+** — [nodejs.org](https://nodejs.org/) (проверить: `node --version`)
-- **Claude Code** — CLI-инструмент от Anthropic (установим ниже)
+- **Claude Code** — CLI-инструмент от Anthropic (установим ниже; для него потребуется Node.js 18+)
 - **OpenAPI-спецификация** вашего API — файл `openapi.json` или `openapi.yaml`, либо URL
+
+> Сам zond — нативный бинарник, Node.js ему не требуется (см. установку ниже).
 
 ---
 
