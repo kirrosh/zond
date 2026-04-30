@@ -17,19 +17,43 @@ function seedData(): { runId: number } {
       suite_name: "petstore",
       started_at: "2025-01-01T00:00:00.000Z",
       finished_at: "2025-01-01T00:00:01.000Z",
-      total: 2,
+      total: 4,
       passed: 1,
-      failed: 1,
+      failed: 3,
       skipped: 0,
       steps: [
         {
           name: "List pets",
-          status: "pass",
+          status: "fail",
           duration_ms: 100,
           request: { method: "GET", url: "http://localhost/pets", headers: {} },
-          response: { status: 200, headers: {}, body: "[]", duration_ms: 100 },
-          assertions: [{ field: "status", rule: "equals 200", passed: true, actual: 200, expected: 200 }],
+          response: { status: 500, headers: {}, body: "[]", duration_ms: 100 },
+          assertions: [{ field: "status", rule: "equals 200", passed: false, actual: 500, expected: 200 }],
           captures: {},
+          provenance: {
+            type: "openapi-generated",
+            generator: "zond-generate",
+            endpoint: "GET /pets",
+            response_branch: "200",
+            spec: "/tmp/petstore.json",
+          },
+          spec_pointer: "#/paths/~1pets/get/responses/200/content/application~1json/schema",
+          spec_excerpt: '{"type":"array","items":{"type":"object"}}',
+        },
+        {
+          name: "Probe limit float",
+          status: "fail",
+          duration_ms: 5,
+          request: { method: "GET", url: "http://localhost/pets?limit=1.5", headers: {} },
+          response: { status: 200, headers: {}, body: "[]", duration_ms: 5 },
+          assertions: [{ field: "status", rule: "one of [400]", passed: false, actual: 200, expected: [400] }],
+          captures: {},
+          provenance: {
+            type: "probe-suite",
+            generator: "negative-probe",
+            endpoint: "GET /pets",
+            response_branch: "400|422",
+          },
         },
         {
           name: "Delete pet",
@@ -39,6 +63,16 @@ function seedData(): { runId: number } {
           response: { status: 500, headers: {}, body: "boom", duration_ms: 50 },
           assertions: [{ field: "status", rule: "equals 204", passed: false, actual: 500, expected: 204 }],
           captures: {},
+        },
+        {
+          name: "Manual smoke",
+          status: "pass",
+          duration_ms: 12,
+          request: { method: "GET", url: "http://localhost/health", headers: {} },
+          response: { status: 200, headers: {}, body: "ok", duration_ms: 12 },
+          assertions: [{ field: "status", rule: "equals 200", passed: true, actual: 200, expected: 200 }],
+          captures: {},
+          provenance: { type: "manual" },
         },
       ],
     },
@@ -89,6 +123,40 @@ describe("UI API routes", () => {
     expect(body.run.id).toBe(runId);
     expect(Array.isArray(body.results)).toBe(true);
     expect(body.results.length).toBeGreaterThan(0);
+  });
+
+  it("GET /api/runs/:id → exposes provenance + spec_pointer + spec_excerpt", async () => {
+    const res = await app.request(`/api/runs/${runId}`);
+    const body = await res.json() as {
+      results: Array<{
+        test_name: string;
+        provenance: { type?: string; generator?: string; endpoint?: string; response_branch?: string } | null;
+        spec_pointer: string | null;
+        spec_excerpt: string | null;
+      }>;
+    };
+
+    const openapiStep = body.results.find((r) => r.test_name === "List pets");
+    expect(openapiStep).toBeDefined();
+    expect(openapiStep?.provenance?.type).toBe("openapi-generated");
+    expect(openapiStep?.provenance?.endpoint).toBe("GET /pets");
+    expect(openapiStep?.provenance?.response_branch).toBe("200");
+    expect(openapiStep?.spec_pointer).toContain("#/paths");
+    expect(openapiStep?.spec_excerpt).toContain('"type":"array"');
+
+    const probeStep = body.results.find((r) => r.test_name === "Probe limit float");
+    expect(probeStep?.provenance?.type).toBe("probe-suite");
+    expect(probeStep?.provenance?.generator).toBe("negative-probe");
+    expect(probeStep?.spec_pointer).toBeNull();
+    expect(probeStep?.spec_excerpt).toBeNull();
+
+    const manualStep = body.results.find((r) => r.test_name === "Manual smoke");
+    expect(manualStep?.provenance?.type).toBe("manual");
+
+    const legacyStep = body.results.find((r) => r.test_name === "Delete pet");
+    expect(legacyStep?.provenance).toBeNull();
+    expect(legacyStep?.spec_pointer).toBeNull();
+    expect(legacyStep?.spec_excerpt).toBeNull();
   });
 
   it("GET /api/runs/999999 → 404", async () => {

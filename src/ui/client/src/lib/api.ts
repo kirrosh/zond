@@ -59,6 +59,21 @@ export interface AssertionResult {
   path?: string;
 }
 
+export type ProvenanceType = "openapi-generated" | "manual" | "probe-suite";
+
+export interface SourceMetadata {
+  type?: ProvenanceType;
+  spec?: string;
+  generator?: string;
+  generated_at?: string;
+  endpoint?: string;
+  response_branch?: string;
+  schema_pointer?: string;
+  [key: string]: unknown;
+}
+
+export type FailureClass = "definitely_bug" | "likely_bug" | "quirk" | "env_issue";
+
 export interface StoredStepResult {
   id: number;
   run_id: number;
@@ -76,6 +91,11 @@ export interface StoredStepResult {
   assertions: AssertionResult[];
   captures: Record<string, unknown>;
   suite_file: string | null;
+  provenance: SourceMetadata | null;
+  failure_class: FailureClass | null;
+  failure_class_reason: string | null;
+  spec_pointer: string | null;
+  spec_excerpt: string | null;
 }
 
 export interface RunDetailResponse {
