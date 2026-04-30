@@ -1,7 +1,18 @@
 import { Hono } from "hono";
 import { resolve } from "node:path";
 import { getDb } from "../../db/schema.ts";
-import { countRuns, getLatestRunForSuite, getResultsByRunId, getRunById, listRuns } from "../../db/queries.ts";
+import {
+  countRuns,
+  getCollectionById,
+  getLatestRunForSuite,
+  getResultById,
+  getResultsByRunId,
+  getRunById,
+  listRuns,
+} from "../../db/queries.ts";
+import { renderCaseStudy } from "../../core/exporter/case-study/index.ts";
+import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
+import { VERSION } from "../../cli/version.ts";
 import { parseDirectorySafe } from "../../core/parser/yaml-parser.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 
@@ -142,6 +153,48 @@ export function createApp() {
       if (!run) return c.json({ error: "run not found" }, 404);
       const results = getResultsByRunId(id);
       return c.json({ run, results });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.get("/api/results/:id/case-study.md", async (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) {
+      return c.json({ error: "invalid result id" }, 400);
+    }
+    try {
+      const result = getResultById(id);
+      if (!result) return c.json({ error: "result not found" }, 404);
+      const run = getRunById(result.run_id);
+      if (!run) return c.json({ error: "run not found" }, 404);
+
+      let specTitle: string | null = null;
+      let specVersion: string | null = null;
+      if (run.collection_id != null) {
+        const col = getCollectionById(run.collection_id);
+        if (col?.openapi_spec) {
+          try {
+            const doc = await readOpenApiSpec(col.openapi_spec);
+            specTitle = doc.info?.title ?? null;
+            specVersion = doc.info?.version ?? null;
+          } catch {
+            // Best-effort — leave TODO placeholders in the draft.
+          }
+        }
+      }
+
+      const md = renderCaseStudy({
+        result,
+        run,
+        specTitle,
+        specVersion,
+        zondVersion: VERSION,
+      });
+      return new Response(md, {
+        status: 200,
+        headers: { "content-type": "text/markdown; charset=utf-8" },
+      });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }

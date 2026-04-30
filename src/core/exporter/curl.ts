@@ -1,4 +1,4 @@
-import type { StoredStepResult } from "../../../db/queries.ts";
+import type { StoredStepResult } from "../../db/queries.ts";
 
 /** Single-quote-wrapped curl, safe-ish for shells. */
 export function buildCurl(step: StoredStepResult): string {
