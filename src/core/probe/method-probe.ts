@@ -167,6 +167,11 @@ export function generateMethodProbes(opts: MethodProbeOptions): MethodProbeResul
     const steps: RawStep[] = missing.map((method) => {
       const step: RawStep = {
         name: `${method} ${bucket.path} — undeclared method must reject (no 5xx, no 2xx)`,
+        source: {
+          generator: "method-probe",
+          endpoint: `${method} ${bucket.path}`,
+          response_branch: ACCEPTABLE_STATUSES.map(String).join("|"),
+        },
         [method]: convertPath(concretePath),
         expect: { status: ACCEPTABLE_STATUSES },
       };
@@ -186,6 +191,11 @@ export function generateMethodProbes(opts: MethodProbeOptions): MethodProbeResul
     suites.push({
       name: `probe methods ${bucket.path}`,
       tags: ["probe-methods", "negative-method", "no-5xx", "smoke"],
+      source: {
+        type: "probe-suite",
+        generator: "method-probe",
+        endpoint: bucket.path,
+      },
       fileStem: `probe-methods-${stem}`,
       base_url: "{{base_url}}",
       ...(headers ? { headers } : {}),

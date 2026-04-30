@@ -28,15 +28,19 @@
     "backlog": "bunx backlog",
     "board": "bunx backlog board",
     "test": "bun run test:unit && bun run test:mocked",
-    "test:unit": "bun test tests/db/ tests/parser/ tests/runner/ tests/generator/ tests/core/ tests/core/meta/ tests/diagnostics/ tests/cli/program.test.ts tests/cli/cli-smoke.test.ts tests/cli/completions.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/safe-run.test.ts tests/cli/json-envelope.test.ts tests/cli/describe.test.ts tests/cli/catalog.test.ts tests/cli/db.test.ts tests/cli/request.test.ts tests/cli/init.test.ts tests/cli/init/agents-md.test.ts tests/cli/init/bootstrap.test.ts tests/cli/use.test.ts tests/cli/guide.test.ts tests/cli/update.test.ts tests/cli/serve.test.ts tests/integration/ tests/web/ tests/reporter/",
+    "test:unit": "bun test tests/db/ tests/parser/ tests/runner/ tests/generator/ tests/core/ tests/core/meta/ tests/diagnostics/ tests/cli/program.test.ts tests/cli/cli-smoke.test.ts tests/cli/completions.test.ts tests/cli/ci-init.test.ts tests/cli/commands.test.ts tests/cli/safe-run.test.ts tests/cli/json-envelope.test.ts tests/cli/describe.test.ts tests/cli/catalog.test.ts tests/cli/db.test.ts tests/cli/request.test.ts tests/cli/init.test.ts tests/cli/init/agents-md.test.ts tests/cli/init/bootstrap.test.ts tests/cli/use.test.ts tests/cli/guide.test.ts tests/cli/update.test.ts tests/cli/serve.test.ts tests/integration/ tests/ui/ tests/reporter/",
     "test:mocked": "bun run scripts/run-mocked-tests.ts",
     "check": "tsc --noEmit --project tsconfig.json",
     "lint:dead": "knip --reporter compact",
-    "build": "bun build --compile src/cli/index.ts --outfile zond && bun run scripts/codesign-darwin.ts ./zond",
+    "build:ui": "bun run scripts/build-ui.ts",
+    "build": "bun run build:ui && bun build --compile src/cli/index.ts --outfile zond && bun run scripts/codesign-darwin.ts ./zond",
+    "dev:ui": "bun --hot src/ui/server/server.ts",
     "bench:api": "bun benchmarks/api/server.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "backlog.md": "^1.44.0",
     "knip": "^6.7.0"
   },
@@ -49,11 +53,21 @@
   "dependencies": {
     "@hono/zod-openapi": "^1.2.2",
     "@readme/openapi-parser": "^5.5.0",
+    "@tanstack/react-query": "^5.100.6",
+    "@tanstack/react-router": "^1.168.26",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
+    "bun-plugin-tailwind": "^0.1.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "commander": "^14.0.0",
     "hono": "^4.12.2",
+    "lucide-react": "^1.14.0",
     "openapi-types": "^12.1.3",
+    "react": "^19",
+    "react-dom": "^19",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.4",
     "yaml": "^2.8.3",
     "zod": "^4.3.6"
   }

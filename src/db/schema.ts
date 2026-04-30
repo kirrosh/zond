@@ -51,7 +51,7 @@ export function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 6;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -86,7 +86,12 @@ const SCHEMA = `
     assertions       TEXT,
     captures         TEXT,
     response_headers TEXT,
-    suite_file       TEXT
+    suite_file       TEXT,
+    provenance       TEXT,
+    failure_class    TEXT,
+    failure_class_reason TEXT,
+    spec_pointer     TEXT,
+    spec_excerpt     TEXT
   );
 
   CREATE TABLE IF NOT EXISTS collections (
@@ -182,7 +187,21 @@ function runMigrations(db: Database): void {
       db.exec("ALTER TABLE results ADD COLUMN suite_file TEXT");
     }
     if (ver >= 2 && ver < 3) {
-      // Migration v2→v3: add lint_runs table for `zond lint-spec` history.
+      // Migration v2→v3: add provenance column (test source metadata)
+      db.exec("ALTER TABLE results ADD COLUMN provenance TEXT");
+    }
+    if (ver >= 3 && ver < 4) {
+      // Migration v3→v4: add failure classification columns
+      db.exec("ALTER TABLE results ADD COLUMN failure_class TEXT");
+      db.exec("ALTER TABLE results ADD COLUMN failure_class_reason TEXT");
+    }
+    if (ver >= 4 && ver < 5) {
+      // Migration v4→v5: add spec_pointer + spec_excerpt (frozen OpenAPI evidence)
+      db.exec("ALTER TABLE results ADD COLUMN spec_pointer TEXT");
+      db.exec("ALTER TABLE results ADD COLUMN spec_excerpt TEXT");
+    }
+    if (ver >= 5 && ver < 6) {
+      // Migration v5→v6: add lint_runs table for `zond lint-spec` history.
       db.exec(`
         CREATE TABLE IF NOT EXISTS lint_runs (
           id              INTEGER PRIMARY KEY AUTOINCREMENT,

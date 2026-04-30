@@ -104,6 +104,11 @@ export interface StoredStepResult {
   assertions: import("../core/runner/types.ts").AssertionResult[];
   captures: Record<string, unknown>;
   suite_file: string | null;
+  provenance: import("../core/parser/types.ts").SourceMetadata | null;
+  failure_class: import("../core/diagnostics/failure-class.ts").FailureClass | null;
+  failure_class_reason: string | null;
+  spec_pointer: string | null;
+  spec_excerpt: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -245,11 +250,11 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
     INSERT INTO results
       (run_id, suite_name, test_name, status, duration_ms,
        request_method, request_url, request_body,
-       response_status, response_body, response_headers, error_message, assertions, captures, suite_file)
+       response_status, response_body, response_headers, error_message, assertions, captures, suite_file, provenance, failure_class, failure_class_reason, spec_pointer, spec_excerpt)
     VALUES
       ($run_id, $suite_name, $test_name, $status, $duration_ms,
        $request_method, $request_url, $request_body,
-       $response_status, $response_body, $response_headers, $error_message, $assertions, $captures, $suite_file)
+       $response_status, $response_body, $response_headers, $error_message, $assertions, $captures, $suite_file, $provenance, $failure_class, $failure_class_reason, $spec_pointer, $spec_excerpt)
   `);
 
   db.transaction(() => {
@@ -276,21 +281,41 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
           $assertions: step.assertions.length > 0 ? JSON.stringify(step.assertions) : null,
           $captures: Object.keys(step.captures).length > 0 ? JSON.stringify(step.captures) : null,
           $suite_file: suite.suite_file ?? null,
+          $provenance: step.provenance ? JSON.stringify(step.provenance) : null,
+          $failure_class: step.failure_class ?? null,
+          $failure_class_reason: step.failure_class_reason ?? null,
+          $spec_pointer: step.spec_pointer ?? null,
+          $spec_excerpt: step.spec_excerpt ?? null,
         });
       }
     }
   })();
 }
 
+function parseProvenance(raw: unknown): import("../core/parser/types.ts").SourceMetadata | null {
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getResultsByRunId(runId: number): StoredStepResult[] {
   const db = getDb();
   const rows = db.query("SELECT * FROM results WHERE run_id = ? ORDER BY id").all(runId) as Array<
-    Omit<StoredStepResult, "assertions" | "captures"> & { assertions: string | null; captures: string | null }
+    Omit<StoredStepResult, "assertions" | "captures" | "provenance"> & {
+      assertions: string | null;
+      captures: string | null;
+      provenance: string | null;
+    }
   >;
   return rows.map((row) => ({
     ...row,
     assertions: row.assertions ? JSON.parse(row.assertions) : [],
     captures: row.captures ? JSON.parse(row.captures) : {},
+    provenance: parseProvenance(row.provenance),
   }));
 }
 
@@ -309,12 +334,17 @@ export function getFilteredResults(runId: number, filters: { method?: string; st
   }
 
   const rows = db.query(`SELECT * FROM results WHERE ${conditions.join(" AND ")} ORDER BY id`).all(...params) as Array<
-    Omit<StoredStepResult, "assertions" | "captures"> & { assertions: string | null; captures: string | null }
+    Omit<StoredStepResult, "assertions" | "captures" | "provenance"> & {
+      assertions: string | null;
+      captures: string | null;
+      provenance: string | null;
+    }
   >;
   return rows.map((row) => ({
     ...row,
     assertions: row.assertions ? JSON.parse(row.assertions) : [],
     captures: row.captures ? JSON.parse(row.captures) : {},
+    provenance: parseProvenance(row.provenance),
   }));
 }
 
@@ -523,6 +553,44 @@ export function listRunsByCollection(collectionId: number, limit = 20, offset = 
     ORDER BY started_at DESC
     LIMIT ? OFFSET ?
   `).all(collectionId, limit, offset) as RunSummary[];
+}
+
+export interface LastRunForSuite {
+  run_id: number;
+  started_at: string;
+  total: number;
+  passed: number;
+  failed: number;
+}
+
+/**
+ * Latest run that included `suiteFile` (matched by step_results.suite_file),
+ * with per-suite step counts within that run. Used by the Suites browser UI.
+ */
+export function getLatestRunForSuite(suiteFile: string): LastRunForSuite | null {
+  const db = getDb();
+  const row = db.query(`
+    SELECT
+      r.id AS run_id,
+      r.started_at AS started_at,
+      COUNT(*) AS total,
+      SUM(CASE WHEN s.status = 'pass' THEN 1 ELSE 0 END) AS passed,
+      SUM(CASE WHEN s.status IN ('fail', 'error') THEN 1 ELSE 0 END) AS failed
+    FROM results s
+    JOIN runs r ON r.id = s.run_id
+    WHERE s.suite_file = ?
+    GROUP BY r.id
+    ORDER BY r.id DESC
+    LIMIT 1
+  `).get(suiteFile) as LastRunForSuite | null;
+  if (!row) return null;
+  return {
+    run_id: row.run_id,
+    started_at: row.started_at,
+    total: Number(row.total) || 0,
+    passed: Number(row.passed) || 0,
+    failed: Number(row.failed) || 0,
+  };
 }
 
 export function getCollectionPassRateTrend(collectionId: number, limit = 30): PassRateTrendPoint[] {
