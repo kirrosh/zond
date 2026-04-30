@@ -39,6 +39,8 @@ function seedData(): { runId: number } {
           },
           spec_pointer: "#/paths/~1pets/get/responses/200/content/application~1json/schema",
           spec_excerpt: '{"type":"array","items":{"type":"object"}}',
+          failure_class: "definitely_bug",
+          failure_class_reason: "Server returned 500 on a documented 200 response",
         },
         {
           name: "Probe limit float",
@@ -54,6 +56,8 @@ function seedData(): { runId: number } {
             endpoint: "GET /pets",
             response_branch: "400|422",
           },
+          failure_class: "likely_bug",
+          failure_class_reason: "Negative probe expected 4xx, got 200 — API accepts invalid input",
         },
         {
           name: "Delete pet",
@@ -157,6 +161,28 @@ describe("UI API routes", () => {
     expect(legacyStep?.provenance).toBeNull();
     expect(legacyStep?.spec_pointer).toBeNull();
     expect(legacyStep?.spec_excerpt).toBeNull();
+  });
+
+  it("GET /api/runs/:id → exposes failure_class + reason", async () => {
+    const res = await app.request(`/api/runs/${runId}`);
+    const body = await res.json() as {
+      results: Array<{
+        test_name: string;
+        failure_class: string | null;
+        failure_class_reason: string | null;
+      }>;
+    };
+
+    const def = body.results.find((r) => r.test_name === "List pets");
+    expect(def?.failure_class).toBe("definitely_bug");
+    expect(def?.failure_class_reason).toContain("500");
+
+    const likely = body.results.find((r) => r.test_name === "Probe limit float");
+    expect(likely?.failure_class).toBe("likely_bug");
+
+    const legacy = body.results.find((r) => r.test_name === "Delete pet");
+    expect(legacy?.failure_class).toBeNull();
+    expect(legacy?.failure_class_reason).toBeNull();
   });
 
   it("GET /api/runs/999999 → 404", async () => {
