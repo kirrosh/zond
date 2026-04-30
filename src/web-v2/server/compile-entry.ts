@@ -4,6 +4,7 @@
 // is fully self-contained.
 import indexHtmlPath from "../../../dist/web-v2/index.html" with { type: "file" };
 import indexJsPath from "../../../dist/web-v2/index.js" with { type: "file" };
+import indexCssPath from "../../../dist/web-v2/index.css" with { type: "file" };
 import { createApp } from "./server.ts";
 
 const port = Number(process.env.ZOND_V2_PORT ?? 6421);
@@ -25,6 +26,15 @@ const server = Bun.serve({
       return new Response(Bun.file(indexJsPath), {
         headers: {
           "Content-Type": "application/javascript; charset=utf-8",
+          "Cache-Control": "public, max-age=3600",
+        },
+      });
+    }
+
+    if (url.pathname === "/index.css") {
+      return new Response(Bun.file(indexCssPath), {
+        headers: {
+          "Content-Type": "text/css; charset=utf-8",
           "Cache-Control": "public, max-age=3600",
         },
       });

@@ -1,5 +1,7 @@
 // TASK-95 spike — production migration tracked separately
 import { useEffect, useState } from "react";
+import { Plus, RotateCcw } from "lucide-react";
+import { Button } from "./components/ui/button";
 
 interface HelloPayload {
   message: string;
@@ -20,31 +22,43 @@ export function App() {
   }, []);
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", padding: 24, maxWidth: 720 }}>
-      <h1>zond v2 — spike</h1>
-      <p>React 19  ВВВы + Hono + Bun bundler. TASK-95.</p>
-
-      <section style={{ marginTop: 24 }}>
-        <h2>HMR / state probe</h2>
-        <p>
-          Counter: <strong>{count}</strong>{" "}
-          <button onClick={() => setCount((c) => c + 1)}>+1</button>
+    <main className="mx-auto max-w-3xl px-6 py-10 space-y-10">
+      <header className="space-y-1">
+        <h1 className="text-3xl font-semibold tracking-tight">zond v2 — spike</h1>
+        <p className="text-sm text-muted-foreground">
+          React 19 + Hono + Bun bundler + Tailwind 4 + shadcn. TASK-95 stage 3.
         </p>
-        <p style={{ color: "#666" }}>
-          Edit this label, save, and watch whether the counter resets — that probes Fast Refresh.
+      </header>
+
+      <section className="space-y-3">
+        <h2 className="text-xl font-medium">HMR / state probe</h2>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-muted-foreground">Counter:</span>
+          <span className="text-2xl font-semibold tabular-nums">{count}</span>
+          <Button onClick={() => setCount((c) => c + 1)}>
+            <Plus className="size-4" />
+            Increment
+          </Button>
+          <Button variant="outline" onClick={() => setCount(0)}>
+            <RotateCcw className="size-4" />
+            Reset
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Edit this label, save, watch whether the counter value survives.
         </p>
       </section>
 
-      <section style={{ marginTop: 24 }}>
-        <h2>API probe</h2>
+      <section className="space-y-3">
+        <h2 className="text-xl font-medium">API probe</h2>
         {error ? (
-          <p style={{ color: "crimson" }}>API error: {error}</p>
+          <p className="text-destructive text-sm">API error: {error}</p>
         ) : hello ? (
-          <pre style={{ background: "#f4f4f5", padding: 12, borderRadius: 6 }}>
+          <pre className="rounded-md border bg-muted p-3 text-xs overflow-x-auto">
 {JSON.stringify(hello, null, 2)}
           </pre>
         ) : (
-          <p>Loading…</p>
+          <p className="text-sm text-muted-foreground">Loading…</p>
         )}
       </section>
     </main>
