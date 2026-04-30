@@ -196,7 +196,7 @@ export function buildProgram(): Command {
     .option("--strict-vars", "Hard-fail (exit 2) when a {{var}} reference has no producer (default: warn and continue)")
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
     .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
-    .option("--validate-schema", "Validate JSON responses against the OpenAPI response schema (requires --spec or a collection with openapi_spec set)")
+    .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
     .action(async (pathArg: string | undefined, opts, cmd: Command) => {
       let path = pathArg;
