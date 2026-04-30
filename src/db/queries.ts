@@ -302,6 +302,24 @@ function parseProvenance(raw: unknown): import("../core/parser/types.ts").Source
   }
 }
 
+export function getResultById(resultId: number): StoredStepResult | null {
+  const db = getDb();
+  const row = db.query("SELECT * FROM results WHERE id = ?").get(resultId) as
+    | (Omit<StoredStepResult, "assertions" | "captures" | "provenance"> & {
+        assertions: string | null;
+        captures: string | null;
+        provenance: string | null;
+      })
+    | null;
+  if (!row) return null;
+  return {
+    ...row,
+    assertions: row.assertions ? JSON.parse(row.assertions) : [],
+    captures: row.captures ? JSON.parse(row.captures) : {},
+    provenance: parseProvenance(row.provenance),
+  };
+}
+
 export function getResultsByRunId(runId: number): StoredStepResult[] {
   const db = getDb();
   const rows = db.query("SELECT * FROM results WHERE run_id = ? ORDER BY id").all(runId) as Array<

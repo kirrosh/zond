@@ -189,7 +189,6 @@ describe("renderHtmlReport (TASK-107)", () => {
         trigger: "manual", commit_sha: null, branch: null, environment: null,
         duration_ms: null, collection_id: null,
       },
-      // @ts-expect-error — partial shape
       results: [{
         id: 1, run_id: 1, suite_name: "x", test_name: "<script>alert('xss')</script>",
         status: "fail", duration_ms: 0, request_method: "GET",
@@ -215,7 +214,6 @@ describe("renderHtmlReport (TASK-107)", () => {
         trigger: "ci", commit_sha: null, branch: "main", environment: "prod",
         duration_ms: 1000, collection_id: null,
       },
-      // @ts-expect-error — partial
       results: [
         { id: 1, run_id: 7, suite_name: "x", test_name: "ok1", status: "pass", duration_ms: 10,
           request_method: "GET", request_url: "https://e.test/a", request_body: null,

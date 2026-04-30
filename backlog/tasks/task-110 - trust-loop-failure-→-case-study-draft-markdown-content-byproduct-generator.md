@@ -1,16 +1,17 @@
 ---
 id: TASK-110
 title: 'trust-loop: failure → case-study draft (markdown content-byproduct generator)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 12:17'
+updated_date: '2026-04-30 12:49'
 labels:
   - ui
   - trust-loop
   - content
   - reporting
-dependencies: []
 milestone: m-6
+dependencies: []
 priority: medium
 ---
 

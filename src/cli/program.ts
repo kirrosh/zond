@@ -16,7 +16,7 @@ import { probeMethodsCommand } from "./commands/probe-methods.ts";
 import { lintSpecCommand } from "./commands/lint-spec.ts";
 import { probeMassAssignmentCommand } from "./commands/probe-mass-assignment.ts";
 import { exportCommand } from "./commands/export.ts";
-import { reportExportHtmlCommand } from "./commands/report.ts";
+import { reportExportHtmlCommand, reportCaseStudyCommand } from "./commands/report.ts";
 import { syncCommand } from "./commands/sync.ts";
 import { updateCommand } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
@@ -688,6 +688,21 @@ export function buildProgram(): Command {
         runId,
         output: opts.output,
         dbPath: opts.db,
+        json: globalJson(cmd),
+      });
+    });
+
+  reportCmd
+    .command("case-study <failure-id>")
+    .description("Generate a markdown case-study draft for a single failure (results.id) — ready to pipe into `gh issue create --body-file -`")
+    .option("-o, --output <file>", "Write the draft to a file (default: print to stdout)")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (failureId: string, opts, cmd: Command) => {
+      process.exitCode = await reportCaseStudyCommand({
+        failureId,
+        output: opts.output,
+        dbPath: opts.db,
+        stdout: !opts.output,
         json: globalJson(cmd),
       });
     });

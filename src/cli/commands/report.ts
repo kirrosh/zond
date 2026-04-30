@@ -1,7 +1,14 @@
 import { resolve } from "path";
 import { getDb } from "../../db/schema.ts";
-import { getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
+import {
+  getRunById,
+  getResultsByRunId,
+  getCollectionById,
+  getResultById,
+} from "../../db/queries.ts";
 import { renderHtmlReport } from "../../core/exporter/html-report/index.ts";
+import { renderCaseStudy } from "../../core/exporter/case-study/index.ts";
+import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
@@ -98,3 +105,139 @@ export async function reportExportHtmlCommand(
 
   return 0;
 }
+
+// ──────────────────────────────────────────────
+// `zond report case-study <failure-id>` — TASK-110
+// ──────────────────────────────────────────────
+
+export interface ReportCaseStudyOptions {
+  failureId: string;
+  output?: string;
+  dbPath?: string;
+  /** Print to stdout instead of (or in addition to) writing a file. */
+  stdout?: boolean;
+  json?: boolean;
+}
+
+export async function reportCaseStudyCommand(
+  options: ReportCaseStudyOptions,
+): Promise<number> {
+  const failureId = parseRunId(options.failureId);
+  if (failureId == null) {
+    const msg = `Invalid failure-id: ${options.failureId}. Expected a positive integer (results.id).`;
+    if (options.json) printJson(jsonError("report case-study", [msg]));
+    else printError(msg);
+    return 2;
+  }
+
+  try {
+    getDb(options.dbPath);
+  } catch (err) {
+    const msg = `Failed to open database: ${(err as Error).message}`;
+    if (options.json) printJson(jsonError("report case-study", [msg]));
+    else printError(msg);
+    return 2;
+  }
+
+  const result = getResultById(failureId);
+  if (!result) {
+    const msg = `Failure #${failureId} not found. Find one via: zond db run <run-id>`;
+    if (options.json) printJson(jsonError("report case-study", [msg]));
+    else printError(msg);
+    return 1;
+  }
+
+  const run = getRunById(result.run_id);
+  if (!run) {
+    const msg = `Internal: failure #${failureId} references missing run #${result.run_id}`;
+    if (options.json) printJson(jsonError("report case-study", [msg]));
+    else printError(msg);
+    return 2;
+  }
+
+  // Best-effort spec load for title/version. Don't fail the command if the spec
+  // is gone — leave a TODO placeholder in the draft.
+  const warnings: string[] = [];
+  let specTitle: string | null = null;
+  let specVersion: string | null = null;
+  if (run.collection_id != null) {
+    const collection = getCollectionById(run.collection_id);
+    if (collection?.openapi_spec) {
+      try {
+        const doc = await readOpenApiSpec(collection.openapi_spec);
+        specTitle = doc.info?.title ?? null;
+        specVersion = doc.info?.version ?? null;
+      } catch (err) {
+        warnings.push(
+          `Could not load OpenAPI spec from ${collection.openapi_spec}: ${(err as Error).message}. Spec title/version left as TODO.`,
+        );
+      }
+    }
+  }
+
+  const md = renderCaseStudy({
+    result,
+    run,
+    specTitle,
+    specVersion,
+    zondVersion: VERSION,
+  });
+
+  // Heuristic: if the failure isn't classified as a bug, surface a hint.
+  if (result.failure_class && result.failure_class !== "definitely_bug" && result.failure_class !== "likely_bug") {
+    warnings.push(
+      `Failure is classified as \`${result.failure_class}\`, not a bug. The case-study draft is still rendered, but you may want to pick a more interesting finding.`,
+    );
+  }
+
+  if (options.stdout || !options.output) {
+    if (options.output) {
+      // Both: write file AND print to stdout
+      try {
+        await Bun.write(resolve(options.output), md);
+      } catch (err) {
+        const msg = `Failed to write draft: ${(err as Error).message}`;
+        if (options.json) printJson(jsonError("report case-study", [msg]));
+        else printError(msg);
+        return 2;
+      }
+    }
+    if (!options.json) {
+      // For human consumption, dump the markdown to stdout so the user can
+      // pipe it into `pbcopy`, `gh issue create --body-file -`, etc.
+      process.stdout.write(md);
+    }
+  } else {
+    try {
+      await Bun.write(resolve(options.output), md);
+    } catch (err) {
+      const msg = `Failed to write draft: ${(err as Error).message}`;
+      if (options.json) printJson(jsonError("report case-study", [msg]));
+      else printError(msg);
+      return 2;
+    }
+    if (!options.json) {
+      for (const w of warnings) printWarning(w);
+      printSuccess(`Wrote case-study draft → ${resolve(options.output)}`);
+    }
+  }
+
+  if (options.json) {
+    printJson(
+      jsonOk(
+        "report case-study",
+        {
+          failureId,
+          runId: run.id,
+          output: options.output ? resolve(options.output) : null,
+          markdown: md,
+          failureClass: result.failure_class,
+        },
+        warnings,
+      ),
+    );
+  }
+
+  return 0;
+}
+

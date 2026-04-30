@@ -99,6 +99,7 @@ zond ci init
 | `probe-mass-assignment <spec>` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--timeout <ms>` |
 | `lint-spec <spec>` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--strict`, `--rule <list>`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
 | `report export <run-id>` | Export a stored run as a single-file shareable HTML report (failure cards, evidence chain, copy-curl, copy-as-issue) | `-o, --output <file>`, `--db <path>` |
+| `report case-study <failure-id>` | Generate a markdown case-study draft for a single failure (one-artefact-per-session content byproduct) | `-o, --output <file>`, `--db <path>` |
 
 ### `lint-spec` — static OpenAPI analysis (pre-flight, zero HTTP)
 
@@ -371,6 +372,49 @@ Typical size: a 50-endpoint run lands in 50–150 KB. `--json` envelope
 output is supported and includes `sizeKb`, `output`, `failures`, and
 `totalSteps`. Exit codes: `0` ok, `1` run-id not found, `2` invalid
 input.
+
+---
+
+### `report case-study` — markdown draft for one failure
+
+`zond report export` gives you the full HTML run; `zond report case-study
+<failure-id>` zooms in on **one** failure and produces a markdown draft
+ready to drop into a tracker, blog post, or Slack write-up. Every session
+should leave behind one such artefact — this command removes the friction
+of starting from a blank page.
+
+```bash
+zond report case-study 2                 # print to stdout
+zond report case-study 2 -o draft.md     # write to file
+zond report case-study 2 | gh issue create --title "POST /pets 5xx" --body-file -
+```
+
+`<failure-id>` is the `results.id` (one row per step, not the run-id).
+Find one via `zond db run <run-id>` — failed/errored rows are the obvious
+candidates. The same draft is also reachable from `zond serve` →
+Run detail → **Case study draft** button on each failure card (writes
+to clipboard via `GET /api/results/:id/case-study.md`).
+
+The template fills itself from existing run data:
+
+- **TL;DR** — chosen by `failure_class` (`definitely_bug` /
+  `likely_bug` / `quirk` / `env_issue`), each gets a different one-liner.
+- **Context** — API title + version pulled from the registered
+  collection's OpenAPI `info` (best-effort: if the spec is unreachable
+  at export time the field becomes `<TODO: ...>` instead of failing).
+- **What the spec says** — JSON pointer + frozen excerpt captured at
+  run time (so later spec edits don't rewrite history).
+- **Repro** — the same `curl` block as the HTML report.
+- **What happened** — status + duration + pretty-printed response body.
+- **Why it matters** — `failure_class_reason` + every failed assertion
+  expanded as `expected vs actual`.
+- **How zond found it** — provenance (which generator, which response
+  branch, which suite).
+
+Anything zond couldn't determine becomes an explicit `<TODO: ...>`
+placeholder so you immediately see the gaps to fill in by hand. Exit
+codes match the rest of the family: `0` ok, `1` failure-id not found,
+`2` invalid input.
 
 ---
 

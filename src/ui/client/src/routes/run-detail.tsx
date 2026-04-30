@@ -1,7 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Check, ChevronRight, Copy, Radio } from "lucide-react";
+import { Check, ChevronRight, Copy, FileText, Radio } from "lucide-react";
 import {
   runDetailQueryOptions,
   type AssertionResult,
@@ -228,7 +228,10 @@ function EvidencePanel({ step }: { step: StoredStepResult }) {
             </button>
           ))}
         </div>
-        <CopyCurlButton step={step} />
+        <div className="flex items-center gap-2">
+          <CaseStudyDraftButton resultId={step.id} />
+          <CopyCurlButton step={step} />
+        </div>
       </div>
       <div className="p-3">
         {tab === "request" && <RequestPanel step={step} />}
@@ -428,6 +431,37 @@ function CodeBlock({ title, content }: { title: string; content: string | null }
         {pretty}
       </pre>
     </div>
+  );
+}
+
+function CaseStudyDraftButton({ resultId }: { resultId: number }) {
+  const [state, setState] = useState<"idle" | "loading" | "copied" | "error">("idle");
+  const onCopy = async () => {
+    setState("loading");
+    try {
+      const resp = await fetch(`/api/results/${resultId}/case-study.md`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const md = await resp.text();
+      await navigator.clipboard.writeText(md);
+      setState("copied");
+      setTimeout(() => setState("idle"), 1800);
+    } catch {
+      setState("error");
+      setTimeout(() => setState("idle"), 1800);
+    }
+  };
+  const label = state === "copied"
+    ? "Copied"
+    : state === "error"
+      ? "Failed"
+      : state === "loading"
+        ? "Generating…"
+        : "Case study draft";
+  return (
+    <Button size="sm" variant="ghost" onClick={onCopy} disabled={state === "loading"}>
+      {state === "copied" ? <Check className="size-3.5" /> : <FileText className="size-3.5" />}
+      {label}
+    </Button>
   );
 }
 

@@ -2,7 +2,7 @@ import type { RunRecord, StoredStepResult } from "../../../db/queries.ts";
 import type { FailureClass } from "../../diagnostics/failure-class.ts";
 import { REPO_URL } from "../../../cli/version.ts";
 import { escapeHtml, tryPrettyJson } from "./escape.ts";
-import { buildCurl } from "./curl.ts";
+import { buildCurl } from "../curl.ts";
 import { STYLES } from "./styles.ts";
 import { SCRIPT } from "./script.ts";
 
