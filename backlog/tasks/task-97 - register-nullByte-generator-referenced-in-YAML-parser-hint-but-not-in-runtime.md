@@ -3,9 +3,10 @@ id: TASK-97
 title: >-
   register {{$nullByte}} generator (referenced in YAML parser hint but not in
   runtime)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 07:47'
+updated_date: '2026-04-30 08:12'
 labels:
   - generator
   - consistency
