@@ -16,6 +16,7 @@ import { probeMethodsCommand } from "./commands/probe-methods.ts";
 import { lintSpecCommand } from "./commands/lint-spec.ts";
 import { probeMassAssignmentCommand } from "./commands/probe-mass-assignment.ts";
 import { exportCommand } from "./commands/export.ts";
+import { reportExportHtmlCommand } from "./commands/report.ts";
 import { syncCommand } from "./commands/sync.ts";
 import { updateCommand } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
@@ -668,6 +669,25 @@ export function buildProgram(): Command {
         output: opts.output,
         env: opts.env,
         collectionName: opts.collectionName,
+        json: globalJson(cmd),
+      });
+    });
+
+  // ── report (with subcommand: export) ──
+  const reportCmd = program.command("report").description("Export run reports for sharing");
+  reportCmd
+    .command("export <run-id>")
+    .description("Export a stored run as a single-file HTML report (shareable, openable in any browser)")
+    .option("--html", "Render as HTML (default and currently the only supported format)")
+    .option("-o, --output <file>", "Output file path (default: zond-run-<id>.html)")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (runId: string, opts, cmd: Command) => {
+      // --html is currently the only format; accept it for forward-compat,
+      // but do not require it (the command's only contract is HTML for now).
+      process.exitCode = await reportExportHtmlCommand({
+        runId,
+        output: opts.output,
+        dbPath: opts.db,
         json: globalJson(cmd),
       });
     });
