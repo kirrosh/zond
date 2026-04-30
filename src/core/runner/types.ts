@@ -34,6 +34,10 @@ export interface StepResult {
   captures: Record<string, unknown>;
   error?: string;
   provenance?: import("../parser/types.ts").SourceMetadata | null;
+  /** TASK-101: classification of why this failure happened — definitely_bug,
+   *  likely_bug, quirk, env_issue. `null` for passed/skipped/unclassifiable. */
+  failure_class?: import("../diagnostics/failure-class.ts").FailureClass | null;
+  failure_class_reason?: string | null;
 }
 
 export interface TestRunResult {

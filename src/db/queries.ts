@@ -105,6 +105,8 @@ export interface StoredStepResult {
   captures: Record<string, unknown>;
   suite_file: string | null;
   provenance: import("../core/parser/types.ts").SourceMetadata | null;
+  failure_class: import("../core/diagnostics/failure-class.ts").FailureClass | null;
+  failure_class_reason: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -246,11 +248,11 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
     INSERT INTO results
       (run_id, suite_name, test_name, status, duration_ms,
        request_method, request_url, request_body,
-       response_status, response_body, response_headers, error_message, assertions, captures, suite_file, provenance)
+       response_status, response_body, response_headers, error_message, assertions, captures, suite_file, provenance, failure_class, failure_class_reason)
     VALUES
       ($run_id, $suite_name, $test_name, $status, $duration_ms,
        $request_method, $request_url, $request_body,
-       $response_status, $response_body, $response_headers, $error_message, $assertions, $captures, $suite_file, $provenance)
+       $response_status, $response_body, $response_headers, $error_message, $assertions, $captures, $suite_file, $provenance, $failure_class, $failure_class_reason)
   `);
 
   db.transaction(() => {
@@ -278,6 +280,8 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
           $captures: Object.keys(step.captures).length > 0 ? JSON.stringify(step.captures) : null,
           $suite_file: suite.suite_file ?? null,
           $provenance: step.provenance ? JSON.stringify(step.provenance) : null,
+          $failure_class: step.failure_class ?? null,
+          $failure_class_reason: step.failure_class_reason ?? null,
         });
       }
     }

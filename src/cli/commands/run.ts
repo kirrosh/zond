@@ -388,6 +388,8 @@ export async function runCommand(options: RunOptions): Promise<number> {
         ...(typeof s.response?.status === "number" ? { http_status: s.response.status } : {}),
         ...(typeof s.response?.status === "number" && s.response.status >= 500 && s.response.status < 600 ? { is_5xx: true } : {}),
         error: s.error,
+        ...(s.failure_class ? { failure_class: s.failure_class, failure_class_reason: s.failure_class_reason } : {}),
+        ...(s.provenance ? { provenance: s.provenance } : {}),
       }))
     );
     const fiveXx = failures.filter(f => f.is_5xx).length;
