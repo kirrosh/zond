@@ -34,7 +34,7 @@
     "lint:dead": "knip --reporter compact",
     "build": "bun build --compile src/cli/index.ts --outfile zond && bun run scripts/codesign-darwin.ts ./zond",
     "dev:v2": "bun --hot src/web-v2/server/server.ts",
-    "build:v2": "bun build src/web-v2/client/index.html --outdir dist/web-v2 --minify --entry-naming [name].[ext] --asset-naming [name].[ext] --chunk-naming [name].[ext]",
+    "build:v2": "bun run scripts/build-web-v2.ts",
     "compile:v2": "bun build --compile src/web-v2/server/compile-entry.ts --outfile zond-v2",
     "bench:api": "bun benchmarks/api/server.ts"
   },
@@ -56,11 +56,17 @@
     "@readme/openapi-parser": "^5.5.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
+    "bun-plugin-tailwind": "^0.1.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "commander": "^14.0.0",
     "hono": "^4.12.2",
+    "lucide-react": "^1.14.0",
     "openapi-types": "^12.1.3",
     "react": "^19",
     "react-dom": "^19",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.4",
     "yaml": "^2.8.3",
     "zod": "^4.3.6"
   }

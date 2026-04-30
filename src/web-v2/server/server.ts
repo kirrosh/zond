@@ -24,6 +24,8 @@ export async function startDevServer(options: ServeV2Options = {}) {
   const port = options.port ?? 6421;
   const hostname = options.host ?? "localhost";
 
+  // bunfig.toml has `[serve.static] plugins = ["bun-plugin-tailwind"]`,
+  // so Bun.serve transparently runs the Tailwind plugin on the HTML route.
   const indexHtml = await import("../client/index.html");
   const app = createApp();
 
