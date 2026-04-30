@@ -1,10 +1,14 @@
 // TASK-95 spike — production migration tracked separately
 import { Hono } from "hono";
+import { countRuns, listRuns } from "../../db/queries.ts";
 
 export interface ServeV2Options {
   port?: number;
   host?: string;
 }
+
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 200;
 
 export function createApp() {
   const app = new Hono();
@@ -16,6 +20,24 @@ export function createApp() {
       ts: new Date().toISOString(),
     }),
   );
+
+  app.get("/api/runs", (c) => {
+    const limitRaw = Number(c.req.query("limit") ?? DEFAULT_LIMIT);
+    const offsetRaw = Number(c.req.query("offset") ?? 0);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(1, limitRaw), MAX_LIMIT) : DEFAULT_LIMIT;
+    const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
+    const status = c.req.query("status");
+    const filters = status === "passed" || status === "failed"
+      ? { status }
+      : undefined;
+    try {
+      const runs = listRuns(limit, offset, filters);
+      const total = countRuns(filters);
+      return c.json({ runs, total, limit, offset });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
 
   return app;
 }
