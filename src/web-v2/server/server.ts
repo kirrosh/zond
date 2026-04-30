@@ -52,24 +52,39 @@ export function createApp() {
     const total = Math.max(run.total, 1);
     const stepMs = total > 50 ? 100 : 350;
 
+    let tick: ReturnType<typeof setInterval> | null = null;
+    let closed = false;
+
     const stream = new ReadableStream({
       start(controller) {
         const enc = new TextEncoder();
         const send = (event: string, payload: unknown) => {
-          controller.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
+          if (closed) return;
+          try {
+            controller.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
+          } catch {
+            // controller already closed (client dropped) — stop the loop
+            closed = true;
+            if (tick) clearInterval(tick);
+          }
         };
         let completed = 0;
         send("snapshot", { runId: id, completed, total, status: "running" });
-        const tick = setInterval(() => {
+        tick = setInterval(() => {
+          if (closed) return;
           completed = Math.min(completed + 1, total);
           send("progress", { runId: id, completed, total });
           if (completed >= total) {
             send("done", { runId: id });
-            clearInterval(tick);
-            controller.close();
+            closed = true;
+            if (tick) clearInterval(tick);
+            try { controller.close(); } catch { /* already closed */ }
           }
         }, stepMs);
-        return () => clearInterval(tick);
+      },
+      cancel() {
+        closed = true;
+        if (tick) clearInterval(tick);
       },
     });
 
@@ -78,6 +93,8 @@ export function createApp() {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
+        // Disable proxy buffering when behind nginx/cloudflare etc.
+        "X-Accel-Buffering": "no",
       },
     });
   });
@@ -113,6 +130,8 @@ export async function startDevServer(options: ServeV2Options = {}) {
     port,
     hostname,
     development: true,
+    // SSE streams can run longer than Bun's default 10 s idle timeout.
+    idleTimeout: 255,
     routes: {
       "/api/*": (req) => app.fetch(req),
       "/": indexHtml.default,
