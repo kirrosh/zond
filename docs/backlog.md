@@ -35,6 +35,7 @@ bunx backlog sequence list --plain       # граф зависимостей
 | [decision-2](../backlog/decisions/decision-2%20-%20Drop-MCP-server-—-keep-CLI-agent-skills-as-the-only-integration-surface.md) | MCP выпилен. Surface = CLI + agent skills. |
 | [decision-3](../backlog/decisions/decision-3%20-%20Future-of-zond-serve-web-UI.md) | `zond serve` сохраняем как human-only secondary surface (revisitable). |
 | [decision-4](../backlog/decisions/decision-4%20-%20Future-of-zond-export-postman.md) | `zond export postman` сохраняем как QA-onboarding мост (revisitable). |
+| [decision-5](../backlog/decisions/decision-5%20-%20Product-direction-AI-generated-tests-with-human-verifiable-trust-loop.md) | Product direction: AI-generated tests + human-verifiable trust loop (agent surface + web UI как два равных surface'а). |
 
 ## Workflow для агента
 
