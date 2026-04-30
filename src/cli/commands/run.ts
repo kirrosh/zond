@@ -19,6 +19,7 @@ import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { getDb } from "../../db/schema.ts";
 import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from "../../db/queries.ts";
 import { AUTH_PATH_RE } from "../../core/runner/execute-run.ts";
+import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
 
 export interface RunOptions {
@@ -224,7 +225,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
     if (!specPath) {
       try {
         const collection = findCollectionByTestPath(options.path);
-        if (collection?.openapi_spec) specPath = collection.openapi_spec;
+        if (collection?.openapi_spec) specPath = resolveCollectionSpec(collection.openapi_spec);
       } catch { /* DB not available — fall through */ }
     }
     if (specPath) {
