@@ -98,6 +98,7 @@ zond ci init
 | `probe-methods <spec>` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--output <dir>`, `--tag` |
 | `probe-mass-assignment <spec>` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--timeout <ms>` |
 | `lint-spec <spec>` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--strict`, `--rule <list>`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
+| `report export <run-id>` | Export a stored run as a single-file shareable HTML report (failure cards, evidence chain, copy-curl, copy-as-issue) | `-o, --output <file>`, `--db <path>` |
 
 ### `lint-spec` — static OpenAPI analysis (pre-flight, zero HTTP)
 
@@ -324,6 +325,52 @@ least set `base_url`. Bearer / API-key tokens are read from `auth_token` /
 `api_key` (matching `zond run`'s convention). Path-param placeholders
 (e.g. `{orgId}`) are substituted from the same env — set them explicitly to
 unlock PATCH/PUT probing.
+
+---
+
+### `report export` — single-file shareable HTML run reports
+
+After a run lives in SQLite (`zond.db`), `zond report export <run-id>`
+materialises it as a self-contained HTML file you can drop into a Slack
+thread, attach to a GitHub issue, or open offline weeks later — no
+`zond serve` required.
+
+```bash
+zond report export 42                       # → zond-run-42.html
+zond report export 42 -o triage/run-42.html # custom path
+zond report export 42 --db ./other.db       # alt DB file
+```
+
+The output is a single `.html` with **inline CSS and JS, zero external
+assets** (no fonts, no CDN scripts) so it renders identically in any
+browser, behind corporate proxies, or in `file://`. Light + dark themes
+auto-switch via `prefers-color-scheme`; print-friendly CSS is included for
+PDF export from the browser.
+
+What's inside, top-to-bottom:
+
+1. **Run summary hero** — pass-rate ring (colour-coded by threshold),
+   spec name, base_url, started/finished/duration, branch + short commit.
+2. **KPI strip** — total / passed / failed / errored / skipped counters.
+3. **Failure cards** — one per failed/errored step, collapsible, with:
+   - method + endpoint + HTTP status badge,
+   - failure_class badge (`definitely_bug` / `likely_bug` / `quirk` /
+     `env_issue`) and reason on hover,
+   - **Copy curl** button for one-line repro,
+   - **Copy as GitHub issue** button — emits ready-to-paste markdown
+     with method/URL, status, failure class, curl block, response body,
+     OpenAPI pointer, and a list of failed assertions,
+   - tabbed evidence panel: Response (headers + body, JSON-highlighted),
+     Request, Assertions, Source (provenance + frozen spec excerpt).
+4. **Filter chips** by failure_class (e.g. show only `definitely_bug`).
+5. **Coverage map** — endpoint × method matrix, colour-coded by worst
+   observed status class (2xx / 4xx / 5xx / network err).
+6. **Footer** — zond version, generation timestamp, project link.
+
+Typical size: a 50-endpoint run lands in 50–150 KB. `--json` envelope
+output is supported and includes `sizeKb`, `output`, `failures`, and
+`totalSteps`. Exit codes: `0` ok, `1` run-id not found, `2` invalid
+input.
 
 ---
 
