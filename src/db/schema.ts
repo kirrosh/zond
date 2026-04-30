@@ -51,7 +51,7 @@ export function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -87,7 +87,9 @@ const SCHEMA = `
     captures         TEXT,
     response_headers TEXT,
     suite_file       TEXT,
-    provenance       TEXT
+    provenance       TEXT,
+    failure_class    TEXT,
+    failure_class_reason TEXT
   );
 
   CREATE TABLE IF NOT EXISTS collections (
@@ -169,6 +171,11 @@ function runMigrations(db: Database): void {
     if (ver >= 2 && ver < 3) {
       // Migration v2→v3: add provenance column (test source metadata)
       db.exec("ALTER TABLE results ADD COLUMN provenance TEXT");
+    }
+    if (ver >= 3 && ver < 4) {
+      // Migration v3→v4: add failure classification columns
+      db.exec("ALTER TABLE results ADD COLUMN failure_class TEXT");
+      db.exec("ALTER TABLE results ADD COLUMN failure_class_reason TEXT");
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

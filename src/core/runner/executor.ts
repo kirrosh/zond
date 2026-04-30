@@ -8,6 +8,7 @@ import { checkAssertions, extractCaptures } from "./assertions.ts";
 import { evaluateExpr } from "./expr-eval.ts";
 import { applyTransform } from "./transforms.ts";
 import type { SchemaValidator } from "./schema-validator.ts";
+import { classifyFailure } from "../diagnostics/failure-class.ts";
 
 function buildUrl(baseUrl: string | undefined, path: string, query?: Record<string, string>): string {
   let url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}${path}` : path;
@@ -92,10 +93,15 @@ export async function runSuite(
   const startedAt = new Date().toISOString();
   const steps: StepResult[] = [];
 
-  /** Push a step result, attaching provenance derived from suite + step source. */
+  /** Push a step result, attaching provenance + failure classification. */
   const pushStep = (result: StepResult, currentStep?: TestStep): void => {
     const merged = mergeProvenance(suite.source, currentStep?.source);
     if (merged !== null) result.provenance = merged;
+    const classification = classifyFailure(result);
+    if (classification) {
+      result.failure_class = classification.failure_class;
+      result.failure_class_reason = classification.failure_class_reason;
+    }
     steps.push(result);
   };
 

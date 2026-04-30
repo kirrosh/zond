@@ -183,6 +183,22 @@ describe("saveResults", () => {
     expect(row?.response_body).toBe('{"error":"oops"}');
   });
 
+  test("failure_class round-trip — saved + reason + null for pass", () => {
+    const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    const suite = makeSuiteResult();
+    suite.steps[1]!.failure_class = "definitely_bug";
+    suite.steps[1]!.failure_class_reason = "API returned 500";
+    saveResults(id, [suite]);
+
+    const results = getResultsByRunId(id);
+    const failed = results.find((r) => r.test_name === "Delete user")!;
+    expect(failed.failure_class).toBe("definitely_bug");
+    expect(failed.failure_class_reason).toBe("API returned 500");
+    const passed = results.find((r) => r.test_name === "Get user")!;
+    expect(passed.failure_class).toBeNull();
+    expect(passed.failure_class_reason).toBeNull();
+  });
+
   test("provenance round-trip — saved as JSON, parsed back", () => {
     const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
     const suiteWithProv = makeSuiteResult();

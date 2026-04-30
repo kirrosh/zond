@@ -1,9 +1,10 @@
 ---
 id: TASK-101
 title: failure classification — definitely_bug / likely_bug / quirk
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 09:35'
+updated_date: '2026-04-30 10:05'
 labels:
   - trust-loop
   - decision-5
@@ -65,8 +66,8 @@ UI показал и почему именно этот класс.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 failure_class присваивается всем failures по правилам в task description
-- [ ] #2 failure_class_reason несёт one-liner why
-- [ ] #3 Поле прокинуто в StepResult, JSON-envelope, results.failure_class в DB
-- [ ] #4 Старые runs без классификации рендерятся как unclassified, не падают
+- [x] #1 failure_class присваивается всем failures по правилам в task description
+- [x] #2 failure_class_reason несёт one-liner why
+- [x] #3 Поле прокинуто в StepResult, JSON-envelope, results.failure_class в DB
+- [x] #4 Старые runs без классификации рендерятся как unclassified, не падают
 <!-- AC:END -->
