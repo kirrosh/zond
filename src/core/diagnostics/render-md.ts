@@ -30,7 +30,17 @@ export function renderDiagnosisMarkdown(result: DiagnoseResult): string {
   if (env_issue) {
     out.push("");
     out.push("## Env issue");
-    out.push(env_issue);
+    out.push(`scope: \`${env_issue.scope}\``);
+    if (env_issue.affected_suites.length > 0) {
+      out.push(`affected_suites: ${env_issue.affected_suites.map(s => `\`${s}\``).join(", ")}`);
+    }
+    const symptomKeys = Object.keys(env_issue.symptoms);
+    if (symptomKeys.length > 0) {
+      const parts = symptomKeys.map(k => `${k}=${env_issue.symptoms[k as keyof typeof env_issue.symptoms]}`);
+      out.push(`symptoms: ${parts.join(", ")}`);
+    }
+    out.push("");
+    out.push(env_issue.message);
   }
 
   if (auth_hint) {
