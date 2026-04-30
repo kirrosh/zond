@@ -1,9 +1,12 @@
 ---
 id: TASK-95
-title: 'spike: new UI stack — React 19 + shadcn + Bun bundler (Vite fallback), 2-screen PoC'
-status: To Do
+title: >-
+  spike: new UI stack — React 19 + shadcn + Bun bundler (Vite fallback),
+  2-screen PoC
+status: In Progress
 assignee: []
 created_date: '2026-04-30 14:00'
+updated_date: '2026-04-30 08:28'
 labels:
   - spike
   - ui
@@ -205,37 +208,40 @@ src/web-v2/
 ```
 
 ## Acceptance Criteria
-
-- [ ] Установлены базовые зависимости (Bun-only stack) — react/react-dom,
+<!-- AC:BEGIN -->
+- [ ] #1 Установлены базовые зависимости (Bun-only stack) — react/react-dom,
       tailwindcss, bun-plugin-tailwind, TanStack Router/Query, shadcn deps,
       shiki, diff. В корневой package.json или отдельный — на усмотрение
       реализации.
-- [ ] Реализованы оба экрана (Runs list + Run detail с evidence panel и
+- [ ] #2 Реализованы оба экрана (Runs list + Run detail с evidence panel и
       SSE-progress strip) на **Bun bundler без Vite**.
-- [ ] `bun run dev` поднимает Hono+Bun.serve на 6421 с HMR и работающим
+- [ ] #3 `bun run dev` поднимает Hono+Bun.serve на 6421 с HMR и работающим
       UI без отдельного dev-server.
-- [ ] `bun run build:ui && bun build --compile src/web-v2/server/compile-entry.ts -o zond-v2`
+- [ ] #4 `bun run build:ui && bun build --compile src/web-v2/server/compile-entry.ts -o zond-v2`
       собирает single-binary; `./zond-v2` запускает рабочий UI без внешних
       файлов и без Node.js.
-- [ ] Замерены и записаны в `src/web-v2/README.md`:
+- [ ] #5 Замерены и записаны в `src/web-v2/README.md`:
       bundle size (gzipped и uncompressed), bun-compile binary size delta,
       cold start time, HMR latency на типичный edit, время первого билда,
       **DX-журнал по Bun-only**: где терялся state, падал ли HMR-сервер,
       работали ли shadcn-компоненты без модификаций.
-- [ ] Если Bun-only вытянул — Vite не добавляется, spike оставляет минимальный стек.
-- [ ] Если Bun-only не вытянул (зафиксировано в DX-журнале) — добавляется
+- [ ] #6 Если Bun-only вытянул — Vite не добавляется, spike оставляет минимальный стек.
+- [ ] #7 Если Bun-only не вытянул (зафиксировано в DX-журнале) — добавляется
       Vite-fallback, переснимаются те же замеры, в README сравнение
       Bun-only vs Bun+Vite.
-- [ ] Существующий `src/web/` и его тесты не сломаны (`bun test` зелёный).
-- [ ] Проверен один цикл «AI-агент добавляет третий экран» — субъективная
+- [ ] #8 Существующий `src/web/` и его тесты не сломаны (`bun test` зелёный).
+- [ ] #9 Проверен один цикл «AI-агент добавляет третий экран» — субъективная
       запись в README: сколько шагов / правок потребовалось vs ожидалось.
-- [ ] Решение зафиксировано в decision-6:
+- [ ] #10 Решение зафиксировано в decision-6:
       - GO Bun-only → миграция `src/web/` → `src/ui/` распилена на 4-5
         backlog-задач, без Vite в стеке.
       - GO Bun+Vite → то же, но с Vite в стеке + обоснование (что именно
         не вытянул Bun bundler).
       - NO-GO React → переход к варианту A (Datastar+islands),
         пересмотр decision-5 в части UI implementation.
+<!-- AC:END -->
+
+
 
 ## Definition of Done
 
