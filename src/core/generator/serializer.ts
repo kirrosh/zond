@@ -1,4 +1,5 @@
 import { resolve } from "path";
+import type { SourceMetadata } from "../parser/types.ts";
 
 // ──────────────────────────────────────────────
 // Utility functions (moved from skeleton.ts)
@@ -25,6 +26,7 @@ export function sanitizeEnvName(name: string): string {
 
 export interface RawStep {
   name: string;
+  source?: SourceMetadata;
   [methodKey: string]: unknown;
   expect: {
     status?: number | number[];
@@ -37,6 +39,7 @@ export interface RawSuite {
   name: string;
   setup?: boolean;
   tags?: string[];
+  source?: SourceMetadata;
   folder?: string;
   fileStem?: string;
   base_url?: string;
@@ -66,10 +69,19 @@ export function serializeSuite(suite: RawSuite): string {
       lines.push(`  ${hk}: ${yamlScalar(String(hv))}`);
     }
   }
+  if (suite.source && Object.keys(suite.source).length > 0) {
+    lines.push("source:");
+    serializeValue(suite.source, 1, lines);
+  }
   lines.push("tests:");
 
   for (const test of suite.tests) {
     lines.push(`  - name: ${yamlScalar(test.name)}`);
+
+    if (test.source && Object.keys(test.source).length > 0) {
+      lines.push("    source:");
+      serializeValue(test.source, 3, lines);
+    }
 
     // Write method-as-key (the shorthand)
     for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"]) {

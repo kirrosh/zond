@@ -1,9 +1,10 @@
 ---
 id: TASK-100
 title: test provenance — source metadata в YAML и DB
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 09:35'
+updated_date: '2026-04-30 10:00'
 labels:
   - trust-loop
   - decision-5
@@ -80,9 +81,9 @@ source:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 yaml-parser принимает optional suite/step source-блок, отдаёт в AST без warnings
-- [ ] #2 Manual YAML без source: продолжает работать без изменений (regression-тест)
-- [ ] #3 zond generate emits suite source + step source с endpoint/response_branch/schema_pointer
-- [ ] #4 Все probe-классы выставляют source.generator на runtime-emitted steps
-- [ ] #5 DB-миграция results.provenance + round-trip через saveResults/getResultsByRunId
+- [x] #1 yaml-parser принимает optional suite/step source-блок, отдаёт в AST без warnings
+- [x] #2 Manual YAML без source: продолжает работать без изменений (regression-тест)
+- [x] #3 zond generate emits suite source + step source с endpoint/response_branch/schema_pointer
+- [x] #4 Все probe-классы выставляют source.generator на runtime-emitted steps
+- [x] #5 DB-миграция results.provenance + round-trip через saveResults/getResultsByRunId
 <!-- AC:END -->

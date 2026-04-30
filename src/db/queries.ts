@@ -104,6 +104,7 @@ export interface StoredStepResult {
   assertions: import("../core/runner/types.ts").AssertionResult[];
   captures: Record<string, unknown>;
   suite_file: string | null;
+  provenance: import("../core/parser/types.ts").SourceMetadata | null;
 }
 
 // ──────────────────────────────────────────────
@@ -245,11 +246,11 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
     INSERT INTO results
       (run_id, suite_name, test_name, status, duration_ms,
        request_method, request_url, request_body,
-       response_status, response_body, response_headers, error_message, assertions, captures, suite_file)
+       response_status, response_body, response_headers, error_message, assertions, captures, suite_file, provenance)
     VALUES
       ($run_id, $suite_name, $test_name, $status, $duration_ms,
        $request_method, $request_url, $request_body,
-       $response_status, $response_body, $response_headers, $error_message, $assertions, $captures, $suite_file)
+       $response_status, $response_body, $response_headers, $error_message, $assertions, $captures, $suite_file, $provenance)
   `);
 
   db.transaction(() => {
@@ -276,21 +277,37 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
           $assertions: step.assertions.length > 0 ? JSON.stringify(step.assertions) : null,
           $captures: Object.keys(step.captures).length > 0 ? JSON.stringify(step.captures) : null,
           $suite_file: suite.suite_file ?? null,
+          $provenance: step.provenance ? JSON.stringify(step.provenance) : null,
         });
       }
     }
   })();
 }
 
+function parseProvenance(raw: unknown): import("../core/parser/types.ts").SourceMetadata | null {
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getResultsByRunId(runId: number): StoredStepResult[] {
   const db = getDb();
   const rows = db.query("SELECT * FROM results WHERE run_id = ? ORDER BY id").all(runId) as Array<
-    Omit<StoredStepResult, "assertions" | "captures"> & { assertions: string | null; captures: string | null }
+    Omit<StoredStepResult, "assertions" | "captures" | "provenance"> & {
+      assertions: string | null;
+      captures: string | null;
+      provenance: string | null;
+    }
   >;
   return rows.map((row) => ({
     ...row,
     assertions: row.assertions ? JSON.parse(row.assertions) : [],
     captures: row.captures ? JSON.parse(row.captures) : {},
+    provenance: parseProvenance(row.provenance),
   }));
 }
 
@@ -309,12 +326,17 @@ export function getFilteredResults(runId: number, filters: { method?: string; st
   }
 
   const rows = db.query(`SELECT * FROM results WHERE ${conditions.join(" AND ")} ORDER BY id`).all(...params) as Array<
-    Omit<StoredStepResult, "assertions" | "captures"> & { assertions: string | null; captures: string | null }
+    Omit<StoredStepResult, "assertions" | "captures" | "provenance"> & {
+      assertions: string | null;
+      captures: string | null;
+      provenance: string | null;
+    }
   >;
   return rows.map((row) => ({
     ...row,
     assertions: row.assertions ? JSON.parse(row.assertions) : [],
     captures: row.captures ? JSON.parse(row.captures) : {},
+    provenance: parseProvenance(row.provenance),
   }));
 }
 

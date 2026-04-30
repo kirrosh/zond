@@ -33,6 +33,7 @@ export interface StepResult {
   assertions: AssertionResult[];
   captures: Record<string, unknown>;
   error?: string;
+  provenance?: import("../parser/types.ts").SourceMetadata | null;
 }
 
 export interface TestRunResult {

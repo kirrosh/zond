@@ -112,7 +112,7 @@ export async function syncCommand(options: SyncOptions): Promise<number> {
     }
 
     // Generate suites for new endpoints only
-    const suites = generateSuites({ endpoints: newEndpoints, securitySchemes });
+    const suites = generateSuites({ endpoints: newEndpoints, securitySchemes, specPath: options.specPath });
 
     if (options.dryRun) {
       const newEndpointKeys = newEndpoints.map((ep) => `${ep.method.toUpperCase()} ${ep.path}`);
