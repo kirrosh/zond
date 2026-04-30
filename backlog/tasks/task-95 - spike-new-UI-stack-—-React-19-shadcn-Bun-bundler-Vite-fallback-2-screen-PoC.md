@@ -3,10 +3,10 @@ id: TASK-95
 title: >-
   spike: new UI stack — React 19 + shadcn + Bun bundler (Vite fallback),
   2-screen PoC
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-30 14:00'
-updated_date: '2026-04-30 08:28'
+updated_date: '2026-04-30 09:38'
 labels:
   - spike
   - ui
