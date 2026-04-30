@@ -1,9 +1,12 @@
 import { dirname } from "path";
 import { stat } from "node:fs/promises";
-import { parse } from "../../core/parser/yaml-parser.ts";
+import { parseSafe } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
+import { preflightCheckVars, formatMissingVarLine } from "../../core/runner/preflight-vars.ts";
 import { runSuite } from "../../core/runner/executor.ts";
+import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
+import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
 import { createRateLimiter, createAdaptiveRateLimiter } from "../../core/runner/rate-limiter.ts";
 import { getReporter, generateJsonReport, generateJunitXml } from "../../core/reporter/index.ts";
 import type { ReporterName } from "../../core/reporter/types.ts";
@@ -34,23 +37,40 @@ export interface RunOptions {
   excludeTag?: string[];
   method?: string;
   envVars?: string[];
+  /** Hard-fail (exit 2) on undefined {{var}} references instead of warning. */
+  strictVars?: boolean;
   dryRun?: boolean;
   json?: boolean;
   /** Write the report to a file instead of stdout. */
   reportOut?: string;
+  /** Validate every JSON response against the OpenAPI response schema. */
+  validateSchema?: boolean;
+  /** Explicit OpenAPI spec path/URL (overrides collection.openapi_spec). */
+  specPath?: string;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
-  // 1. Parse test files
+  // 1. Parse test files (collect parse errors instead of silently skipping)
   let suites: TestSuite[];
+  let parseErrors: { file: string; error: string }[];
   try {
-    suites = await parse(options.path);
+    const parsed = await parseSafe(options.path);
+    suites = parsed.suites;
+    parseErrors = parsed.errors;
   } catch (err) {
     printError(err instanceof Error ? err.message : String(err));
     return 2;
   }
 
+  for (const pe of parseErrors) {
+    printWarning(`Skipped ${pe.file}: ${pe.error}`);
+  }
+
   if (suites.length === 0) {
+    if (parseErrors.length > 0) {
+      printError(`All ${parseErrors.length} test file(s) in ${options.path} failed to parse`);
+      return 2;
+    }
     printWarning(`No test files found in ${options.path}`);
     return 0;
   }
@@ -59,6 +79,12 @@ export async function runCommand(options: RunOptions): Promise<number> {
   if (options.tag && options.tag.length > 0) {
     suites = filterSuitesByTags(suites, options.tag);
     if (suites.length === 0) {
+      if (parseErrors.length > 0) {
+        printError(
+          `No suites match tags [${options.tag.join(", ")}] — but ${parseErrors.length} file(s) failed to parse (see warnings above). Fix parse errors and retry.`
+        );
+        return 1;
+      }
       printWarning("No suites match the specified tags");
       return 0;
     }
@@ -180,7 +206,32 @@ export async function runCommand(options: RunOptions): Promise<number> {
   const rateLimiter = rateLimit === "auto"
     ? createAdaptiveRateLimiter()
     : createRateLimiter(rateLimit);
-  const runOpts = { rateLimiter };
+
+  // 3c. Resolve OpenAPI spec for --validate-schema:
+  //     explicit --spec wins; otherwise fall back to the collection record.
+  let schemaValidator: ReturnType<typeof createSchemaValidator> | undefined;
+  if (options.validateSchema) {
+    let specPath = options.specPath;
+    if (!specPath) {
+      try {
+        const collection = findCollectionByTestPath(options.path);
+        if (collection?.openapi_spec) specPath = collection.openapi_spec;
+      } catch { /* DB not available — fall through to error below */ }
+    }
+    if (!specPath) {
+      printError("--validate-schema requires --spec <path|url> or a collection with openapi_spec set");
+      return 2;
+    }
+    try {
+      const doc = await readOpenApiSpec(specPath);
+      schemaValidator = createSchemaValidator(doc);
+    } catch (err) {
+      printError(`Failed to load OpenAPI spec '${specPath}': ${(err as Error).message}`);
+      return 2;
+    }
+  }
+
+  const runOpts = { rateLimiter, schemaValidator };
 
   // 4. Run suites — setup suites run first (sequentially), their captures flow into regular suites
   const results: TestRunResult[] = [];
@@ -189,6 +240,17 @@ export async function runCommand(options: RunOptions): Promise<number> {
   const setupSuites = suites.filter(s => s.setup);
   const regularSuites = suites.filter(s => !s.setup);
   const setupCaptures: Record<string, string> = {};
+
+  // 3d. Pre-flight variable check on setup suites — only `env` is known
+  //     (their captures don't exist yet).
+  {
+    const setupHits = preflightCheckVars(setupSuites, env);
+    for (const hit of setupHits) printWarning(formatMissingVarLine(hit));
+    if (options.strictVars && setupHits.length > 0) {
+      printError(`--strict-vars: ${setupHits.length} undefined variable reference(s) in setup suites`);
+      return 2;
+    }
+  }
 
   for (const suite of setupSuites) {
     const result = await runSuite(suite, env, dryRun, runOpts);
@@ -201,6 +263,17 @@ export async function runCommand(options: RunOptions): Promise<number> {
   }
 
   const enrichedEnv = { ...env, ...setupCaptures };
+
+  // 3e. Pre-flight variable check on regular suites — env + setup captures
+  //     are known producers; per-suite captures/sets/parameterize handled inside.
+  {
+    const hits = preflightCheckVars(regularSuites, enrichedEnv);
+    for (const hit of hits) printWarning(formatMissingVarLine(hit));
+    if (options.strictVars && hits.length > 0) {
+      printError(`--strict-vars: ${hits.length} undefined variable reference(s)`);
+      return 2;
+    }
+  }
 
   if (options.bail) {
     // Sequential with bail at suite level

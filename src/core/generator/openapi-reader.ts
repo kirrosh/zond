@@ -120,9 +120,12 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
       const responseContentTypesSet = new Set<string>();
       if (operation.responses) {
         for (const [statusCode, responseObj] of Object.entries(operation.responses)) {
+          const parsedStatus = parseInt(statusCode, 10);
+          // Skip non-numeric keys like "default" — they have no asserting status code.
+          if (!Number.isFinite(parsedStatus)) continue;
           const resp = responseObj as OpenAPIV3.ResponseObject;
           const info: ResponseInfo = {
-            statusCode: parseInt(statusCode, 10),
+            statusCode: parsedStatus,
             description: resp.description || "",
           };
           if (resp.content) {

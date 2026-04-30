@@ -1,9 +1,10 @@
 ---
 id: TASK-67
 title: 'T67: probe-validation — numeric coercion для query params (follow-up T49)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:35'
+updated_date: '2026-04-29 14:36'
 labels:
   - bug-hunting
   - generator

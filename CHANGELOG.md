@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Breaking
+
+- **TASK-73: top-level `--json` removed.** `--json` was previously a global
+  option that propagated to every subcommand; on `run` it collided with
+  `--report json` and crashed (`paths[0] must be of type string`). It is now
+  a per-command option attached only to subcommands that produce a JSON
+  envelope. **Migration**: replace `zond run … --json` with
+  `zond run … --report json`. Other commands (`db diagnose --json`,
+  `validate --json`, `coverage --json`, …) keep working unchanged — only
+  the flag's scope changed, not its meaning.
+
+### Round-2 papercuts continued (TASK-70 / TASK-72 / TASK-75)
+
+- **TASK-72: `--tag` no longer silently swallows YAML parse errors.** Tag
+  filter prints every parse error as a warning; if every file fails to parse
+  the run exits 2; if the tag filter empties to zero AND parse errors exist,
+  the run exits 1 with a message pointing at the parse failures instead of
+  the misleading "No suites match the specified tags".
+
+- **TASK-75: pre-flight `{{var}}` check + `--strict-vars`.** Every `{{var}}`
+  reference is checked against env, parameterize, set keys and prior-step
+  captures before a request goes out. Missing references emit a warning by
+  default; `--strict-vars` makes them a hard-fail (exit 2) so CI catches
+  typos before the server returns "invalid email format".
+
+- **TASK-70: env_issue overrides per-failure recommendation.** When
+  `db diagnose` detects a run-level env_issue, every non-5xx failure's
+  `recommended_action` becomes `fix_env` and the misleading per-failure
+  hint/schema_hint is suppressed. Real backend bugs (5xx) keep
+  `report_backend_bug`.
+
 ## [0.22.0] — 2026-04-29
 
 ### Round-2 papercuts (TASK-68 → TASK-86)

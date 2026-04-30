@@ -73,11 +73,32 @@ function selectHealthcheckEndpoint(gets: EndpointInfo[]): EndpointInfo | undefin
   );
 }
 
+/**
+ * Pick the success status the test should assert.
+ *
+ * Order:
+ *   1. First 2xx declared in the spec (most authoritative).
+ *   2. Method-aware default when the spec lists only non-2xx responses or none
+ *      at all (Resend OpenAPI is silent for several mutating endpoints — the
+ *      actual runtime returns 201/204, while the old default of 200 caused
+ *      tests to fail at runtime). We never assert a 4xx/5xx as the success
+ *      status — that would generate guaranteed-failing tests.
+ */
 function getExpectedStatus(ep: EndpointInfo): number {
   const success = ep.responses.find(r => r.statusCode >= 200 && r.statusCode < 300);
   if (success) return success.statusCode;
-  if (ep.responses.length > 0) return ep.responses[0]!.statusCode;
-  return 200;
+  return defaultStatusByMethod(ep.method);
+}
+
+function defaultStatusByMethod(method: string): number {
+  switch (method.toUpperCase()) {
+    case "POST":
+      return 201;
+    case "DELETE":
+      return 204;
+    default:
+      return 200;
+  }
 }
 
 function getSuccessSchema(ep: EndpointInfo): OpenAPIV3.SchemaObject | undefined {

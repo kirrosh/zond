@@ -1,9 +1,10 @@
 ---
 id: TASK-75
 title: 'T75: variable interpolation — нет warning''а на missing'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:40'
+updated_date: '2026-04-29 14:19'
 labels:
   - bug
   - runner

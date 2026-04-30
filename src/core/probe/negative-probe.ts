@@ -17,6 +17,17 @@ import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
+import {
+  convertPath,
+  endpointStem,
+  getAuthHeaders,
+  pathWithPlaceholders,
+  isMutating,
+  findDeleteCounterpart,
+  captureFieldFor,
+  headersEqual,
+  hasJsonBody,
+} from "./shared.ts";
 
 // ──────────────────────────────────────────────
 // Constants
@@ -98,66 +109,6 @@ export interface ProbeResult {
 // ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
-
-function convertPath(path: string): string {
-  return path.replace(/\{([^}]+)\}/g, "{{$1}}");
-}
-
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-function endpointStem(ep: EndpointInfo): string {
-  const path = ep.path
-    .replace(/\{[^}]+\}/g, "by-id")
-    .replace(/^\//, "")
-    .replace(/\//g, "-");
-  return slugify(`${ep.method.toLowerCase()}-${path}`);
-}
-
-function getAuthHeaders(
-  ep: EndpointInfo,
-  schemes: SecuritySchemeInfo[],
-): Record<string, string> | undefined {
-  if (ep.security.length === 0) return undefined;
-  for (const secName of ep.security) {
-    const scheme = schemes.find((s) => s.name === secName);
-    if (!scheme) continue;
-    if (scheme.type === "http") {
-      if (scheme.scheme === "bearer" || !scheme.scheme) {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      if (scheme.scheme === "basic") {
-        return { Authorization: "Basic {{auth_token}}" };
-      }
-    }
-    if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
-      if (scheme.apiKeyName === "Authorization") {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      return { [scheme.apiKeyName]: "{{api_key}}" };
-    }
-  }
-  return undefined;
-}
-
-/** Path with placeholders replaced by valid-but-nonexistent IDs (for body probes
- *  on PUT/PATCH/DELETE — we don't want path validation to mask body errors). */
-function pathWithPlaceholders(ep: EndpointInfo, badId: string): string {
-  return ep.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
-    const param = ep.parameters.find((p) => p.name === name && p.in === "path");
-    const schema = param?.schema as OpenAPIV3.SchemaObject | undefined;
-    if (badId === "valid-shape") {
-      if (schema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
-      if (schema?.type === "integer" || schema?.type === "number") return "999999999";
-      return "nonexistent-zzzzz";
-    }
-    return badId;
-  });
-}
 
 function findUuidPathParams(ep: EndpointInfo): OpenAPIV3.ParameterObject[] {
   return ep.parameters.filter((p) => {
@@ -438,6 +389,88 @@ function probeInvalidPathId(
   return out;
 }
 
+/** TASK-67: numeric coercion probes for integer/number params (query + path).
+ *  Round-2 found `GET /emails?limit=1.5` → 500 — the bug class probe-validation
+ *  exists for. T49 covered numeric type-confusion in body, this extends to
+ *  query/path. */
+const NUMERIC_BAD_VALUES: Array<{ value: string; label: string }> = [
+  { value: "1.5", label: "float on integer" },
+  { value: "-1", label: "negative" },
+  { value: "0", label: "zero" },
+  { value: "abc", label: "non-numeric" },
+  { value: "", label: "empty string" },
+  // null on a query param means literal "null" string — most parsers treat it as bad input
+  { value: "null", label: "literal null" },
+  // Number.MAX_SAFE_INTEGER + 1 = 9007199254740992
+  { value: "9007199254740992", label: "MAX_SAFE_INTEGER+1" },
+];
+
+function isNumericSchema(schema: OpenAPIV3.SchemaObject | undefined): boolean {
+  return schema?.type === "integer" || schema?.type === "number";
+}
+
+function probeNumericQueryParams(
+  ep: EndpointInfo,
+  schemes: SecuritySchemeInfo[],
+  budget: number,
+): RawStep[] {
+  const numericQuery = ep.parameters.filter(
+    (p) => p.in === "query" && isNumericSchema(p.schema as OpenAPIV3.SchemaObject | undefined),
+  );
+  if (numericQuery.length === 0) return [];
+
+  const out: RawStep[] = [];
+  for (const param of numericQuery) {
+    for (const { value, label } of NUMERIC_BAD_VALUES) {
+      if (out.length >= budget) break;
+      const basePath = pathWithPlaceholders(ep, "valid-shape");
+      const sep = basePath.includes("?") ? "&" : "?";
+      const pathWithQuery = `${basePath}${sep}${param.name}=${encodeURIComponent(value)}`;
+      out.push(
+        buildStep(ep, schemes, {
+          name: `query ${param.name}=${JSON.stringify(value)} (${label}) — must reject (no 5xx)`,
+          pathOverride: pathWithQuery,
+        }),
+      );
+    }
+  }
+  return out;
+}
+
+function probeNumericPathParams(
+  ep: EndpointInfo,
+  schemes: SecuritySchemeInfo[],
+  budget: number,
+): RawStep[] {
+  const numericPath = ep.parameters.filter(
+    (p) => p.in === "path" && isNumericSchema(p.schema as OpenAPIV3.SchemaObject | undefined),
+  );
+  if (numericPath.length === 0) return [];
+
+  const out: RawStep[] = [];
+  for (const param of numericPath) {
+    for (const { value, label } of NUMERIC_BAD_VALUES) {
+      if (value === "") continue; // empty path segment yields a different endpoint
+      if (out.length >= budget) break;
+      const overriddenPath = ep.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
+        if (name === param.name) return value;
+        const other = ep.parameters.find((p) => p.name === name && p.in === "path");
+        const otherSchema = other?.schema as OpenAPIV3.SchemaObject | undefined;
+        if (otherSchema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
+        if (isNumericSchema(otherSchema)) return "1";
+        return "valid-shape";
+      });
+      out.push(
+        buildStep(ep, schemes, {
+          name: `path param ${param.name}=${JSON.stringify(value)} (${label}) — must reject (no 5xx)`,
+          pathOverride: overriddenPath,
+        }),
+      );
+    }
+  }
+  return out;
+}
+
 // ──────────────────────────────────────────────
 // Type-confusion helpers
 // ──────────────────────────────────────────────
@@ -463,62 +496,6 @@ function pickWrongType(schema: OpenAPIV3.SchemaObject): unknown | undefined {
 function describeType(schema: OpenAPIV3.SchemaObject): string {
   if (schema.format) return `${schema.type ?? "any"}/${schema.format}`;
   return schema.type ?? "any";
-}
-
-function hasJsonBody(ep: EndpointInfo): boolean {
-  return (
-    ep.method !== "GET" &&
-    ep.method !== "DELETE" &&
-    ep.requestBodyContentType === "application/json" &&
-    ep.requestBodySchema !== undefined
-  );
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function isMutating(method: string): boolean {
-  const m = method.toUpperCase();
-  return m === "POST" || m === "PUT" || m === "PATCH";
-}
-
-/**
- * Find the DELETE endpoint that owns resources created by `ep`:
- *  - POST /collection            → DELETE /collection/{id}
- *  - PUT  /collection/{id}       → DELETE /collection/{id}    (same path)
- *  - PATCH /collection/{id}      → DELETE /collection/{id}    (same path)
- */
-function findDeleteCounterpart(
-  ep: EndpointInfo,
-  all: EndpointInfo[],
-): EndpointInfo | undefined {
-  const m = ep.method.toUpperCase();
-  if (m === "POST") {
-    const re = new RegExp(`^${escapeRegex(ep.path)}/\\{[^}]+\\}$`);
-    return all.find(e => e.method.toUpperCase() === "DELETE" && !e.deprecated && re.test(e.path));
-  }
-  if (m === "PUT" || m === "PATCH") {
-    return all.find(e => e.method.toUpperCase() === "DELETE" && !e.deprecated && e.path === ep.path);
-  }
-  return undefined;
-}
-
-/**
- * Pick the response field that holds the new resource's id. Defaults to "id";
- * falls back to the first integer / uuid property when no `id` field exists.
- */
-function captureFieldFor(ep: EndpointInfo): string {
-  const success = ep.responses.find(r => r.statusCode >= 200 && r.statusCode < 300 && r.schema);
-  const schema = success?.schema;
-  if (schema?.properties) {
-    if ("id" in schema.properties) return "id";
-    for (const [name, propSchema] of Object.entries(schema.properties)) {
-      const s = propSchema as OpenAPIV3.SchemaObject;
-      if (s.type === "integer" || s.format === "uuid") return name;
-    }
-  }
-  return "id";
 }
 
 /** Build a cleanup-DELETE step for a single mutating probe. The capture var
@@ -547,14 +524,6 @@ function buildCleanupStep(
   return step;
 }
 
-function headersEqual(a: Record<string, string>, b: Record<string, string>): boolean {
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  if (ka.length !== kb.length) return false;
-  for (const k of ka) if (a[k] !== b[k]) return false;
-  return true;
-}
-
 // ──────────────────────────────────────────────
 // Public API
 // ──────────────────────────────────────────────
@@ -578,6 +547,14 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
 
     // 1. Path-id probes (cheap, deterministic)
     steps.push(...probeInvalidPathId(ep, securitySchemes, remaining()));
+
+    // 1b. Numeric query / path coercion probes (T67) — float-on-integer,
+    //     negative, non-numeric, etc. Catches `GET /x?limit=1.5` → 500.
+    const numericQueryProbes = probeNumericQueryParams(ep, securitySchemes, remaining());
+    steps.push(...numericQueryProbes);
+    const numericPathProbes = probeNumericPathParams(ep, securitySchemes, remaining());
+    steps.push(...numericPathProbes);
+    const hasNumericCoercion = numericQueryProbes.length + numericPathProbes.length > 0;
 
     // 2. Body probes (only for body-bearing methods)
     const empty = probeEmptyBody(ep, securitySchemes);
@@ -644,7 +621,12 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
     const stem = endpointStem(ep);
     const suite: RawSuite = {
       name: `probe ${ep.method} ${ep.path}`,
-      tags: ["probe-validation", "negative-input", "no-5xx"],
+      tags: [
+        "probe-validation",
+        "negative-input",
+        "no-5xx",
+        ...(hasNumericCoercion ? ["query-coercion"] : []),
+      ],
       fileStem: `probe-${stem}`,
       base_url: "{{base_url}}",
       ...(suiteHeaders ? { headers: suiteHeaders } : {}),

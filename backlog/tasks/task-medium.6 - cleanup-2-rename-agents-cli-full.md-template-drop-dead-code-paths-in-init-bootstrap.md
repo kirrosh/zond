@@ -3,10 +3,10 @@ id: TASK-MEDIUM.6
 title: >-
   cleanup 2: rename agents-cli-full.md template, drop dead code paths in
   init/bootstrap
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-04-28 12:02'
-updated_date: '2026-04-28 12:39'
+updated_date: '2026-04-29 14:05'
 labels:
   - cleanup
   - refactor

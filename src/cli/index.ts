@@ -1,11 +1,28 @@
 #!/usr/bin/env bun
 
+import { createHash } from "node:crypto";
 import { CommanderError } from "commander";
 import { buildProgram, preprocessArgv } from "./program.ts";
-import { printError } from "./output.ts";
 import { VERSION } from "./version.ts";
 
 export { VERSION };
+
+/**
+ * Anything that reaches this handler is an *unexpected* throw — command
+ * implementations are expected to catch their own usage/config errors and
+ * return exit 2 themselves. Tag these with `[zond:internal]` so operators
+ * can tell them apart from sandbox/SIGKILL/OOM (137/143). See ZOND.md →
+ * "Exit codes" for the full taxonomy.
+ */
+function reportInternalError(err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error && err.stack ? err.stack : message;
+  const stackHash = createHash("sha1").update(stack).digest("hex").slice(0, 8);
+  process.stderr.write(`[zond:internal] zond ${VERSION} — uncaught ${message} (stack ${stackHash})\n`);
+  if (err instanceof Error && err.stack) {
+    process.stderr.write(err.stack + "\n");
+  }
+}
 
 async function main(): Promise<void> {
   const program = buildProgram();
@@ -22,8 +39,8 @@ async function main(): Promise<void> {
       process.exitCode = 2;
       return;
     }
-    printError(err instanceof Error ? err.message : String(err));
-    process.exitCode = 2;
+    reportInternalError(err);
+    process.exitCode = 3;
   }
 }
 

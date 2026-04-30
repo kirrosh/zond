@@ -59,9 +59,9 @@ conventional-commits стиль (`feat:` / `refactor:` / `docs:` / `chore:`),
 
 ## Историческая справка
 
-До подключения Backlog.md план держался в `docs/backlog.md`. Сейчас этот файл
-сжат до указателя; источник правды — `backlog/`. Архитектурные принципы
-вынесены в `backlog/decisions/`.
+Источник правды по задачам — `backlog/` (Backlog.md CLI). Краткий обзор
+структуры и активных decisions — `docs/project-backlog.md`. Архитектурные
+принципы — в `backlog/decisions/`.
 
 ## Развитие zond
 

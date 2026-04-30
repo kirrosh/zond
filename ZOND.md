@@ -89,13 +89,14 @@ zond ci init
 
 | Command | Description | Key flags |
 |---------|-------------|-----------|
-| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--report json\|junit`, `--report-out <file>` |
+| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--report json\|junit`, `--report-out <file>` |
 | `validate <path>` | Validate YAML tests | |
 | `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
 | `probe-validation <spec>` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup` |
 | `probe-methods <spec>` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--output <dir>`, `--tag` |
+| `probe-mass-assignment <spec>` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--timeout <ms>` |
 
 ### `probe-validation` — bug-hunting negative-input probes
 
@@ -159,6 +160,75 @@ being rejected purely on path syntax. Body-bearing methods carry a minimal
 `{}` JSON body. Each probe expects status in `[401, 403, 404, 405]`; anything
 else is a test failure. Probes are deterministic — same spec → same suites —
 so generated YAML can be committed as a regression test.
+
+### `probe-mass-assignment` — privilege-escalation hunt
+
+Mass assignment is the class where an API silently accepts client-supplied
+fields that should be server-controlled — `is_admin`, `role`, `account_id`,
+`owner_id` — and either *applies* them (privilege escalation) or *ignores*
+them (silent acceptance, latent risk). Unlike the other probes,
+`probe-mass-assignment` runs **live** against a real API: the only way to
+distinguish "applied" from "ignored" is to read back the resource via a
+follow-up GET.
+
+```bash
+zond probe-mass-assignment openapi.json \
+  --env .env.yaml \
+  --output digest.md \
+  --emit-tests probes/mass-assignment/
+```
+
+For every POST endpoint (and PATCH/PUT when env supplies path-param values)
+the probe sends one request whose body is the spec-baseline payload merged
+with two extra-field families:
+
+| Family | Examples | Why |
+|--------|----------|-----|
+| Suspected | `is_admin: true`, `role: "admin"`, `is_system: true`, `verified: true`, `account_id`, `owner_id`, `user_id` | Classic mass-assignment vectors — fields that, if writable, escalate privileges |
+| Server-assigned | `id`, `created_at`, `updated_at`, `object` (lifted from the 2xx response schema if absent in the request schema) | If the server uses the client-supplied value here instead of generating its own, that's a takeover/forgery bug |
+
+The response (and follow-up GET, when a `GET /resource/{id}` counterpart
+exists) classifies each endpoint into one of:
+
+| Severity | Outcome | Meaning |
+|----------|---------|---------|
+| 🚨 HIGH | accepted-and-applied | Suspicious value persisted — privilege escalation candidate. Or 5xx — unhandled exception. Also covers **extras-bypass** (baseline 4xx but injected 2xx — extras opened a code path the baseline never reached). |
+| ⚠️ INCONCLUSIVE | baseline-failure | Both the no-extras baseline POST *and* the with-extras POST returned 4xx — the API rejected the request before validation reached the extras. Almost always a missing fixture (FK id, scope, path-param). The digest surfaces the server's error message verbatim so you know which value to set. Excluded from `--emit-tests` on purpose: locking in a baseline-broken endpoint would make CI 404 every run and mask real regressions. |
+| ⚠️ MEDIUM | inconclusive (no-GET) | 2xx but no GET counterpart in the spec to verify persistence. |
+| ℹ️ LOW | accepted-and-ignored | 2xx, follow-up GET shows the field was silently dropped. Soft-warn — server should reject explicitly. |
+| ✅ OK | rejected (4xx) | Baseline 2xx + injected 4xx — extras genuinely refused. Bonus credit when request schema declares `additionalProperties: false`. |
+| ⏭ SKIPPED | — | No JSON body, or PATCH/PUT without a resolvable path id. |
+
+**Why the baseline probe.** Without it, a 4xx caused by FK miss / bad
+fixture / scope mismatch is indistinguishable from a 4xx that actually
+rejected our extras — false-OK on FK-heavy SaaS APIs (Stripe / Linear /
+GitHub / Resend, anywhere POSTs reference parent resources). Each
+endpoint pays one extra request: baseline first, then injected. If
+baseline 2xx, the resource is auto-DELETE'd before the injected probe
+fires (so the second POST doesn't trip a unique-constraint).
+
+Output is a Markdown digest grouped by severity (stdout by default; `--output
+<file>` writes to disk). Exit code is non-zero (`1`) when at least one HIGH
+finding exists — useful for CI gating.
+
+**Cleanup.** When a 2xx response leaks a real resource and the spec defines a
+`DELETE /resource/{id}` counterpart, the probe issues a follow-up DELETE
+automatically. Use `--no-cleanup` for namespace-isolated test environments
+that dump-and-reset.
+
+**`--emit-tests <dir>`** writes a YAML regression suite that locks in the
+*observed safe* behaviour: rejected endpoints get a probe asserting `status ∈
+[400,401,403,409,415,422]`; ignored endpoints get a POST + GET pair asserting
+the suspicious field did not echo back, plus an `always: true` cleanup
+DELETE. Endpoints classified HIGH or MEDIUM are deliberately not emitted —
+those are bugs to fix, not baselines to lock. Run the resulting suite via
+`zond run <dir> --env .env.yaml` on CI.
+
+**Auth / config.** Live probing requires `--env <file>`; the YAML must at
+least set `base_url`. Bearer / API-key tokens are read from `auth_token` /
+`api_key` (matching `zond run`'s convention). Path-param placeholders
+(e.g. `{orgId}`) are substituted from the same env — set them explicitly to
+unlock PATCH/PUT probing.
 
 ---
 
@@ -344,9 +414,13 @@ zond run tests/ --env staging
 - **CLI:** `--rate-limit <N>` caps the run at N requests per second across all suites.
 - **`.env.yaml`:** add a top-level `rateLimit: <N>` field — picked up automatically when no CLI flag is given. CLI takes precedence.
 - **Auto retry on 429:** the runner respects the `Retry-After` header (seconds or HTTP-date). If the header is missing, it falls back to capped exponential backoff (base = `retry_delay`, cap = 30s). Up to 5 attempts per request, then the 429 is reported as the final response.
-- **Adaptive throttling from response headers (`--rate-limit auto`):** zond reads the standard `RateLimit-Remaining` / `RateLimit-Reset` headers (RFC draft `draft-ietf-httpapi-ratelimit-headers`) plus the GitHub/Stripe-style `X-RateLimit-*` aliases on every response. When `remaining` drops to ≤5, subsequent requests are paused until the window resets. `--rate-limit auto` starts with no static cap and lets the API's headers do the throttling — useful for `zond probe-validation` runs against production APIs where the right cap isn't known up front. A static `--rate-limit N` still benefits from the same headers (the cap is the floor; headers can push pauses out further).
+- **Adaptive throttling from response headers (`--rate-limit auto`):** zond reads the standard `RateLimit-Remaining` / `RateLimit-Reset` headers (RFC 9568, formerly `draft-ietf-httpapi-ratelimit-headers`) plus the GitHub/Stripe-style `X-RateLimit-*` aliases on every response. Two complementary mechanisms keep parallel suites from blowing through small windows:
+  - **Window-aware spacing (TASK-88):** when the response carries `RateLimit-Policy: N;w=W` (e.g. Resend's `5;w=1`), the limiter learns a per-request interval of `(W/N) * 1000 + 50ms` safety. Subsequent acquires — even from suites running in parallel — are paced one-by-one at that interval, so a burst of 10 simultaneous requests fans out to ten ~200ms steps instead of overshooting in the first 50ms. The strictest policy wins when several are advertised. `IntervalRateLimiter` (static `--rate-limit N`) tightens too if the server's policy is more restrictive than the user-supplied cap; it never loosens below the cap.
+  - **Reset-window pause:** when `remaining` drops to ≤2, subsequent requests are pinned to wait until the API's `reset` window expires.
+  
+  `--rate-limit auto` starts with no static cap and lets the API's headers do the throttling — useful for `zond probe-validation` and `zond probe-mass-assignment` runs against production APIs where the right cap isn't known up front.
 
-> **Tip:** set `--rate-limit` **1 below** the API's documented cap (e.g. use `4` for an API that allows 5 req/s). The throttle paces requests at `1000/N` ms intervals — at exactly N, sliding-window APIs may still return 429 on boundary milliseconds. A small margin avoids it. If the API exposes `RateLimit-*` headers, prefer `--rate-limit auto` and skip the guesswork.
+> **Tip:** prefer `--rate-limit auto` whenever the API exposes `RateLimit-Policy` — the limiter learns the right spacing on the first response. For APIs that omit the policy header, set `--rate-limit` **1 below** the documented cap (e.g. use `4` for an API that allows 5 req/s) — at exactly N, sliding-window APIs may still return 429 on boundary milliseconds.
 
 ```yaml
 # .env.yaml
@@ -358,6 +432,40 @@ rateLimit: 5  # ≤ 5 req/s
 ```bash
 zond run apis/resend/tests --rate-limit 5
 ```
+
+### Response-schema validation (`--validate-schema`)
+
+`zond run --validate-schema` validates every JSON response body against the
+declared OpenAPI response schema (matched by path + method + status). Any
+mismatch surfaces as an extra assertion failure on the step — alongside your
+explicit YAML expectations — and follows the normal reporter / DB / `--report`
+pipeline.
+
+What's checked: `type`, `required`, `enum`, `format` (`email`, `uri`, `uuid`,
+`date-time`), `additionalProperties` (only when the spec sets it), `oneOf` /
+`anyOf`, plus every nested `$ref`. OpenAPI 3.0 (`nullable: true`) and 3.1
+(`type: ["string", "null"]`) are both supported.
+
+`format: date-time` is enforced strictly per RFC3339 §5.6: `T` is required as
+the separator (space is rejected), and the offset must be `Z` or `±HH:MM` with
+an explicit colon. PostgreSQL-style values like `"2026-04-29 07:10:44.674675+00"`
+fail validation — they break strict RFC3339 clients (e.g. Go `time.RFC3339`)
+even when JS `new Date()` accepts them.
+
+```bash
+# explicit spec
+zond run apis/resend/tests --spec apis/resend/openapi.json --validate-schema
+
+# spec resolved from the collection (set during `zond generate` / `zond use`)
+zond run --api resend --validate-schema
+```
+
+For 4xx / 5xx responses zond falls back to `responses.<NXX>` then
+`responses.default` if a status-specific schema isn't declared. Endpoints
+without a JSON response schema are skipped silently.
+
+If `--validate-schema` is passed without `--spec` and the active collection has
+no `openapi_spec`, the run exits with code 2.
 
 ---
 
@@ -404,6 +512,96 @@ Pass `--kill-existing` to restore the legacy behaviour of terminating whichever 
 ## CI/CD
 
 `zond ci init` scaffolds GitHub Actions or GitLab CI workflow. Supports schedule, repository_dispatch, manual triggers. See [docs/ci.md](docs/ci.md).
+
+---
+
+## Exit codes
+
+zond uses a small, stable taxonomy so CI and oncall scripts can branch on `$?`
+without grepping logs.
+
+| Code | Meaning |
+|------|---------|
+| `0`  | success |
+| `1`  | assertion / probe failure (test artifact, **not** a zond bug) |
+| `2`  | usage, config, or spec error (zond couldn't run the test) |
+| `3`  | internal zond error — uncaught throw, escapes command handler. Always prefixed with `[zond:internal]` and includes version + stack hash |
+| `4+` | reserved for future classes (network, schema, …) |
+
+Codes ≥ `128` come from the OS, not zond — typically `137` (SIGKILL: OOM
+killer / Gatekeeper / sandbox) or `143` (SIGTERM). Anything in this range
+means the process was killed externally:
+
+```bash
+zond run apis/foo/tests
+rc=$?
+if   [ $rc -eq 0   ]; then echo "ok"
+elif [ $rc -eq 1   ]; then echo "test failure"
+elif [ $rc -eq 2   ]; then echo "usage/config error"
+elif [ $rc -eq 3   ]; then echo "zond internal bug — file an issue"
+elif [ $rc -ge 128 ]; then echo "killed by signal $((rc - 128))"
+fi
+```
+
+JSON envelopes from `--json` carry the same code in `exit_code` on errors.
+
+---
+
+## `--json` envelope
+
+Most subcommands accept `--json` (or, for `run`, `--report json`) and emit a
+single uniform envelope so a downstream parser only needs one shape:
+
+```jsonc
+{
+  "ok": true,            // false on errors[].length > 0
+  "command": "db diagnose",
+  "data": { /* command-specific payload */ },
+  "warnings": [ /* string[], non-fatal */ ],
+  "errors":   [ /* string[], populated when ok=false */ ]
+}
+```
+
+Holds for `db collections|runs|run|diagnose|compare`, `validate`, `coverage`,
+`generate`, `probe-*`, `request`, `init`, `describe`, `use`, `sync`, `update`,
+`postman`, `catalog`, `guide`. The `data` payload shape varies by command (e.g.
+`db run`'s `data` is `{ run, results }`); the envelope itself does not.
+
+`run` (test execution) is the exception — historically `--json` collided with
+`--report json`. Use `--report json` for the report payload; `--report-out
+<file>` writes it to disk.
+
+### `db diagnose` envelope — `env_issue`
+
+When the diagnose detector decides that environment misconfiguration (not test
+logic, not a backend bug) is the root cause of failures, it surfaces the
+finding as a structured `env_issue` field in the `data` payload:
+
+```jsonc
+{
+  "env_issue": {
+    "message": "Suite \"payments\" looks env-broken (missing_var=2) — check .env.yaml",
+    "scope": "suite:payments",          // "run" or "suite:<name>"
+    "affected_suites": ["payments"],    // suites that were re-classified to fix_env
+    "symptoms": {                       // histogram of root-cause classes
+      "missing_var": 2,                 // unresolved {{var}} in URL/body/headers
+      "base_url": 0,                    // base_url unset or empty
+      "url_malformed": 0,               // computed URL is not parseable
+      "auth_expired": 0                 // 401/403 with auth-header reference
+    }
+  }
+}
+```
+
+`scope` semantics:
+- `run` — multiple suites tripped the detector; the run as a whole is
+  env-broken. Often paired with a "missing base_url"/expired-token symptom
+  set.
+- `suite:<name>` — only one suite tripped the detector. The other suites'
+  failures keep their original `recommended_action` (e.g. `fix_test_logic`).
+
+5xx failures are **never** rewritten to `fix_env` — `report_backend_bug` wins
+even when the surrounding suite is otherwise env-broken.
 
 ---
 

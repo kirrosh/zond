@@ -103,6 +103,38 @@ describe("dbCommand", () => {
     expect(code).toBe(2);
   });
 
+  test("TASK-74: every db --json command emits the same envelope shape", async () => {
+    db = tmpDb();
+    output = suppressOutput();
+    getDb(db);
+    const runIdA = createRun({ started_at: new Date().toISOString() });
+    finalizeRun(runIdA, []);
+    const runIdB = createRun({ started_at: new Date().toISOString() });
+    finalizeRun(runIdB, []);
+
+    const subcommands: Array<{ subcommand: string; positional: string[] }> = [
+      { subcommand: "collections", positional: [] },
+      { subcommand: "runs", positional: [] },
+      { subcommand: "run", positional: [String(runIdA)] },
+      { subcommand: "diagnose", positional: [String(runIdA)] },
+      { subcommand: "compare", positional: [String(runIdA), String(runIdB)] },
+    ];
+
+    const ENVELOPE_KEYS = ["ok", "command", "data", "warnings", "errors"].sort();
+    for (const { subcommand, positional } of subcommands) {
+      output.restore();
+      output = suppressOutput();
+      const code = await dbCommand({ subcommand, positional, dbPath: db, json: true });
+      expect(code).toBe(0);
+      const envelope = JSON.parse(output.getCaptured());
+      expect(Object.keys(envelope).sort()).toEqual(ENVELOPE_KEYS);
+      expect(envelope.ok).toBe(true);
+      expect(envelope.command).toBe(`db ${subcommand}`);
+      expect(Array.isArray(envelope.warnings)).toBe(true);
+      expect(Array.isArray(envelope.errors)).toBe(true);
+    }
+  });
+
   test("runs prints FAIL when 0 passed despite failed=0 (errors only)", async () => {
     db = tmpDb();
     output = suppressOutput();
