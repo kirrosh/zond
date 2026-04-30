@@ -3,9 +3,10 @@ id: TASK-96
 title: >-
   TASK-42 regression: getExpectedStatus produces NaN on default-only / picks
   first 4xx
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 07:47'
+updated_date: '2026-04-30 08:12'
 labels:
   - regression
   - generate
