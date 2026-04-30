@@ -35,6 +35,64 @@ export interface RunsQueryParams {
   offset?: number;
 }
 
+export interface RunRecord {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  trigger: string;
+  commit_sha: string | null;
+  branch: string | null;
+  environment: string | null;
+  duration_ms: number | null;
+  collection_id: number | null;
+}
+
+export interface AssertionResult {
+  type: string;
+  passed: boolean;
+  message?: string;
+  expected?: unknown;
+  actual?: unknown;
+  path?: string;
+}
+
+export interface StoredStepResult {
+  id: number;
+  run_id: number;
+  suite_name: string;
+  test_name: string;
+  status: string;
+  duration_ms: number;
+  request_method: string | null;
+  request_url: string | null;
+  request_body: string | null;
+  response_status: number | null;
+  response_body: string | null;
+  response_headers: string | null;
+  error_message: string | null;
+  assertions: AssertionResult[];
+  captures: Record<string, unknown>;
+  suite_file: string | null;
+}
+
+export interface RunDetailResponse {
+  run: RunRecord;
+  results: StoredStepResult[];
+}
+
+export function runDetailQueryOptions(runId: string) {
+  const url = `/api/runs/${encodeURIComponent(runId)}`;
+  return queryOptions({
+    queryKey: ["run", runId] as const,
+    queryFn: () => getJson<RunDetailResponse>(url),
+    staleTime: 5_000,
+  });
+}
+
 export function runsListQueryOptions(params: RunsQueryParams = {}) {
   const { status = "all", limit = 50, offset = 0 } = params;
   const search = new URLSearchParams();

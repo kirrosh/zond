@@ -12,7 +12,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { Suspense } from "react";
 import { RunsListPage } from "./routes/runs-list";
 import { RunDetailPage } from "./routes/run-detail";
-import { runsListQueryOptions, type StatusFilter } from "./lib/api";
+import { runDetailQueryOptions, runsListQueryOptions, type StatusFilter } from "./lib/api";
 
 export interface RouterContext {
   queryClient: QueryClient;
@@ -79,6 +79,8 @@ const runsListRoute = createRoute({
 const runDetailRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/runs/$runId",
+  loader: ({ context, params }) =>
+    context.queryClient.ensureQueryData(runDetailQueryOptions(params.runId)),
   component: RunDetailPage,
 });
 

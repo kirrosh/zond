@@ -1,6 +1,6 @@
 // TASK-95 spike — production migration tracked separately
 import { Hono } from "hono";
-import { countRuns, listRuns } from "../../db/queries.ts";
+import { countRuns, getResultsByRunId, getRunById, listRuns } from "../../db/queries.ts";
 
 export interface ServeV2Options {
   port?: number;
@@ -35,6 +35,21 @@ export function createApp() {
       const runs = listRuns(limit, offset, filters);
       const total = countRuns(filters);
       return c.json({ runs, total, limit, offset });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.get("/api/runs/:id", (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) {
+      return c.json({ error: "invalid run id" }, 400);
+    }
+    try {
+      const run = getRunById(id);
+      if (!run) return c.json({ error: "run not found" }, 404);
+      const results = getResultsByRunId(id);
+      return c.json({ run, results });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
