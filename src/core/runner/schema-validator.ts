@@ -151,7 +151,7 @@ function getByJsonPointer(obj: unknown, pointer: string): unknown {
 // separator; offset is "Z" or "[+-]HH:MM" with explicit colon. ajv-formats
 // accepts " " as separator and "+HH" without colon, which lets PostgreSQL-style
 // timestamps ("2026-04-29 07:10:44.674675+00") slip through.
-const STRICT_RFC3339_DATE_TIME =
+export const STRICT_RFC3339_DATE_TIME =
   /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])[Tt](?:[01]\d|2[0-3]):[0-5]\d:(?:[0-5]\d|60)(?:\.\d+)?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
 
 function applyStrictFormats(ajv: Ajv): void {

@@ -13,6 +13,7 @@ import { guideCommand } from "./commands/guide.ts";
 import { generateCommand } from "./commands/generate.ts";
 import { probeValidationCommand } from "./commands/probe-validation.ts";
 import { probeMethodsCommand } from "./commands/probe-methods.ts";
+import { lintSpecCommand } from "./commands/lint-spec.ts";
 import { probeMassAssignmentCommand } from "./commands/probe-mass-assignment.ts";
 import { exportCommand } from "./commands/export.ts";
 import { syncCommand } from "./commands/sync.ts";
@@ -581,6 +582,32 @@ export function buildProgram(): Command {
         noCleanup: opts.cleanup === false,
         timeoutMs: opts.timeout,
         json: globalJson(cmd),
+      });
+    });
+
+  // ── lint-spec ──
+  program
+    .command("lint-spec <spec>")
+    .description("Static-analyse an OpenAPI spec for internal-consistency and strictness gaps (catches bugs before any HTTP)")
+    .option("--strict", "Exit non-zero even on LOW-severity issues")
+    .option("--ndjson", "Stream issues as one JSON per line (NDJSON), instead of the wrapped envelope")
+    .option("--rule <list>", "Comma-separated rule overrides: R1, !R2, R3=high|medium|low")
+    .option("--config <path>", "Path to .zond-lint.json")
+    .option("--include-path <glob...>", "Only lint endpoints whose path matches glob (repeatable)")
+    .option("--max-issues <N>", "Stop after N issues", parsePositiveInt("--max-issues"))
+    .option("--no-db", "Don't write to lint_runs SQLite history")
+    .action(async (specPath: string, opts, cmd: Command) => {
+      process.exitCode = await lintSpecCommand({
+        specPath,
+        json: globalJson(cmd),
+        ndjson: opts.ndjson === true,
+        strict: opts.strict === true,
+        rule: opts.rule,
+        config: opts.config,
+        includePath: opts.includePath,
+        maxIssues: opts.maxIssues,
+        // Commander: --no-db → opts.db === false
+        noDb: opts.db === false,
       });
     });
 

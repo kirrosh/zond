@@ -97,6 +97,101 @@ zond ci init
 | `probe-validation <spec>` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup` |
 | `probe-methods <spec>` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--output <dir>`, `--tag` |
 | `probe-mass-assignment <spec>` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--timeout <ms>` |
+| `lint-spec <spec>` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--strict`, `--rule <list>`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
+
+### `lint-spec` — static OpenAPI analysis (pre-flight, zero HTTP)
+
+A lot of "API bugs" are visible in the spec itself, before any test runs.
+`zond lint-spec` walks the OpenAPI document once and reports two ortho­gonal
+classes of problems:
+
+- **Group A — internal consistency.** The spec contradicts itself: an
+  `example` violates its own `format`, an `enum` member is duplicated, a
+  `default` falls outside `minimum`/`maximum`. Schemathesis-style fuzzing
+  would eventually hit these too — `lint-spec` finds them deterministically
+  in milliseconds.
+- **Group B — strictness gaps.** The schema is too loose: a path-param has
+  no `format` or `pattern`; an integer query-param (`limit`, `offset`) has
+  no `minimum`/`maximum`; a 2xx response has no JSON schema; a request body
+  doesn't declare `additionalProperties`. SDKs generated from such specs
+  silently send invalid data and the server rejects it with 422.
+
+```bash
+zond lint-spec openapi.json                                # human report
+zond lint-spec openapi.json --json | jq '.data.issues'      # structured
+zond lint-spec openapi.json --rule '!B2,!B5,!B6,!B9'        # disable heuristics
+zond lint-spec openapi.json --config .zond-lint.json        # per-project rules
+```
+
+| Group | Rule | Severity (default) | What it checks |
+|---|---|---|---|
+| A | A1 | high | `example` matches `format` (strict RFC3339 for `date-time`, plus `email`/`uri`/`uuid`/`ipv4`/`hostname`) |
+| A | A2 | high | `example` matches `enum` |
+| A | A3 | medium | `example` matches `pattern` |
+| A | A4 | medium | `example` respects `minLength`/`maxLength`/`minimum`/`maximum` |
+| A | A5 | medium | `default` respects all of the above |
+| A | A6 | low | `enum` members are pairwise unique |
+| B | B1 | high | string path-param has neither `format` nor `pattern` |
+| B | B2 | low (heuristic) | id-like param (`*_id`) without `format: uuid` or `pattern` |
+| B | B3 | medium | integer query-param without `minimum`/`maximum` (medium for pagination names, low otherwise) |
+| B | B4 | low | cursor-style param (`after`/`before`/`cursor`) without `minLength: 1` |
+| B | B5 | medium (heuristic) | `*_at`/`*_date`/`created`/`updated` field without `format: date-time` |
+| B | B6 | low (heuristic) | `email`/`url`/`website` field without matching `format` |
+| B | B7 | high | 2xx response has no JSON schema (`--validate-schema` would silently skip it). 204/205 are exempt by definition |
+| B | B8 | low | request body schema doesn't declare `additionalProperties` |
+| B | B9 | low (heuristic) | request body has `name`/`email`/`title` properties but `required` is empty |
+
+Heuristic rules (B2/B5/B6/B9) are name-based and configurable via
+`.zond-lint.json` (see `heuristics.id_suffixes` etc). Disable any rule with
+`--rule !B2`; force a severity with `--rule B8=high`.
+
+**RFC6901 jsonpointer.** Every issue carries a `jsonpointer` field pointing
+to the exact node in the spec — agents and IDEs can open the source location
+without re-parsing the document.
+
+**`affects`** (JSON output only). Each issue lists which other zond commands
+become noisy or unreliable while this issue is unfixed. For example, an
+unfixed B1 surfaces as `affects: ["probe-validation:invalid-path-uuid"]`,
+predicting which `probe-validation` runs will produce false-positive 5xx
+because the spec didn't pin a format. This is the runtime-aware angle no
+generic OpenAPI linter offers.
+
+```jsonc
+// --json output, single issue
+{
+  "rule": "B1",
+  "severity": "high",
+  "path": "/webhooks/{id}",
+  "method": "GET",
+  "jsonpointer": "/paths/~1webhooks~1{id}/get/parameters/0",
+  "message": "path-param \"id\" missing format/pattern",
+  "fix_hint": "add format: uuid (or pattern: ^...$) so SDKs reject malformed values client-side",
+  "affects": ["probe-validation:invalid-path-uuid", "probe-methods"]
+}
+```
+
+**Exit codes:**
+
+- `0` — no issues, or only LOW issues without `--strict`.
+- `1` — at least one HIGH (CI fail).
+- `2` — at least one MEDIUM (or LOW with `--strict`); also for usage errors.
+
+**SQLite history.** Each lint run is recorded in the `lint_runs` table for
+future `zond db lint-diff`. Disable with `--no-db`.
+
+**Config (`.zond-lint.json`, optional):**
+
+```json
+{
+  "rules": { "B2": "off", "B5": "low" },
+  "heuristics": {
+    "id_suffixes": ["_id", "Id"],
+    "timestamp_suffixes": ["_at", "_date"],
+    "url_names": ["url", "website", "homepage"]
+  },
+  "ignore_paths": ["/internal/*"]
+}
+```
 
 ### `probe-validation` — bug-hunting negative-input probes
 
