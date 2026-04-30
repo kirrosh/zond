@@ -71,14 +71,46 @@ describe("generateStep", () => {
     expect(step.expect.status).toBe(201);
   });
 
-  test("falls back to first response status if no 2xx", () => {
+  test("TASK-96: falls back to method default when no 2xx is declared (only 3xx)", () => {
     const ep = makeEndpoint({
       path: "/pets",
       method: "GET",
       responses: [{ statusCode: 302, description: "Redirect" }],
     });
     const step = generateStep(ep, noSecurity);
-    expect(step.expect.status).toBe(302);
+    // Asserting 302 as success would generate a guaranteed-failing test:
+    // the runtime is unlikely to follow the redirect by itself.
+    expect(step.expect.status).toBe(200);
+  });
+
+  test("TASK-96: only-4xx spec falls back to method default (POST→201)", () => {
+    const ep = makeEndpoint({
+      path: "/things",
+      method: "POST",
+      responses: [{ statusCode: 400, description: "Bad request" }],
+    });
+    const step = generateStep(ep, noSecurity);
+    expect(step.expect.status).toBe(201);
+  });
+
+  test("TASK-96: only-5xx spec falls back to method default (DELETE→204)", () => {
+    const ep = makeEndpoint({
+      path: "/things/{id}",
+      method: "DELETE",
+      responses: [{ statusCode: 500, description: "Server error" }],
+    });
+    const step = generateStep(ep, noSecurity);
+    expect(step.expect.status).toBe(204);
+  });
+
+  test("TASK-96: status is always finite — never NaN", () => {
+    const ep = makeEndpoint({
+      path: "/things",
+      method: "GET",
+      responses: [],
+    });
+    const step = generateStep(ep, noSecurity);
+    expect(Number.isFinite(step.expect.status)).toBe(true);
   });
 
   test("defaults to 200 if no responses (GET)", () => {
