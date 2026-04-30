@@ -171,6 +171,10 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
+  if (options.sessionId && !options.json) {
+    process.stderr.write(`zond: session ${options.sessionId} (run will be grouped)\n`);
+  }
+
   // Inject CLI auth token — overrides env file value
   if (options.authToken) {
     env.auth_token = options.authToken;

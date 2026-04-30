@@ -89,7 +89,8 @@ zond ci init
 
 | Command | Description | Key flags |
 |---------|-------------|-----------|
-| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--report json\|junit`, `--report-out <file>` |
+| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--session-id <id>`, `--report json\|junit`, `--report-out <file>` |
+| `session start\|end\|status` | Group multiple `zond run` calls into one campaign in `/runs` Sessions view | `--label <text>`, `--id <uuid>` |
 | `validate <path>` | Validate YAML tests | |
 | `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
@@ -686,6 +687,27 @@ zond resolves the workspace root via walk-up from the current directory. The fir
 The walk stops at `$HOME` to avoid accidentally adopting `~/apis` or `~/zond.db` when zond is invoked from an unrelated directory. If no marker is found, zond falls back to the current directory and prints a one-time warning to stderr — run `zond init` (or create `zond.config.yml`) to anchor the workspace explicitly.
 
 The workspace root is used as the default location for `zond.db`, the `apis/<name>/` directory created by `zond init`, and the `.zond-current` file written by `zond use`. Explicit `--db` and `--dir` flags always win over walk-up.
+
+### Sessions — group multiple runs into one campaign
+
+A "session" stitches multiple `zond run` invocations under one `session_id` so the dashboard's `/runs` view collapses them into a single row instead of N scattered runs. Use it when running a typical sweep — `smoke + probe-methods + probe-validation + mass-assignment` — and you want them grouped as one campaign.
+
+```bash
+zond session start --label "post-deploy sweep"   # writes UUID to .zond/current-session
+zond run apis/resend/tests --tag smoke            # auto-picks up the session
+zond run apis/resend/probes/methods               # same session
+zond run apis/resend/probes/validation            # same session
+zond session end                                  # removes .zond/current-session
+zond session status                               # show what's active
+```
+
+`session_id` resolution order in `zond run`:
+
+1. `--session-id <uuid>` flag (explicit override)
+2. `ZOND_SESSION_ID` env var (CI-friendly)
+3. `.zond/current-session` file (set by `zond session start`)
+
+If none of those is set, the run is "ad-hoc" and shows up alone in `/runs`. Old runs without `session_id` continue to render in the legacy `Runs` tab.
 
 ### `zond serve` port handling
 

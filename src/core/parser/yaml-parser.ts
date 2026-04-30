@@ -76,13 +76,24 @@ export async function parseFile(filePath: string): Promise<TestSuite> {
   }
 }
 
+/**
+ * Files that live alongside test suites but aren't suites themselves. The
+ * yaml-parser scans recursively from the workspace root, so picking these up
+ * would surface spurious "Validation error: missing field name" noise.
+ */
+function isNonSuiteYaml(file: string): boolean {
+  if (file.match(/\.env(\..+)?\.ya?ml$/)) return true;
+  // Workspace marker — present at the root of every zond workspace.
+  if (file === "zond.config.yml" || file === "zond.config.yaml") return true;
+  return false;
+}
+
 export async function parseDirectory(dirPath: string): Promise<TestSuite[]> {
   const glob = new Glob("**/*.{yaml,yml}");
   const suites: TestSuite[] = [];
 
   for await (const file of glob.scan({ cwd: dirPath, absolute: false })) {
-    // Skip environment files
-    if (file.match(/\.env(\..+)?\.yaml$/) || file.match(/\.env(\..+)?\.yml$/)) {
+    if (isNonSuiteYaml(file)) {
       continue;
     }
     const fullPath = `${dirPath}/${file}`;
@@ -108,7 +119,7 @@ export async function parseDirectorySafe(dirPath: string): Promise<ParseDirector
   const errors: { file: string; error: string }[] = [];
 
   for await (const file of glob.scan({ cwd: dirPath, absolute: false })) {
-    if (file.match(/\.env(\..+)?\.yaml$/) || file.match(/\.env(\..+)?\.yml$/)) {
+    if (isNonSuiteYaml(file)) {
       continue;
     }
     const fullPath = `${dirPath}/${file}`;

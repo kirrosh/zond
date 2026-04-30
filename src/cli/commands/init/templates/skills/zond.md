@@ -90,10 +90,19 @@ servers, `--safe` runs, and specs with no `format:` constraints.
 
 ## Phase 3 — Run (sanity → smoke → full)
 
+When you're about to fire several runs in a row (sanity → smoke → CRUD →
+probes), group them into one campaign so `/runs` shows one row instead of
+N. Run `zond session start --label "<short reason>"` once before the
+sweep; every `zond run` in this workspace then auto-inherits the
+`session_id`. Close with `zond session end`. Use it for any multi-run
+sweep — fixture-pack pass, probe burst, post-deploy check.
+
 ```bash
+zond session start --label "smoke + probes"                          # group runs
 zond run apis/<name>/tests --tag sanity --json                       # 3.1 sanity gate
 zond run apis/<name>/tests --safe --json                             # 3.2 smoke (GET-only)
 zond run apis/<name>/tests --tag crud,setup --validate-schema --spec <spec> --json  # 3.3 full CRUD
+zond session end
 ```
 
 **Always pass `--validate-schema` for CRUD** — contract drift (date format,

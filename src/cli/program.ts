@@ -22,6 +22,12 @@ import { updateCommand } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
 import { completionsCommand, COMPLETION_SHELLS, type CompletionShell } from "./commands/completions.ts";
 import { useCommand } from "./commands/use.ts";
+import {
+  sessionStartCommand,
+  sessionEndCommand,
+  sessionStatusCommand,
+} from "./commands/session.ts";
+import { resolveSessionId } from "../core/context/session.ts";
 
 import { readCurrentApi } from "../core/context/current.ts";
 import { printError } from "./output.ts";
@@ -198,7 +204,7 @@ export function buildProgram(): Command {
     .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
     .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
-    .option("--session-id <id>", "Group this run under a session (for hunt-style multi-run campaigns; ZOND_SESSION_ID env var also honoured)")
+    .option("--session-id <id>", "Group this run under a session. Resolution order: --session-id flag > ZOND_SESSION_ID env > .zond/current-session file (set by 'zond session start')")
     .action(async (pathArg: string | undefined, opts, cmd: Command) => {
       let path = pathArg;
       const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
@@ -250,9 +256,10 @@ export function buildProgram(): Command {
         reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
         validateSchema: opts.validateSchema === true,
         specPath: typeof opts.spec === "string" ? opts.spec : undefined,
-        sessionId: typeof opts.sessionId === "string" && opts.sessionId.length > 0
-          ? opts.sessionId
-          : (process.env.ZOND_SESSION_ID || undefined),
+        sessionId: resolveSessionId({
+          flag: typeof opts.sessionId === "string" ? opts.sessionId : null,
+          env: process.env.ZOND_SESSION_ID ?? null,
+        }) ?? undefined,
         json: false,
       });
     });
@@ -318,6 +325,38 @@ export function buildProgram(): Command {
         clear: opts.clear === true,
         json: globalJson(cmd),
       });
+    });
+
+  // ── session ──
+  //
+  // Group multiple `zond run` calls under one session_id without juggling env
+  // vars. `start` writes a UUID to .zond/current-session; subsequent `run`
+  // calls auto-pick it up (priority: --session-id flag > ZOND_SESSION_ID env
+  // > current-session file).
+  const session = program.command("session").description("Manage run grouping (campaigns)");
+  session
+    .command("start")
+    .description("Begin a session — group all subsequent 'zond run' calls under one session_id (.zond/current-session)")
+    .option("--label <text>", "Optional human-readable label shown alongside the session in the UI")
+    .option("--id <uuid>", "Reuse a specific UUID instead of generating one (useful for CI)")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await sessionStartCommand({
+        label: opts.label,
+        id: opts.id,
+        json: globalJson(cmd),
+      });
+    });
+  session
+    .command("end")
+    .description("End the current session — remove .zond/current-session")
+    .action(async (_opts, cmd: Command) => {
+      process.exitCode = await sessionEndCommand({ json: globalJson(cmd) });
+    });
+  session
+    .command("status")
+    .description("Show the active session (if any)")
+    .action(async (_opts, cmd: Command) => {
+      process.exitCode = await sessionStatusCommand({ json: globalJson(cmd) });
     });
 
   // ── coverage ──
