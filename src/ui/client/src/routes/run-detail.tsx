@@ -6,6 +6,7 @@ import {
   runDetailQueryOptions,
   type AssertionResult,
   type RunRecord,
+  type SourceMetadata,
   type StoredStepResult,
 } from "../lib/api";
 import { useRunProgress } from "../lib/use-run-progress";
@@ -183,14 +184,20 @@ function FailureCard({ step }: { step: StoredStepResult }) {
   );
 }
 
-type EvidenceTab = "request" | "response" | "assertions";
+type EvidenceTab = "request" | "response" | "assertions" | "source";
+
+function hasSourceEvidence(step: StoredStepResult): boolean {
+  return Boolean(step.provenance) || Boolean(step.spec_pointer) || Boolean(step.spec_excerpt);
+}
 
 function EvidencePanel({ step }: { step: StoredStepResult }) {
+  const sourceVisible = hasSourceEvidence(step);
   const [tab, setTab] = useState<EvidenceTab>("response");
   const tabs: { id: EvidenceTab; label: string }[] = [
     { id: "request", label: "Request" },
     { id: "response", label: "Response" },
     { id: "assertions", label: `Assertions (${step.assertions.length})` },
+    ...(sourceVisible ? [{ id: "source" as const, label: "Source" }] : []),
   ];
   return (
     <div className="border-t bg-muted/20">
@@ -218,8 +225,114 @@ function EvidencePanel({ step }: { step: StoredStepResult }) {
         {tab === "request" && <RequestPanel step={step} />}
         {tab === "response" && <ResponsePanel step={step} />}
         {tab === "assertions" && <AssertionsPanel assertions={step.assertions} />}
+        {tab === "source" && <SourcePanel step={step} />}
       </div>
     </div>
+  );
+}
+
+const PROVENANCE_LABEL: Record<NonNullable<SourceMetadata["type"]>, string> = {
+  "openapi-generated": "openapi-generated",
+  "probe-suite": "probe-suite",
+  manual: "manually authored",
+};
+
+function SourcePanel({ step }: { step: StoredStepResult }) {
+  const { provenance, spec_pointer, spec_excerpt } = step;
+  return (
+    <div className="space-y-3">
+      <ProvenanceBlock provenance={provenance} />
+      {(spec_pointer || spec_excerpt) && (
+        <SpecSnippetBlock pointer={spec_pointer} excerpt={spec_excerpt} />
+      )}
+      {!provenance && !spec_pointer && !spec_excerpt && (
+        <p className="text-xs text-muted-foreground italic">
+          No source metadata recorded for this run.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ProvenanceBlock({ provenance }: { provenance: SourceMetadata | null }) {
+  if (!provenance) {
+    return (
+      <div className="text-xs text-muted-foreground italic">No provenance.</div>
+    );
+  }
+  const type = provenance.type;
+  const label = type ? PROVENANCE_LABEL[type] : "unknown";
+  if (type === "manual") {
+    return (
+      <div>
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Provenance</div>
+        <div className="mt-1">
+          <Badge variant="outline">{label}</Badge>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Provenance</div>
+      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+        <Badge variant="outline">{label}</Badge>
+        {provenance.generator && (
+          <span className="font-mono text-muted-foreground">{provenance.generator}</span>
+        )}
+        {provenance.endpoint && (
+          <span className="font-mono">{provenance.endpoint}</span>
+        )}
+        {provenance.response_branch && (
+          <Badge variant="secondary">→ {provenance.response_branch}</Badge>
+        )}
+      </div>
+      {provenance.spec && (
+        <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground" title={provenance.spec}>
+          spec: {provenance.spec}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SpecSnippetBlock({ pointer, excerpt }: { pointer: string | null; excerpt: string | null }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Spec snippet</div>
+        {pointer && <CopyTextButton text={pointer} label="Copy pointer" />}
+      </div>
+      {pointer && (
+        <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">
+          {pointer}
+        </div>
+      )}
+      {excerpt && (
+        <pre className="mt-1 max-h-72 overflow-auto rounded bg-background p-2 text-[11px] font-mono leading-relaxed">
+          {tryPrettyJson(excerpt)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function CopyTextButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked */
+    }
+  };
+  return (
+    <Button size="sm" variant="ghost" onClick={onCopy}>
+      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      {copied ? "Copied" : label}
+    </Button>
   );
 }
 

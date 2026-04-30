@@ -1,9 +1,10 @@
 ---
 id: TASK-104
 title: UI — provenance + spec snippet в Run detail evidence panel
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 09:36'
+updated_date: '2026-04-30 10:59'
 labels:
   - trust-loop
   - decision-5
@@ -65,7 +66,7 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Generator/endpoint/response_branch/manual бейджи рендерятся корректно по типу source
-- [ ] #2 Spec excerpt отображается с pretty-formatting + copy-pointer кнопка
-- [ ] #3 Failure без provenance (старый run) скрывает секцию, не падает
+- [x] #1 Generator/endpoint/response_branch/manual бейджи рендерятся корректно по типу source
+- [x] #2 Spec excerpt отображается с pretty-formatting + copy-pointer кнопка
+- [x] #3 Failure без provenance (старый run) скрывает секцию, не падает
 <!-- AC:END -->
