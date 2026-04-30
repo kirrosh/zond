@@ -1,5 +1,5 @@
 import { resolve, dirname, basename } from "node:path";
-import type { TestSuite, TestStep, Environment } from "../parser/types.ts";
+import type { TestSuite, TestStep, Environment, SourceMetadata } from "../parser/types.ts";
 import { substituteString, substituteStep, substituteDeep, extractVariableReferences } from "../parser/variables.ts";
 import type { TestRunResult, StepResult, HttpRequest } from "./types.ts";
 import { executeRequest, type FetchOptions } from "./http-client.ts";
@@ -16,6 +16,15 @@ function buildUrl(baseUrl: string | undefined, path: string, query?: Record<stri
     url += `?${params.toString()}`;
   }
   return url;
+}
+
+/** Shallow-merge suite-level и step-level provenance. Step перекрывает suite. */
+export function mergeProvenance(
+  suiteSrc?: SourceMetadata,
+  stepSrc?: SourceMetadata,
+): SourceMetadata | null {
+  if (!suiteSrc && !stepSrc) return null;
+  return { ...(suiteSrc ?? {}), ...(stepSrc ?? {}) };
 }
 
 function makeSkippedResult(stepName: string, reason: string): StepResult {
@@ -83,6 +92,13 @@ export async function runSuite(
   const startedAt = new Date().toISOString();
   const steps: StepResult[] = [];
 
+  /** Push a step result, attaching provenance derived from suite + step source. */
+  const pushStep = (result: StepResult, currentStep?: TestStep): void => {
+    const merged = mergeProvenance(suite.source, currentStep?.source);
+    if (merged !== null) result.provenance = merged;
+    steps.push(result);
+  };
+
   const fetchOptions: Partial<FetchOptions> = {
     timeout: suite.config.timeout,
     retries: suite.config.retries,
@@ -149,14 +165,14 @@ export async function runSuite(
         const substituted = substituteDeep(rawDirective, variables);
         variables[key] = applyTransform(substituted);
       }
-      steps.push({
+      pushStep({
         name: interpolateName(step.name, variables),
         status: "pass",
         duration_ms: 0,
         request: { method: "", url: "", headers: {} },
         assertions: [],
         captures: {},
-      });
+      }, step);
       continue;
     }
 
@@ -165,13 +181,13 @@ export async function runSuite(
     const referencedVars = extractVariableReferences(step);
     const missing = referencedVars.find((v) => missingCaptures.has(v));
     if (missing) {
-      steps.push(makeSkippedResult(interpolateName(step.name, variables), `Depends on missing capture: ${missing}`));
+      pushStep(makeSkippedResult(interpolateName(step.name, variables), `Depends on missing capture: ${missing}`), step);
       continue;
     }
     if (!step.always) {
       const tainted = referencedVars.find((v) => taintedCaptures.has(v));
       if (tainted) {
-        steps.push(makeSkippedResult(interpolateName(step.name, variables), `Depends on tainted capture: ${tainted} (use always: true on cleanup steps)`));
+        pushStep(makeSkippedResult(interpolateName(step.name, variables), `Depends on tainted capture: ${tainted} (use always: true on cleanup steps)`), step);
         continue;
       }
     }
@@ -180,7 +196,7 @@ export async function runSuite(
     if (step.skip_if) {
       const exprAfterSubst = String(substituteString(step.skip_if, variables));
       if (evaluateExpr(exprAfterSubst)) {
-        steps.push(makeSkippedResult(interpolateName(step.name, variables), `Skipped: ${step.skip_if}`));
+        pushStep(makeSkippedResult(interpolateName(step.name, variables), `Skipped: ${step.skip_if}`), step);
         continue;
       }
     }
@@ -202,7 +218,7 @@ export async function runSuite(
       resolvedSuiteHeaders = suite.headers ? substituteDeep(suite.headers, variables) : undefined;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      steps.push({
+      pushStep({
         name: interpolateName(step.name, variables),
         status: "error",
         duration_ms: 0,
@@ -210,7 +226,7 @@ export async function runSuite(
         assertions: [],
         captures: {},
         error: errorMsg,
-      });
+      }, step);
       // Substitution never produced a request → capture truly missing.
       if (step.expect.body) {
         for (const rule of Object.values(step.expect.body)) {
@@ -254,7 +270,7 @@ export async function runSuite(
 
     // Validate absolute URL before attempting fetch
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
-      steps.push({
+      pushStep({
         name: interpolateName(step.name, variables),
         status: "error",
         duration_ms: 0,
@@ -262,7 +278,7 @@ export async function runSuite(
         assertions: [],
         captures: {},
         error: `base_url is not configured — URL resolved to a relative path: "${url}". Set base_url in .env.yaml`,
-      });
+      }, step);
       if (step.expect.body) {
         for (const rule of Object.values(step.expect.body)) {
           if (rule.capture) missingCaptures.add(rule.capture);
@@ -275,7 +291,7 @@ export async function runSuite(
       const bodyPreview = formData
         ? ` [multipart: ${[...formData.keys()].length} field(s)]`
         : body ? ` ${body.slice(0, 200)}` : "";
-      steps.push({
+      pushStep({
         name: interpolateName(step.name, variables),
         status: "pass",
         duration_ms: 0,
@@ -283,7 +299,7 @@ export async function runSuite(
         assertions: [],
         captures: {},
         error: `[DRY RUN] ${resolved.method} ${url}${bodyPreview}`,
-      });
+      }, step);
       continue;
     }
 
@@ -339,7 +355,7 @@ export async function runSuite(
           };
         }
       }
-      if (lastStepResult) steps.push(lastStepResult);
+      if (lastStepResult) pushStep(lastStepResult, step);
       continue;
     }
 
@@ -366,7 +382,7 @@ export async function runSuite(
       }
       const allPassed = assertions.every((a) => a.passed);
 
-      steps.push({
+      pushStep({
         name: interpolateName(step.name, variables),
         status: allPassed ? "pass" : "fail",
         duration_ms: response.duration_ms,
@@ -374,7 +390,7 @@ export async function runSuite(
         response,
         assertions,
         captures,
-      });
+      }, step);
 
       // If step failed, captures that did extract are tainted (value is real
       // but came from a step whose other assertions failed). Always-steps may
@@ -388,7 +404,7 @@ export async function runSuite(
       }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      steps.push({
+      pushStep({
         name: interpolateName(step.name, variables),
         status: "error",
         duration_ms: 0,
@@ -396,7 +412,7 @@ export async function runSuite(
         assertions: [],
         captures: {},
         error: errorMsg,
-      });
+      }, step);
 
       // Network/runtime error → no response → capture truly missing.
       if (step.expect.body) {

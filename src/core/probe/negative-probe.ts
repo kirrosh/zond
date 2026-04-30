@@ -173,11 +173,18 @@ function buildStep(
   const path = opts.pathOverride ?? pathWithPlaceholders(ep, "valid-shape");
   const headers = getAuthHeaders(ep, schemes);
 
+  const expectedStatus = opts.expectStatusOk ?? ACCEPTABLE_4XX;
+  const responseBranch = Array.isArray(expectedStatus) ? expectedStatus.map(String).join("|") : String(expectedStatus);
   const step: RawStep = {
     name: opts.name,
+    source: {
+      generator: "negative-probe",
+      endpoint: `${method} ${ep.path}`,
+      response_branch: responseBranch,
+    },
     [method]: convertPath(path),
     expect: {
-      status: opts.expectStatusOk ?? ACCEPTABLE_4XX,
+      status: expectedStatus,
     },
   };
   if (headers) step.headers = headers;
@@ -514,6 +521,10 @@ function buildCleanupStep(
   const headers = getAuthHeaders(deleteEp, schemes);
   const step: RawStep = {
     name: `cleanup leaked resource from "${probeStepName}"`,
+    source: {
+      generator: "negative-probe-cleanup",
+      endpoint: `DELETE ${deleteEp.path}`,
+    },
     always: true,
     DELETE: path,
     expect: {
@@ -627,6 +638,11 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
         "no-5xx",
         ...(hasNumericCoercion ? ["query-coercion"] : []),
       ],
+      source: {
+        type: "probe-suite",
+        generator: "negative-probe",
+        endpoint: `${ep.method.toUpperCase()} ${ep.path}`,
+      },
       fileStem: `probe-${stem}`,
       base_url: "{{base_url}}",
       ...(suiteHeaders ? { headers: suiteHeaders } : {}),

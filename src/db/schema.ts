@@ -51,7 +51,7 @@ export function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -86,7 +86,8 @@ const SCHEMA = `
     assertions       TEXT,
     captures         TEXT,
     response_headers TEXT,
-    suite_file       TEXT
+    suite_file       TEXT,
+    provenance       TEXT
   );
 
   CREATE TABLE IF NOT EXISTS collections (
@@ -164,6 +165,10 @@ function runMigrations(db: Database): void {
     if (ver >= 1 && ver < 2) {
       // Migration v1→v2: add suite_file column to results
       db.exec("ALTER TABLE results ADD COLUMN suite_file TEXT");
+    }
+    if (ver >= 2 && ver < 3) {
+      // Migration v2→v3: add provenance column (test source metadata)
+      db.exec("ALTER TABLE results ADD COLUMN provenance TEXT");
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

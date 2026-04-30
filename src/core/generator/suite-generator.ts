@@ -1,6 +1,7 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo, CrudGroup } from "./types.ts";
 import type { RawSuite, RawStep } from "./serializer.ts";
+import type { SourceMetadata } from "../parser/types.ts";
 import { generateFromSchema, generateMultipartFromSchema } from "./data-factory.ts";
 import { groupEndpointsByTag } from "./chunker.ts";
 
@@ -222,6 +223,46 @@ function isAuthEndpoint(ep: EndpointInfo): boolean {
 }
 
 // ──────────────────────────────────────────────
+// Provenance helpers
+// ──────────────────────────────────────────────
+
+function escapeJsonPointerSegment(s: string): string {
+  return s.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+function pickPrimaryStatus(status: number | number[]): number {
+  return Array.isArray(status) ? (status[0] ?? 200) : status;
+}
+
+/** Build step-level provenance for an endpoint + chosen response status. */
+export function buildStepSource(
+  ep: EndpointInfo,
+  statusOverride?: number | number[],
+): SourceMetadata {
+  const method = ep.method.toUpperCase();
+  const status = statusOverride ?? getExpectedStatus(ep);
+  const primary = pickPrimaryStatus(status);
+  const responseBranch = Array.isArray(status) ? status.map(String).join("|") : String(status);
+  const escapedPath = escapeJsonPointerSegment(ep.path);
+  return {
+    endpoint: `${method} ${ep.path}`,
+    response_branch: responseBranch,
+    schema_pointer: `#/paths/${escapedPath}/${method.toLowerCase()}/responses/${primary}`,
+  };
+}
+
+/** Build suite-level provenance for an openapi-generated suite. */
+export function buildOpenApiSuiteSource(specPath?: string): SourceMetadata | undefined {
+  if (!specPath) return undefined;
+  return {
+    type: "openapi-generated",
+    spec: specPath,
+    generator: "zond-generate",
+    generated_at: new Date().toISOString(),
+  };
+}
+
+// ──────────────────────────────────────────────
 // Public API
 // ──────────────────────────────────────────────
 
@@ -236,6 +277,7 @@ export function generateStep(
 
   const step: RawStep = {
     name,
+    source: buildStepSource(ep),
     [method]: path,
     expect: {
       status: getExpectedStatus(ep),
@@ -344,6 +386,7 @@ export function generateCrudSuite(
   if (group.read) {
     const step: RawStep = {
       name: group.read.operationId ?? `Read created ${group.resource.replace(/s$/, "")}`,
+      source: buildStepSource(group.read),
       GET: convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`),
       expect: {
         status: getExpectedStatus(group.read),
@@ -363,6 +406,7 @@ export function generateCrudSuite(
     if (group.update.requiresEtag && group.read) {
       tests.push({
         name: `Get ETag before update ${group.resource.replace(/s$/, "")}`,
+        source: buildStepSource(group.read),
         GET: itemPath,
         expect: {
           status: getExpectedStatus(group.read),
@@ -373,6 +417,7 @@ export function generateCrudSuite(
 
     const step: RawStep = {
       name: group.update.operationId ?? `Update ${group.resource.replace(/s$/, "")}`,
+      source: buildStepSource(group.update),
       [method]: itemPath,
       expect: {
         status: getExpectedStatus(group.update),
@@ -397,6 +442,7 @@ export function generateCrudSuite(
     if (group.delete.requiresEtag && group.read && !updateAlreadyCapturedEtag) {
       tests.push({
         name: `Get ETag before delete ${group.resource.replace(/s$/, "")}`,
+        source: buildStepSource(group.read),
         GET: itemPath,
         expect: {
           status: getExpectedStatus(group.read),
@@ -408,6 +454,7 @@ export function generateCrudSuite(
     // T44: cleanup must run even if earlier assertions failed (tainted captures)
     const step: RawStep = {
       name: group.delete.operationId ?? `Delete ${group.resource.replace(/s$/, "")}`,
+      source: buildStepSource(group.delete),
       DELETE: itemPath,
       always: true,
       expect: {
@@ -423,6 +470,7 @@ export function generateCrudSuite(
     if (group.read) {
       tests.push({
         name: `Verify ${group.resource.replace(/s$/, "")} deleted`,
+        source: buildStepSource(group.read, 404),
         GET: convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`),
         always: true,
         expect: {
@@ -652,8 +700,10 @@ export function generateSanitySuite(opts: {
 export function generateSuites(opts: {
   endpoints: EndpointInfo[];
   securitySchemes: SecuritySchemeInfo[];
+  /** Path to OpenAPI spec, recorded in suite-level provenance. */
+  specPath?: string;
 }): RawSuite[] {
-  const { endpoints, securitySchemes } = opts;
+  const { endpoints, securitySchemes, specPath } = opts;
 
   // Filter deprecated
   const active = endpoints.filter(ep => !ep.deprecated);
@@ -857,5 +907,15 @@ export function generateSuites(opts: {
   const nonAuthGetEndpoints = nonAuth.filter(ep => ep.method.toUpperCase() === "GET");
   const sanitySuite = generateSanitySuite({ authEndpoints, nonAuthGetEndpoints, securitySchemes });
 
-  return sanitySuite ? [sanitySuite, ...suites] : suites;
+  const allSuites = sanitySuite ? [sanitySuite, ...suites] : suites;
+
+  // Stamp suite-level provenance when a spec path is known.
+  const suiteSrc = buildOpenApiSuiteSource(specPath);
+  if (suiteSrc) {
+    for (const s of allSuites) {
+      s.source = suiteSrc;
+    }
+  }
+
+  return allSuites;
 }

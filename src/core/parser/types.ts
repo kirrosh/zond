@@ -41,6 +41,22 @@ export interface ForEach {
   in: unknown;
 }
 
+/**
+ * Provenance metadata: «откуда этот test/suite». Optional, не участвует в
+ * matching/dedup/validation. Suite-level задаёт общие поля; step-level
+ * наследует через shallow merge `{ ...suite.source, ...step.source }`.
+ */
+export interface SourceMetadata {
+  type?: "openapi-generated" | "manual" | "probe-suite";
+  spec?: string;
+  generator?: string;
+  generated_at?: string;
+  endpoint?: string;
+  response_branch?: string;
+  schema_pointer?: string;
+  [key: string]: unknown;
+}
+
 export interface MultipartFileField {
   file: string;
   filename?: string;
@@ -51,6 +67,7 @@ export type MultipartField = string | MultipartFileField;
 
 export interface TestStep {
   name: string;
+  source?: SourceMetadata;
   method: HttpMethod;
   path: string;
   headers?: Record<string, string>;
@@ -85,6 +102,7 @@ export interface TestSuite {
   /** If true, this suite runs before all regular suites and its captures are shared into their env */
   setup?: boolean;
   tags?: string[];
+  source?: SourceMetadata;
   base_url?: string;
   headers?: Record<string, string>;
   /** Cross-product parameterisation: each key contributes one variable

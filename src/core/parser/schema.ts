@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { TestSuite, TestStep, AssertionRule, TestStepExpect, SuiteConfig, RetryUntil, ForEach, MultipartField } from "./types.ts";
+import type { TestSuite, TestStep, AssertionRule, TestStepExpect, SuiteConfig, RetryUntil, ForEach, MultipartField, SourceMetadata } from "./types.ts";
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
@@ -158,6 +158,17 @@ const MultipartFileFieldSchema = z.object({
 
 const MultipartFieldSchema: z.ZodType<MultipartField> = z.union([z.string(), MultipartFileFieldSchema]);
 
+// Provenance metadata: passthrough — все поля optional, неизвестные пропускаем без warning
+const SourceMetadataSchema: z.ZodType<SourceMetadata> = z.object({
+  type: z.enum(["openapi-generated", "manual", "probe-suite"]).optional(),
+  spec: z.string().optional(),
+  generator: z.string().optional(),
+  generated_at: z.string().optional(),
+  endpoint: z.string().optional(),
+  response_branch: z.string().optional(),
+  schema_pointer: z.string().optional(),
+}).passthrough() as z.ZodType<SourceMetadata>;
+
 const TestStepSchema: z.ZodType<TestStep> = z.preprocess(
   (raw) => {
     const obj = extractMethodAndPath(raw);
@@ -172,6 +183,7 @@ const TestStepSchema: z.ZodType<TestStep> = z.preprocess(
   },
   z.object({
     name: z.string(),
+    source: SourceMetadataSchema.optional(),
     method: z.enum(HTTP_METHODS),
     path: z.string(),
     headers: z.record(z.string(), z.string()).optional(),
@@ -219,6 +231,7 @@ const TestSuiteSchema = z.preprocess(
     description: z.string().optional(),
     setup: z.boolean().optional(),
     tags: z.array(z.string()).optional(),
+    source: SourceMetadataSchema.optional(),
     base_url: z.string().optional(),
     headers: z.record(z.string(), z.string()).optional(),
     parameterize: z.record(z.string(), z.array(z.unknown()).min(1)).optional(),

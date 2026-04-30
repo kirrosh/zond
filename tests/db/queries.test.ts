@@ -183,6 +183,27 @@ describe("saveResults", () => {
     expect(row?.response_body).toBe('{"error":"oops"}');
   });
 
+  test("provenance round-trip — saved as JSON, parsed back", () => {
+    const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    const suiteWithProv = makeSuiteResult();
+    suiteWithProv.steps[0]!.provenance = {
+      generator: "negative-probe",
+      endpoint: "GET /users/{id}",
+      response_branch: "404",
+    };
+    saveResults(id, [suiteWithProv]);
+
+    const results = getResultsByRunId(id);
+    const first = results.find((r) => r.test_name === "Get user")!;
+    expect(first.provenance).toEqual({
+      generator: "negative-probe",
+      endpoint: "GET /users/{id}",
+      response_branch: "404",
+    });
+    const second = results.find((r) => r.test_name === "Delete user")!;
+    expect(second.provenance).toBeNull();
+  });
+
   test("assertions are deserialized back from JSON", () => {
     const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
     saveResults(id, [makeSuiteResult()]);
