@@ -54,6 +54,10 @@ zond coverage --fail-on-coverage 50
 # 6. CRUD only with explicit user confirmation + staging env
 zond run --tag crud --dry-run                # show what would be sent
 zond run --tag crud --env staging
+
+# 7. Share findings (after a definitely_bug surfaces)
+zond report export <run-id> -o triage/run.html       # whole run, single-file HTML
+zond report case-study <results.id> | gh issue create --body-file -
 ```
 
 ### Filtering by tag

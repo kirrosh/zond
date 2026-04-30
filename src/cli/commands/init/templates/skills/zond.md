@@ -44,6 +44,7 @@ For multi-step user journeys / fixture creation through the API, hand off to
 | "find bugs", "probe this API", "test for 5xx" | 1 then 5 (Probes) | — |
 | "tests are failing", "diagnose run X", "fix failures" | 4 (Diagnose) | 1–3 |
 | "the run after my fix" | 3.x (Run) → 4 (Diagnose) | 1–2 |
+| "share these results", "send the run to X", "case study", "draft an issue" | 7 (Share) | 1–6 |
 
 ## Phase 1 — Discover
 
@@ -174,6 +175,39 @@ zond coverage --api <name> --fail-on-coverage 80
 zond coverage --api <name> --run-id <id>          # per-run breakdown
 zond sync <spec> --tests apis/<name>/tests        # detect new/removed endpoints
 ```
+
+## Phase 7 — Share findings (run → artefact)
+
+After a run is in `zond.db`, materialise it as a file the user can hand
+off (Slack, GitHub issue, ticket, blog post). Two granularities:
+
+```bash
+# Whole-run shareable: single-file HTML, openable offline, no zond serve needed
+zond report export <run-id> -o triage/run-<id>.html
+
+# One-failure markdown draft: ready for `gh issue create --body-file -`
+zond report case-study <failure-id>                   # → stdout (pipe-friendly)
+zond report case-study <failure-id> -o draft.md       # write to file
+zond report case-study <failure-id> --json            # envelope with `markdown`
+```
+
+`<run-id>` comes from `zond db runs`; `<failure-id>` is the `results.id`
+of a single failed step (find via `zond db run <run-id>`). Use the HTML
+export for "send my colleague the whole run", and the case-study draft
+when there's **one** finding worth its own write-up.
+
+**When to offer this proactively.** After `zond run` surfaces a
+`definitely_bug` (5xx, schema violation, mass-assignment 2xx), suggest
+`zond report case-study <results.id>` so the user gets a ready-to-edit
+markdown instead of starting from blank. Don't run it for `env_issue` or
+`quirk` — those aren't worth a public artefact.
+
+The HTML report includes provenance, frozen OpenAPI excerpts, copy-curl
++ copy-as-issue buttons, and an endpoint × method coverage map. The
+case-study draft fills TL;DR / Context / Spec snippet / Repro / What
+happened / Why it matters / How zond found it from the same evidence
+chain; missing fields become explicit `<TODO: ...>` placeholders the
+user can grep for and fill in.
 
 ## Auth / environments
 
