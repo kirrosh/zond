@@ -28,6 +28,7 @@ import {
   sessionStatusCommand,
 } from "./commands/session.ts";
 import { resolveSessionId } from "../core/context/session.ts";
+import { resolveCollectionSpec } from "../core/setup-api.ts";
 
 import { readCurrentApi } from "../core/context/current.ts";
 import { printError } from "./output.ts";
@@ -159,7 +160,8 @@ function resolveApiCollection(apiName: string, dbPath: string | undefined):
     getDb(dbPath);
     const col = findCollectionByNameOrId(apiName);
     if (!col) return { error: `API '${apiName}' not found` };
-    return { spec: col.openapi_spec ?? null, testPath: col.test_path ?? null };
+    const spec = col.openapi_spec ? resolveCollectionSpec(col.openapi_spec) : null;
+    return { spec, testPath: col.test_path ?? null };
   } catch (err) {
     return { error: `Failed to resolve --api: ${(err as Error).message}` };
   }

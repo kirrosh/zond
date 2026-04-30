@@ -12,3 +12,7 @@ export type { EndpointInfo, ResponseInfo, GenerateOptions, SecuritySchemeInfo, C
 export { generateSuites, generateStep, detectCrudGroups, generateCrudSuite, generateSanitySuite, findUnresolvedVars } from "./suite-generator.ts";
 export { buildCatalog, serializeCatalog } from "./catalog-builder.ts";
 export type { ApiCatalog, CatalogEndpoint } from "./catalog-builder.ts";
+export { buildApiResourceMap, serializeApiResourceMap } from "./resources-builder.ts";
+export type { ApiResourceMap, ApiResourceEntry, ResourceFkRef } from "./resources-builder.ts";
+export { buildApiFixtureManifest, serializeApiFixtureManifest } from "./fixtures-builder.ts";
+export type { ApiFixtureManifest, FixtureRequirement, FixtureSource } from "./fixtures-builder.ts";

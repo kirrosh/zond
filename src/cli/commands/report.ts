@@ -9,6 +9,7 @@ import {
 import { renderHtmlReport } from "../../core/exporter/html-report/index.ts";
 import { renderCaseStudy } from "../../core/exporter/case-study/index.ts";
 import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
+import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
@@ -163,13 +164,14 @@ export async function reportCaseStudyCommand(
   if (run.collection_id != null) {
     const collection = getCollectionById(run.collection_id);
     if (collection?.openapi_spec) {
+      const specPath = resolveCollectionSpec(collection.openapi_spec);
       try {
-        const doc = await readOpenApiSpec(collection.openapi_spec);
+        const doc = await readOpenApiSpec(specPath);
         specTitle = doc.info?.title ?? null;
         specVersion = doc.info?.version ?? null;
       } catch (err) {
         warnings.push(
-          `Could not load OpenAPI spec from ${collection.openapi_spec}: ${(err as Error).message}. Spec title/version left as TODO.`,
+          `Could not load OpenAPI spec from ${specPath}: ${(err as Error).message}. Spec title/version left as TODO.`,
         );
       }
     }
