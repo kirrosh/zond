@@ -194,6 +194,35 @@ describe("UI API routes", () => {
     const res = await app.request("/api/runs/abc");
     expect(res.status).toBe(400);
   });
+
+  it("GET /api/sessions → groups runs that share a session_id", async () => {
+    const sid = "test-session-abc";
+    const r1 = createRun({ started_at: new Date().toISOString(), session_id: sid });
+    finalizeRun(r1, [{
+      suite_name: "s1", started_at: new Date().toISOString(), finished_at: new Date().toISOString(),
+      total: 1, passed: 1, failed: 0, skipped: 0, steps: [],
+    }]);
+    const r2 = createRun({ started_at: new Date().toISOString(), session_id: sid });
+    finalizeRun(r2, [{
+      suite_name: "s2", started_at: new Date().toISOString(), finished_at: new Date().toISOString(),
+      total: 2, passed: 1, failed: 1, skipped: 0, steps: [],
+    }]);
+
+    const res = await app.request("/api/sessions");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { sessions: Array<{ session_id: string; run_count: number; total: number; failed: number }>; total: number };
+    const found = body.sessions.find((s) => s.session_id === sid);
+    expect(found).toBeDefined();
+    expect(found!.run_count).toBe(2);
+    expect(found!.total).toBe(3);
+    expect(found!.failed).toBe(1);
+
+    const runsRes = await app.request(`/api/sessions/${sid}/runs`);
+    expect(runsRes.status).toBe(200);
+    const runsBody = await runsRes.json() as { runs: Array<{ id: number; session_id: string }> };
+    expect(runsBody.runs.length).toBe(2);
+    expect(runsBody.runs[0]!.session_id).toBe(sid);
+  });
 });
 
 describe("UI /api/suites", () => {

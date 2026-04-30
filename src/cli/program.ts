@@ -198,6 +198,7 @@ export function buildProgram(): Command {
     .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
     .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
+    .option("--session-id <id>", "Group this run under a session (for hunt-style multi-run campaigns; ZOND_SESSION_ID env var also honoured)")
     .action(async (pathArg: string | undefined, opts, cmd: Command) => {
       let path = pathArg;
       const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
@@ -249,6 +250,9 @@ export function buildProgram(): Command {
         reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
         validateSchema: opts.validateSchema === true,
         specPath: typeof opts.spec === "string" ? opts.spec : undefined,
+        sessionId: typeof opts.sessionId === "string" && opts.sessionId.length > 0
+          ? opts.sessionId
+          : (process.env.ZOND_SESSION_ID || undefined),
         json: false,
       });
     });

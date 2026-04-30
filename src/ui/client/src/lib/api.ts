@@ -11,6 +11,32 @@ export interface RunSummary {
   environment: string | null;
   duration_ms: number | null;
   collection_id: number | null;
+  session_id: string | null;
+}
+
+export interface SessionSummary {
+  session_id: string;
+  started_at: string;
+  finished_at: string | null;
+  run_count: number;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration_ms: number | null;
+  environment: string | null;
+}
+
+export interface SessionsListResponse {
+  sessions: SessionSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface SessionRunsResponse {
+  session_id: string;
+  runs: RunSummary[];
 }
 
 export interface RunsListResponse {
@@ -158,6 +184,27 @@ export function suitesListQueryOptions(path?: string) {
   return queryOptions({
     queryKey: ["suites", path ?? null] as const,
     queryFn: () => getJson<SuitesListResponse>(url),
+    staleTime: 5_000,
+  });
+}
+
+export function sessionsListQueryOptions(params: { limit?: number; offset?: number } = {}) {
+  const { limit = 50, offset = 0 } = params;
+  const search = new URLSearchParams();
+  search.set("limit", String(limit));
+  search.set("offset", String(offset));
+  const url = `/api/sessions?${search.toString()}`;
+  return queryOptions({
+    queryKey: ["sessions", { limit, offset }] as const,
+    queryFn: () => getJson<SessionsListResponse>(url),
+    staleTime: 5_000,
+  });
+}
+
+export function sessionRunsQueryOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: ["session-runs", sessionId] as const,
+    queryFn: () => getJson<SessionRunsResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/runs`),
     staleTime: 5_000,
   });
 }
