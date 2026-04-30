@@ -8,7 +8,7 @@ labels:
   - bug-hunting
   - cli
   - ergonomics
-milestone: m-4
+milestone: m-5
 dependencies: []
 priority: medium
 ---
