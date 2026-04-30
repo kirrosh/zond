@@ -85,6 +85,10 @@ function isNonSuiteYaml(file: string): boolean {
   if (file.match(/\.env(\..+)?\.ya?ml$/)) return true;
   // Workspace marker — present at the root of every zond workspace.
   if (file === "zond.config.yml" || file === "zond.config.yaml") return true;
+  // Per-API artifact files written by `zond add api` / `zond refresh-api`.
+  // Match the basename so it works for files at any depth (apis/<name>/...).
+  const basename = file.split("/").pop() ?? file;
+  if (/^\.api-[a-z0-9-]+\.ya?ml$/i.test(basename)) return true;
   return false;
 }
 

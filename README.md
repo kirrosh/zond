@@ -15,15 +15,28 @@ curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
 iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex        # Windows
 ```
 
-Bootstrap a workspace and register your first API:
+Bootstrap a workspace, register your first API, then check what fixtures it needs:
 
 ```bash
-zond init --workspace --with-spec ./openapi.json
+zond init                                              # bootstrap workspace
+zond add api my-api --spec ./openapi.json              # register: copies spec.json + emits artifacts
+zond doctor --api my-api                               # what to fill in apis/my-api/.env.yaml
 ```
 
-`zond init` writes a self-contained [`AGENTS.md`](AGENTS.md) — agents read it
-and use the CLI directly (`zond run`, `zond probe-validation`,
-`zond db diagnose`, …). No daemon, no transport, no extra configuration.
+`zond init` writes a self-contained [`AGENTS.md`](AGENTS.md) and Claude Code
+skills — agents read it and use the CLI directly (`zond run`,
+`zond probe-validation`, `zond db diagnose`, …). No daemon, no transport, no
+extra configuration.
+
+Each registered API gets four files in `apis/<name>/`:
+
+- `spec.json` — dereferenced OpenAPI snapshot (canonical machine source).
+- `.api-catalog.yaml` — endpoint index for agents (cheap to read).
+- `.api-resources.yaml` — CRUD chains, FK dependencies, ETag/soft-delete flags.
+- `.api-fixtures.yaml` — required `{{vars}}` you must fill in `.env.yaml`.
+
+Run `zond refresh-api <name> [--spec <new-source>]` to re-snapshot when the
+upstream spec changes.
 
 Then say to your agent: _"Safely cover the API from openapi.json with tests."_
 
