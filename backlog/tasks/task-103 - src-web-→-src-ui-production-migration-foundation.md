@@ -1,9 +1,10 @@
 ---
 id: TASK-103
 title: src/web/ → src/ui/ production migration foundation
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 09:36'
+updated_date: '2026-04-30 10:36'
 labels:
   - trust-loop
   - decision-5
@@ -57,9 +58,9 @@ TanStack Router/Query + bun build --compile работают end-to-end
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 src/web-v2/ переименован в src/ui/, spike-комментарии удалены
-- [ ] #2 zond serve запускает new UI; старый src/web/ удалён
-- [ ] #3 tests/ui/ smoke-тесты на /, /runs, /runs/:id и API endpoints — зелёные
-- [ ] #4 Единый build pipeline: bun run build собирает UI + binary за одну команду
-- [ ] #5 bun test зелёный, bunx tsc --noEmit чистый
+- [x] #1 src/web-v2/ переименован в src/ui/, spike-комментарии удалены
+- [x] #2 zond serve запускает new UI; старый src/web/ удалён
+- [x] #3 tests/ui/ smoke-тесты на /, /runs, /runs/:id и API endpoints — зелёные
+- [x] #4 Единый build pipeline: bun run build собирает UI + binary за одну команду
+- [x] #5 bun test зелёный, bunx tsc --noEmit чистый
 <!-- AC:END -->

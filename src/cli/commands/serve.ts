@@ -1,4 +1,4 @@
-import { startServer } from "../../web/server.ts";
+import { startServer } from "../../ui/server/server.ts";
 import { printError } from "../output.ts";
 
 export interface ServeOptions {

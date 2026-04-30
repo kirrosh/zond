@@ -2,11 +2,12 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": [
     "src/cli/index.ts",
-    "src/web/server.ts"
+    "src/ui/server/server.ts",
+    "src/ui/client/index.html",
+    "src/ui/client/src/main.tsx"
   ],
-  "project": ["src/**/*.ts"],
+  "project": ["src/**/*.{ts,tsx}"],
   "ignore": [
-    "src/web/**",
     "src/core/exporter/postman.ts",
     "src/cli/commands/init/templates/**"
   ]
