@@ -119,6 +119,49 @@ export function runDetailQueryOptions(runId: string) {
   });
 }
 
+export interface SuiteTestEntry {
+  name: string;
+  method: string;
+  path: string;
+  source: SourceMetadata | null;
+}
+
+export interface SuiteLastRun {
+  run_id: number;
+  started_at: string;
+  total: number;
+  passed: number;
+  failed: number;
+}
+
+export interface SuiteEntry {
+  name: string;
+  description: string | null;
+  file: string | null;
+  source: SourceMetadata | null;
+  tests: SuiteTestEntry[];
+  step_count: number;
+  tags: string[];
+  last_run: SuiteLastRun | null;
+}
+
+export interface SuitesListResponse {
+  root: string;
+  suites: SuiteEntry[];
+  errors: { file: string; error: string }[];
+}
+
+export function suitesListQueryOptions(path?: string) {
+  const url = path
+    ? `/api/suites?path=${encodeURIComponent(path)}`
+    : "/api/suites";
+  return queryOptions({
+    queryKey: ["suites", path ?? null] as const,
+    queryFn: () => getJson<SuitesListResponse>(url),
+    staleTime: 5_000,
+  });
+}
+
 export function runsListQueryOptions(params: RunsQueryParams = {}) {
   const { status = "all", limit = 50, offset = 0 } = params;
   const search = new URLSearchParams();

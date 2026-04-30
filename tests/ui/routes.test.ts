@@ -3,7 +3,7 @@ import { createApp, startServer } from "../../src/ui/server/server.ts";
 import { getDb, closeDb } from "../../src/db/schema.ts";
 import { createCollection, createRun, finalizeRun, saveResults } from "../../src/db/queries.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
-import { unlinkSync } from "fs";
+import { mkdirSync, rmSync, unlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -193,6 +193,162 @@ describe("UI API routes", () => {
   it("GET /api/runs/abc → 400 invalid id", async () => {
     const res = await app.request("/api/runs/abc");
     expect(res.status).toBe(400);
+  });
+});
+
+describe("UI /api/suites", () => {
+  const SUITES_DIR = join(tmpdir(), `zond-ui-suites-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const TEST_DB = join(tmpdir(), `zond-ui-suites-${Date.now()}.db`);
+  let app: ReturnType<typeof createApp>;
+
+  beforeAll(() => {
+    try { unlinkSync(TEST_DB); } catch {}
+    getDb(TEST_DB);
+    seedData();
+    app = createApp();
+
+    mkdirSync(SUITES_DIR, { recursive: true });
+    writeFileSync(join(SUITES_DIR, "manual.yaml"), [
+      "name: Manual smoke",
+      "description: hand-written health probe",
+      "base_url: http://localhost",
+      "tests:",
+      "  - name: alive",
+      "    GET: /health",
+      "    expect:",
+      "      status: 200",
+    ].join("\n"));
+    writeFileSync(join(SUITES_DIR, "generated.yaml"), [
+      "name: listPets",
+      "source:",
+      "  type: openapi-generated",
+      "  generator: zond-generate",
+      "  endpoint: GET /pets",
+      "  response_branch: '200'",
+      "  spec: /tmp/petstore.json",
+      "base_url: http://localhost",
+      "tests:",
+      "  - name: list pets",
+      "    source:",
+      "      type: openapi-generated",
+      "      endpoint: GET /pets",
+      "      response_branch: '200'",
+      "    GET: /pets",
+      "    expect:",
+      "      status: 200",
+      "  - name: list pets paged",
+      "    source:",
+      "      type: openapi-generated",
+      "      endpoint: GET /pets",
+      "      response_branch: '200'",
+      "    GET: /pets?page=2",
+      "    expect:",
+      "      status: 200",
+    ].join("\n"));
+    writeFileSync(join(SUITES_DIR, "probe.yaml"), [
+      "name: probe GET /pets",
+      "source:",
+      "  type: probe-suite",
+      "  generator: negative-probe",
+      "  endpoint: GET /pets",
+      "base_url: http://localhost",
+      "tests:",
+      "  - name: probe limit float",
+      "    GET: /pets?limit=1.5",
+      "    expect:",
+      "      status: [400, 422]",
+    ].join("\n"));
+  });
+
+  afterAll(() => {
+    closeDb();
+    try { unlinkSync(TEST_DB); } catch {}
+    try { rmSync(SUITES_DIR, { recursive: true, force: true }); } catch {}
+  });
+
+  it("GET /api/suites?path=… returns parsed suites with source blocks", async () => {
+    const res = await app.request(`/api/suites?path=${encodeURIComponent(SUITES_DIR)}`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      root: string;
+      errors: unknown[];
+      suites: Array<{
+        name: string;
+        file: string | null;
+        source: { type?: string; endpoint?: string } | null;
+        step_count: number;
+        tests: Array<{ name: string; method: string; path: string }>;
+        last_run: { run_id: number } | null;
+      }>;
+    };
+    expect(body.root).toBe(SUITES_DIR);
+    expect(body.errors).toEqual([]);
+    expect(body.suites.length).toBe(3);
+
+    const generated = body.suites.find((s) => s.name === "listPets");
+    expect(generated?.source?.type).toBe("openapi-generated");
+    expect(generated?.source?.endpoint).toBe("GET /pets");
+    expect(generated?.step_count).toBe(2);
+    expect(generated?.tests[0]?.method).toBe("GET");
+    expect(generated?.tests[0]?.path).toBe("/pets");
+
+    const probe = body.suites.find((s) => s.name === "probe GET /pets");
+    expect(probe?.source?.type).toBe("probe-suite");
+
+    const manual = body.suites.find((s) => s.name === "Manual smoke");
+    expect(manual?.source).toBeNull();
+    expect(manual?.step_count).toBe(1);
+  });
+
+  it("GET /api/suites: last_run wires through suite_file → step_results", async () => {
+    // Seed a run whose results carry suite_file = generated.yaml
+    const filePath = join(SUITES_DIR, "generated.yaml");
+    const runId = createRun({ started_at: "2026-01-01T00:00:00.000Z", environment: "test", collection_id: null });
+    const results: TestRunResult[] = [{
+      suite_name: "listPets",
+      suite_file: filePath,
+      started_at: "2026-01-01T00:00:00.000Z",
+      finished_at: "2026-01-01T00:00:01.000Z",
+      total: 2,
+      passed: 1,
+      failed: 1,
+      skipped: 0,
+      steps: [
+        {
+          name: "list pets",
+          status: "pass",
+          duration_ms: 5,
+          request: { method: "GET", url: "http://localhost/pets", headers: {} },
+          response: { status: 200, headers: {}, body: "[]", duration_ms: 5 },
+          assertions: [{ field: "status", rule: "equals 200", passed: true, actual: 200, expected: 200 }],
+          captures: {},
+        },
+        {
+          name: "list pets paged",
+          status: "fail",
+          duration_ms: 5,
+          request: { method: "GET", url: "http://localhost/pets?page=2", headers: {} },
+          response: { status: 500, headers: {}, body: "boom", duration_ms: 5 },
+          assertions: [{ field: "status", rule: "equals 200", passed: false, actual: 500, expected: 200 }],
+          captures: {},
+        },
+      ],
+    }];
+    finalizeRun(runId, results);
+    saveResults(runId, results);
+
+    const res = await app.request(`/api/suites?path=${encodeURIComponent(SUITES_DIR)}`);
+    const body = await res.json() as {
+      suites: Array<{ name: string; last_run: { run_id: number; total: number; passed: number; failed: number } | null }>;
+    };
+    const generated = body.suites.find((s) => s.name === "listPets");
+    expect(generated?.last_run?.run_id).toBe(runId);
+    expect(generated?.last_run?.total).toBe(2);
+    expect(generated?.last_run?.passed).toBe(1);
+    expect(generated?.last_run?.failed).toBe(1);
+
+    const manual = body.suites.find((s) => s.name === "Manual smoke");
+    expect(manual?.last_run).toBeNull();
   });
 });
 
