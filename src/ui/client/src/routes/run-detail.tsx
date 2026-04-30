@@ -12,6 +12,7 @@ import {
 import { useRunProgress } from "../lib/use-run-progress";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { FailureClassBadge } from "../components/failure-class-badge";
 import { cn } from "../lib/utils";
 
 export function RunDetailPage() {
@@ -158,6 +159,7 @@ function Meta({
 
 function FailureCard({ step }: { step: StoredStepResult }) {
   const [open, setOpen] = useState(false);
+  const isFail = step.status !== "pass";
   return (
     <li className="overflow-hidden rounded-md border">
       <button
@@ -172,7 +174,14 @@ function FailureCard({ step }: { step: StoredStepResult }) {
           {step.request_method ?? "—"}
         </span>
         <span className="truncate text-sm">{step.test_name}</span>
-        <Badge variant="outline" className="ml-auto">
+        {isFail && (
+          <FailureClassBadge
+            failureClass={step.failure_class}
+            reason={step.failure_class_reason}
+            className="ml-auto"
+          />
+        )}
+        <Badge variant="outline" className={cn(!isFail && "ml-auto")}>
           {step.response_status ?? "no resp"}
         </Badge>
         <Badge variant={step.status === "pass" ? "success" : "destructive"}>

@@ -1,9 +1,10 @@
 ---
 id: TASK-105
 title: UI — failure classification badges + reason tooltips
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 09:37'
+updated_date: '2026-04-30 11:12'
 labels:
   - trust-loop
   - decision-5
@@ -54,7 +55,7 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Бейдж по failure_class — корректные variant/цвет, tooltip с reason
-- [ ] #2 unclassified рендерится muted без warning
+- [x] #1 Бейдж по failure_class — корректные variant/цвет, tooltip с reason
+- [x] #2 unclassified рендерится muted без warning
 - [ ] #3 Опционально: в Runs list quirk-counter отделён от definitely/likely
 <!-- AC:END -->
