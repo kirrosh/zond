@@ -87,8 +87,8 @@ zond ci init
 
 ## CLI Commands
 
-All spec-consuming commands (`catalog`, `describe`, `guide`, `generate`,
-`probe-*`, `lint-spec`, `sync`) accept either a positional `<spec>` path/URL
+All spec-consuming commands (`catalog`, `describe`, `generate`,
+`probe-*`, `lint-spec`) accept either a positional `<spec>` path/URL
 **or** `--api <name>` to use the workspace-local snapshot at
 `apis/<name>/spec.json`. If neither is given, they fall back to the API
 selected via `zond use`.
@@ -111,9 +111,7 @@ selected via `zond use`.
 | `lint-spec [spec]` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--api <name>`, `--strict`, `--rule <list>`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
 | `catalog [spec]` | Standalone build of `.api-catalog.yaml` (registered APIs already have one in `apis/<name>/`) | `--api <name>`, `--output <dir>` |
 | `describe [spec]` | Describe endpoints from OpenAPI spec | `--api <name>`, `--compact`, `--list-params`, `--method`, `--path` |
-| `guide [spec]` | Generate test-generation guide from OpenAPI spec | `--api <name>`, `--tests-dir`, `--tag` |
-| `generate [spec]` | Autogenerate test suites | `--api <name>`, `--output`, `--tag`, `--uncovered-only` |
-| `sync [spec]` | Detect new/removed endpoints and generate tests for new ones (for refreshing artifacts use `refresh-api`) | `--api <name>`, `--tests`, `--dry-run`, `--tag` |
+| `generate [spec]` | Autogenerate test suites; combine with `--uncovered-only` to top up after `zond refresh-api` | `--api <name>`, `--output`, `--tag`, `--uncovered-only` |
 | `report export <run-id>` | Export a stored run as a single-file shareable HTML report | `-o, --output <file>`, `--db <path>` |
 | `report case-study <failure-id>` | Generate a markdown case-study draft for a single failure | `-o, --output <file>`, `--db <path>` |
 
@@ -719,7 +717,7 @@ and makes API drift git-visible.
 | File | Role | Read by |
 |------|------|---------|
 | `spec.json` | Dereferenced OpenAPI snapshot — canonical machine source. | `generate`, `probe-*`, `--validate-schema`, anything that needs full schemas. |
-| `.api-catalog.yaml` | Compressed endpoint index (method/path/params/compressed schemas). | Skill prose, `describe`, `guide`. **Cheap to read.** |
+| `.api-catalog.yaml` | Compressed endpoint index (method/path/params/compressed schemas). | Skill prose, `describe`. **Cheap to read.** |
 | `.api-resources.yaml` | CRUD chains: idParam, captureField, FK dependencies, ETag/soft-delete flags, orphan endpoints. | Scenario authoring, audit setup. |
 | `.api-fixtures.yaml` | Required `{{vars}}` classified by source (server/auth/path/header) with descriptions and affected-endpoint lists. | `zond doctor`, scenarios skill. |
 | `.env.yaml` | User-provided values for the fixture manifest. Auto-gitignored. | Every test run. |
@@ -817,9 +815,10 @@ single uniform envelope so a downstream parser only needs one shape:
 ```
 
 Holds for `db collections|runs|run|diagnose|compare`, `validate`, `coverage`,
-`generate`, `probe-*`, `request`, `init`, `describe`, `use`, `sync`, `update`,
-`postman`, `catalog`, `guide`. The `data` payload shape varies by command (e.g.
-`db run`'s `data` is `{ run, results }`); the envelope itself does not.
+`generate`, `probe-*`, `request`, `init`, `add api`, `refresh-api`, `doctor`,
+`describe`, `use`, `update`, `postman`, `catalog`. The `data` payload shape
+varies by command (e.g. `db run`'s `data` is `{ run, results }`); the envelope
+itself does not.
 
 `run` (test execution) is the exception — historically `--json` collided with
 `--report json`. Use `--report json` for the report payload; `--report-out

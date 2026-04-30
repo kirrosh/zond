@@ -614,11 +614,6 @@ export function findCollectionByNameOrId(nameOrId: string): CollectionRecord | n
   return db.query("SELECT * FROM collections WHERE lower(name) = lower(?)").get(nameOrId) as CollectionRecord | null;
 }
 
-export function findCollectionBySpec(spec: string): CollectionRecord | null {
-  const db = getDb();
-  return db.query("SELECT * FROM collections WHERE openapi_spec = ?").get(spec) as CollectionRecord | null;
-}
-
 export function listRunsByCollection(collectionId: number, limit = 20, offset = 0): RunSummary[] {
   const db = getDb();
   return db.query(`
