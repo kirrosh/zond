@@ -28,8 +28,12 @@ export function mergeProvenance(
   return { ...(suiteSrc ?? {}), ...(stepSrc ?? {}) };
 }
 
-function makeSkippedResult(stepName: string, reason: string): StepResult {
-  return {
+function makeSkippedResult(
+  stepName: string,
+  reason: string,
+  opts?: { cascade?: { missingCapture: string } },
+): StepResult {
+  const result: StepResult = {
     name: stepName,
     status: "skip",
     duration_ms: 0,
@@ -38,6 +42,11 @@ function makeSkippedResult(stepName: string, reason: string): StepResult {
     captures: {},
     error: reason,
   };
+  if (opts?.cascade) {
+    result.failure_class = "cascade";
+    result.failure_class_reason = `Upstream capture not produced: ${opts.cascade.missingCapture}`;
+  }
+  return result;
 }
 
 /** Interpolate {{var}} placeholders inside a test/step name. Falls back to
@@ -187,13 +196,27 @@ export async function runSuite(
     const referencedVars = extractVariableReferences(step);
     const missing = referencedVars.find((v) => missingCaptures.has(v));
     if (missing) {
-      pushStep(makeSkippedResult(interpolateName(step.name, variables), `Depends on missing capture: ${missing}`), step);
+      pushStep(
+        makeSkippedResult(
+          interpolateName(step.name, variables),
+          `Depends on missing capture: ${missing}`,
+          { cascade: { missingCapture: missing } },
+        ),
+        step,
+      );
       continue;
     }
     if (!step.always) {
       const tainted = referencedVars.find((v) => taintedCaptures.has(v));
       if (tainted) {
-        pushStep(makeSkippedResult(interpolateName(step.name, variables), `Depends on tainted capture: ${tainted} (use always: true on cleanup steps)`), step);
+        pushStep(
+          makeSkippedResult(
+            interpolateName(step.name, variables),
+            `Depends on tainted capture: ${tainted} (use always: true on cleanup steps)`,
+            { cascade: { missingCapture: tainted } },
+          ),
+          step,
+        );
         continue;
       }
     }

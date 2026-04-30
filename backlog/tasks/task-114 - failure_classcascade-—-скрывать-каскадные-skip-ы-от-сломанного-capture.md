@@ -1,9 +1,10 @@
 ---
 id: TASK-114
 title: failure_class=cascade — скрывать каскадные skip\'ы от сломанного capture
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 14:18'
+updated_date: '2026-04-30 14:38'
 labels:
   - reporter
   - ui

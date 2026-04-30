@@ -98,7 +98,7 @@ export interface SourceMetadata {
   [key: string]: unknown;
 }
 
-export type FailureClass = "definitely_bug" | "likely_bug" | "quirk" | "env_issue";
+export type FailureClass = "definitely_bug" | "likely_bug" | "quirk" | "env_issue" | "cascade";
 
 export interface StoredStepResult {
   id: number;
