@@ -27,9 +27,10 @@ export function createApp() {
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(1, limitRaw), MAX_LIMIT) : DEFAULT_LIMIT;
     const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
     const status = c.req.query("status");
-    const filters = status === "passed" || status === "failed"
-      ? { status }
+    const dbStatus = status === "passed" ? "all_passed"
+      : status === "failed" ? "has_failures"
       : undefined;
+    const filters = dbStatus ? { status: dbStatus } : undefined;
     try {
       const runs = listRuns(limit, offset, filters);
       const total = countRuns(filters);
