@@ -9,7 +9,6 @@ import { initCommand } from "./commands/init.ts";
 import { describeCommand } from "./commands/describe.ts";
 import { dbCommand } from "./commands/db.ts";
 import { requestCommand } from "./commands/request.ts";
-import { guideCommand } from "./commands/guide.ts";
 import { generateCommand } from "./commands/generate.ts";
 import { probeValidationCommand } from "./commands/probe-validation.ts";
 import { probeMethodsCommand } from "./commands/probe-methods.ts";
@@ -17,7 +16,6 @@ import { lintSpecCommand } from "./commands/lint-spec.ts";
 import { probeMassAssignmentCommand } from "./commands/probe-mass-assignment.ts";
 import { exportCommand } from "./commands/export.ts";
 import { reportExportHtmlCommand, reportCaseStudyCommand } from "./commands/report.ts";
-import { syncCommand } from "./commands/sync.ts";
 import { updateCommand } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
 import { completionsCommand, COMPLETION_SHELLS, type CompletionShell } from "./commands/completions.ts";
@@ -819,24 +817,6 @@ export function buildProgram(): Command {
       });
     });
 
-  // ── guide ──
-  program
-    .command("guide [spec]")
-    .description("Generate test generation guide from OpenAPI spec")
-    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
-    .option("--db <path>", "Path to SQLite database file")
-    .option("--tests-dir <dir>", "Filter to uncovered endpoints only")
-    .option("--tag <tag>", "Generate only for endpoints with this tag")
-    .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
-      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      process.exitCode = await guideCommand({
-        specPath: resolved.spec,
-        testsDir: opts.testsDir,
-        tag: opts.tag,
-        json: globalJson(cmd),
-      });
-    });
 
   // ── export (with subcommand: postman) ──
   const exportCmd = program.command("export").description("Export tests to other formats");
@@ -899,27 +879,6 @@ export function buildProgram(): Command {
     .action(async (opts, cmd: Command) => {
       process.exitCode = await updateCommand({
         check: opts.check === true,
-        json: globalJson(cmd),
-      });
-    });
-
-  // ── sync ──
-  program
-    .command("sync [spec]")
-    .description("Detect new/removed endpoints and generate tests for new ones (for refreshing the local snapshot + artifacts use `zond refresh-api <name>`)")
-    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
-    .option("--db <path>", "Path to SQLite database file")
-    .requiredOption("--tests <dir>", "Path to test files directory")
-    .option("--dry-run", "Show what would be generated without writing files")
-    .option("--tag <tag>", "Limit sync to endpoints with this tag")
-    .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
-      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      process.exitCode = await syncCommand({
-        specPath: resolved.spec,
-        testsDir: opts.tests,
-        dryRun: opts.dryRun === true,
-        tag: opts.tag,
         json: globalJson(cmd),
       });
     });
