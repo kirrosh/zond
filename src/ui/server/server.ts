@@ -1,6 +1,9 @@
 import { Hono } from "hono";
+import { resolve } from "node:path";
 import { getDb } from "../../db/schema.ts";
-import { countRuns, getResultsByRunId, getRunById, listRuns } from "../../db/queries.ts";
+import { countRuns, getLatestRunForSuite, getResultsByRunId, getRunById, listRuns } from "../../db/queries.ts";
+import { parseDirectorySafe } from "../../core/parser/yaml-parser.ts";
+import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 
 export interface ServerOptions {
   port?: number;
@@ -97,6 +100,36 @@ export function createApp() {
         "X-Accel-Buffering": "no",
       },
     });
+  });
+
+  app.get("/api/suites", async (c) => {
+    const overridePath = c.req.query("path");
+    const root = overridePath ? resolve(overridePath) : findWorkspaceRoot().root;
+    try {
+      const { suites, errors } = await parseDirectorySafe(root);
+      const items = suites.map((suite) => {
+        const file = suite.filePath ?? null;
+        const last = file ? getLatestRunForSuite(file) : null;
+        return {
+          name: suite.name,
+          description: suite.description ?? null,
+          file,
+          source: suite.source ?? null,
+          tests: suite.tests.map((t) => ({
+            name: t.name,
+            method: t.method,
+            path: t.path,
+            source: t.source ?? null,
+          })),
+          step_count: suite.tests.length,
+          tags: suite.tags ?? [],
+          last_run: last,
+        };
+      });
+      return c.json({ root, suites: items, errors });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   });
 
   app.get("/api/runs/:id", (c) => {

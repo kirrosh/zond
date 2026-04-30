@@ -1,9 +1,10 @@
 ---
 id: TASK-106
 title: UI — Suites browser экран (что лежит и что прогонится)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 09:37'
+updated_date: '2026-04-30 11:24'
 labels:
   - trust-loop
   - decision-5
@@ -64,7 +65,7 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 GET /api/suites возвращает все YAML с source + last-run мета
-- [ ] #2 Таблица рендерит, expand-row показывает per-step source
-- [ ] #3 Фильтры по source.type работают, has-failures фильтр опционален
+- [x] #1 GET /api/suites возвращает все YAML с source + last-run мета
+- [x] #2 Таблица рендерит, expand-row показывает per-step source
+- [x] #3 Фильтры по source.type работают, has-failures фильтр опционален
 <!-- AC:END -->

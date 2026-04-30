@@ -11,7 +11,8 @@ import type { QueryClient } from "@tanstack/react-query";
 import { Suspense } from "react";
 import { RunsListPage } from "./routes/runs-list";
 import { RunDetailPage } from "./routes/run-detail";
-import { runDetailQueryOptions, runsListQueryOptions, type StatusFilter } from "./lib/api";
+import { SuitesListPage, type SuiteSourceFilter } from "./routes/suites-list";
+import { runDetailQueryOptions, runsListQueryOptions, suitesListQueryOptions, type StatusFilter } from "./lib/api";
 
 export interface RouterContext {
   queryClient: QueryClient;
@@ -26,7 +27,7 @@ function RootLayout() {
     <div className="min-h-screen">
       <header className="border-b">
         <nav className="mx-auto flex max-w-5xl items-center gap-4 px-6 py-3">
-          <span className="text-sm font-semibold">zond v2</span>
+          <span className="text-sm font-semibold">zond</span>
           <Link
             to="/runs"
             activeProps={{ className: "text-foreground" }}
@@ -35,7 +36,14 @@ function RootLayout() {
           >
             Runs
           </Link>
-          <span className="ml-auto text-xs text-muted-foreground">spike · TASK-95</span>
+          <Link
+            to="/suites"
+            activeProps={{ className: "text-foreground" }}
+            inactiveProps={{ className: "text-muted-foreground hover:text-foreground" }}
+            className="text-sm transition-colors"
+          >
+            Suites
+          </Link>
         </nav>
       </header>
       <Suspense
@@ -83,7 +91,26 @@ const runDetailRoute = createRoute({
   component: RunDetailPage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, runsListRoute, runDetailRoute]);
+interface SuitesSearch {
+  source: SuiteSourceFilter;
+}
+
+const suitesListRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/suites",
+  validateSearch: (search: Record<string, unknown>): SuitesSearch => {
+    const s = search.source;
+    if (s === "openapi-generated" || s === "manual" || s === "probe-suite") {
+      return { source: s };
+    }
+    return { source: "all" };
+  },
+  loader: ({ context }) =>
+    context.queryClient.ensureQueryData(suitesListQueryOptions()),
+  component: SuitesListPage,
+});
+
+const routeTree = rootRoute.addChildren([indexRoute, runsListRoute, runDetailRoute, suitesListRoute]);
 
 export function createAppRouter(queryClient: QueryClient) {
   return createRouter({
