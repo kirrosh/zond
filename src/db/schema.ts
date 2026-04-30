@@ -51,7 +51,7 @@ export function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -150,6 +150,22 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_ai_gen_collection  ON ai_generations(collection_id);
   CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
   CREATE INDEX IF NOT EXISTS idx_chat_sessions_active  ON chat_sessions(last_active DESC);
+
+  CREATE TABLE IF NOT EXISTS lint_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    spec_path       TEXT NOT NULL,
+    started_at      TEXT NOT NULL,
+    finished_at     TEXT,
+    total           INTEGER NOT NULL DEFAULT 0,
+    high_count      INTEGER NOT NULL DEFAULT 0,
+    medium_count    INTEGER NOT NULL DEFAULT 0,
+    low_count       INTEGER NOT NULL DEFAULT 0,
+    endpoint_count  INTEGER NOT NULL DEFAULT 0,
+    config_json     TEXT,
+    issues_json     TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_lint_runs_spec ON lint_runs(spec_path, started_at DESC);
 `;
 
 function runMigrations(db: Database): void {
@@ -164,6 +180,25 @@ function runMigrations(db: Database): void {
     if (ver >= 1 && ver < 2) {
       // Migration v1→v2: add suite_file column to results
       db.exec("ALTER TABLE results ADD COLUMN suite_file TEXT");
+    }
+    if (ver >= 2 && ver < 3) {
+      // Migration v2→v3: add lint_runs table for `zond lint-spec` history.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS lint_runs (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          spec_path       TEXT NOT NULL,
+          started_at      TEXT NOT NULL,
+          finished_at     TEXT,
+          total           INTEGER NOT NULL DEFAULT 0,
+          high_count      INTEGER NOT NULL DEFAULT 0,
+          medium_count    INTEGER NOT NULL DEFAULT 0,
+          low_count       INTEGER NOT NULL DEFAULT 0,
+          endpoint_count  INTEGER NOT NULL DEFAULT 0,
+          config_json     TEXT,
+          issues_json     TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_lint_runs_spec ON lint_runs(spec_path, started_at DESC);
+      `);
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

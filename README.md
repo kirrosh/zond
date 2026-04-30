@@ -59,6 +59,7 @@ Claude Code can write pytest from scratch — but it takes 30-60 minutes per flo
 | **Full Visibility** | Every run is stored in SQLite. Compare runs, track regressions, see exactly what the server returned. |
 | **Coverage Tracking** | See which endpoints are tested, which aren't, and what broke since last run. |
 | **Schema Validation** | `--validate-schema` checks every JSON response against the OpenAPI schema (types, required, enum, format, `$ref`) — catches contract drift the YAML expectations miss. |
+| **Spec Linting** | `zond lint-spec` static-analyses the OpenAPI document for internal-consistency bugs (e.g. example violates `format: date-time`) and strictness gaps (path-params without `format`, integer params without min/max) — surfaces issues before any HTTP request. |
 | **CI-Ready** | One command generates GitHub Actions or GitLab CI workflow. Tests in YAML, in git, with code review. |
 
 ## Try It

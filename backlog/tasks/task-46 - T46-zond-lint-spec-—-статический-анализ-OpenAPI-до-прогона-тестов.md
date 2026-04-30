@@ -1,10 +1,10 @@
 ---
 id: TASK-46
 title: 'T46: zond lint-spec — статический анализ OpenAPI до прогона тестов'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-04-27 16:42'
-updated_date: '2026-04-29'
+updated_date: '2026-04-30 11:39'
 labels:
   - spec-validation
   - bug-hunting
