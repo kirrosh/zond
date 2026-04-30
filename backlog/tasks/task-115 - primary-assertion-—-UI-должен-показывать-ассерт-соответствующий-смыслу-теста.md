@@ -1,9 +1,10 @@
 ---
 id: TASK-115
 title: 'primary assertion — UI должен показывать ассерт, соответствующий смыслу теста'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 14:19'
+updated_date: '2026-04-30 14:44'
 labels:
   - ui
   - reporter

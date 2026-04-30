@@ -233,6 +233,7 @@ export function checkAssertions(expect: TestStepExpect, response: HttpResponse):
       passed: allowed.includes(response.status),
       actual: response.status,
       expected: expect.status,
+      kind: "primary",
     });
   }
 
@@ -243,6 +244,7 @@ export function checkAssertions(expect: TestStepExpect, response: HttpResponse):
       passed: response.duration_ms <= expect.duration,
       actual: response.duration_ms,
       expected: expect.duration,
+      kind: "auxiliary",
     });
   }
 
@@ -256,12 +258,14 @@ export function checkAssertions(expect: TestStepExpect, response: HttpResponse):
           passed: actual === rule,
           actual,
           expected: rule,
+          kind: "auxiliary",
         });
       } else {
         // AssertionRule in header — supports capture and other checks
         const ruleResults = checkRule(key, rule, actual).map(r => ({
           ...r,
           field: r.field.replace(/^body\./, "headers."),
+          kind: "auxiliary" as const,
         }));
         results.push(...ruleResults);
       }
@@ -278,7 +282,11 @@ export function checkAssertions(expect: TestStepExpect, response: HttpResponse):
       } else {
         actual = getByPath(response.body_parsed, path);
       }
-      results.push(...checkRule(path, rule, actual));
+      const bodyResults = checkRule(path, rule, actual).map((r) => ({
+        ...r,
+        kind: "primary" as const,
+      }));
+      results.push(...bodyResults);
     }
   }
 
