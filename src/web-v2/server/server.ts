@@ -40,6 +40,48 @@ export function createApp() {
     }
   });
 
+  app.get("/api/runs/:id/stream", (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) return c.json({ error: "invalid run id" }, 400);
+    const run = getRunById(id);
+    if (!run) return c.json({ error: "run not found" }, 404);
+
+    // Spike-stub: production version would gate this on `run.finished_at === null`
+    // and tail real runner progress. For the spike we always emit a fake ramp-up
+    // so the UI wiring is observable on already-finished local runs.
+    const total = Math.max(run.total, 1);
+    const stepMs = total > 50 ? 100 : 350;
+
+    const stream = new ReadableStream({
+      start(controller) {
+        const enc = new TextEncoder();
+        const send = (event: string, payload: unknown) => {
+          controller.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
+        };
+        let completed = 0;
+        send("snapshot", { runId: id, completed, total, status: "running" });
+        const tick = setInterval(() => {
+          completed = Math.min(completed + 1, total);
+          send("progress", { runId: id, completed, total });
+          if (completed >= total) {
+            send("done", { runId: id });
+            clearInterval(tick);
+            controller.close();
+          }
+        }, stepMs);
+        return () => clearInterval(tick);
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  });
+
   app.get("/api/runs/:id", (c) => {
     const id = Number(c.req.param("id"));
     if (!Number.isFinite(id)) {

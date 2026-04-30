@@ -6,15 +6,18 @@
 ## Stages
 
 - ✅ **Этап 1 — Bun-only baseline.** React 19 + Hono + Bun bundler,
-  single-binary через `bun build --compile`. Cold start, bundle size,
-  HMR с сохранением state — все check-и пройдены.
+  single-binary через `bun build --compile`.
 - ✅ **Этап 3 — Tailwind 4 + shadcn.** Tailwind через `bun-plugin-tailwind`,
-  one shadcn Button copy-paste. Единый build через JS API
+  shadcn Button/Table/Badge copy-paste. Единый build через JS API
   (`Bun.build()` + plugin). Vite-fallback не понадобился.
-- Этап 4 — TanStack Router + Query, два экрана (Runs list + Run detail).
-- (Этап 2 — Vite-fallback) — пропущен; Bun-only вытянул базовые сценарии.
-  Триггер для возврата: HMR-сервер начнёт падать или state будет регулярно
-  теряться на edit shadcn-форм / TanStack-хуков.
+- ✅ **Этап 4 — TanStack Router + Query, два экрана.**
+  - 4a: code-based router, RouterProvider + QueryClientProvider, Suspense.
+  - 4b: `/api/runs` поверх `listRuns`, loader + `ensureQueryData` +
+    `useSuspenseQuery`, фильтр в URL через `validateSearch`.
+  - 4c: `/api/runs/:id` + Run detail, failures list, evidence panel
+    (Request/Response/Assertions tabs), copy-curl.
+  - 4d: `/api/runs/:id/stream` SSE-stub + LiveProgressStrip.
+- (Этап 2 — Vite-fallback) — пропущен; Bun-only вытянул все сценарии.
 
 ## Запуск
 
@@ -53,12 +56,22 @@ bun run compile:v2
 | JS bundle gzipped                     | **126 KB**       | +9 KB            |
 | CSS bundle uncompressed               | 39 KB            | (новый)          |
 | CSS bundle gzipped                    | **5.5 KB**       | (новый)          |
+
+### Этап 4 — TanStack Router + Query, два экрана, SSE
+
+| Метрика                               | Значение         | Δ vs этап 3     |
+|---------------------------------------|------------------|------------------|
+| JS bundle uncompressed                | 567 KB           | +142 KB          |
+| JS bundle gzipped                     | **175 KB**       | +49 KB           |
+| CSS bundle uncompressed               | 44 KB            | +5 KB            |
+| CSS bundle gzipped                    | **6.8 KB**       | +1.3 KB          |
 | Build time (Bun.build JS API)         | ~50 ms           | —                |
-| Single-binary size                    | 62 MB            | +1 MB            |
+| Single-binary size                    | 62 MB            | без изменений    |
 | Cold start                            | 20–40 ms         | без изменений    |
 
-Совокупный gzip: **131 KB** при бюджете 350 KB. Запас огромный — есть
-куда расти на TanStack Router/Query + shiki + JSON-viewer.
+Совокупный gzip: **182 KB** при бюджете 350 KB. Запас на shiki
+(если понадобится rich JSON viewer), CodeMirror replay-editor (4–5 МБ raw,
+~600 KB gzip — отдельная задача), virtualized table.
 
 ## DX-журнал (Bun-only)
 
@@ -116,7 +129,14 @@ Build pipeline:
 ## API
 
 - `GET /api/hello` — health probe (вернёт `{message, bunVersion, ts}`).
-- (этап 4) `GET /api/runs`, `GET /api/runs/:id`, `GET /api/runs/:id/stream`.
+- `GET /api/runs?status=&limit=&offset=` — список runs (поверх
+  `listRuns` + `countRuns`). UI-status `passed`/`failed` маппится в
+  DB-фильтр `all_passed`/`has_failures`.
+- `GET /api/runs/:id` — `{ run, results }` (поверх `getRunById` +
+  `getResultsByRunId`).
+- `GET /api/runs/:id/stream` — SSE-стрим прогресса. На spike — fake
+  ramp-up для любого run (чтобы wiring был проверяем без живого runner-а).
+  Production-вариант гейтит на `run.finished_at === null`.
 
 ## Известные ограничения и обходы
 
