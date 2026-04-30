@@ -571,6 +571,38 @@ Holds for `db collections|runs|run|diagnose|compare`, `validate`, `coverage`,
 `--report json`. Use `--report json` for the report payload; `--report-out
 <file>` writes it to disk.
 
+### `db diagnose` envelope — `env_issue`
+
+When the diagnose detector decides that environment misconfiguration (not test
+logic, not a backend bug) is the root cause of failures, it surfaces the
+finding as a structured `env_issue` field in the `data` payload:
+
+```jsonc
+{
+  "env_issue": {
+    "message": "Suite \"payments\" looks env-broken (missing_var=2) — check .env.yaml",
+    "scope": "suite:payments",          // "run" or "suite:<name>"
+    "affected_suites": ["payments"],    // suites that were re-classified to fix_env
+    "symptoms": {                       // histogram of root-cause classes
+      "missing_var": 2,                 // unresolved {{var}} in URL/body/headers
+      "base_url": 0,                    // base_url unset or empty
+      "url_malformed": 0,               // computed URL is not parseable
+      "auth_expired": 0                 // 401/403 with auth-header reference
+    }
+  }
+}
+```
+
+`scope` semantics:
+- `run` — multiple suites tripped the detector; the run as a whole is
+  env-broken. Often paired with a "missing base_url"/expired-token symptom
+  set.
+- `suite:<name>` — only one suite tripped the detector. The other suites'
+  failures keep their original `recommended_action` (e.g. `fix_test_logic`).
+
+5xx failures are **never** rewritten to `fix_env` — `report_backend_bug` wins
+even when the surrounding suite is otherwise env-broken.
+
 ---
 
 ## Principles

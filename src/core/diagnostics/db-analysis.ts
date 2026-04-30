@@ -1,7 +1,7 @@
 import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
-import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, recommendedAction, softDeleteHint, type RecommendedAction } from "./failure-hints.ts";
+import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, clusterEnvIssues, buildEnvIssue, recommendedAction, softDeleteHint, type RecommendedAction, type EnvIssue } from "./failure-hints.ts";
 import { AUTH_PATH_RE } from "../runner/execute-run.ts";
 
 export function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
@@ -145,7 +145,7 @@ export interface DiagnoseResult {
     network_errors: number;
   };
   agent_directive?: string;
-  env_issue?: string;
+  env_issue?: EnvIssue;
   auth_hint?: string;
   cascade_skips?: CascadeSkipGroup[];
   failures: Array<{
@@ -213,16 +213,51 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
       };
     });
 
-  const sharedEnvHint = computeSharedEnvIssue(failures, envFilePath);
+  // TASK-70 + TASK-98 — env_issue detector.
+  //
+  // Two passes:
+  //   1. Run-level: if every non-5xx failure shares a single env-category,
+  //      treat it as a global env_issue (legacy TASK-70 behaviour). This
+  //      catches the most common case — base_url unset, every test broken.
+  //   2. Suite-level clustering: group failures by suite, flag each suite
+  //      whose non-5xx failures are ≥80% env-symptomatic (TASK-98). Catches
+  //      per-suite missing variables, expired auth tokens, dead webhook
+  //      hosts — situations where the run is *mixed* but a specific suite
+  //      is clearly env-broken.
+  //
+  // The fix_env override only applies to failures inside an affected suite.
+  // 5xx (api_error) is excluded everywhere — backend bugs stay
+  // report_backend_bug regardless of env state.
+  let env_issue: EnvIssue | undefined;
+  const legacyEnvHint = computeSharedEnvIssue(failures, envFilePath);
+  const clusters = clusterEnvIssues(failures);
+  const built = buildEnvIssue(clusters, envFilePath);
 
-  // TASK-70: when env_issue is detected at run-level, per-failure
-  // recommended_action ("fix_test_logic") and per-failure hints contradict
-  // the real fix (env). Override the action to `fix_env` for all non-5xx
-  // failures and drop the misleading per-failure hint/schema_hint so the
-  // user reads one consistent story.
-  if (sharedEnvHint) {
+  let affectedSuites: Set<string>;
+  if (built) {
+    env_issue = built;
+    affectedSuites = new Set(built.affected_suites);
+  } else if (legacyEnvHint) {
+    // Legacy global env_issue (no clustered match — e.g. only one failure,
+    // or every suite has a single failing test). Preserve the original
+    // single-message form but expose it via the new envelope shape so
+    // downstream consumers see one stable contract.
+    const allSuites = [...new Set(failures.filter(f => f.failure_type !== "api_error").map(f => f.suite_name))].sort();
+    env_issue = {
+      message: legacyEnvHint,
+      scope: "run",
+      affected_suites: allSuites,
+      symptoms: {},
+    };
+    affectedSuites = new Set(allSuites);
+  } else {
+    affectedSuites = new Set();
+  }
+
+  if (env_issue) {
     for (const f of failures) {
       if (f.failure_type === "api_error") continue; // real backend bug — keep
+      if (!affectedSuites.has(f.suite_name)) continue; // out-of-scope suite
       f.recommended_action = "fix_env";
       delete f.hint;
       delete f.schema_hint;
@@ -304,7 +339,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
       network_errors: networkErrors,
     },
     ...(agent_directive ? { agent_directive } : {}),
-    ...(sharedEnvHint ? { env_issue: sharedEnvHint } : {}),
+    ...(env_issue ? { env_issue } : {}),
     ...(auth_hint ? { auth_hint } : {}),
     ...(cascade_skips ? { cascade_skips } : {}),
     failures: compactFailures,

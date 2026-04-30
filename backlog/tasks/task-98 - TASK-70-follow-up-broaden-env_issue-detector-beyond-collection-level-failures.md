@@ -1,11 +1,10 @@
 ---
 id: TASK-98
-title: >-
-  TASK-70 follow-up: broaden env_issue detector beyond collection-level
-  failures
-status: To Do
+title: 'TASK-70 follow-up: broaden env_issue detector beyond collection-level failures'
+status: Done
 assignee: []
 created_date: '2026-04-30 15:00'
+updated_date: '2026-04-30 08:12'
 labels:
   - diagnose
   - follow-up
@@ -71,7 +70,6 @@ Round-3 review (2026-04-30) выявил, что **сам detector тригге�
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
 <!-- AC:BEGIN -->
 - [ ] #1 Per-suite env_issue: missing var в одном suite → suite-scoped env_issue, fix_env override только в этом suite
 - [ ] #2 Mixed-run остаётся mixed: report показывает env_issue.scope=suite:<name>, не глобальный fix_env
