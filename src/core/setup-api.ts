@@ -20,27 +20,107 @@ import { findWorkspaceRoot } from "./workspace/root.ts";
 /** Filename of the dereferenced spec snapshot inside `apis/<name>/`. */
 export const SPEC_SNAPSHOT_FILENAME = "spec.json";
 
+interface WriteArtifactsParams {
+  /** Dereferenced OpenAPI document. */
+  doc: unknown;
+  /** Absolute path to apis/<name>/. */
+  baseDir: string;
+  /** Collection name (goes into the catalog header). */
+  apiName: string;
+  /** Resolved server URL or "". */
+  baseUrl: string;
+  /** Absolute workspace root, used to compute the relative specSource. */
+  workspaceRoot: string;
+}
+
 /**
- * Resolve a `collections.openapi_spec` value (which may be either a
- * workspace-relative path to a local snapshot or — for legacy entries — an
- * absolute path / URL) to a concrete file path or URL that
- * `readOpenApiSpec` can consume.
+ * Snapshot the dereferenced spec into `apis/<name>/spec.json` and emit the
+ * three derived artifacts (`.api-catalog.yaml`, `.api-resources.yaml`,
+ * `.api-fixtures.yaml`). Pure side-effect; safe to call from `setupApi` at
+ * register time and from `refreshApi` for re-snapshot.
+ */
+export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
+  const { doc, baseDir, apiName, baseUrl, workspaceRoot } = params;
+  const localSpecAbsPath = join(baseDir, SPEC_SNAPSHOT_FILENAME);
+  writeFileSync(localSpecAbsPath, JSON.stringify(doc, null, 2) + "\n", "utf-8");
+
+  const endpoints = extractEndpoints(doc as any);
+  const securitySchemes = extractSecuritySchemes(doc as any);
+  const specHash = hashSpec(JSON.stringify(decycleSchema(doc)));
+  const localSpecRelPath = relative(workspaceRoot, localSpecAbsPath).replace(/\\/g, "/");
+
+  const catalog = buildCatalog({
+    endpoints,
+    securitySchemes,
+    specSource: localSpecRelPath,
+    specHash,
+    apiName,
+    apiVersion: (doc as any).info?.version,
+    baseUrl,
+  });
+  writeFileSync(join(baseDir, ".api-catalog.yaml"), serializeCatalog(catalog), "utf-8");
+
+  const resources = buildApiResourceMap({ endpoints, specHash });
+  writeFileSync(join(baseDir, ".api-resources.yaml"), serializeApiResourceMap(resources), "utf-8");
+
+  const fixtures = buildApiFixtureManifest({
+    endpoints,
+    securitySchemes,
+    baseUrl: baseUrl || undefined,
+    specHash,
+  });
+  writeFileSync(join(baseDir, ".api-fixtures.yaml"), serializeApiFixtureManifest(fixtures), "utf-8");
+}
+
+/**
+ * Resolve a `collections.openapi_spec` value to a concrete file path the
+ * caller can read. Throws on a legacy / broken workspace so the user gets
+ * a single clear instruction instead of a downstream ENOENT.
  *
  * Resolution order:
- *   1. URL (http/https) — return as-is
- *   2. Absolute filesystem path that exists — return as-is
- *   3. Workspace-relative path (e.g. `apis/resend/spec.json`) — resolve
- *      against the workspace root and verify existence
- *   4. Otherwise — return the original string and let the caller surface
- *      the failure with its own context
+ *   1. URL (http/https) — return as-is.
+ *   2. Workspace-relative path (e.g. `apis/resend/spec.json`) that exists.
+ *   3. Absolute filesystem path that exists. Treated as legacy: the spec
+ *      is outside the workspace and not snapshotted into `apis/<name>/`.
+ *      We let it through, but `assertLocalSpec` (used by run/report/doctor)
+ *      will reject it.
+ *   4. Otherwise — throw a "legacy / stale workspace" error pointing at
+ *      `zond refresh-api`.
  */
 export function resolveCollectionSpec(specRef: string): string {
   if (/^https?:\/\//i.test(specRef)) return specRef;
-  if (specRef.startsWith("/") && existsSync(specRef)) return specRef;
   const root = findWorkspaceRoot().root;
   const local = resolve(root, specRef);
   if (existsSync(local)) return local;
-  return specRef;
+  if (specRef.startsWith("/") && existsSync(specRef)) return specRef;
+  throw new Error(
+    `Spec for this API is missing at ${local}` +
+    (specRef.startsWith("/") ? ` (DB recorded an external path: ${specRef})` : "") +
+    `. The workspace looks legacy or stale — run \`zond refresh-api <name> [--spec <path|url>]\` to re-snapshot.`,
+  );
+}
+
+/**
+ * Strict variant for code paths that must read the workspace-local
+ * snapshot (run/report/doctor). Returns the local absolute path or
+ * throws — never returns an external URL or path.
+ */
+export function assertLocalSpec(specRef: string, apiName: string): string {
+  if (/^https?:\/\//i.test(specRef)) {
+    throw new Error(
+      `API '${apiName}' has a remote spec recorded (${specRef}) but no local snapshot. ` +
+      `Run \`zond refresh-api ${apiName}\` to materialise apis/${apiName}/${SPEC_SNAPSHOT_FILENAME}.`,
+    );
+  }
+  const root = findWorkspaceRoot().root;
+  const local = resolve(root, specRef);
+  if (!existsSync(local)) {
+    throw new Error(
+      `Local spec missing for API '${apiName}' (expected ${local}). ` +
+      `Run \`zond refresh-api ${apiName}\` to regenerate it.`,
+    );
+  }
+  return local;
 }
 
 function toYaml(vars: Record<string, string>): string {
@@ -180,37 +260,13 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   let localSpecAbsPath: string | null = null;
   if (dereferencedDoc) {
     localSpecAbsPath = join(baseDir, SPEC_SNAPSHOT_FILENAME);
-    writeFileSync(localSpecAbsPath, JSON.stringify(dereferencedDoc, null, 2) + "\n", "utf-8");
-
-    // Emit the three derived artifacts. Skill code (scenarios + audit)
-    // reads these instead of grep'ing the raw spec, so token cost stays
-    // bounded regardless of API size.
-    const endpoints = extractEndpoints(dereferencedDoc as any);
-    const securitySchemes = extractSecuritySchemes(dereferencedDoc as any);
-    const specHash = hashSpec(JSON.stringify(decycleSchema(dereferencedDoc)));
-    const localSpecRelPath = relative(workspaceRoot, localSpecAbsPath).replace(/\\/g, "/");
-
-    const catalog = buildCatalog({
-      endpoints,
-      securitySchemes,
-      specSource: localSpecRelPath,
-      specHash,
+    writeArtifactsFromDoc({
+      doc: dereferencedDoc,
+      baseDir,
       apiName: name,
-      apiVersion: (dereferencedDoc as any).info?.version,
       baseUrl,
+      workspaceRoot,
     });
-    writeFileSync(join(baseDir, ".api-catalog.yaml"), serializeCatalog(catalog), "utf-8");
-
-    const resources = buildApiResourceMap({ endpoints, specHash });
-    writeFileSync(join(baseDir, ".api-resources.yaml"), serializeApiResourceMap(resources), "utf-8");
-
-    const fixtures = buildApiFixtureManifest({
-      endpoints,
-      securitySchemes,
-      baseUrl: baseUrl || undefined,
-      specHash,
-    });
-    writeFileSync(join(baseDir, ".api-fixtures.yaml"), serializeApiFixtureManifest(fixtures), "utf-8");
   }
 
   const normalizedTestPath = normalizePath(testPath);
