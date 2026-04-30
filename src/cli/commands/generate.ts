@@ -66,7 +66,7 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
     }
 
     // Generate suites
-    const suites = generateSuites({ endpoints, securitySchemes });
+    const suites = generateSuites({ endpoints, securitySchemes, specPath: options.specPath });
 
     // Ensure output directory exists
     await mkdir(options.output, { recursive: true });

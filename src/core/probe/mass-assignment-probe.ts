@@ -842,12 +842,18 @@ export function emitRegressionSuites(
     const ep = endpoints.find(e => e.path === v.path && e.method.toUpperCase() === v.method);
     if (!ep) continue;
     const suiteHeaders = buildEmittedHeaders(ep, schemes);
+    const probeExpectedStatus = v.severity === "ok" ? ACCEPTABLE_4XX : [200, 201, 202, 204];
     const probeStep: RawStep = {
       name: `mass-assignment: extras must ${v.severity === "ok" ? "be rejected" : "not apply"}`,
+      source: {
+        generator: "mass-assignment-probe",
+        endpoint: `${v.method} ${v.path}`,
+        response_branch: probeExpectedStatus.map(String).join("|"),
+      },
       [v.method]: convertPath(ep.path),
       json: v.request.body,
       expect: {
-        status: v.severity === "ok" ? ACCEPTABLE_4XX : [200, 201, 202, 204],
+        status: probeExpectedStatus,
       },
     };
     const tests: RawStep[] = [probeStep];
@@ -864,6 +870,11 @@ export function emitRegressionSuites(
         const idParam = findIdParam(getEp);
         const getStep: RawStep = {
           name: `verify extras did not persist`,
+          source: {
+            generator: "mass-assignment-probe",
+            endpoint: `GET ${getEp.path}`,
+            response_branch: "200",
+          },
           GET: convertPath(getEp.path).replace(`{{${idParam}}}`, "{{created_id}}"),
           expect: {
             status: 200,
@@ -878,6 +889,10 @@ export function emitRegressionSuites(
         const idParam = findIdParam(delEp);
         const delStep: RawStep = {
           name: "cleanup",
+          source: {
+            generator: "mass-assignment-probe-cleanup",
+            endpoint: `DELETE ${delEp.path}`,
+          },
           always: true,
           DELETE: convertPath(delEp.path).replace(`{{${idParam}}}`, "{{created_id}}"),
           expect: { status: [200, 202, 204, 404] },
@@ -888,6 +903,11 @@ export function emitRegressionSuites(
     suites.push({
       name: `mass-assignment ${v.method} ${v.path}`,
       tags: ["probe-mass-assignment", v.severity === "ok" ? "rejected-baseline" : "ignored-baseline"],
+      source: {
+        type: "probe-suite",
+        generator: "mass-assignment-probe",
+        endpoint: `${v.method} ${v.path}`,
+      },
       fileStem: `mass-assignment-${endpointStem(ep)}`,
       base_url: "{{base_url}}",
       ...(suiteHeaders ? { headers: suiteHeaders } : {}),

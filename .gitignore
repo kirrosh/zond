@@ -9,6 +9,8 @@ dist
 # compiled binary
 zond
 zond.exe
+zond-v2
+zond-v2.exe
 
 # code coverage
 coverage

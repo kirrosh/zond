@@ -183,6 +183,59 @@ describe("saveResults", () => {
     expect(row?.response_body).toBe('{"error":"oops"}');
   });
 
+  test("failure_class round-trip — saved + reason + null for pass", () => {
+    const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    const suite = makeSuiteResult();
+    suite.steps[1]!.failure_class = "definitely_bug";
+    suite.steps[1]!.failure_class_reason = "API returned 500";
+    saveResults(id, [suite]);
+
+    const results = getResultsByRunId(id);
+    const failed = results.find((r) => r.test_name === "Delete user")!;
+    expect(failed.failure_class).toBe("definitely_bug");
+    expect(failed.failure_class_reason).toBe("API returned 500");
+    const passed = results.find((r) => r.test_name === "Get user")!;
+    expect(passed.failure_class).toBeNull();
+    expect(passed.failure_class_reason).toBeNull();
+  });
+
+  test("spec_pointer + spec_excerpt round-trip", () => {
+    const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    const suite = makeSuiteResult();
+    suite.steps[1]!.spec_pointer = "#/paths/~1users~1{id}/delete/responses/204";
+    suite.steps[1]!.spec_excerpt = "{ \"description\": \"No Content\" }";
+    saveResults(id, [suite]);
+
+    const results = getResultsByRunId(id);
+    const failed = results.find((r) => r.test_name === "Delete user")!;
+    expect(failed.spec_pointer).toBe("#/paths/~1users~1{id}/delete/responses/204");
+    expect(failed.spec_excerpt).toContain("No Content");
+    const passed = results.find((r) => r.test_name === "Get user")!;
+    expect(passed.spec_pointer).toBeNull();
+    expect(passed.spec_excerpt).toBeNull();
+  });
+
+  test("provenance round-trip — saved as JSON, parsed back", () => {
+    const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    const suiteWithProv = makeSuiteResult();
+    suiteWithProv.steps[0]!.provenance = {
+      generator: "negative-probe",
+      endpoint: "GET /users/{id}",
+      response_branch: "404",
+    };
+    saveResults(id, [suiteWithProv]);
+
+    const results = getResultsByRunId(id);
+    const first = results.find((r) => r.test_name === "Get user")!;
+    expect(first.provenance).toEqual({
+      generator: "negative-probe",
+      endpoint: "GET /users/{id}",
+      response_branch: "404",
+    });
+    const second = results.find((r) => r.test_name === "Delete user")!;
+    expect(second.provenance).toBeNull();
+  });
+
   test("assertions are deserialized back from JSON", () => {
     const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
     saveResults(id, [makeSuiteResult()]);
