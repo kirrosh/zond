@@ -5,13 +5,12 @@ status: Done
 assignee:
   - '@claude'
 created_date: '2026-04-27'
-updated_date: '2026-04-27 11:47'
+updated_date: '2026-04-29 14:06'
 labels:
   - T8
   - phase-1
   - size-M
-dependencies:
-  - TASK-5
+dependencies: []
 ---
 
 ## Description

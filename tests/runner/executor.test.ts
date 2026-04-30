@@ -1,7 +1,9 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
 import { runSuite, runSuites } from "../../src/core/runner/executor.ts";
+import { createSchemaValidator } from "../../src/core/runner/schema-validator.ts";
 import type { TestSuite } from "../../src/core/parser/types.ts";
 import { DEFAULT_CONFIG } from "../../src/core/parser/schema.ts";
+import type { OpenAPIV3 } from "openapi-types";
 
 const originalFetch = globalThis.fetch;
 
@@ -958,5 +960,95 @@ describe("header captures", () => {
     expect(result.steps[0]!.status).toBe("error");
     expect(result.steps[1]!.status).toBe("skip");
     expect(result.steps[1]!.error).toMatch(/missing capture: thing_id/);
+  });
+});
+
+describe("schema validation integration", () => {
+  test("schemaValidator failures land in step.assertions and fail the step", async () => {
+    mockFetchResponses([{ status: 200, body: { data: [] } }]); // missing has_more
+
+    const doc: OpenAPIV3.Document = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/emails": {
+          get: {
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      required: ["data", "has_more"],
+                      properties: {
+                        data: { type: "array", items: {} },
+                        has_more: { type: "boolean" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const suite: TestSuite = {
+      name: "Resend B11",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "List emails",
+        method: "GET",
+        path: "/emails",
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite, {}, false, { schemaValidator: createSchemaValidator(doc) });
+    expect(result.failed).toBe(1);
+    const failed = result.steps[0]!.assertions.filter(a => !a.passed);
+    expect(failed.some(a => a.rule === "schema.required")).toBe(true);
+  });
+
+  test("step passes when --validate-schema agrees", async () => {
+    mockFetchResponses([{ status: 200, body: { data: [], has_more: false } }]);
+
+    const doc: OpenAPIV3.Document = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/emails": {
+          get: {
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      required: ["data", "has_more"],
+                      properties: { data: { type: "array", items: {} }, has_more: { type: "boolean" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const suite: TestSuite = {
+      name: "ok",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{ name: "List", method: "GET", path: "/emails", expect: { status: 200 } }],
+    };
+
+    const result = await runSuite(suite, {}, false, { schemaValidator: createSchemaValidator(doc) });
+    expect(result.passed).toBe(1);
   });
 });

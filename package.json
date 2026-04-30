@@ -32,7 +32,7 @@
     "test:mocked": "bun run scripts/run-mocked-tests.ts",
     "check": "tsc --noEmit --project tsconfig.json",
     "lint:dead": "knip --reporter compact",
-    "build": "bun build --compile src/cli/index.ts --outfile zond",
+    "build": "bun build --compile src/cli/index.ts --outfile zond && bun run scripts/codesign-darwin.ts ./zond",
     "bench:api": "bun benchmarks/api/server.ts"
   },
   "devDependencies": {
@@ -49,6 +49,8 @@
   "dependencies": {
     "@hono/zod-openapi": "^1.2.2",
     "@readme/openapi-parser": "^5.5.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "commander": "^14.0.0",
     "hono": "^4.12.2",
     "openapi-types": "^12.1.3",

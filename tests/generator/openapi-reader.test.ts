@@ -205,3 +205,26 @@ describe("extractEndpoints — media-level example lifting (T33)", () => {
     expect(ep.requestBodySchema?.example).toEqual({ name: "schema-wins" });
   });
 });
+
+// TASK-96 — non-numeric response keys (e.g. "default") must be skipped so
+// that downstream code never sees a NaN status.
+describe("extractEndpoints — non-numeric response keys (TASK-96)", () => {
+  test("'default' response key is dropped from responses[]", () => {
+    const doc = {
+      openapi: "3.0.0",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/things": {
+          post: {
+            operationId: "createThing",
+            responses: { default: { description: "any" } },
+          },
+        },
+      },
+    } as Awaited<ReturnType<typeof readOpenApiSpec>>;
+    const endpoints = extractEndpoints(doc);
+    const ep = endpoints[0]!;
+    expect(ep.responses.length).toBe(0);
+    expect(ep.responses.every((r) => Number.isFinite(r.statusCode))).toBe(true);
+  });
+});

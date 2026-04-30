@@ -1,9 +1,10 @@
 ---
 id: TASK-42
 title: 'T42: Generated expect.status — взять из spec, не дефолтить в 200'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-27 15:28'
+updated_date: '2026-04-29 14:32'
 labels:
   - generator
 milestone: m-1

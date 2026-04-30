@@ -45,3 +45,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # test playground
 playground/
 .mcp.json
+
+# Claude Code local state
+.claude/

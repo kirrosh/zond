@@ -101,6 +101,108 @@ describe("parseRateLimitHeaders (TASK-81)", () => {
   });
 });
 
+describe("parseRateLimitHeaders — RateLimit-Policy spacing (TASK-88)", () => {
+  test("derives intervalMs from `5;w=1` (Resend-style)", () => {
+    const meta = parseRateLimitHeaders({ "ratelimit-policy": "5;w=1" });
+    // 1000 ms / 5 + 50 ms safety
+    expect(meta.intervalMs).toBe(250);
+  });
+
+  test("derives intervalMs from `100;w=60` (GitHub-style)", () => {
+    const meta = parseRateLimitHeaders({ "x-ratelimit-policy": "100;w=60" });
+    // 60000 ms / 100 + 50 ms safety
+    expect(meta.intervalMs).toBe(650);
+  });
+
+  test("picks the strictest (slowest) policy when multiple are advertised", () => {
+    const meta = parseRateLimitHeaders({
+      "ratelimit-policy": "100;w=60, 5;w=1",
+    });
+    // 100/60 → 650ms is slower (more restrictive) than 5/1 → 250ms.
+    expect(meta.intervalMs).toBe(650);
+  });
+
+  test("returns undefined intervalMs when policy is malformed", () => {
+    expect(parseRateLimitHeaders({ "ratelimit-policy": "garbage" }).intervalMs).toBeUndefined();
+    expect(parseRateLimitHeaders({ "ratelimit-policy": "5" }).intervalMs).toBeUndefined();
+    expect(parseRateLimitHeaders({ "ratelimit-policy": ";w=1" }).intervalMs).toBeUndefined();
+  });
+
+  test("undefined intervalMs when policy header absent", () => {
+    expect(parseRateLimitHeaders({ "ratelimit-limit": "5" }).intervalMs).toBeUndefined();
+  });
+});
+
+describe("RateLimiter — window-aware spacing (TASK-88)", () => {
+  test("AdaptiveRateLimiter: learns spacing from policy and paces parallel acquires", async () => {
+    const limiter = createAdaptiveRateLimiter();
+    // Simulate first response carrying Resend-style policy.
+    limiter.note!({ intervalMs: 250 });
+
+    // Fire 4 acquires "in parallel" — each one should reserve a slot.
+    const t0 = Date.now();
+    await Promise.all([
+      limiter.acquire(),
+      limiter.acquire(),
+      limiter.acquire(),
+      limiter.acquire(),
+    ]);
+    // 4 slots at 250ms spacing → ~750ms (3 intervals between 4 requests).
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeGreaterThanOrEqual(700);
+    expect(elapsed).toBeLessThan(1200);
+  });
+
+  test("AdaptiveRateLimiter: no spacing applied before policy is seen", async () => {
+    const limiter = createAdaptiveRateLimiter();
+    const t0 = Date.now();
+    await Promise.all([
+      limiter.acquire(),
+      limiter.acquire(),
+      limiter.acquire(),
+    ]);
+    expect(Date.now() - t0).toBeLessThan(50);
+  });
+
+  test("IntervalRateLimiter: tightens to server policy when stricter than --rate-limit cap", async () => {
+    const limiter = createRateLimiter(100)!; // 10ms interval
+    await limiter.acquire();
+    limiter.note!({ intervalMs: 250 }); // server says 250ms required
+
+    const t0 = Date.now();
+    await limiter.acquire();
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(220);
+  });
+
+  test("IntervalRateLimiter: ignores looser server policy than --rate-limit cap", async () => {
+    const limiter = createRateLimiter(20)!; // 50ms interval (stricter)
+    await limiter.acquire();
+    limiter.note!({ intervalMs: 10 }); // server allows 10ms; we keep 50ms
+
+    const t0 = Date.now();
+    await limiter.acquire();
+    const elapsed = Date.now() - t0;
+    expect(elapsed).toBeGreaterThanOrEqual(40);
+    expect(elapsed).toBeLessThan(80);
+  });
+
+  test("THROTTLE_THRESHOLD: remaining=3 does not pause (was 5 in T81, lowered to 2)", async () => {
+    const limiter = createAdaptiveRateLimiter();
+    limiter.note!({ remaining: 3, reset: 5 }); // 3 > 2 threshold
+    const t0 = Date.now();
+    await limiter.acquire();
+    expect(Date.now() - t0).toBeLessThan(40);
+  });
+
+  test("THROTTLE_THRESHOLD: remaining=2 does pause", async () => {
+    const limiter = createAdaptiveRateLimiter();
+    limiter.note!({ remaining: 2, reset: 0.2 });
+    const t0 = Date.now();
+    await limiter.acquire();
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(150);
+  });
+});
+
 describe("RateLimiter.note() — proactive throttling (TASK-81)", () => {
   test("AdaptiveRateLimiter: low remaining + small reset pauses next acquire", async () => {
     const limiter = createAdaptiveRateLimiter();

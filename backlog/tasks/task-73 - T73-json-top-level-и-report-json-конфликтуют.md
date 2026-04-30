@@ -1,9 +1,10 @@
 ---
 id: TASK-73
 title: 'T73: --json (top-level) и --report json конфликтуют'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:38'
+updated_date: '2026-04-29 14:26'
 labels:
   - bug
   - cli

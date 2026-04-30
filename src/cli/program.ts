@@ -13,6 +13,7 @@ import { guideCommand } from "./commands/guide.ts";
 import { generateCommand } from "./commands/generate.ts";
 import { probeValidationCommand } from "./commands/probe-validation.ts";
 import { probeMethodsCommand } from "./commands/probe-methods.ts";
+import { probeMassAssignmentCommand } from "./commands/probe-mass-assignment.ts";
 import { exportCommand } from "./commands/export.ts";
 import { syncCommand } from "./commands/sync.ts";
 import { updateCommand } from "./commands/update.ts";
@@ -131,9 +132,12 @@ function flatSplit(values: string[] | undefined): string[] | undefined {
   return out.length > 0 ? out : undefined;
 }
 
-// Helper: read a global option from any command in the tree
+// TASK-73: --json is a per-command option (not a top-level global) so that
+// `run --json` does not collide with `run --report json`. Subcommands that
+// support an envelope output add `.option("--json", ...)` themselves and we
+// read it from local opts.
 function globalJson(cmd: Command): boolean {
-  return cmd.optsWithGlobals().json === true;
+  return cmd.opts().json === true;
 }
 
 // Resolve API collection → returns { spec?, testPath? } or null when not found
@@ -160,7 +164,6 @@ export function buildProgram(): Command {
     .description("API Testing Platform")
     .version(`${VERSION} (${getRuntimeInfo()})`, "-v, --version", "Show version")
     .helpOption("-h, --help", "Show this help")
-    .option("--json", "Output in JSON envelope format")
     .showHelpAfterError("(run 'zond --help' for usage)")
     .exitOverride();
 
@@ -188,8 +191,11 @@ export function buildProgram(): Command {
     .option("--exclude-tag <tag>", "Exclude suites by tag (repeatable, comma-separated)", collect, [])
     .option("--method <method>", "Filter tests by HTTP method (e.g. GET, POST)")
     .option("--env-var <KEY=VALUE>", "Inject env variable (repeatable, overrides env file)", collect, [])
+    .option("--strict-vars", "Hard-fail (exit 2) when a {{var}} reference has no producer (default: warn and continue)")
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
     .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
+    .option("--validate-schema", "Validate JSON responses against the OpenAPI response schema (requires --spec or a collection with openapi_spec set)")
+    .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
     .action(async (pathArg: string | undefined, opts, cmd: Command) => {
       let path = pathArg;
       const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
@@ -236,9 +242,12 @@ export function buildProgram(): Command {
         excludeTag: excludeTags,
         method: opts.method,
         envVars,
+        strictVars: opts.strictVars === true,
         dryRun: opts.dryRun === true,
         reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
-        json: globalJson(cmd),
+        validateSchema: opts.validateSchema === true,
+        specPath: typeof opts.spec === "string" ? opts.spec : undefined,
+        json: false,
       });
     });
 
@@ -547,6 +556,34 @@ export function buildProgram(): Command {
       });
     });
 
+  // ── probe-mass-assignment ──
+  program
+    .command("probe-mass-assignment <spec>")
+    .description(
+      "Live probe for mass-assignment / privilege-escalation: classifies POST/PATCH/PUT against suspected extra fields (is_admin, role, account_id, owner_id, user_id, verified, is_system) as rejected (4xx) | accepted-and-applied (HIGH) | accepted-and-ignored (LOW) via follow-up GET",
+    )
+    .requiredOption("--env <file>", "Env YAML with base_url + auth_token (live calls require this)")
+    .option("--output <file>", "Write markdown digest to file (default: stdout)")
+    .option("--emit-tests <dir>", "Also emit YAML regression suites locking in safe behaviour for CI")
+    .option("--tag <tag>", "Probe only endpoints with this tag")
+    .option("--list-tags", "List available tags from spec and exit")
+    .option("--no-cleanup", "Skip follow-up DELETE for resources accidentally created by 2xx probes")
+    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
+    .action(async (specPath: string, opts, cmd: Command) => {
+      process.exitCode = await probeMassAssignmentCommand({
+        specPath,
+        env: opts.env,
+        output: opts.output,
+        emitTests: opts.emitTests,
+        tag: opts.tag,
+        listTags: opts.listTags,
+        // Commander: --no-cleanup → opts.cleanup === false; default is true.
+        noCleanup: opts.cleanup === false,
+        timeoutMs: opts.timeout,
+        json: globalJson(cmd),
+      });
+    });
+
   // ── probe-methods ──
   program
     .command("probe-methods <spec>")
@@ -650,6 +687,27 @@ export function buildProgram(): Command {
       }
       process.exitCode = completionsCommand({ shell: shell as CompletionShell, program });
     });
+
+  // TASK-73: previously `--json` was a top-level/global option that propagated
+  // to every subcommand, which collided with `run --report json` (and broke
+  // `run --json` outright). Now it is per-command. Attach `--json` to every
+  // subcommand that previously read it via globalJson(), EXCEPT `run` —
+  // run's only JSON output path is `--report json`.
+  // Skip by fully-qualified path so `db run` (inner) keeps --json while
+  // top-level `run` does not.
+  const skipJson = new Set(["run", "completions", "serve"]);
+  const attachJson = (cmd: Command, parentPath: string): void => {
+    const path = parentPath ? `${parentPath} ${cmd.name()}` : cmd.name();
+    // Only leaf commands (those with action handlers) get --json — parent
+    // namespace commands like `db` and `ci` would otherwise shadow the option
+    // on their children and `cmd.opts()` on the leaf would not see --json.
+    const hasAction = (cmd as unknown as { _actionHandler?: unknown })._actionHandler != null;
+    if (hasAction && !skipJson.has(path)) {
+      cmd.option("--json", "Output in JSON envelope format");
+    }
+    for (const sub of cmd.commands) attachJson(sub, path);
+  };
+  for (const sub of program.commands) attachJson(sub, "");
 
   return program;
 }

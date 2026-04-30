@@ -1,9 +1,10 @@
 ---
 id: TASK-57
 title: 'T57: Response-schema validation против OpenAPI'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:34'
+updated_date: '2026-04-29 10:29'
 labels:
   - bug-hunting
   - contract
