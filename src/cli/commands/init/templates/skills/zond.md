@@ -1,82 +1,108 @@
 ---
 name: zond
 description: |
-  End-to-end API testing with zond — generate tests from an OpenAPI spec, run them,
-  diagnose failures, and hunt for typical backend bugs via probe suites. Use when
-  asked to: test an API, cover endpoints, raise coverage, find bugs, diagnose
-  failed runs, fix failing tests, debug 4xx/5xx, run probes, sync tests after a
-  spec change, set up API test infrastructure. Activates on: openapi.json,
-  openapi.yaml, swagger.json, .api-catalog.yaml, "test this API", "cover this
-  spec", "tests are failing", "diagnose run", "find bugs", "probe", "5xx",
-  "negative input".
-allowed-tools: [Read, Write, Bash(zond *), Bash(bunx zond *)]
+  Full API audit with zond — autogenerate tests from an OpenAPI spec, run a
+  multi-phase sweep (sanity → smoke → CRUD → probes → coverage), and produce
+  shareable bug reports. Use when the user asks for: a full audit, broad
+  coverage, contract-drift check, probe sweep, schema-drift detection, post-
+  deploy regression, "find bugs in this API", "test for 5xx", "generate tests
+  for the whole API", "raise coverage", "diagnose run", "case study". For a
+  single user flow / scenario, hand off to `zond-scenarios`.
+allowed-tools: [Read, Write, Edit, Bash(zond *), Bash(bunx zond *), Bash(sqlite3 *)]
 ---
 
-# zond — API Coverage, Diagnosis & Bug Hunting
+# zond — Full API audit
 
-CLI-only skill. Run `zond --version` first; if missing:
+CLI-only skill. The lighter sibling `zond-scenarios` covers single-flow
+work; this one does breadth: autogen, smoke, probes, coverage, reports.
+
+Run `zond --version` first; if missing:
 `curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh`.
 
-For multi-step user journeys / fixture creation through the API, hand off to
-`zond-scenarios` instead.
+## Iron rules
 
-## Critical rules (always-on)
-
-- **NEVER** open OpenAPI/Swagger with Read/cat/grep — use `zond describe`,
-  `zond catalog`, or `.api-catalog.yaml`.
-- **NEVER** use curl/wget — use `zond request <method> <url>`.
-- **NEVER** write test YAML from scratch — start with `zond generate`, then edit failures.
-- **NEVER** hardcode tokens — put in `apis/<name>/.env.yaml` (auto-gitignored), reference as `{{auth_token}}`.
-- **`recommended_action: report_backend_bug` / any 5xx → STOP**. Surface the
+- **NEVER read raw OpenAPI/swagger** with Read/cat/grep. The workspace has
+  pre-built artifacts (catalog/resources/fixtures) — use those. Drop into
+  `apis/<name>/spec.json` only when probe-* needs full schemas.
+- **NEVER `curl` or `wget`** — use `zond request <method> <url>` for ad-hoc
+  HTTP so it lands in the run DB and respects auth.
+- **NEVER hardcode tokens** — put in `apis/<name>/.env.yaml` (auto-gitignored),
+  reference as `{{auth_token}}`.
+- **`recommended_action: report_backend_bug` / any 5xx → STOP.** Surface the
   request/response excerpt to the user; do NOT edit `expect:` to mask it.
-- `--safe` enforces GET-only — required for first-pass smoke against unknown envs.
-- For multi-suite tag filters always include the setup tag: `--tag crud,setup`.
+- `--safe` enforces GET-only — required for first-pass smoke against unknown
+  envs.
+- For multi-suite tag filters always include `setup`: `--tag crud,setup`.
 - Re-run after each fix with `--json`; don't batch edits without verifying.
+
+## Workspace assumption
+
+By the time this skill is active, the user has run `zond init` and
+`zond add api <name> --spec <path|url>`. That means `apis/<name>/`
+already contains `spec.json` (machine source) plus three artifacts:
+
+| File | Purpose |
+|---|---|
+| `.api-catalog.yaml` | Endpoint shape — read this for navigation. |
+| `.api-resources.yaml` | CRUD chains, FK deps, ETag/soft-delete flags — read for setup planning. |
+| `.api-fixtures.yaml` | Required `{{vars}}` with descriptions — read for fixture pack. |
+
+If any artifact is missing or stale (`zond doctor` flags it), run
+`zond refresh-api <name>` before continuing.
 
 ## Entry points (skip phases when the request is narrow)
 
-| User asked... | Start at phase | Skip |
+| User asked... | Start at | Skip |
 |---|---|---|
-| "cover this API", "raise coverage", "test this spec" | 1 (Discover) | — |
+| "audit this API", "cover this spec", "test the whole API" | 1 (Orient) | — |
 | "find bugs", "probe this API", "test for 5xx" | 1 then 5 (Probes) | — |
 | "tests are failing", "diagnose run X", "fix failures" | 4 (Diagnose) | 1–3 |
-| "the run after my fix" | 3.x (Run) → 4 (Diagnose) | 1–2 |
+| "the run after my fix" | 3 (Run) → 4 (Diagnose) | 1–2 |
 | "share these results", "case study", "draft an issue" | 7 (Share) | 1–6 |
 
-## Phase 1 — Discover
+## Phase 1 — Orient
 
 ```bash
-zond init --with-spec <spec> --name <name> [--base-url <url>]
-zond use <name>
-zond catalog <spec> --output apis/<name>/tests   # writes .api-catalog.yaml
-zond describe <spec> --compact                   # quick overview
-zond guide <spec> --tests-dir apis/<name>/tests  # uncovered + suggestions
+zond doctor --api <name> --json                  # fixture gaps + artifact freshness
 ```
 
-## Phase 2 — Generate
+Then read three artifacts (NOT raw spec):
 
 ```bash
-zond generate <spec> --output apis/<name>/tests [--tag <tag>] [--uncovered-only]
+cat apis/<name>/.api-catalog.yaml | head -80
+cat apis/<name>/.api-resources.yaml
+cat apis/<name>/.api-fixtures.yaml
+```
+
+If `doctor` reports stale → `zond refresh-api <name>`. If required
+fixtures missing → ask the user to fill `.env.yaml` and pause until they
+confirm.
+
+## Phase 2 — Generate (autogen smoke + CRUD)
+
+```bash
+zond generate apis/<name>/spec.json --output apis/<name>/tests [--tag <spec-tag>] [--uncovered-only]
 zond validate apis/<name>/tests
 ```
 
-`generate` fills bodies with `{{$randomString}}`. Format-strict APIs reject many
-of these — that's a **test-fix**, not a backend bug (Phase 4a).
+`generate` fills bodies with `{{$randomString}}`. Format-strict APIs reject
+many of these — that's a **test-fix**, not a backend bug (Phase 4a).
 
-## Phase 2.5 — Fixture pack (real-API pre-flight)
+## Phase 2.5 — Fixture pack
 
-Before *any* CRUD run on a real API, gather **FK ids**, **verified resources**,
-and **valid enums** into `apis/<name>/.env.yaml` — generators cannot produce
-them, and skipping this costs 5+ fix-iterations. No separate `fixtures.yaml`;
-`.env.yaml` already takes arbitrary keys interpolated as `{{var}}`.
+`zond doctor` already showed which `.env.yaml` keys are missing. Beyond
+the auto-detected list, real-API CRUD usually needs **pre-existing FK
+ids**, **verified resources**, and **valid enums** the spec doesn't
+enforce. Use `zond request` to discover them:
 
 ```bash
 zond request GET /audiences | jq '.data[0].id'
 zond request GET /domains   | jq '.data[] | select(.status=="verified") | .id'
 ```
 
+Add to `apis/<name>/.env.yaml`:
+
 ```yaml
-# apis/<name>/.env.yaml — auth + fixtures
 base_url: https://api.example.com
 auth_token: <secret>
 audience_id: "0b141f35-..."
@@ -85,8 +111,9 @@ real_to_email: "delivered@example.dev"
 region: "us-east-1"
 ```
 
-Reference as `{{audience_id}}`, `{{verified_from_email}}`, etc. Skip on mock
-servers, `--safe` runs, and specs with no `format:` constraints.
+Reference as `{{audience_id}}`, `{{verified_from_email}}`, etc. Skip on
+mock servers, `--safe` runs, and specs with no `format:` constraints.
+Re-run `zond doctor` to confirm zero required gaps before Phase 3.
 
 ## Phase 3 — Run (sanity → smoke → full)
 
@@ -101,7 +128,7 @@ sweep — fixture-pack pass, probe burst, post-deploy check.
 zond session start --label "smoke + probes"                          # group runs
 zond run apis/<name>/tests --tag sanity --json                       # 3.1 sanity gate
 zond run apis/<name>/tests --safe --json                             # 3.2 smoke (GET-only)
-zond run apis/<name>/tests --tag crud,setup --validate-schema --spec <spec> --json  # 3.3 full CRUD
+zond run apis/<name>/tests --tag crud,setup --validate-schema --json  # 3.3 full CRUD
 zond session end
 ```
 
@@ -147,9 +174,9 @@ When `recommended_action: fix_test_logic` and the body is rejected on format
 Run on a passing API to surface latent bugs.
 
 ```bash
-zond probe-validation <spec> --output apis/<name>/probes/validation
-zond probe-methods    <spec> --output apis/<name>/probes/methods
-zond probe-mass-assignment <spec> --env apis/<name>/.env.yaml \
+zond probe-validation apis/<name>/spec.json --output apis/<name>/probes/validation
+zond probe-methods    apis/<name>/spec.json --output apis/<name>/probes/methods
+zond probe-mass-assignment apis/<name>/spec.json --env apis/<name>/.env.yaml \
   --output apis/<name>/probes/mass-assignment-digest.md \
   --emit-tests apis/<name>/probes/mass-assignment
 
@@ -307,8 +334,8 @@ the second call — note as *project decision*, not a bug.
 
 ```bash
 zond coverage --api <name> --fail-on-coverage 80
-zond coverage --api <name> --run-id <id>          # per-run
-zond sync <spec> --tests apis/<name>/tests        # detect spec drift
+zond coverage --api <name> --run-id <id>           # per-run
+zond refresh-api <name> --spec <new-spec>          # re-snapshot when upstream spec changed
 ```
 
 ## Phase 7 — Share findings
@@ -341,9 +368,11 @@ What happened / Why it matters; missing fields become `<TODO: ...>` placeholders
 
 ## When to hand off to `zond-scenarios`
 
-- Multi-step user journeys / business flows / fixture creation through the API.
-- Failures whose root cause requires hand-written multi-step suites
-  `zond generate` cannot express.
+Step out of `zond` and let `zond-scenarios` take over when the user asks
+to **verify a specific flow** rather than audit the API: "test the
+checkout", "what happens after refund", "repro this bug from prod". The
+scenarios skill writes hand-crafted multi-step YAML; this audit skill
+focuses on autogenerated breadth + probes.
 
 For YAML format (assertions, generators, captures, `always: true`,
 `setup: true`), see `ZOND.md` or `zond run --help`.

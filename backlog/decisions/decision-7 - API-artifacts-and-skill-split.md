@@ -144,18 +144,30 @@ executor change. Decide when the env-var pattern proves insufficient.
 ## Added (this branch)
 
 - `apis/<name>/spec.json` snapshot at register time.
-- Three new artifacts at register time.
-- `resolveCollectionSpec()` for portable spec lookup.
+- Three new artifacts at register time (`.api-catalog.yaml`, `.api-resources.yaml`, `.api-fixtures.yaml`).
+- `resolveCollectionSpec()` and `assertLocalSpec()` for portable spec lookup; legacy paths now hard-error toward `zond refresh-api`.
 - `core/generator/resources-builder.ts`, `core/generator/fixtures-builder.ts`.
+- `core/setup-api.ts:writeArtifactsFromDoc()` shared by register and refresh.
+- `zond add api <name> --spec X` — primary registration command.
+- `zond init --spec` — kept as deprecated alias with a stderr warning.
+- `zond refresh-api <name> [--spec X]` — re-snapshot + regenerate artifacts.
+- `zond doctor [--api X]` — fixture gaps + artifact freshness in one report.
+- Skills split: `zond-scenarios` (default) + `zond` (audit). Both rewritten
+  around the artifact model; both ship via `zond init` into
+  `.claude/skills/<name>/SKILL.md`.
 
 ## Carried forward (next iteration)
 
-- `zond refresh-api <name>` command.
-- `specHash` staleness check in `zond run` / `zond scenario new`.
-- `zond scenario new <name>` scaffold command.
-- Skill split: `zond-base` + `zond-scenarios` + `zond-audit`.
-- `zond doctor` (or extend `zond use`) — surface fixture gaps in human form.
-- Optional: per-step `base_url` override.
+- `zond audit` family — single-entry-point wrapper over lint-spec + run smoke
+  + probe-* + coverage + report. Skill currently composes these manually;
+  consolidating into one command + one session_id reduces skill prose and
+  ensures consistent grouping in `/runs`. Subcommands proposed: `audit full
+  | smoke | crud | probes | coverage`. Out of scope for the artifact iteration.
+- `specHash` staleness *active* check in `zond run` (today: surfaced via
+  `zond doctor`; runtime guard would prevent silent drift between runs).
+- Optional: per-step `base_url` override (multi-service scenarios).
+- Optional: built-in scenario templates if the skill prose proves insufficient
+  in practice.
 
 # Non-goals for this iteration
 

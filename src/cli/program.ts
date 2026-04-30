@@ -27,6 +27,9 @@ import {
   sessionEndCommand,
   sessionStatusCommand,
 } from "./commands/session.ts";
+import { doctorCommand } from "./commands/doctor.ts";
+import { refreshApiCommand } from "./commands/refresh-api.ts";
+import { addApiCommand } from "./commands/add-api.ts";
 import { resolveSessionId } from "../core/context/session.ts";
 import { resolveCollectionSpec } from "../core/setup-api.ts";
 
@@ -329,6 +332,37 @@ export function buildProgram(): Command {
       });
     });
 
+  // ── refresh-api ──
+  program
+    .command("refresh-api <name>")
+    .description("Re-snapshot the OpenAPI spec into apis/<name>/spec.json and regenerate the 3 artifacts (catalog/resources/fixtures)")
+    .option("--spec <path>", "Pull fresh from this path or URL (overrides registered source)")
+    .option("--insecure", "Allow self-signed TLS when --spec is an https URL")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (name: string, opts, cmd: Command) => {
+      process.exitCode = await refreshApiCommand({
+        api: name,
+        spec: opts.spec,
+        insecure: opts.insecure === true,
+        dbPath: typeof opts.db === "string" ? opts.db : undefined,
+        json: globalJson(cmd),
+      });
+    });
+
+  // ── doctor ──
+  program
+    .command("doctor")
+    .description("Diagnose registered API: fixture gaps in .env.yaml + artifact freshness vs spec.json")
+    .option("--api <name>", "API collection name (defaults to the only registered one)")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await doctorCommand({
+        api: opts.api,
+        dbPath: typeof opts.db === "string" ? opts.db : undefined,
+        json: globalJson(cmd),
+      });
+    });
+
   // ── session ──
   //
   // Group multiple `zond run` calls under one session_id without juggling env
@@ -421,9 +455,19 @@ export function buildProgram(): Command {
     .option("--no-agents-md", "Skip writing AGENTS.md when bootstrapping")
     .option("--no-skills", "Skip writing Claude Code skills under .claude/skills/")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const spec = opts.spec ?? specPos;
+      const json = globalJson(cmd);
+      // Deprecation: registering an API via `init` is now `zond add api <name>
+      // --spec X`. Keep init working for one or two releases; just warn so
+      // skill code and scripts migrate.
+      if ((spec || opts.withSpec) && !json) {
+        process.stderr.write(
+          `Warning: 'zond init --spec' / '--with-spec' is deprecated. Use \`zond add api <name> --spec <path>\` (run \`zond init\` separately to bootstrap the workspace).\n`,
+        );
+      }
       process.exitCode = await initCommand({
         name: opts.name,
-        spec: opts.spec ?? specPos,
+        spec,
         baseUrl: opts.baseUrl,
         dir: opts.dir,
         force: opts.force === true,
@@ -433,6 +477,30 @@ export function buildProgram(): Command {
         withSpec: opts.withSpec,
         noAgents: opts.agentsMd === false,
         noSkills: opts.skills === false,
+        json,
+      });
+    });
+
+  // ── add api ──
+  const add = program.command("add").description("Register objects in the workspace");
+  add
+    .command("api <name>")
+    .description("Register an API: copy spec into apis/<name>/spec.json and emit catalog/resources/fixtures artifacts")
+    .requiredOption("--spec <path>", "Path or URL to OpenAPI spec")
+    .option("--base-url <url>", "Override base URL recorded in .env.yaml")
+    .option("--dir <path>", "Target directory (defaults to apis/<name>/)")
+    .option("--force", "Overwrite an existing API with the same name")
+    .option("--insecure", "Skip TLS verification when fetching the spec from https")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (name: string, opts, cmd: Command) => {
+      process.exitCode = await addApiCommand({
+        name,
+        spec: opts.spec,
+        baseUrl: opts.baseUrl,
+        dir: opts.dir,
+        force: opts.force === true,
+        insecure: opts.insecure === true,
+        dbPath: typeof opts.db === "string" ? opts.db : undefined,
         json: globalJson(cmd),
       });
     });
