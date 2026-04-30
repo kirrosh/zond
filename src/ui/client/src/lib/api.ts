@@ -76,13 +76,21 @@ export interface RunRecord {
   collection_id: number | null;
 }
 
+export type AssertionKind = "primary" | "schema" | "auxiliary";
+
 export interface AssertionResult {
-  type: string;
+  /** Server-side: short rule label (e.g. `equals 200`, `schema.format`). Older
+   *  reporters used `type`; we keep both so the renderer can fall back. */
+  rule?: string;
+  type?: string;
+  /** Server-side path/field hit by this assertion (e.g. `body.created_at`). */
+  field?: string;
+  path?: string;
   passed: boolean;
   message?: string;
   expected?: unknown;
   actual?: unknown;
-  path?: string;
+  kind?: AssertionKind;
 }
 
 export type ProvenanceType = "openapi-generated" | "manual" | "probe-suite";

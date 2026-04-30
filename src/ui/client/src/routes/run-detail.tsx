@@ -418,40 +418,99 @@ function ResponsePanel({ step }: { step: StoredStepResult }) {
   );
 }
 
+const KIND_ORDER: Record<NonNullable<AssertionResult["kind"]>, number> = {
+  primary: 0,
+  schema: 1,
+  auxiliary: 2,
+};
+
+const KIND_LABEL: Record<NonNullable<AssertionResult["kind"]>, string> = {
+  primary: "primary",
+  schema: "schema",
+  auxiliary: "aux",
+};
+
+function assertionKind(a: AssertionResult): NonNullable<AssertionResult["kind"]> {
+  // Heuristic for legacy runs (no `kind` recorded): schema.* rules → schema;
+  // duration / headers.* → auxiliary; everything else → primary.
+  if (a.kind) return a.kind;
+  const rule = a.rule ?? a.type ?? "";
+  const field = a.field ?? a.path ?? "";
+  if (rule.startsWith("schema.")) return "schema";
+  if (field === "duration" || field.startsWith("headers.")) return "auxiliary";
+  return "primary";
+}
+
 function AssertionsPanel({ assertions }: { assertions: AssertionResult[] }) {
+  const [showAll, setShowAll] = useState(false);
   if (assertions.length === 0) {
     return <p className="text-xs text-muted-foreground">No assertions recorded.</p>;
   }
+  const indexed = assertions.map((a, i) => ({ a, i, kind: assertionKind(a) }));
+  indexed.sort((x, y) => {
+    if (x.a.passed !== y.a.passed) return x.a.passed ? 1 : -1;
+    return KIND_ORDER[x.kind] - KIND_ORDER[y.kind];
+  });
+  const primary = indexed.filter((e) => e.kind === "primary");
+  const secondary = indexed.filter((e) => e.kind !== "primary");
+  const visible = showAll || primary.length === 0 ? indexed : primary;
   return (
-    <ul className="space-y-1.5 text-xs">
-      {assertions.map((a, i) => (
-        <li
-          key={i}
-          className={cn(
-            "rounded border px-2 py-1.5",
-            a.passed ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50",
-          )}
+    <div className="space-y-2">
+      <ul className="space-y-1.5 text-xs">
+        {visible.map((entry) => (
+          <AssertionItem key={entry.i} a={entry.a} kind={entry.kind} />
+        ))}
+      </ul>
+      {primary.length > 0 && secondary.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
         >
-          <div className="flex items-center gap-2">
-            <Badge variant={a.passed ? "success" : "destructive"}>{a.type}</Badge>
-            {a.path && <span className="font-mono text-muted-foreground">{a.path}</span>}
+          {showAll
+            ? "Hide schema/auxiliary checks"
+            : `Show ${secondary.length} schema/auxiliary check${secondary.length === 1 ? "" : "s"}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AssertionItem({ a, kind }: { a: AssertionResult; kind: NonNullable<AssertionResult["kind"]> }) {
+  const ruleLabel = a.rule ?? a.type ?? "";
+  const fieldLabel = a.field ?? a.path ?? "";
+  return (
+    <li
+      className={cn(
+        "rounded border px-2 py-1.5",
+        a.passed
+          ? "border-emerald-200 bg-emerald-50"
+          : kind === "primary"
+            ? "border-red-300 bg-red-50 ring-1 ring-red-300/50"
+            : "border-red-200 bg-red-50",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <Badge variant={a.passed ? "success" : "destructive"}>{ruleLabel || "—"}</Badge>
+        <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+          {KIND_LABEL[kind]}
+        </Badge>
+        {fieldLabel && <span className="font-mono text-muted-foreground">{fieldLabel}</span>}
+      </div>
+      {a.message && <div className="mt-1 text-muted-foreground">{a.message}</div>}
+      {!a.passed && (a.expected !== undefined || a.actual !== undefined) && (
+        <div className="mt-1 grid grid-cols-2 gap-2 font-mono text-[11px]">
+          <div>
+            <span className="text-muted-foreground">expected: </span>
+            <span>{prettyValue(a.expected)}</span>
           </div>
-          {a.message && <div className="mt-1 text-muted-foreground">{a.message}</div>}
-          {!a.passed && (a.expected !== undefined || a.actual !== undefined) && (
-            <div className="mt-1 grid grid-cols-2 gap-2 font-mono text-[11px]">
-              <div>
-                <span className="text-muted-foreground">expected: </span>
-                <span>{prettyValue(a.expected)}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">actual: </span>
-                <span>{prettyValue(a.actual)}</span>
-              </div>
-            </div>
-          )}
-        </li>
-      ))}
-    </ul>
+          <div>
+            <span className="text-muted-foreground">actual: </span>
+            <span>{prettyValue(a.actual)}</span>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 
