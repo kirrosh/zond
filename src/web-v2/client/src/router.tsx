@@ -1,17 +1,24 @@
 // TASK-95 spike — production migration tracked separately
 // Code-based router (not file-based) — simpler for spike, no codegen step.
 import {
-  createRootRoute,
+  createRootRouteWithContext,
   createRoute,
   createRouter,
   Link,
   Outlet,
   redirect,
 } from "@tanstack/react-router";
+import type { QueryClient } from "@tanstack/react-query";
+import { Suspense } from "react";
 import { RunsListPage } from "./routes/runs-list";
 import { RunDetailPage } from "./routes/run-detail";
+import { runsListQueryOptions, type StatusFilter } from "./lib/api";
 
-const rootRoute = createRootRoute({
+export interface RouterContext {
+  queryClient: QueryClient;
+}
+
+const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
 });
 
@@ -32,7 +39,15 @@ function RootLayout() {
           <span className="ml-auto text-xs text-muted-foreground">spike · TASK-95</span>
         </nav>
       </header>
-      <Outlet />
+      <Suspense
+        fallback={
+          <div className="mx-auto max-w-5xl px-6 py-8 text-sm text-muted-foreground">
+            Loading…
+          </div>
+        }
+      >
+        <Outlet />
+      </Suspense>
     </div>
   );
 }
@@ -45,9 +60,19 @@ const indexRoute = createRoute({
   },
 });
 
+interface RunsSearch {
+  status: StatusFilter;
+}
+
 const runsListRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/runs",
+  validateSearch: (search: Record<string, unknown>): RunsSearch => ({
+    status: search.status === "passed" || search.status === "failed" ? search.status : "all",
+  }),
+  loaderDeps: ({ search: { status } }) => ({ status }),
+  loader: ({ context, deps }) =>
+    context.queryClient.ensureQueryData(runsListQueryOptions({ status: deps.status })),
   component: RunsListPage,
 });
 
@@ -59,10 +84,19 @@ const runDetailRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([indexRoute, runsListRoute, runDetailRoute]);
 
-export const router = createRouter({ routeTree });
+export function createAppRouter(queryClient: QueryClient) {
+  return createRouter({
+    routeTree,
+    context: { queryClient },
+    defaultPreload: "intent",
+    scrollRestoration: true,
+  });
+}
+
+export type AppRouter = ReturnType<typeof createAppRouter>;
 
 declare module "@tanstack/react-router" {
   interface Register {
-    router: typeof router;
+    router: AppRouter;
   }
 }
