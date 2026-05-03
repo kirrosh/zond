@@ -89,62 +89,6 @@ export function createApp() {
     }
   });
 
-  app.get("/api/runs/:id/stream", (c) => {
-    const id = Number(c.req.param("id"));
-    if (!Number.isFinite(id)) return c.json({ error: "invalid run id" }, 400);
-    const run = getRunById(id);
-    if (!run) return c.json({ error: "run not found" }, 404);
-
-    // Stub: emits a synthetic ramp-up so the UI wiring is observable on already-finished
-    // local runs. Real runner progress streaming arrives with TASK-104.
-    const total = Math.max(run.total, 1);
-    const stepMs = total > 50 ? 100 : 350;
-
-    let tick: ReturnType<typeof setInterval> | null = null;
-    let closed = false;
-
-    const stream = new ReadableStream({
-      start(controller) {
-        const enc = new TextEncoder();
-        const send = (event: string, payload: unknown) => {
-          if (closed) return;
-          try {
-            controller.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
-          } catch {
-            closed = true;
-            if (tick) clearInterval(tick);
-          }
-        };
-        let completed = 0;
-        send("snapshot", { runId: id, completed, total, status: "running" });
-        tick = setInterval(() => {
-          if (closed) return;
-          completed = Math.min(completed + 1, total);
-          send("progress", { runId: id, completed, total });
-          if (completed >= total) {
-            send("done", { runId: id });
-            closed = true;
-            if (tick) clearInterval(tick);
-            try { controller.close(); } catch { /* already closed */ }
-          }
-        }, stepMs);
-      },
-      cancel() {
-        closed = true;
-        if (tick) clearInterval(tick);
-      },
-    });
-
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      },
-    });
-  });
-
   app.get("/api/suites", async (c) => {
     const overridePath = c.req.query("path");
     const root = overridePath ? resolve(overridePath) : findWorkspaceRoot().root;
@@ -356,8 +300,6 @@ async function startDev(api: ReturnType<typeof createApp>, port: number, hostnam
     port,
     hostname,
     development: true,
-    // SSE streams can run longer than Bun's default 10s idle timeout.
-    idleTimeout: 255,
     routes: {
       "/api/*": (req) => api.fetch(req),
       "/": indexHtml.default,
@@ -379,7 +321,6 @@ async function startProd(api: ReturnType<typeof createApp>, port: number, hostna
   return Bun.serve({
     port,
     hostname,
-    idleTimeout: 255,
     async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname.startsWith("/api/")) return api.fetch(req);

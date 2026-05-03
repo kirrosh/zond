@@ -137,13 +137,6 @@ export interface RunDetailResponse {
   results: StoredStepResult[];
 }
 
-export interface ProgressFrame {
-  runId: number;
-  completed: number;
-  total: number;
-  status?: "running" | "finished";
-}
-
 export function runDetailQueryOptions(runId: string) {
   const url = `/api/runs/${encodeURIComponent(runId)}`;
   return queryOptions({
