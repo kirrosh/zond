@@ -185,6 +185,24 @@ describe("UI API routes", () => {
     expect(legacy?.failure_class_reason).toBeNull();
   });
 
+  it("GET /api/apis → returns registered collections + current marker", async () => {
+    const res = await app.request("/api/apis");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { apis: Array<{ name: string }>; current: string | null };
+    expect(Array.isArray(body.apis)).toBe(true);
+    expect(body.apis.find((a) => a.name === "Test API")).toBeDefined();
+  });
+
+  it("GET /api/coverage → 400 on missing api", async () => {
+    const res = await app.request("/api/coverage");
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /api/coverage → 400 on unknown api", async () => {
+    const res = await app.request("/api/coverage?api=does-not-exist");
+    expect(res.status).toBe(400);
+  });
+
   it("POST /api/replay → dryRun resolves vars from collection env without sending", async () => {
     const res = await app.request("/api/replay", {
       method: "POST",

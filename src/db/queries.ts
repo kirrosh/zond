@@ -545,6 +545,16 @@ export function getCollectionById(id: number): CollectionRecord | null {
   return db.query("SELECT * FROM collections WHERE id = ?").get(id) as CollectionRecord | null;
 }
 
+export function getLatestRunByCollection(collectionId: number): RunRecord | null {
+  const db = getDb();
+  return db.query(`
+    SELECT * FROM runs
+    WHERE collection_id = ? AND finished_at IS NOT NULL
+    ORDER BY started_at DESC
+    LIMIT 1
+  `).get(collectionId) as RunRecord | null;
+}
+
 export function listCollections(): CollectionSummary[] {
   const db = getDb();
   return db.query(`

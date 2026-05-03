@@ -217,6 +217,97 @@ export function sessionRunsQueryOptions(sessionId: string) {
   });
 }
 
+export type CoverageStatusClass = "2xx" | "4xx" | "5xx";
+
+export type CoverageReason =
+  | "covered" | "partial-failed" | "not-generated" | "no-spec"
+  | "deprecated" | "no-fixtures" | "ephemeral-only"
+  | "auth-scope-mismatch" | "tag-filtered";
+
+export interface CoverageCellResult {
+  resultId: number;
+  runId: number;
+  status: string;
+  responseStatus: number | null;
+  failureClass: string | null;
+  testName: string;
+  suiteFile: string | null;
+}
+
+export interface CoverageCell {
+  status: "covered" | "partial" | "uncovered";
+  reasons: CoverageReason[];
+  results: CoverageCellResult[];
+}
+
+export interface CoverageRow {
+  endpoint: string;
+  method: string;
+  path: string;
+  tags: string[];
+  deprecated: boolean;
+  security: string[];
+  declaredStatuses: number[];
+  cells: Record<CoverageStatusClass, CoverageCell>;
+}
+
+export interface CoverageTotals {
+  endpoints: number;
+  cells: number;
+  covered: number;
+  partial: number;
+  uncovered: number;
+  byReason: Record<CoverageReason, number>;
+}
+
+export interface CoverageResponse {
+  apiName: string;
+  baseDir: string;
+  specPath: string;
+  matrix: { rows: CoverageRow[]; totals: CoverageTotals };
+  run: { id: number; started_at: string; total: number; passed: number; failed: number } | null;
+  profile: "safe" | "full";
+  tagFilter: string[];
+  ephemeralCount: number;
+}
+
+export interface ApiSummary {
+  name: string;
+  base_dir: string | null;
+  openapi_spec: string | null;
+  last_run_at: string | null;
+  last_run_total: number;
+  last_run_passed: number;
+  last_run_failed: number;
+}
+
+export interface ApisListResponse {
+  current: string | null;
+  apis: ApiSummary[];
+}
+
+export function apisListQueryOptions() {
+  return queryOptions({
+    queryKey: ["apis"] as const,
+    queryFn: () => getJson<ApisListResponse>("/api/apis"),
+    staleTime: 30_000,
+  });
+}
+
+export function coverageQueryOptions(params: { api: string; runId?: number; profile?: "safe" | "full"; tag?: string[] }) {
+  const search = new URLSearchParams();
+  search.set("api", params.api);
+  if (params.runId != null) search.set("runId", String(params.runId));
+  if (params.profile) search.set("profile", params.profile);
+  if (params.tag && params.tag.length > 0) search.set("tag", params.tag.join(","));
+  const url = `/api/coverage?${search.toString()}`;
+  return queryOptions({
+    queryKey: ["coverage", params] as const,
+    queryFn: () => getJson<CoverageResponse>(url),
+    staleTime: 5_000,
+  });
+}
+
 export interface ReplayPayload {
   method: string;
   url: string;
