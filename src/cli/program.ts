@@ -731,6 +731,7 @@ export function buildProgram(): Command {
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .option("--list-tags", "List available tags from spec and exit")
     .option("--no-cleanup", "Skip follow-up DELETE for resources accidentally created by 2xx probes")
+    .option("--no-discover", "Disable auto-discovery of path-param fixtures via GET-on-list (TASK-92)")
     .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
@@ -744,6 +745,7 @@ export function buildProgram(): Command {
         listTags: opts.listTags,
         // Commander: --no-cleanup → opts.cleanup === false; default is true.
         noCleanup: opts.cleanup === false,
+        noDiscover: opts.discover === false,
         timeoutMs: opts.timeout,
         json: globalJson(cmd),
       });
