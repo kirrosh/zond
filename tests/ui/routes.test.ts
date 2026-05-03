@@ -185,6 +185,58 @@ describe("UI API routes", () => {
     expect(legacy?.failure_class_reason).toBeNull();
   });
 
+  it("POST /api/replay → dryRun resolves vars from collection env without sending", async () => {
+    const res = await app.request("/api/replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        method: "GET",
+        url: "http://localhost/pets",
+        headers: { "X-Trace": "abc" },
+        dryRun: true,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { resolved: { method: string; url: string; headers: Record<string, string> } };
+    expect(body.resolved.method).toBe("GET");
+    expect(body.resolved.url).toBe("http://localhost/pets");
+    expect(body.resolved.headers["X-Trace"]).toBe("abc");
+  });
+
+  it("POST /api/replay → 400 on missing method/url", async () => {
+    const res = await app.request("/api/replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "http://localhost" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /api/replay → sends and returns response", async () => {
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+    try {
+      const res = await app.request("/api/replay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method: "POST", url: "http://localhost/pets", body: '{"name":"x"}' }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json() as {
+        resolved: { headers: Record<string, string> };
+        response: { status: number; body: unknown };
+      };
+      expect(body.response.status).toBe(201);
+      expect(body.resolved.headers["Content-Type"]).toBe("application/json");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
   it("GET /api/runs/999999 → 404", async () => {
     const res = await app.request("/api/runs/999999");
     expect(res.status).toBe(404);

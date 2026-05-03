@@ -33,6 +33,10 @@ export interface SendAdHocRequestOptions {
   maxResponseChars?: number;
   dbPath?: string;
   searchDir?: string;
+  /** Extra vars merged on top of env (e.g. captured values from a stored run). */
+  extraVars?: Record<string, unknown>;
+  /** When true, resolve interpolation but do not actually send the request. */
+  dryRun?: boolean;
 }
 
 export interface SendAdHocRequestResult {
@@ -42,21 +46,28 @@ export interface SendAdHocRequestResult {
   duration_ms: number;
 }
 
-export async function sendAdHocRequest(options: SendAdHocRequestOptions): Promise<SendAdHocRequestResult> {
+export interface ResolvedRequest {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body?: string;
+}
+
+export async function resolveAdHocRequest(options: SendAdHocRequestOptions): Promise<ResolvedRequest> {
   let searchDir = options.searchDir ?? process.cwd();
   if (options.collectionName) {
     getDb(options.dbPath);
     const col = findCollectionByNameOrId(options.collectionName);
     if (col?.base_dir) searchDir = col.base_dir;
   }
-  const vars = await loadEnvironment(options.envName, searchDir);
+  const envVars = await loadEnvironment(options.envName, searchDir);
+  const vars = options.extraVars ? { ...envVars, ...options.extraVars } : envVars;
 
   const resolvedUrl = substituteString(options.url, vars) as string;
   const parsedHeaders = options.headers ?? {};
   const resolvedHeaders = Object.keys(parsedHeaders).length > 0 ? substituteDeep(parsedHeaders, vars) : {};
   const resolvedBody = options.body ? substituteString(options.body, vars) as string : undefined;
 
-  // Auto-detect Content-Type for body if not explicitly set
   const finalHeaders: Record<string, string> = { ...resolvedHeaders };
   if (resolvedBody && !finalHeaders["Content-Type"] && !finalHeaders["content-type"]) {
     try {
@@ -67,12 +78,23 @@ export async function sendAdHocRequest(options: SendAdHocRequestOptions): Promis
     }
   }
 
+  return {
+    method: options.method,
+    url: resolvedUrl,
+    headers: finalHeaders,
+    ...(resolvedBody !== undefined ? { body: resolvedBody } : {}),
+  };
+}
+
+export async function sendAdHocRequest(options: SendAdHocRequestOptions): Promise<SendAdHocRequestResult> {
+  const resolved = await resolveAdHocRequest(options);
+
   const response = await executeRequest(
     {
-      method: options.method,
-      url: resolvedUrl,
-      headers: finalHeaders,
-      body: resolvedBody,
+      method: resolved.method,
+      url: resolved.url,
+      headers: resolved.headers,
+      body: resolved.body,
     },
     options.timeout ? { timeout: options.timeout } : undefined,
   );

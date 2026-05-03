@@ -1,7 +1,8 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Check, ChevronRight, Copy, FileText, Radio } from "lucide-react";
+import { Check, ChevronRight, Copy, FileText, Radio, Send } from "lucide-react";
+import { ReplayPanel } from "./replay-panel";
 import {
   runDetailQueryOptions,
   type AssertionResult,
@@ -234,7 +235,7 @@ function FailureCard({ step }: { step: StoredStepResult }) {
   );
 }
 
-type EvidenceTab = "request" | "response" | "assertions" | "source";
+type EvidenceTab = "request" | "response" | "assertions" | "source" | "replay";
 
 function hasSourceEvidence(step: StoredStepResult): boolean {
   return Boolean(step.provenance) || Boolean(step.spec_pointer) || Boolean(step.spec_excerpt);
@@ -248,6 +249,7 @@ function EvidencePanel({ step }: { step: StoredStepResult }) {
     { id: "response", label: "Response" },
     { id: "assertions", label: `Assertions (${step.assertions.length})` },
     ...(sourceVisible ? [{ id: "source" as const, label: "Source" }] : []),
+    { id: "replay", label: "Replay" },
   ];
   return (
     <div className="border-t bg-muted/20">
@@ -270,6 +272,10 @@ function EvidencePanel({ step }: { step: StoredStepResult }) {
           ))}
         </div>
         <div className="flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={() => setTab("replay")}>
+            <Send className="size-3.5" />
+            Replay
+          </Button>
           <CaseStudyDraftButton resultId={step.id} />
           <CopyCurlButton step={step} />
         </div>
@@ -279,6 +285,7 @@ function EvidencePanel({ step }: { step: StoredStepResult }) {
         {tab === "response" && <ResponsePanel step={step} />}
         {tab === "assertions" && <AssertionsPanel assertions={step.assertions} />}
         {tab === "source" && <SourcePanel step={step} />}
+        {tab === "replay" && <ReplayPanel step={step} />}
       </div>
     </div>
   );

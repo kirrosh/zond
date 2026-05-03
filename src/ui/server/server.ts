@@ -14,6 +14,7 @@ import {
   listSessions,
 } from "../../db/queries.ts";
 import { renderCaseStudy } from "../../core/exporter/case-study/index.ts";
+import { resolveAdHocRequest, sendAdHocRequest } from "../../core/runner/send-request.ts";
 import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
 import { VERSION } from "../../cli/version.ts";
 import { parseDirectorySafe } from "../../core/parser/yaml-parser.ts";
@@ -183,6 +184,73 @@ export function createApp() {
       return c.json({ run, results });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.post("/api/replay", async (c) => {
+    let payload: {
+      method?: string;
+      url?: string;
+      headers?: Record<string, string>;
+      body?: string;
+      resultId?: number;
+      envName?: string;
+      timeout?: number;
+      dryRun?: boolean;
+    };
+    try {
+      payload = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+
+    if (!payload.method || typeof payload.method !== "string") {
+      return c.json({ error: "method required" }, 400);
+    }
+    if (!payload.url || typeof payload.url !== "string") {
+      return c.json({ error: "url required" }, 400);
+    }
+
+    let extraVars: Record<string, unknown> | undefined;
+    let collectionName: string | undefined;
+    let envName = payload.envName;
+    if (typeof payload.resultId === "number" && Number.isFinite(payload.resultId)) {
+      const result = getResultById(payload.resultId);
+      if (result) {
+        if (result.captures && Object.keys(result.captures).length > 0) {
+          extraVars = result.captures;
+        }
+        const run = getRunById(result.run_id);
+        if (run?.collection_id != null) {
+          const col = getCollectionById(run.collection_id);
+          if (col) collectionName = col.name;
+        }
+        if (!envName && run?.environment) envName = run.environment;
+      }
+    }
+
+    const opts = {
+      method: payload.method.toUpperCase(),
+      url: payload.url,
+      headers: payload.headers,
+      body: payload.body,
+      timeout: payload.timeout,
+      envName,
+      collectionName,
+      extraVars,
+    };
+
+    try {
+      if (payload.dryRun) {
+        const resolved = await resolveAdHocRequest(opts);
+        return c.json({ resolved });
+      }
+      const resolved = await resolveAdHocRequest(opts);
+      const response = await sendAdHocRequest(opts);
+      return c.json({ resolved, response });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 200);
     }
   });
 
