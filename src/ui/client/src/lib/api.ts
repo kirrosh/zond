@@ -217,6 +217,47 @@ export function sessionRunsQueryOptions(sessionId: string) {
   });
 }
 
+export interface ReplayPayload {
+  method: string;
+  url: string;
+  headers?: Record<string, string>;
+  body?: string;
+  resultId?: number;
+  envName?: string;
+  dryRun?: boolean;
+}
+
+export interface ReplayResolved {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body?: string;
+}
+
+export interface ReplayResponseBody {
+  status: number;
+  headers: Record<string, string>;
+  body: unknown;
+  duration_ms: number;
+}
+
+export interface ReplayResult {
+  resolved?: ReplayResolved;
+  response?: ReplayResponseBody;
+  error?: string;
+}
+
+export async function postReplay(payload: ReplayPayload): Promise<ReplayResult> {
+  const r = await fetch("/api/replay", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await r.json() as ReplayResult & { error?: string };
+  if (!r.ok) throw new Error(data.error ?? `HTTP ${r.status}`);
+  return data;
+}
+
 export function runsListQueryOptions(params: RunsQueryParams = {}) {
   const { status = "all", limit = 50, offset = 0 } = params;
   const search = new URLSearchParams();

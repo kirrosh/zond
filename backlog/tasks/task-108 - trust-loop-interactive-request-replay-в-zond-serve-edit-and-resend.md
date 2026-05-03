@@ -1,15 +1,16 @@
 ---
 id: TASK-108
 title: 'trust-loop: interactive request replay в zond serve (edit-and-resend)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 12:17'
+updated_date: '2026-05-03 11:52'
 labels:
   - ui
   - trust-loop
   - replay
-dependencies: []
 milestone: m-6
+dependencies: []
 priority: high
 ---
 
