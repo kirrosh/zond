@@ -3,15 +3,16 @@ id: TASK-109
 title: >-
   trust-loop: Coverage map UI с reasons (endpoint × method × status ×
   why-skipped)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 12:17'
+updated_date: '2026-05-03 12:15'
 labels:
   - ui
   - trust-loop
   - coverage
-dependencies: []
 milestone: m-6
+dependencies: []
 priority: high
 ---
 

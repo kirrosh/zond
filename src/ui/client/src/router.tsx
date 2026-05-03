@@ -12,7 +12,8 @@ import { Suspense } from "react";
 import { RunsListPage } from "./routes/runs-list";
 import { RunDetailPage } from "./routes/run-detail";
 import { SuitesListPage, type SuiteSourceFilter } from "./routes/suites-list";
-import { runDetailQueryOptions, runsListQueryOptions, sessionsListQueryOptions, suitesListQueryOptions, type StatusFilter } from "./lib/api";
+import { CoveragePage, validateCoverageSearch } from "./routes/coverage";
+import { apisListQueryOptions, runDetailQueryOptions, runsListQueryOptions, sessionsListQueryOptions, suitesListQueryOptions, type StatusFilter } from "./lib/api";
 
 export interface RouterContext {
   queryClient: QueryClient;
@@ -43,6 +44,14 @@ function RootLayout() {
             className="text-sm transition-colors"
           >
             Suites
+          </Link>
+          <Link
+            to="/coverage"
+            activeProps={{ className: "text-foreground" }}
+            inactiveProps={{ className: "text-muted-foreground hover:text-foreground" }}
+            className="text-sm transition-colors"
+          >
+            Coverage
           </Link>
         </nav>
       </header>
@@ -116,7 +125,15 @@ const suitesListRoute = createRoute({
   component: SuitesListPage,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, runsListRoute, runDetailRoute, suitesListRoute]);
+const coverageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/coverage",
+  validateSearch: validateCoverageSearch,
+  loader: ({ context }) => context.queryClient.ensureQueryData(apisListQueryOptions()),
+  component: CoveragePage,
+});
+
+const routeTree = rootRoute.addChildren([indexRoute, runsListRoute, runDetailRoute, suitesListRoute, coverageRoute]);
 
 export function createAppRouter(queryClient: QueryClient) {
   return createRouter({

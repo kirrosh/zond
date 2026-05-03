@@ -356,6 +356,14 @@ pre.code {
 .cov-cell.s5 { background: var(--fail-bg); color: var(--fail); font-weight: 600; }
 .cov-cell.serr { background: var(--fail); color: white; font-weight: 600; }
 .cov-cell.empty { color: var(--border-strong); }
+.cov-row.reasons { grid-template-columns: 2fr repeat(3, 1fr); }
+.cov-cell.reasons { flex-wrap: wrap; gap: 3px; padding: 6px; min-height: 32px; }
+.cov-cell.s2.reasons { background: var(--pass-bg); }
+.cov-cell.s4.reasons { background: var(--warn-bg); }
+.cov-cell.su { background: var(--bg-muted); color: var(--fg-muted); }
+.cov-cell .rchip { background: rgba(255,255,255,0.6); padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 500; color: var(--fg); }
+.method-mini { font-weight: 700; color: var(--accent); margin-right: 4px; }
+.cov-cell.path .badge { margin-left: 6px; vertical-align: middle; }
 
 /* Footer */
 footer {

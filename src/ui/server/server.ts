@@ -15,6 +15,9 @@ import {
 } from "../../db/queries.ts";
 import { renderCaseStudy } from "../../core/exporter/case-study/index.ts";
 import { resolveAdHocRequest, sendAdHocRequest } from "../../core/runner/send-request.ts";
+import { listCollections } from "../../db/queries.ts";
+import { loadCoverage } from "../../core/coverage/loader.ts";
+import { readCurrentApi } from "../../core/context/current.ts";
 import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
 import { VERSION } from "../../cli/version.ts";
 import { parseDirectorySafe } from "../../core/parser/yaml-parser.ts";
@@ -184,6 +187,52 @@ export function createApp() {
       return c.json({ run, results });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.get("/api/apis", (c) => {
+    try {
+      const cols = listCollections();
+      let current: string | null = null;
+      try { current = readCurrentApi(); } catch { /* outside workspace */ }
+      return c.json({
+        current,
+        apis: cols.map((c) => ({
+          name: c.name,
+          base_dir: c.base_dir,
+          openapi_spec: c.openapi_spec,
+          last_run_at: c.last_run_at,
+          last_run_total: c.last_run_total,
+          last_run_passed: c.last_run_passed,
+          last_run_failed: c.last_run_failed,
+        })),
+      });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.get("/api/coverage", async (c) => {
+    const apiName = c.req.query("api");
+    if (!apiName) return c.json({ error: "missing 'api' query parameter" }, 400);
+    const runIdRaw = c.req.query("runId");
+    const runId = runIdRaw != null ? Number(runIdRaw) : undefined;
+    if (runIdRaw != null && !Number.isFinite(runId)) {
+      return c.json({ error: "invalid runId" }, 400);
+    }
+    const profile = c.req.query("profile") === "safe" ? "safe" : "full";
+    const tagRaw = c.req.query("tag");
+    const tagFilter = tagRaw ? tagRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    try {
+      const result = await loadCoverage({
+        apiName,
+        ...(runId != null ? { runId } : {}),
+        profile,
+        tagFilter,
+      });
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
   });
 

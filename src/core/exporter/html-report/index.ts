@@ -1,5 +1,6 @@
 import type { RunRecord, StoredStepResult } from "../../../db/queries.ts";
 import type { FailureClass } from "../../diagnostics/failure-class.ts";
+import type { CoverageMatrix, ReasonCode, StatusClass } from "../../coverage/reasons.ts";
 import { REPO_URL } from "../../../cli/version.ts";
 import { escapeHtml, tryPrettyJson } from "./escape.ts";
 import { buildCurl } from "../curl.ts";
@@ -15,7 +16,22 @@ export interface RenderOptions {
   collectionName?: string | null;
   /** Optional resolved base_url (currently best-effort from results). */
   baseUrl?: string | null;
+  /** Optional spec-aware coverage matrix with reason codes (TASK-109).
+   *  When supplied, replaces the URL-only coverage map. */
+  coverageMatrix?: CoverageMatrix;
 }
+
+const REASON_LABEL: Record<ReasonCode, string> = {
+  "covered": "covered",
+  "partial-failed": "partial",
+  "not-generated": "not generated",
+  "no-spec": "not in spec",
+  "deprecated": "deprecated",
+  "no-fixtures": "missing fixtures",
+  "ephemeral-only": "ephemeral-only",
+  "auth-scope-mismatch": "no auth token",
+  "tag-filtered": "filtered",
+};
 
 const FAILURE_CLASS_META: Record<FailureClass, { label: string; cls: string; emoji: string }> = {
   definitely_bug: { label: "Definitely bug", cls: "fail", emoji: "🐞" },
@@ -316,6 +332,40 @@ function renderCoverage(rows: CoverageRow[]): string {
   </section>`;
 }
 
+function renderCoverageWithReasons(matrix: CoverageMatrix): string {
+  if (matrix.rows.length === 0) return "";
+  const classes: StatusClass[] = ["2xx", "4xx", "5xx"];
+  const cellCls = (s: "covered" | "partial" | "uncovered") =>
+    s === "covered" ? "s2" : s === "partial" ? "s4" : "su";
+  const header = `<div class="cov-row reasons">
+    <div class="cov-cell head path">Endpoint</div>
+    ${classes.map((c) => `<div class="cov-cell head">${c}</div>`).join("")}
+  </div>`;
+  const body = matrix.rows.map((row) => {
+    const cells = classes.map((c) => {
+      const cell = row.cells[c];
+      const reasonChips = cell.reasons.map((r) =>
+        `<span class="rchip" title="${escapeHtml(r)}">${escapeHtml(REASON_LABEL[r])}</span>`,
+      ).join("");
+      return `<div class="cov-cell ${cellCls(cell.status)} reasons">${reasonChips}</div>`;
+    }).join("");
+    const tagBadges = row.tags.length > 0
+      ? row.tags.map((t) => `<span class="badge muted">${escapeHtml(t)}</span>`).join("")
+      : "";
+    const deprecated = row.deprecated ? `<span class="badge warn">deprecated</span>` : "";
+    return `<div class="cov-row reasons">
+      <div class="cov-cell path mono"><span class="method-mini">${escapeHtml(row.method)}</span> ${escapeHtml(row.path)} ${deprecated}${tagBadges}</div>
+      ${cells}
+    </div>`;
+  }).join("");
+  const t = matrix.totals;
+  const pct = t.cells === 0 ? 0 : Math.round((t.covered / t.cells) * 1000) / 10;
+  return `<section>
+    <h2>Coverage map <span class="count">${pct}% covered · ${t.endpoints} endpoint${t.endpoints === 1 ? "" : "s"} × 3 classes</span></h2>
+    <div class="cov-grid wide">${header}${body}</div>
+  </section>`;
+}
+
 export function renderHtmlReport(opts: RenderOptions): string {
   const { run, results, zondVersion, generatedAt, collectionName } = opts;
   const failures = results.filter((r) => r.status !== "pass" && r.status !== "skip");
@@ -397,7 +447,7 @@ export function renderHtmlReport(opts: RenderOptions): string {
   </div>
 
   ${failuresSection}
-  ${renderCoverage(coverage)}
+  ${opts.coverageMatrix ? renderCoverageWithReasons(opts.coverageMatrix) : renderCoverage(coverage)}
 
   <footer>
     <span>zond <span class="mono">${escapeHtml(zondVersion)}</span> · generated ${escapeHtml(generatedAt.toISOString())}</span>

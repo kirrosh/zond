@@ -10,6 +10,8 @@ import { renderHtmlReport } from "../../core/exporter/html-report/index.ts";
 import { renderCaseStudy } from "../../core/exporter/case-study/index.ts";
 import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
+import { loadCoverage } from "../../core/coverage/loader.ts";
+import type { CoverageMatrix } from "../../core/coverage/reasons.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
@@ -17,6 +19,7 @@ import { VERSION } from "../version.ts";
 export interface ReportExportOptions {
   runId: string;
   output?: string;
+  api?: string;
   dbPath?: string;
   json?: boolean;
 }
@@ -57,12 +60,26 @@ export async function reportExportHtmlCommand(
   const results = getResultsByRunId(runId);
   const collection = run.collection_id != null ? getCollectionById(run.collection_id) : null;
 
+  // Try to enrich with the spec-aware coverage matrix (TASK-109). Best-effort:
+  // skip silently if no API can be resolved or the spec can't load.
+  let coverageMatrix: CoverageMatrix | undefined;
+  const apiName = options.api ?? collection?.name ?? null;
+  if (apiName) {
+    try {
+      const cov = await loadCoverage({ apiName, runId });
+      coverageMatrix = cov.matrix;
+    } catch {
+      // No registered API / missing spec — fall back to URL-only coverage.
+    }
+  }
+
   const html = renderHtmlReport({
     run,
     results,
     zondVersion: VERSION,
     generatedAt: new Date(),
     collectionName: collection?.name ?? null,
+    ...(coverageMatrix ? { coverageMatrix } : {}),
   });
 
   const outputPath = resolve(options.output ?? `zond-run-${runId}.html`);
