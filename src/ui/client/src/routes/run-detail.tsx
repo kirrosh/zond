@@ -1,7 +1,7 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Check, ChevronRight, Copy, FileText, Radio, Send } from "lucide-react";
+import { Check, ChevronRight, Copy, FileText, Send } from "lucide-react";
 import { ReplayPanel } from "./replay-panel";
 import {
   runDetailQueryOptions,
@@ -10,7 +10,6 @@ import {
   type SourceMetadata,
   type StoredStepResult,
 } from "../lib/api";
-import { useRunProgress } from "../lib/use-run-progress";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { FailureClassBadge } from "../components/failure-class-badge";
@@ -39,8 +38,6 @@ export function RunDetailPage() {
         cascadeCount={cascadeSkips.length}
         totalCount={results.length}
       />
-
-      <LiveProgressStrip runId={runId} total={Math.max(run.total, 1)} />
 
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
@@ -93,52 +90,6 @@ function CascadeGroup({ steps }: { steps: StoredStepResult[] }) {
         </ul>
       )}
     </section>
-  );
-}
-
-function LiveProgressStrip({ runId, total }: { runId: string; total: number }) {
-  // Spike: server always emits a fake ramp-up so the SSE wiring is observable.
-  // Production would auto-start only for runs with finished_at === null.
-  const [open, setOpen] = useState(false);
-  const { frame, done, error } = useRunProgress(runId, open);
-
-  if (!open) {
-    return (
-      <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2 text-xs">
-        <span className="inline-flex items-center gap-2 text-muted-foreground">
-          <Radio className="size-3.5" />
-          SSE live progress (spike stub)
-        </span>
-        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-          Replay progress
-        </Button>
-      </div>
-    );
-  }
-
-  const completed = frame?.completed ?? 0;
-  const target = frame?.total ?? total;
-  const pct = target > 0 ? Math.round((completed / target) * 100) : 0;
-
-  return (
-    <div className="space-y-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
-      <div className="flex items-center justify-between">
-        <span className="inline-flex items-center gap-2">
-          <Radio className={cn("size-3.5", !done && "animate-pulse text-emerald-600")} />
-          {done ? "Done" : "Streaming progress…"}
-        </span>
-        <span className="font-mono tabular-nums">
-          {completed} / {target} ({pct}%)
-        </span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded bg-background">
-        <div
-          className={cn("h-full transition-[width] duration-200", done ? "bg-emerald-500" : "bg-foreground/70")}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      {error && <p className="text-destructive">SSE error: {error}</p>}
-    </div>
   );
 }
 
