@@ -107,7 +107,7 @@ selected via `zond use`.
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
 | `probe-validation [spec]` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup` |
 | `probe-methods [spec]` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--api <name>`, `--output <dir>`, `--tag` |
-| `probe-mass-assignment [spec]` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--timeout <ms>` |
+| `probe-mass-assignment [spec]` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--no-discover`, `--timeout <ms>` |
 | `lint-spec [spec]` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--api <name>`, `--strict`, `--rule <list>`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
 | `catalog [spec]` | Standalone build of `.api-catalog.yaml` (registered APIs already have one in `apis/<name>/`) | `--api <name>`, `--output <dir>` |
 | `describe [spec]` | Describe endpoints from OpenAPI spec | `--api <name>`, `--compact`, `--list-params`, `--method`, `--path` |
@@ -344,6 +344,20 @@ least set `base_url`. Bearer / API-key tokens are read from `auth_token` /
 `api_key` (matching `zond run`'s convention). Path-param placeholders
 (e.g. `{orgId}`) are substituted from the same env — set them explicitly to
 unlock PATCH/PUT probing.
+
+**Path-param auto-discovery (TASK-92).** When env doesn't supply a value for
+a path placeholder (`{domain_id}`, `{webhook_id}`, …), the probe tries to
+find a sibling list endpoint in the spec — `GET /domains` for
+`/domains/{domain_id}` — call it once per run, and pull the first item's id
+(`data[0].id`, `items[0].id`, top-level `[0].id`). The discovered value is
+cached per `GET <listPath>` so all endpoints sharing the same parent
+resource pay only one extra HTTP call. Nested collections
+(`/orgs/{org_id}/projects/{project_id}`) are resolved recursively.
+If the list is empty / 4xx / not in the spec, the endpoint still goes to
+SKIPPED but the digest spells out *why*
+(e.g. `auto-discover failed (GET /domains returned empty list)`) instead of
+the generic missing-env message. Use `--no-discover` to disable when GET
+side-effects are unwanted.
 
 ---
 

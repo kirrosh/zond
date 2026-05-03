@@ -190,6 +190,19 @@ echoed in response (HIGH from `probe-mass-assignment`).
 
 Filter scope on large APIs: `--tag <spec-tag> [--max-per-endpoint 20]`.
 
+**Auto-discovery of path-param fixtures.** When a probed endpoint depends on
+`{domain_id}` / `{webhook_id}` / etc. that `.env.yaml` doesn't supply,
+`probe-mass-assignment` looks for a sibling `GET /domains` (or
+`/orgs/{org_id}/projects` for nested), calls it once per run, pulls
+`data[0].id` (also tries `items[0].id` and top-level array shapes), and
+reuses that value for every endpoint sharing the same parent. Cached, so
+each list is hit at most once per run. Failures still SKIP the endpoint but
+the digest now spells out *why* (`auto-discover failed (GET /domains
+returned empty list)` etc.). Pass `--no-discover` to opt out when GET
+side-effects are unwanted. Don't ask the user to fill a path-param into
+`.env.yaml` before checking the digest — auto-discovery may already cover
+it.
+
 ### Phase 5.1 — Manual mass-assignment catch-up
 
 `probe-mass-assignment` digest splits findings into HIGH / MED / LOW /
