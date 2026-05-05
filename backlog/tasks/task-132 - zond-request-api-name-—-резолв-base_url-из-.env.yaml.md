@@ -1,9 +1,10 @@
 ---
 id: TASK-132
 title: zond request --api <name> — резолв base_url из .env.yaml
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-05 10:04'
+updated_date: '2026-05-05 10:28'
 labels: []
 dependencies: []
 priority: medium
