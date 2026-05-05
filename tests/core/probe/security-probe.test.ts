@@ -228,6 +228,316 @@ describe("runSecurityProbes", () => {
   });
 });
 
+describe("runSecurityProbes — TASK-151 snapshot+restore on PUT", () => {
+  it("snapshots GET before baseline and restores after each 2xx attack", async () => {
+    // Mock state machine: a single project resource whose `subjectPrefix`
+    // can be read via GET, mutated via PUT. We assert the FINAL state
+    // equals the original — proving probe-security restored after every
+    // 2xx attack instead of leaving a payload in place.
+    const original = { id: "p1", subjectPrefix: "[Prod] " };
+    let current: Record<string, unknown> = { ...original };
+
+    responder = (req) => {
+      if (req.method === "GET") {
+        return { status: 200, body: { ...current } };
+      }
+      if (req.method === "PUT") {
+        const body = req.body as Record<string, unknown> | undefined;
+        if (!body) return { status: 400 };
+        current = { ...current, ...body };
+        return { status: 200, body: { ...current } };
+      }
+      return { status: 405 };
+    };
+
+    const projectSchema: OpenAPIV3.SchemaObject = {
+      type: "object",
+      properties: {
+        subjectPrefix: { type: "string" },
+        platforms: { type: "array", items: { type: "string" } },
+      },
+    };
+    const putEp = ep({
+      method: "PUT",
+      path: "/projects/{id}",
+      requestBodySchema: projectSchema,
+      responses: [{ statusCode: 200, description: "ok" }],
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    const getEp = ep({
+      method: "GET",
+      path: "/projects/{id}",
+      requestBodySchema: undefined,
+      requestBodyContentType: undefined,
+      responses: [{ statusCode: 200, description: "ok", schema: projectSchema }],
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+
+    const result = await runSecurityProbes({
+      endpoints: [putEp, getEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test", id: "p1" },
+      classes: ["crlf"],
+    });
+
+    // The probe must have run — at least one CRLF attack on subjectPrefix.
+    expect(result.verdicts[0]!.findings.length).toBeGreaterThan(0);
+    // CRITICAL: live state is back to its original value, not an attack payload.
+    expect(current.subjectPrefix).toBe("[Prod] ");
+    expect(JSON.stringify(current)).not.toContain("X-Zond-Injected");
+
+    // verdict.cleanup must indicate restore was attempted.
+    expect(result.verdicts[0]!.cleanup?.attempted).toBe(true);
+  });
+
+  it("falls back to DELETE-cleanup on POST (no GET-counterpart on collection)", async () => {
+    // POST has no per-id GET to snapshot (the GET is on the item path which
+    // doesn't exist yet). So snapshotOriginal returns null and we keep the
+    // existing DELETE-cleanup path.
+    let createdIds: string[] = [];
+    responder = (req) => {
+      if (req.method === "POST") {
+        const id = `wh_${createdIds.length + 1}`;
+        createdIds.push(id);
+        return { status: 201, body: { id } };
+      }
+      if (req.method === "DELETE") {
+        // We can extract id from URL.
+        const m = req.url.match(/\/webhooks\/([^/?]+)/);
+        if (m) createdIds = createdIds.filter(x => x !== m[1]);
+        return { status: 204 };
+      }
+      return { status: 200, body: {} };
+    };
+    const postEp = ep({
+      method: "POST",
+      path: "/webhooks",
+      requestBodySchema: { type: "object", properties: { url: { type: "string", format: "uri" } } },
+    });
+    const delEp = ep({
+      method: "DELETE",
+      path: "/webhooks/{id}",
+      requestBodySchema: undefined,
+      requestBodyContentType: undefined,
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    const result = await runSecurityProbes({
+      endpoints: [postEp, delEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      classes: ["ssrf"],
+    });
+    expect(result.verdicts[0]!.findings.length).toBeGreaterThan(0);
+    // All created webhooks were deleted.
+    expect(createdIds).toEqual([]);
+  });
+
+  it("--no-cleanup disables both snapshot+restore and DELETE", async () => {
+    let getCount = 0;
+    let deleteCount = 0;
+    responder = (req) => {
+      if (req.method === "GET") { getCount++; return { status: 200, body: { id: "p1" } }; }
+      if (req.method === "DELETE") { deleteCount++; return { status: 204 }; }
+      return { status: 200, body: { id: "p1" } };
+    };
+    const putEp = ep({
+      method: "PUT",
+      path: "/projects/{id}",
+      requestBodySchema: {
+        type: "object",
+        properties: { subjectPrefix: { type: "string" } },
+      },
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    const getEp = ep({
+      method: "GET",
+      path: "/projects/{id}",
+      requestBodySchema: undefined,
+      requestBodyContentType: undefined,
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    await runSecurityProbes({
+      endpoints: [putEp, getEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test", id: "p1" },
+      classes: ["crlf"],
+      noCleanup: true,
+    });
+    // No snapshot GET, no restore PUT, no DELETE — only baseline + attacks.
+    expect(getCount).toBe(0);
+    expect(deleteCount).toBe(0);
+  });
+
+  it("logs restore failure in verdict.cleanup.error", async () => {
+    let phase: "open" | "broken" = "open";
+    responder = (req) => {
+      if (req.method === "GET") return { status: 200, body: { id: "p1", subjectPrefix: "ok" } };
+      if (req.method === "PUT") {
+        // Break PUT after first request — restore will fail.
+        if (phase === "open") {
+          phase = "broken";
+          return { status: 200, body: { id: "p1", subjectPrefix: "x" } };
+        }
+        return { status: 500, body: { error: "broken" } };
+      }
+      return { status: 200 };
+    };
+    const putEp = ep({
+      method: "PUT",
+      path: "/projects/{id}",
+      requestBodySchema: { type: "object", properties: { subjectPrefix: { type: "string" } } },
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    const getEp = ep({
+      method: "GET",
+      path: "/projects/{id}",
+      requestBodySchema: undefined,
+      requestBodyContentType: undefined,
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    const result = await runSecurityProbes({
+      endpoints: [putEp, getEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test", id: "p1" },
+      classes: ["crlf"],
+    });
+    // Cleanup attempted; the post-baseline restore failed with 500.
+    const v = result.verdicts[0]!;
+    expect(v.cleanup?.attempted).toBe(true);
+    expect(v.cleanup?.error).toMatch(/restore failed: 500|restore network error/);
+  });
+});
+
+describe("runSecurityProbes — TASK-152 partial-body fallback on PUT", () => {
+  it("rescues a proven HIGH when full-body baseline is rejected by partial-PUT API", async () => {
+    // Sentry-shaped behaviour: PUT accepts only fields you actually want
+    // to change. Sending the spec's full body with all properties returns
+    // 422; sending a single field works.
+    let lastPutBody: Record<string, unknown> | null = null;
+    responder = (req) => {
+      if (req.method === "GET") return { status: 200, body: { id: "p1", subjectPrefix: "[Prod] " } };
+      if (req.method === "PUT") {
+        const body = req.body as Record<string, unknown> | undefined;
+        if (!body) return { status: 400 };
+        // Reject if more than one user-mutable key is present in the body.
+        const keys = Object.keys(body);
+        if (keys.length > 1) return { status: 422, body: { error: "use partial PUT" } };
+        lastPutBody = body;
+        // Accept partial; echo whatever was sent so the classifier can detect echo.
+        return { status: 200, body: { id: "p1", ...body } };
+      }
+      return { status: 200 };
+    };
+    const putEp = ep({
+      method: "PUT",
+      path: "/projects/{id}",
+      requestBodySchema: {
+        type: "object",
+        // Multiple writable fields → spec generator builds a body with both.
+        properties: {
+          subjectPrefix: { type: "string" },
+          platforms: { type: "array", items: { type: "string" } },
+        },
+      },
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    const getEp = ep({
+      method: "GET",
+      path: "/projects/{id}",
+      requestBodySchema: undefined,
+      requestBodyContentType: undefined,
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+
+    const result = await runSecurityProbes({
+      endpoints: [putEp, getEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test", id: "p1" },
+      classes: ["crlf"],
+    });
+
+    // CRITICAL: this used to land in INCONCLUSIVE-BASELINE; with partial-body
+    // fallback it is now classified (HIGH because the mock echoes the payload).
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("high");
+    const high = v.findings.filter(f => f.severity === "high");
+    expect(high.length).toBeGreaterThan(0);
+    // Reason annotated with [partial-body] so emit-tests / case-studies know
+    // which body shape to use.
+    expect(high[0]!.reason).toContain("[partial-body]");
+    // The PUT we sent during attack contains exactly one key — subjectPrefix.
+    expect(lastPutBody).not.toBeNull();
+    expect(Object.keys(lastPutBody!)).toHaveLength(1);
+  });
+
+  it("does not partial-fallback on POST (would break required fields)", async () => {
+    responder = () => ({ status: 422, body: { error: "missing required" } });
+    const postEp = ep({
+      method: "POST",
+      path: "/webhooks",
+      requestBodySchema: {
+        type: "object",
+        required: ["url", "secret"],
+        properties: {
+          url: { type: "string", format: "uri" },
+          secret: { type: "string" },
+        },
+      },
+    });
+    const result = await runSecurityProbes({
+      endpoints: [postEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      classes: ["ssrf"],
+    });
+    expect(result.verdicts[0]!.severity).toBe("inconclusive-baseline");
+    expect(result.verdicts[0]!.summary).not.toContain("partial-body");
+  });
+
+  it("INCONCLUSIVE-BASELINE when both full and partial baselines fail on PUT", async () => {
+    responder = () => ({ status: 422, body: { error: "scope locked" } });
+    const putEp = ep({
+      method: "PUT",
+      path: "/projects/{id}",
+      requestBodySchema: {
+        type: "object",
+        properties: { subjectPrefix: { type: "string" } },
+      },
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    // No GET-counterpart in the spec → snapshot returns null, no restore noise.
+    const result = await runSecurityProbes({
+      endpoints: [putEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test", id: "p1" },
+      classes: ["crlf"],
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("inconclusive-baseline");
+    expect(v.summary).toContain("partial-body");
+  });
+});
+
 describe("formatSecurityDigest", () => {
   it("renders sections per severity", () => {
     const md = formatSecurityDigest(

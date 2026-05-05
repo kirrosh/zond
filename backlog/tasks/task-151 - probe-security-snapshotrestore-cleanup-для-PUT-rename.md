@@ -1,8 +1,10 @@
 ---
 id: TASK-151
 title: 'probe-security: snapshot+restore cleanup для PUT-rename'
-status: To Do
+status: Done
 assignee: []
+created_date: ''
+updated_date: '2026-05-05 13:30'
 labels:
   - probe
   - probe-security
@@ -15,6 +17,7 @@ priority: high
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-8 feedback round 3 §J](../notes/m-8-audit-cli-gaps/feedback-round3.md).
@@ -53,18 +56,32 @@ priority: high
 4. **Cleanup-step в emit-tests.** В сгенерированном YAML добавить
    `setup` шаг (capture original) и `always: true` шаг restore, чтобы
    regression-сьют тоже не оставлял повреждённых данных.
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
-- [ ] Для PUT/PATCH endpoints с GET-counterpart probe-security делает
+<!-- AC:BEGIN -->
+- [ ] #1 Для PUT/PATCH endpoints с GET-counterpart probe-security делает
       GET до baseline и сохраняет `originalBody`.
-- [ ] После 2xx attack-response делается restore PUT с `originalBody`.
-- [ ] При `requiresEtag` правильно пробрасывается `If-Match`.
-- [ ] Restore-failure отдельно логируется в `verdict.cleanup.error`.
-- [ ] Тест: фикстура с PUT /things/{id} и GET /things/{id}, проверить,
+- [ ] #2 После 2xx attack-response делается restore PUT с `originalBody`.
+- [ ] #3 При `requiresEtag` правильно пробрасывается `If-Match`.
+- [ ] #4 Restore-failure отдельно логируется в `verdict.cleanup.error`.
+- [ ] #5 Тест: фикстура с PUT /things/{id} и GET /things/{id}, проверить,
       что после probe текущее значение возвращено к исходному
       (mock-сервер записывает state).
-- [ ] `--emit-tests` выгружает setup+always:true restore.
-- [ ] `--no-cleanup` отключает обе ветки.
-- [ ] CHANGELOG, обновление skill/Phase 5.2 (убрать warning после
+- [ ] #6 `--emit-tests` выгружает setup+always:true restore.
+- [ ] #7 `--no-cleanup` отключает обе ветки.
+- [ ] #8 CHANGELOG, обновление skill/Phase 5.2 (убрать warning после
       реализации).
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+snapshotOriginal делает GET до baseline, кэширует body+ETag, restoreOriginal делает PUT/PATCH с original'ом после каждого 2xx (баseline и атак). Стрипает read-only поля (id, created_at, updated_at) из restore body, проставляет If-Match при requiresEtag. Restore-failure → verdict.cleanup.error. POST остаётся на DELETE-cleanup (нет GET-counterpart на collection). 4 теста: state-roundtrip / POST DELETE-fallback / --no-cleanup / restore failure.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+TASK-151: snapshot+restore cleanup для PUT/PATCH. Закрывает блокер для unattended prod-use.
+<!-- SECTION:FINAL_SUMMARY:END -->

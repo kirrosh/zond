@@ -1,8 +1,10 @@
 ---
 id: TASK-152
 title: 'probe-security: minimal-body fallback для partial PUT (false-negative fix)'
-status: To Do
+status: Done
 assignee: []
+created_date: ''
+updated_date: '2026-05-05 13:30'
 labels:
   - probe
   - probe-security
@@ -15,6 +17,7 @@ priority: high
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-8 feedback round 3 §K](../notes/m-8-audit-cli-gaps/feedback-round3.md).
@@ -50,17 +53,31 @@ fallback на минимальный body.
 
 4. **Логирование:** в digest отметить, какой режим сработал
    (`baseline=full-200` vs `baseline=partial-200(field=subjectPrefix)`).
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
-- [ ] При baseline-полным-body 4xx на PUT/PATCH пробуется partial-body
+<!-- AC:BEGIN -->
+- [ ] #1 При baseline-полным-body 4xx на PUT/PATCH пробуется partial-body
       по каждому атакуемому полю.
-- [ ] Если хотя бы одно partial-baseline дало 2xx — endpoint не идёт
+- [ ] #2 Если хотя бы одно partial-baseline дало 2xx — endpoint не идёт
       в INCONCLUSIVE-BASELINE, атакуется именно это поле.
-- [ ] POST не использует fallback (partial body нарушит required).
-- [ ] Тест: фикстура где `PUT /things/{id}` с full body отдаёт 422,
+- [ ] #3 POST не использует fallback (partial body нарушит required).
+- [ ] #4 Тест: фикстура где `PUT /things/{id}` с full body отдаёт 422,
       с partial body (только `subject`) отдаёт 200 → атака на `subject`
       запускается, прошлый INCONCLUSIVE-baseline исчезает.
-- [ ] Тест на фикстуре где partial тоже падает → INCONCLUSIVE-BASELINE
+- [ ] #5 Тест на фикстуре где partial тоже падает → INCONCLUSIVE-BASELINE
       с reason "full & partial both rejected".
-- [ ] CHANGELOG.
+- [ ] #6 CHANGELOG.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Когда полный baseline даёт 4xx на PUT/PATCH — пробуем по одному ключу ({field}). При успехе используем partial body как basis для атак на это поле. Reason помечается [partial-body]. POST не fallback'ится (нарушит required). Если и full и все partial fail → INCONCLUSIVE-BASELINE с расширенным summary. 3 теста: rescue-proven-HIGH / POST-no-fallback / both-fail.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+TASK-152: partial-body fallback на PUT. Возвращает proven HIGH-finding из INCONCLUSIVE-BASELINE.
+<!-- SECTION:FINAL_SUMMARY:END -->
