@@ -33,6 +33,7 @@ import { resolveCollectionSpec } from "../core/setup-api.ts";
 
 import { readCurrentApi } from "../core/context/current.ts";
 import { printError } from "./output.ts";
+import { jsonError, printJson } from "./json-envelope.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { VERSION } from "./version.ts";
 import { getDb } from "../db/schema.ts";
@@ -199,7 +200,12 @@ function resolveSpecArg(
   const resolved = resolveApiCollection(apiName, dbPath);
   if ("error" in resolved) return { error: resolved.error };
   if (!resolved.spec) {
-    return { error: `API '${apiName}' has no OpenAPI spec recorded — run \`zond refresh-api ${apiName} --spec <path>\``};
+    return {
+      error:
+        `API '${apiName}' is registered without an OpenAPI spec — this command needs one. ` +
+        `Run \`zond refresh-api ${apiName} --spec <path|url>\` to attach a spec, ` +
+        `or use \`zond run --api ${apiName} <test.yaml>\` for YAML-based testing.`,
+    };
   }
   return { spec: resolved.spec };
 }
@@ -519,14 +525,21 @@ export function buildProgram(): Command {
   const add = program.command("add").description("Register objects in the workspace");
   add
     .command("api <name>")
-    .description("Register an API: copy spec into apis/<name>/spec.json and emit catalog/resources/fixtures artifacts")
-    .requiredOption("--spec <path>", "Path or URL to OpenAPI spec")
-    .option("--base-url <url>", "Override base URL recorded in .env.yaml")
+    .description("Register an API: from an OpenAPI spec (full toolkit) or just --base-url (run-only mode)")
+    .option("--spec <path>", "Path or URL to OpenAPI spec — enables generate/probe/validate-schema")
+    .option("--base-url <url>", "Base URL recorded in .env.yaml (required if --spec is omitted)")
     .option("--dir <path>", "Target directory (defaults to apis/<name>/)")
     .option("--force", "Overwrite an existing API with the same name")
     .option("--insecure", "Skip TLS verification when fetching the spec from https")
     .option("--db <path>", "Path to SQLite database file")
     .action(async (name: string, opts, cmd: Command) => {
+      const json = globalJson(cmd);
+      if (!opts.spec && !opts.baseUrl) {
+        const m = "Provide --spec <path|url> for a full registration, or --base-url <url> for run-only mode.";
+        if (json) printJson(jsonError("add-api", [m])); else printError(m);
+        process.exitCode = 2;
+        return;
+      }
       process.exitCode = await addApiCommand({
         name,
         spec: opts.spec,
@@ -535,7 +548,7 @@ export function buildProgram(): Command {
         force: opts.force === true,
         insecure: opts.insecure === true,
         dbPath: typeof opts.db === "string" ? opts.db : undefined,
-        json: globalJson(cmd),
+        json,
       });
     });
 

@@ -19,7 +19,7 @@ import { printError, printSuccess } from "../output.ts";
 
 export interface AddApiOptions {
   name: string;
-  spec: string;
+  spec?: string;
   baseUrl?: string;
   dir?: string;
   force?: boolean;
@@ -56,19 +56,32 @@ export async function addApiCommand(opts: AddApiOptions): Promise<number> {
     return 2;
   }
 
+  const mode: "spec" | "run-only" = opts.spec ? "spec" : "run-only";
+  const artifacts = mode === "spec"
+    ? ["spec.json", ".api-catalog.yaml", ".api-resources.yaml", ".api-fixtures.yaml", ".env.yaml"]
+    : [".env.yaml"];
+
   if (opts.json) {
     printJson(jsonOk("add-api", {
       api: opts.name,
+      mode,
       collectionId: result.collectionId,
       baseDir: result.baseDir,
       testPath: result.testPath,
       endpoints: result.specEndpoints,
-      artifacts: ["spec.json", ".api-catalog.yaml", ".api-resources.yaml", ".api-fixtures.yaml"],
+      artifacts,
     }, result.warnings));
   } else {
-    printSuccess(`Registered API '${opts.name}' at ${result.baseDir} (${result.specEndpoints} endpoints)`);
-    process.stdout.write(`  Artifacts: spec.json + .api-catalog.yaml + .api-resources.yaml + .api-fixtures.yaml\n`);
-    process.stdout.write(`  Next: run \`zond doctor --api ${opts.name}\` to see required fixtures.\n`);
+    if (mode === "spec") {
+      printSuccess(`Registered API '${opts.name}' at ${result.baseDir} (${result.specEndpoints} endpoints)`);
+      process.stdout.write(`  Artifacts: spec.json + .api-catalog.yaml + .api-resources.yaml + .api-fixtures.yaml\n`);
+      process.stdout.write(`  Next: run \`zond doctor --api ${opts.name}\` to see required fixtures.\n`);
+    } else {
+      printSuccess(`Registered API '${opts.name}' at ${result.baseDir} (no spec — run-only mode)`);
+      process.stdout.write(`  Artifacts: .env.yaml (base_url=${opts.baseUrl})\n`);
+      process.stdout.write(`  Next: write tests in ${result.testPath}/, run \`zond run --api ${opts.name} <test.yaml>\`.\n`);
+      process.stdout.write(`  To enable generate/probe/validate-schema, attach a spec: \`zond refresh-api ${opts.name} --spec <path|url>\`.\n`);
+    }
     if (result.warnings) for (const w of result.warnings) process.stderr.write(`Warning: ${w}\n`);
   }
   return 0;
