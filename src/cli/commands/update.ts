@@ -1,4 +1,4 @@
-import { VERSION } from "../version.ts";
+import { VERSION, REPO } from "../version.ts";
 import { isCompiledBinary } from "../runtime.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
@@ -8,7 +8,6 @@ export interface UpdateOptions {
   check?: boolean;
 }
 
-const REPO = "kirrosh/zond";
 const GITHUB_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 
 interface GitHubRelease {

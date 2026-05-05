@@ -53,6 +53,34 @@ describe("checkAssertions", () => {
     });
   });
 
+  describe("kind tagging (TASK-115)", () => {
+    test("status assertion is primary", () => {
+      const r = checkAssertions({ status: 200 }, makeResponse({ status: 200 }));
+      expect(r[0]!.kind).toBe("primary");
+    });
+
+    test("duration assertion is auxiliary", () => {
+      const r = checkAssertions({ duration: 100 }, makeResponse({ duration_ms: 50 }));
+      expect(r[0]!.kind).toBe("auxiliary");
+    });
+
+    test("header assertion is auxiliary", () => {
+      const r = checkAssertions(
+        { headers: { "content-type": "application/json" } },
+        makeResponse({ headers: { "content-type": "application/json" } }),
+      );
+      expect(r[0]!.kind).toBe("auxiliary");
+    });
+
+    test("body assertion is primary", () => {
+      const r = checkAssertions(
+        { body: { id: { equals: 42 } } },
+        makeResponse({ body_parsed: { id: 42 } }),
+      );
+      expect(r[0]!.kind).toBe("primary");
+    });
+  });
+
   describe("duration", () => {
     test("passes when duration is within limit", () => {
       const results = checkAssertions({ duration: 200 }, makeResponse({ duration_ms: 100 }));

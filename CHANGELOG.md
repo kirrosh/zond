@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **TASK-110: `zond report case-study <failure-id>` — markdown drafts for
+  one failure.** Companion to TASK-107: zooms into a single `results.id`
+  and produces a ready-to-edit case-study (TL;DR, spec snippet, curl,
+  response, "why it matters", provenance) primed for `gh issue create
+  --body-file -` or a Slack write-up. Powers a **Case study draft**
+  button on the Run detail UI (clipboard via
+  `GET /api/results/:id/case-study.md`). Missing fields become explicit
+  `<TODO: ...>` placeholders.
+
+- **TASK-107: `zond report export <run-id>` — single-file HTML run reports.**
+  Materialises a stored run as a self-contained HTML (inline CSS + JS, no
+  external assets) you can attach to a GitHub issue, drop into Slack, or
+  archive offline. Includes pass-rate ring, KPI strip, collapsible failure
+  cards with provenance + frozen OpenAPI excerpts, **Copy curl** and
+  **Copy as GitHub issue** buttons, failure-class filter chips, and an
+  endpoint × method coverage map. Light/dark themes via
+  `prefers-color-scheme`; print-friendly for browser-PDF export.
+
 ### Breaking
 
 - **TASK-73: top-level `--json` removed.** `--json` was previously a global

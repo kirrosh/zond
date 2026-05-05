@@ -360,7 +360,7 @@ describe("runMassAssignmentProbes", () => {
     expect(v.summary).toMatch(/5xx/);
   });
 
-  it("skips PATCH/PUT when env doesn't supply path id", async () => {
+  it("skips PATCH/PUT when env doesn't supply path id (--no-discover)", async () => {
     const patch = ep({
       method: "PATCH",
       path: "/users/{id}",
@@ -373,10 +373,59 @@ describe("runMassAssignmentProbes", () => {
       endpoints: [patch],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
+      discover: false,
     });
     expect(result.verdicts[0]!.severity).toBe("skipped");
     expect(result.verdicts[0]!.skipReason).toMatch(/PATCH requires existing resource id/);
     expect(calls).toHaveLength(0);
+  });
+
+  it("auto-discovers path-param via GET-on-list (TASK-92)", async () => {
+    let createdId = "discovered-user-id";
+    responder = (req) => {
+      if (req.method === "GET" && req.url === "https://api.test/users") {
+        return { status: 200, body: { data: [{ id: createdId }] } };
+      }
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        // baseline of PATCH? PATCH never sends to POST. So this branch is moot for PATCH.
+        return { status: 200, body: { id: createdId } };
+      }
+      // PATCH calls (baseline or injected)
+      if (req.method === "PATCH") {
+        if (isBaseline(req.body)) return { status: 200, body: { id: createdId, name: "alice" } };
+        return { status: 400, body: { error: "additional property not allowed" } };
+      }
+      return { status: 404 };
+    };
+    const list = ep({
+      method: "GET",
+      path: "/users",
+      requestBodySchema: undefined,
+      requestBodyContentType: undefined,
+      responses: [{ statusCode: 200, description: "ok", schema: userResponseSchema }],
+    });
+    const patch = ep({
+      method: "PATCH",
+      path: "/users/{id}",
+      requestBodySchema: userSchema,
+      responses: [{ statusCode: 200, description: "ok", schema: userResponseSchema }],
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+      ],
+    });
+    const result = await runMassAssignmentProbes({
+      endpoints: [list, patch],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const v = result.verdicts.find(x => x.method === "PATCH")!;
+    expect(v.severity).not.toBe("skipped");
+    // The PATCH URL should have the discovered id substituted in.
+    const patchCall = calls.find(c => c.method === "PATCH")!;
+    expect(patchCall.url).toBe(`https://api.test/users/${createdId}`);
+    // GET /users should have been called exactly once (cached).
+    expect(calls.filter(c => c.method === "GET" && c.url === "https://api.test/users")).toHaveLength(1);
   });
 
   it("auth header injected from vars", async () => {

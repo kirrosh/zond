@@ -910,6 +910,7 @@ describe("header captures", () => {
       expect(result.steps[0]!.status).toBe("fail");
       expect(result.steps[1]!.status).toBe("skip");
       expect(result.steps[1]!.error).toMatch(/missing capture: audience_id/);
+      expect(result.steps[1]!.failure_class).toBe("cascade");
     });
 
     test("always:true respects skip_if (explicit user skip still fires)", async () => {
@@ -960,6 +961,8 @@ describe("header captures", () => {
     expect(result.steps[0]!.status).toBe("error");
     expect(result.steps[1]!.status).toBe("skip");
     expect(result.steps[1]!.error).toMatch(/missing capture: thing_id/);
+    expect(result.steps[1]!.failure_class).toBe("cascade");
+    expect(result.steps[1]!.failure_class_reason).toMatch(/Upstream capture not produced: thing_id/);
   });
 });
 

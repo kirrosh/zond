@@ -95,9 +95,6 @@ Build pipeline:
   DB-фильтр `all_passed`/`has_failures`.
 - `GET /api/runs/:id` — `{ run, results }` (поверх `getRunById` +
   `getResultsByRunId`).
-- `GET /api/runs/:id/stream` — SSE-стрим прогресса. Сейчас отдаёт
-  синтетический ramp-up для любого run (wiring); реальный progress-stream
-  поверх runner-а — TASK-104.
 
 ## Известные ограничения и обходы
 

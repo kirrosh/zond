@@ -36,7 +36,13 @@ import {
   findGetByIdCounterpart,
   captureFieldFor,
   hasJsonBody,
+  liveAuthHeaders,
 } from "./shared.ts";
+import {
+  createDiscoveryCache,
+  discoverPathParams,
+  type DiscoveryCache,
+} from "./path-discovery.ts";
 
 // ──────────────────────────────────────────────
 // Suspected fields (the "classic" mass-assignment vectors)
@@ -140,6 +146,8 @@ export interface MassAssignmentOptions {
   noCleanup?: boolean;
   /** Per-request fetch timeout (ms). */
   timeoutMs?: number;
+  /** When false, skip auto-discovery of path-param fixtures via GET-on-list (TASK-92). */
+  discover?: boolean;
 }
 
 export interface MassAssignmentResult {
@@ -219,37 +227,6 @@ function suspectedExtras(ep: EndpointInfo): Record<string, unknown> {
 // URL building / auth
 // ──────────────────────────────────────────────
 
-function authHeadersLive(
-  ep: EndpointInfo,
-  schemes: SecuritySchemeInfo[],
-  vars: Record<string, string>,
-): Record<string, string> {
-  if (ep.security.length === 0) return {};
-  for (const secName of ep.security) {
-    const scheme = schemes.find(s => s.name === secName);
-    if (!scheme) continue;
-    if (scheme.type === "http") {
-      if (scheme.scheme === "bearer" || !scheme.scheme) {
-        const tok = vars["auth_token"];
-        if (tok) return { Authorization: `Bearer ${tok}` };
-      }
-      if (scheme.scheme === "basic") {
-        const tok = vars["auth_token"];
-        if (tok) return { Authorization: `Basic ${tok}` };
-      }
-    }
-    if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
-      if (scheme.apiKeyName === "Authorization") {
-        const tok = vars["auth_token"];
-        if (tok) return { Authorization: `Bearer ${tok}` };
-      }
-      const key = vars["api_key"];
-      if (key) return { [scheme.apiKeyName]: key };
-    }
-  }
-  return {};
-}
-
 function buildUrl(
   ep: EndpointInfo,
   vars: Record<string, string>,
@@ -270,6 +247,8 @@ export async function runMassAssignmentProbes(
   opts: MassAssignmentOptions,
 ): Promise<MassAssignmentResult> {
   const { endpoints, securitySchemes, vars, noCleanup, timeoutMs } = opts;
+  const discover = opts.discover !== false;
+  const cache: DiscoveryCache = createDiscoveryCache();
   const verdicts: EndpointVerdict[] = [];
   const warnings: string[] = [];
   let totalEndpoints = 0;
@@ -285,24 +264,41 @@ export async function runMassAssignmentProbes(
       continue;
     }
 
-    // PATCH/PUT typically need an existing resource id in the path. We can
-    // probe them only when env supplies a value for every path placeholder.
-    // POST is the primary surface; PATCH/PUT we skip with a note when the
-    // path can't be resolved.
-    if (m !== "POST") {
-      const probe = buildUrl(ep, vars);
-      if (probe.unresolved.length > 0) {
+    // Resolve path placeholders, attempting auto-discovery when env doesn't
+    // supply them and the spec has a sibling list endpoint (TASK-92).
+    let effectiveVars = vars;
+    const probe = buildUrl(ep, vars);
+    if (probe.unresolved.length > 0) {
+      if (!discover) {
+        const reason =
+          m === "POST"
+            ? `cannot resolve path placeholders: ${probe.unresolved.join(", ")} (set them in --env file)`
+            : `${m} requires existing resource id; missing env vars: ${probe.unresolved.join(", ")}`;
+        verdicts.push(skipped(ep, reason));
+        continue;
+      }
+      const discovered = await discoverPathParams({
+        ep,
+        unresolved: probe.unresolved,
+        allEndpoints: endpoints,
+        schemes: securitySchemes,
+        vars,
+        cache,
+        timeoutMs,
+      });
+      if (discovered.kind === "miss") {
         verdicts.push(
           skipped(
             ep,
-            `${m} requires existing resource id; missing env vars: ${probe.unresolved.join(", ")}`,
+            `cannot resolve path placeholders: ${probe.unresolved.join(", ")} — auto-discover failed (${discovered.reason})`,
           ),
         );
         continue;
       }
+      effectiveVars = { ...vars, ...discovered.values };
     }
 
-    const verdict = await probeEndpoint(ep, endpoints, securitySchemes, vars, {
+    const verdict = await probeEndpoint(ep, endpoints, securitySchemes, effectiveVars, {
       noCleanup: noCleanup === true,
       timeoutMs,
     });
@@ -372,7 +368,7 @@ async function probeEndpoint(
   const headers: Record<string, string> = {
     "content-type": "application/json",
     accept: "application/json",
-    ...authHeadersLive(ep, schemes, vars),
+    ...liveAuthHeaders(ep, schemes, vars),
   };
 
   const verdict: EndpointVerdict = {
@@ -499,7 +495,7 @@ async function probeEndpoint(
               url: getUrl.url,
               headers: {
                 accept: "application/json",
-                ...authHeadersLive(getEp, schemes, vars),
+                ...liveAuthHeaders(getEp, schemes, vars),
               },
             },
             { timeout: opts.timeoutMs ?? 30000, retries: 0 },
@@ -537,7 +533,7 @@ async function probeEndpoint(
                 url: delUrl.url,
                 headers: {
                   accept: "application/json",
-                  ...authHeadersLive(delEp, schemes, vars),
+                  ...liveAuthHeaders(delEp, schemes, vars),
                 },
               },
               { timeout: opts.timeoutMs ?? 30000, retries: 0 },
@@ -592,7 +588,7 @@ async function tryCleanupBaseline(
         url: delUrl.url,
         headers: {
           accept: "application/json",
-          ...authHeadersLive(delEp, schemes, vars),
+          ...liveAuthHeaders(delEp, schemes, vars),
         },
       },
       { timeout: opts.timeoutMs ?? 30000, retries: 0 },

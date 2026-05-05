@@ -87,17 +87,37 @@ zond ci init
 
 ## CLI Commands
 
+All spec-consuming commands (`catalog`, `describe`, `generate`,
+`probe-*`, `lint-spec`) accept either a positional `<spec>` path/URL
+**or** `--api <name>` to use the workspace-local snapshot at
+`apis/<name>/spec.json`. If neither is given, they fall back to the API
+selected via `zond use`.
+
 | Command | Description | Key flags |
 |---------|-------------|-----------|
-| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--report json\|junit`, `--report-out <file>` |
+| `init` | Bootstrap a workspace (`zond.config.yml`, `apis/`, `AGENTS.md`, `.claude/skills/`) | `--no-agents-md`, `--no-skills` |
+| `add api <name>` | Register an API: copy spec into `apis/<name>/spec.json` and emit catalog/resources/fixtures artifacts | `--spec <path\|url>`, `--base-url`, `--force`, `--insecure`, `--db` |
+| `refresh-api <name>` | Re-snapshot spec.json + regenerate the 3 artifacts | `--spec <path\|url>`, `--insecure` |
+| `doctor` | Fixture gaps in `.env.yaml` + artifact freshness vs spec.json (exit 0/1/2) | `--api <name>` |
+| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--session-id <id>`, `--report json\|junit`, `--report-out <file>` |
+| `session start\|end\|status` | Group multiple `zond run` calls into one campaign in `/runs` Sessions view | `--label <text>`, `--id <uuid>` |
 | `validate <path>` | Validate YAML tests | |
-| `coverage` | API test coverage | `--spec`, `--tests`, `--fail-on-coverage <N>` |
+| `coverage` | API test coverage | `--spec`, `--tests`, `--api`, `--fail-on-coverage <N>` |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
-| `probe-validation <spec>` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup` |
-| `probe-methods <spec>` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--output <dir>`, `--tag` |
-| `probe-mass-assignment <spec>` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--timeout <ms>` |
-| `lint-spec <spec>` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--strict`, `--rule <list>`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
+| `probe-validation [spec]` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup` |
+| `probe-methods [spec]` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--api <name>`, `--output <dir>`, `--tag` |
+| `probe-mass-assignment [spec]` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--no-discover`, `--timeout <ms>` |
+| `lint-spec [spec]` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--api <name>`, `--strict`, `--rule <list>`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
+| `catalog [spec]` | Standalone build of `.api-catalog.yaml` (registered APIs already have one in `apis/<name>/`) | `--api <name>`, `--output <dir>` |
+| `describe [spec]` | Describe endpoints from OpenAPI spec | `--api <name>`, `--compact`, `--list-params`, `--method`, `--path` |
+| `generate [spec]` | Autogenerate test suites; combine with `--uncovered-only` to top up after `zond refresh-api` | `--api <name>`, `--output`, `--tag`, `--uncovered-only` |
+| `report export <run-id>` | Export a stored run as a single-file shareable HTML report | `-o, --output <file>`, `--db <path>` |
+| `report case-study <failure-id>` | Generate a markdown case-study draft for a single failure | `-o, --output <file>`, `--db <path>` |
+
+> **Deprecated**: `zond init --spec <path> --name <api>` (and `--with-spec`) still
+> work but print a stderr warning. Prefer `zond init` followed by
+> `zond add api <name> --spec <path>`.
 
 ### `lint-spec` — static OpenAPI analysis (pre-flight, zero HTTP)
 
@@ -324,6 +344,109 @@ least set `base_url`. Bearer / API-key tokens are read from `auth_token` /
 `api_key` (matching `zond run`'s convention). Path-param placeholders
 (e.g. `{orgId}`) are substituted from the same env — set them explicitly to
 unlock PATCH/PUT probing.
+
+**Path-param auto-discovery (TASK-92).** When env doesn't supply a value for
+a path placeholder (`{domain_id}`, `{webhook_id}`, …), the probe tries to
+find a sibling list endpoint in the spec — `GET /domains` for
+`/domains/{domain_id}` — call it once per run, and pull the first item's id
+(`data[0].id`, `items[0].id`, top-level `[0].id`). The discovered value is
+cached per `GET <listPath>` so all endpoints sharing the same parent
+resource pay only one extra HTTP call. Nested collections
+(`/orgs/{org_id}/projects/{project_id}`) are resolved recursively.
+If the list is empty / 4xx / not in the spec, the endpoint still goes to
+SKIPPED but the digest spells out *why*
+(e.g. `auto-discover failed (GET /domains returned empty list)`) instead of
+the generic missing-env message. Use `--no-discover` to disable when GET
+side-effects are unwanted.
+
+---
+
+### `report export` — single-file shareable HTML run reports
+
+After a run lives in SQLite (`zond.db`), `zond report export <run-id>`
+materialises it as a self-contained HTML file you can drop into a Slack
+thread, attach to a GitHub issue, or open offline weeks later — no
+`zond serve` required.
+
+```bash
+zond report export 42                       # → zond-run-42.html
+zond report export 42 -o triage/run-42.html # custom path
+zond report export 42 --db ./other.db       # alt DB file
+```
+
+The output is a single `.html` with **inline CSS and JS, zero external
+assets** (no fonts, no CDN scripts) so it renders identically in any
+browser, behind corporate proxies, or in `file://`. Light + dark themes
+auto-switch via `prefers-color-scheme`; print-friendly CSS is included for
+PDF export from the browser.
+
+What's inside, top-to-bottom:
+
+1. **Run summary hero** — pass-rate ring (colour-coded by threshold),
+   spec name, base_url, started/finished/duration, branch + short commit.
+2. **KPI strip** — total / passed / failed / errored / skipped counters.
+3. **Failure cards** — one per failed/errored step, collapsible, with:
+   - method + endpoint + HTTP status badge,
+   - failure_class badge (`definitely_bug` / `likely_bug` / `quirk` /
+     `env_issue`) and reason on hover,
+   - **Copy curl** button for one-line repro,
+   - **Copy as GitHub issue** button — emits ready-to-paste markdown
+     with method/URL, status, failure class, curl block, response body,
+     OpenAPI pointer, and a list of failed assertions,
+   - tabbed evidence panel: Response (headers + body, JSON-highlighted),
+     Request, Assertions, Source (provenance + frozen spec excerpt).
+4. **Filter chips** by failure_class (e.g. show only `definitely_bug`).
+5. **Coverage map** — endpoint × method matrix, colour-coded by worst
+   observed status class (2xx / 4xx / 5xx / network err).
+6. **Footer** — zond version, generation timestamp, project link.
+
+Typical size: a 50-endpoint run lands in 50–150 KB. `--json` envelope
+output is supported and includes `sizeKb`, `output`, `failures`, and
+`totalSteps`. Exit codes: `0` ok, `1` run-id not found, `2` invalid
+input.
+
+---
+
+### `report case-study` — markdown draft for one failure
+
+`zond report export` gives you the full HTML run; `zond report case-study
+<failure-id>` zooms in on **one** failure and produces a markdown draft
+ready to drop into a tracker, blog post, or Slack write-up. Every session
+should leave behind one such artefact — this command removes the friction
+of starting from a blank page.
+
+```bash
+zond report case-study 2                 # print to stdout
+zond report case-study 2 -o draft.md     # write to file
+zond report case-study 2 | gh issue create --title "POST /pets 5xx" --body-file -
+```
+
+`<failure-id>` is the `results.id` (one row per step, not the run-id).
+Find one via `zond db run <run-id>` — failed/errored rows are the obvious
+candidates. The same draft is also reachable from `zond serve` →
+Run detail → **Case study draft** button on each failure card (writes
+to clipboard via `GET /api/results/:id/case-study.md`).
+
+The template fills itself from existing run data:
+
+- **TL;DR** — chosen by `failure_class` (`definitely_bug` /
+  `likely_bug` / `quirk` / `env_issue`), each gets a different one-liner.
+- **Context** — API title + version pulled from the registered
+  collection's OpenAPI `info` (best-effort: if the spec is unreachable
+  at export time the field becomes `<TODO: ...>` instead of failing).
+- **What the spec says** — JSON pointer + frozen excerpt captured at
+  run time (so later spec edits don't rewrite history).
+- **Repro** — the same `curl` block as the HTML report.
+- **What happened** — status + duration + pretty-printed response body.
+- **Why it matters** — `failure_class_reason` + every failed assertion
+  expanded as `expected vs actual`.
+- **How zond found it** — provenance (which generator, which response
+  branch, which suite).
+
+Anything zond couldn't determine becomes an explicit `<TODO: ...>`
+placeholder so you immediately see the gaps to fill in by hand. Exit
+codes match the rest of the family: `0` ok, `1` failure-id not found,
+`2` invalid input.
 
 ---
 
@@ -566,20 +689,23 @@ no `openapi_spec`, the run exits with code 2.
 
 ## Bootstrapping a workspace
 
-In a fresh directory, run `zond init` (no flags) to scaffold a zond workspace:
-
 ```bash
 mkdir my-api-tests && cd my-api-tests
-zond init                                    # creates zond.config.yml, apis/, AGENTS.md
+zond init                                              # workspace: zond.config.yml + apis/ + AGENTS.md + .claude/skills/
+zond add api my-api --spec ./openapi.json              # register: copies spec into apis/my-api/spec.json + emits 3 artifacts + .env.yaml
+zond doctor --api my-api                               # report what to fill in apis/my-api/.env.yaml
 ```
 
-Pass `--no-agents-md` to skip writing `AGENTS.md` (only `zond.config.yml` + `apis/` will be created).
+`zond init` is idempotent — re-running re-emits skill files and updates the
+`<!-- zond:start --> / <!-- zond:end -->` block in `AGENTS.md` without
+touching surrounding content.
 
-Combo: `zond init --with-spec <path> --name <api>` bootstraps the workspace **and** registers the first API in one shot.
+Pass `--no-agents-md` or `--no-skills` to skip the corresponding template.
 
-`AGENTS.md` is written between `<!-- zond:start -->` / `<!-- zond:end -->` markers, so an existing `AGENTS.md` is preserved and re-running `zond init` is idempotent (the block is replaced, surrounding content untouched).
-
-The legacy `zond init --spec <path> --name <api>` keeps registering a single API without bootstrapping — backwards compatible.
+> **Deprecated**: `zond init --spec <path> --name <api>` and `zond init
+> --with-spec <path>` still bootstrap + register in one step but print a
+> stderr warning. New scripts should use the two-step `zond init` +
+> `zond add api`.
 
 ---
 
@@ -594,7 +720,52 @@ zond resolves the workspace root via walk-up from the current directory. The fir
 
 The walk stops at `$HOME` to avoid accidentally adopting `~/apis` or `~/zond.db` when zond is invoked from an unrelated directory. If no marker is found, zond falls back to the current directory and prints a one-time warning to stderr — run `zond init` (or create `zond.config.yml`) to anchor the workspace explicitly.
 
-The workspace root is used as the default location for `zond.db`, the `apis/<name>/` directory created by `zond init`, and the `.zond-current` file written by `zond use`. Explicit `--db` and `--dir` flags always win over walk-up.
+The workspace root is used as the default location for `zond.db`, the `apis/<name>/` directory created by `zond add api`, and the `.zond-current` file written by `zond use`. Explicit `--db` and `--dir` flags always win over walk-up.
+
+### Per-API artifacts (`apis/<name>/`)
+
+`zond add api` and `zond refresh-api` produce a self-contained set of files
+agents and tools read instead of the raw spec — keeps token cost bounded
+and makes API drift git-visible.
+
+| File | Role | Read by |
+|------|------|---------|
+| `spec.json` | Dereferenced OpenAPI snapshot — canonical machine source. | `generate`, `probe-*`, `--validate-schema`, anything that needs full schemas. |
+| `.api-catalog.yaml` | Compressed endpoint index (method/path/params/compressed schemas). | Skill prose, `describe`. **Cheap to read.** |
+| `.api-resources.yaml` | CRUD chains: idParam, captureField, FK dependencies, ETag/soft-delete flags, orphan endpoints. | Scenario authoring, audit setup. |
+| `.api-fixtures.yaml` | Required `{{vars}}` classified by source (server/auth/path/header) with descriptions and affected-endpoint lists. | `zond doctor`, scenarios skill. |
+| `.env.yaml` | User-provided values for the fixture manifest. Auto-gitignored. | Every test run. |
+
+The `.api-*.yaml` files are read-only — regenerate via
+`zond refresh-api <name>`. `collections.openapi_spec` in the SQLite DB now
+stores the workspace-relative path to the local snapshot
+(`apis/<name>/spec.json`), so workspaces are portable.
+
+`zond doctor [--api X]` is the one-shot health check: surfaces missing
+fixtures, stale artifacts (specHash mismatch), and missing snapshots in
+one report. JSON envelope mode (`--json`) is the integration point for
+agents.
+
+### Sessions — group multiple runs into one campaign
+
+A "session" stitches multiple `zond run` invocations under one `session_id` so the dashboard's `/runs` view collapses them into a single row instead of N scattered runs. Use it when running a typical sweep — `smoke + probe-methods + probe-validation + mass-assignment` — and you want them grouped as one campaign.
+
+```bash
+zond session start --label "post-deploy sweep"   # writes UUID to .zond/current-session
+zond run apis/resend/tests --tag smoke            # auto-picks up the session
+zond run apis/resend/probes/methods               # same session
+zond run apis/resend/probes/validation            # same session
+zond session end                                  # removes .zond/current-session
+zond session status                               # show what's active
+```
+
+`session_id` resolution order in `zond run`:
+
+1. `--session-id <uuid>` flag (explicit override)
+2. `ZOND_SESSION_ID` env var (CI-friendly)
+3. `.zond/current-session` file (set by `zond session start`)
+
+If none of those is set, the run is "ad-hoc" and shows up alone in `/runs`. Old runs without `session_id` continue to render in the legacy `Runs` tab.
 
 ### `zond serve` port handling
 
@@ -658,9 +829,10 @@ single uniform envelope so a downstream parser only needs one shape:
 ```
 
 Holds for `db collections|runs|run|diagnose|compare`, `validate`, `coverage`,
-`generate`, `probe-*`, `request`, `init`, `describe`, `use`, `sync`, `update`,
-`postman`, `catalog`, `guide`. The `data` payload shape varies by command (e.g.
-`db run`'s `data` is `{ run, results }`); the envelope itself does not.
+`generate`, `probe-*`, `request`, `init`, `add api`, `refresh-api`, `doctor`,
+`describe`, `use`, `update`, `postman`, `catalog`. The `data` payload shape
+varies by command (e.g. `db run`'s `data` is `{ run, results }`); the envelope
+itself does not.
 
 `run` (test execution) is the exception — historically `--json` collided with
 `--report json`. Use `--report json` for the report payload; `--report-out

@@ -9,21 +9,31 @@ import { initCommand } from "./commands/init.ts";
 import { describeCommand } from "./commands/describe.ts";
 import { dbCommand } from "./commands/db.ts";
 import { requestCommand } from "./commands/request.ts";
-import { guideCommand } from "./commands/guide.ts";
 import { generateCommand } from "./commands/generate.ts";
 import { probeValidationCommand } from "./commands/probe-validation.ts";
 import { probeMethodsCommand } from "./commands/probe-methods.ts";
 import { lintSpecCommand } from "./commands/lint-spec.ts";
 import { probeMassAssignmentCommand } from "./commands/probe-mass-assignment.ts";
 import { exportCommand } from "./commands/export.ts";
-import { syncCommand } from "./commands/sync.ts";
+import { reportExportHtmlCommand, reportCaseStudyCommand } from "./commands/report.ts";
 import { updateCommand } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
 import { completionsCommand, COMPLETION_SHELLS, type CompletionShell } from "./commands/completions.ts";
 import { useCommand } from "./commands/use.ts";
+import {
+  sessionStartCommand,
+  sessionEndCommand,
+  sessionStatusCommand,
+} from "./commands/session.ts";
+import { doctorCommand } from "./commands/doctor.ts";
+import { refreshApiCommand } from "./commands/refresh-api.ts";
+import { addApiCommand } from "./commands/add-api.ts";
+import { resolveSessionId } from "../core/context/session.ts";
+import { resolveCollectionSpec } from "../core/setup-api.ts";
 
 import { readCurrentApi } from "../core/context/current.ts";
 import { printError } from "./output.ts";
+import { jsonError, printJson } from "./json-envelope.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { VERSION } from "./version.ts";
 import { getDb } from "../db/schema.ts";
@@ -152,10 +162,52 @@ function resolveApiCollection(apiName: string, dbPath: string | undefined):
     getDb(dbPath);
     const col = findCollectionByNameOrId(apiName);
     if (!col) return { error: `API '${apiName}' not found` };
-    return { spec: col.openapi_spec ?? null, testPath: col.test_path ?? null };
+    const spec = col.openapi_spec ? resolveCollectionSpec(col.openapi_spec) : null;
+    return { spec, testPath: col.test_path ?? null };
   } catch (err) {
     return { error: `Failed to resolve --api: ${(err as Error).message}` };
   }
+}
+
+/**
+ * Resolve a `<spec>` argument used by spec-consuming commands —
+ * catalog, sync, generate, probe-validation, probe-methods,
+ * probe-mass-assignment, lint-spec, describe, guide.
+ *
+ * Resolution order:
+ *   1. Explicit positional/flag value — used as-is (URL or filesystem path).
+ *   2. --api <name> — look up the workspace-local snapshot via
+ *      `resolveCollectionSpec`.
+ *   3. .zond-current — same lookup using the currently-selected API.
+ *
+ * Returns `{ spec }` on success, `{ error }` on failure. Centralised here
+ * so commands stay thin and skill/CI prompts can rely on either form.
+ */
+function resolveSpecArg(
+  positional: string | undefined,
+  apiFlag: string | undefined,
+  dbPath: string | undefined,
+): { spec: string } | { error: string } {
+  if (typeof positional === "string" && positional.length > 0) {
+    return { spec: positional };
+  }
+  const apiName = apiFlag ?? readCurrentApi() ?? undefined;
+  if (!apiName) {
+    return {
+      error: "Need a spec — pass it positionally, via --api <name>, or set the current API with `zond use <name>`.",
+    };
+  }
+  const resolved = resolveApiCollection(apiName, dbPath);
+  if ("error" in resolved) return { error: resolved.error };
+  if (!resolved.spec) {
+    return {
+      error:
+        `API '${apiName}' is registered without an OpenAPI spec — this command needs one. ` +
+        `Run \`zond refresh-api ${apiName} --spec <path|url>\` to attach a spec, ` +
+        `or use \`zond run --api ${apiName} <test.yaml>\` for YAML-based testing.`,
+    };
+  }
+  return { spec: resolved.spec };
 }
 
 // ── Program builder ──
@@ -195,8 +247,9 @@ export function buildProgram(): Command {
     .option("--strict-vars", "Hard-fail (exit 2) when a {{var}} reference has no producer (default: warn and continue)")
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
     .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
-    .option("--validate-schema", "Validate JSON responses against the OpenAPI response schema (requires --spec or a collection with openapi_spec set)")
+    .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
+    .option("--session-id <id>", "Group this run under a session. Resolution order: --session-id flag > ZOND_SESSION_ID env > .zond/current-session file (set by 'zond session start')")
     .action(async (pathArg: string | undefined, opts, cmd: Command) => {
       let path = pathArg;
       const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
@@ -248,6 +301,10 @@ export function buildProgram(): Command {
         reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
         validateSchema: opts.validateSchema === true,
         specPath: typeof opts.spec === "string" ? opts.spec : undefined,
+        sessionId: resolveSessionId({
+          flag: typeof opts.sessionId === "string" ? opts.sessionId : null,
+          env: process.env.ZOND_SESSION_ID ?? null,
+        }) ?? undefined,
         json: false,
       });
     });
@@ -315,6 +372,69 @@ export function buildProgram(): Command {
       });
     });
 
+  // ── refresh-api ──
+  program
+    .command("refresh-api <name>")
+    .description("Re-snapshot the OpenAPI spec into apis/<name>/spec.json and regenerate the 3 artifacts (catalog/resources/fixtures)")
+    .option("--spec <path>", "Pull fresh from this path or URL (overrides registered source)")
+    .option("--insecure", "Allow self-signed TLS when --spec is an https URL")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (name: string, opts, cmd: Command) => {
+      process.exitCode = await refreshApiCommand({
+        api: name,
+        spec: opts.spec,
+        insecure: opts.insecure === true,
+        dbPath: typeof opts.db === "string" ? opts.db : undefined,
+        json: globalJson(cmd),
+      });
+    });
+
+  // ── doctor ──
+  program
+    .command("doctor")
+    .description("Diagnose registered API: fixture gaps in .env.yaml + artifact freshness vs spec.json")
+    .option("--api <name>", "API collection name (defaults to the only registered one)")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await doctorCommand({
+        api: opts.api,
+        dbPath: typeof opts.db === "string" ? opts.db : undefined,
+        json: globalJson(cmd),
+      });
+    });
+
+  // ── session ──
+  //
+  // Group multiple `zond run` calls under one session_id without juggling env
+  // vars. `start` writes a UUID to .zond/current-session; subsequent `run`
+  // calls auto-pick it up (priority: --session-id flag > ZOND_SESSION_ID env
+  // > current-session file).
+  const session = program.command("session").description("Manage run grouping (campaigns)");
+  session
+    .command("start")
+    .description("Begin a session — group all subsequent 'zond run' calls under one session_id (.zond/current-session)")
+    .option("--label <text>", "Optional human-readable label shown alongside the session in the UI")
+    .option("--id <uuid>", "Reuse a specific UUID instead of generating one (useful for CI)")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await sessionStartCommand({
+        label: opts.label,
+        id: opts.id,
+        json: globalJson(cmd),
+      });
+    });
+  session
+    .command("end")
+    .description("End the current session — remove .zond/current-session")
+    .action(async (_opts, cmd: Command) => {
+      process.exitCode = await sessionEndCommand({ json: globalJson(cmd) });
+    });
+  session
+    .command("status")
+    .description("Show the active session (if any)")
+    .action(async (_opts, cmd: Command) => {
+      process.exitCode = await sessionStatusCommand({ json: globalJson(cmd) });
+    });
+
   // ── coverage ──
   program
     .command("coverage")
@@ -375,9 +495,19 @@ export function buildProgram(): Command {
     .option("--no-agents-md", "Skip writing AGENTS.md when bootstrapping")
     .option("--no-skills", "Skip writing Claude Code skills under .claude/skills/")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const spec = opts.spec ?? specPos;
+      const json = globalJson(cmd);
+      // Deprecation: registering an API via `init` is now `zond add api <name>
+      // --spec X`. Keep init working for one or two releases; just warn so
+      // skill code and scripts migrate.
+      if ((spec || opts.withSpec) && !json) {
+        process.stderr.write(
+          `Warning: 'zond init --spec' / '--with-spec' is deprecated. Use \`zond add api <name> --spec <path>\` (run \`zond init\` separately to bootstrap the workspace).\n`,
+        );
+      }
       process.exitCode = await initCommand({
         name: opts.name,
-        spec: opts.spec ?? specPos,
+        spec,
         baseUrl: opts.baseUrl,
         dir: opts.dir,
         force: opts.force === true,
@@ -387,21 +517,56 @@ export function buildProgram(): Command {
         withSpec: opts.withSpec,
         noAgents: opts.agentsMd === false,
         noSkills: opts.skills === false,
-        json: globalJson(cmd),
+        json,
+      });
+    });
+
+  // ── add api ──
+  const add = program.command("add").description("Register objects in the workspace");
+  add
+    .command("api <name>")
+    .description("Register an API: from an OpenAPI spec (full toolkit) or just --base-url (run-only mode)")
+    .option("--spec <path>", "Path or URL to OpenAPI spec — enables generate/probe/validate-schema")
+    .option("--base-url <url>", "Base URL recorded in .env.yaml (required if --spec is omitted)")
+    .option("--dir <path>", "Target directory (defaults to apis/<name>/)")
+    .option("--force", "Overwrite an existing API with the same name")
+    .option("--insecure", "Skip TLS verification when fetching the spec from https")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (name: string, opts, cmd: Command) => {
+      const json = globalJson(cmd);
+      if (!opts.spec && !opts.baseUrl) {
+        const m = "Provide --spec <path|url> for a full registration, or --base-url <url> for run-only mode.";
+        if (json) printJson(jsonError("add-api", [m])); else printError(m);
+        process.exitCode = 2;
+        return;
+      }
+      process.exitCode = await addApiCommand({
+        name,
+        spec: opts.spec,
+        baseUrl: opts.baseUrl,
+        dir: opts.dir,
+        force: opts.force === true,
+        insecure: opts.insecure === true,
+        dbPath: typeof opts.db === "string" ? opts.db : undefined,
+        json,
       });
     });
 
   // ── describe ──
   program
-    .command("describe <spec>")
+    .command("describe [spec]")
     .description("Describe endpoints from OpenAPI spec")
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
     .option("--compact", "List all endpoints briefly")
     .option("--list-params", "List all unique parameters across all endpoints")
     .option("--method <method>", "HTTP method for single endpoint detail")
     .option("--path <path>", "Endpoint path for single endpoint detail")
-    .action(async (specPath: string, opts, cmd: Command) => {
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       process.exitCode = await describeCommand({
-        specPath,
+        specPath: resolved.spec,
         compact: opts.compact === true,
         listParams: opts.listParams === true,
         method: opts.method,
@@ -520,14 +685,18 @@ export function buildProgram(): Command {
 
   // ── generate ──
   program
-    .command("generate <spec>")
+    .command("generate [spec]")
     .description("Generate test suites from OpenAPI spec")
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
     .requiredOption("--output <dir>", "Output directory for generated test files")
     .option("--tag <tag>", "Generate only for endpoints with this tag")
     .option("--uncovered-only", "Skip endpoints already covered by existing tests")
-    .action(async (specPath: string, opts, cmd: Command) => {
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       process.exitCode = await generateCommand({
-        specPath,
+        specPath: resolved.spec,
         output: opts.output,
         tag: opts.tag,
         uncoveredOnly: opts.uncoveredOnly === true,
@@ -537,16 +706,20 @@ export function buildProgram(): Command {
 
   // ── probe-validation ──
   program
-    .command("probe-validation <spec>")
+    .command("probe-validation [spec]")
     .description("Generate negative-input probe suites (catches 5xx-on-bad-input bugs)")
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
     .requiredOption("--output <dir>", "Output directory for generated probe files")
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .option("--list-tags", "List available tags from spec and exit")
     .option("--max-per-endpoint <N>", "Cap probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
     .option("--no-cleanup", "Skip emission of follow-up DELETE cleanup steps for mutating probes (use in namespace-isolated test envs)")
-    .action(async (specPath: string, opts, cmd: Command) => {
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       process.exitCode = await probeValidationCommand({
-        specPath,
+        specPath: resolved.spec,
         output: opts.output,
         tag: opts.tag,
         maxPerEndpoint: opts.maxPerEndpoint,
@@ -559,20 +732,25 @@ export function buildProgram(): Command {
 
   // ── probe-mass-assignment ──
   program
-    .command("probe-mass-assignment <spec>")
+    .command("probe-mass-assignment [spec]")
     .description(
       "Live probe for mass-assignment / privilege-escalation: classifies POST/PATCH/PUT against suspected extra fields (is_admin, role, account_id, owner_id, user_id, verified, is_system) as rejected (4xx) | accepted-and-applied (HIGH) | accepted-and-ignored (LOW) via follow-up GET",
     )
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
     .requiredOption("--env <file>", "Env YAML with base_url + auth_token (live calls require this)")
     .option("--output <file>", "Write markdown digest to file (default: stdout)")
     .option("--emit-tests <dir>", "Also emit YAML regression suites locking in safe behaviour for CI")
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .option("--list-tags", "List available tags from spec and exit")
     .option("--no-cleanup", "Skip follow-up DELETE for resources accidentally created by 2xx probes")
+    .option("--no-discover", "Disable auto-discovery of path-param fixtures via GET-on-list (TASK-92)")
     .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
-    .action(async (specPath: string, opts, cmd: Command) => {
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       process.exitCode = await probeMassAssignmentCommand({
-        specPath,
+        specPath: resolved.spec,
         env: opts.env,
         output: opts.output,
         emitTests: opts.emitTests,
@@ -580,6 +758,7 @@ export function buildProgram(): Command {
         listTags: opts.listTags,
         // Commander: --no-cleanup → opts.cleanup === false; default is true.
         noCleanup: opts.cleanup === false,
+        noDiscover: opts.discover === false,
         timeoutMs: opts.timeout,
         json: globalJson(cmd),
       });
@@ -587,8 +766,9 @@ export function buildProgram(): Command {
 
   // ── lint-spec ──
   program
-    .command("lint-spec <spec>")
+    .command("lint-spec [spec]")
     .description("Static-analyse an OpenAPI spec for internal-consistency and strictness gaps (catches bugs before any HTTP)")
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--strict", "Exit non-zero even on LOW-severity issues")
     .option("--ndjson", "Stream issues as one JSON per line (NDJSON), instead of the wrapped envelope")
     .option("--rule <list>", "Comma-separated rule overrides: R1, !R2, R3=high|medium|low")
@@ -596,9 +776,14 @@ export function buildProgram(): Command {
     .option("--include-path <glob...>", "Only lint endpoints whose path matches glob (repeatable)")
     .option("--max-issues <N>", "Stop after N issues", parsePositiveInt("--max-issues"))
     .option("--no-db", "Don't write to lint_runs SQLite history")
-    .action(async (specPath: string, opts, cmd: Command) => {
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      // lint-spec already supports --no-db; if user passes a non-default
+      // --db <path>, commander will surface it as opts.db === string.
+      const dbPath = typeof opts.db === "string" ? opts.db : undefined;
+      const resolved = resolveSpecArg(specPos, opts.api, dbPath);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       process.exitCode = await lintSpecCommand({
-        specPath,
+        specPath: resolved.spec,
         json: globalJson(cmd),
         ndjson: opts.ndjson === true,
         strict: opts.strict === true,
@@ -613,13 +798,17 @@ export function buildProgram(): Command {
 
   // ── probe-methods ──
   program
-    .command("probe-methods <spec>")
+    .command("probe-methods [spec]")
     .description("Generate negative-method probe suites (catches 5xx/2xx on undeclared HTTP methods)")
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
     .requiredOption("--output <dir>", "Output directory for generated probe files")
     .option("--tag <tag>", "Probe only endpoints with this tag")
-    .action(async (specPath: string, opts, cmd: Command) => {
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       process.exitCode = await probeMethodsCommand({
-        specPath,
+        specPath: resolved.spec,
         output: opts.output,
         tag: opts.tag,
         json: globalJson(cmd),
@@ -628,31 +817,21 @@ export function buildProgram(): Command {
 
   // ── catalog ──
   program
-    .command("catalog <spec>")
-    .description("Generate API catalog (compact endpoint reference)")
+    .command("catalog [spec]")
+    .description("Generate API catalog (compact endpoint reference). For registered APIs prefer --api <name>; the artifact is also available at apis/<name>/.api-catalog.yaml.")
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
     .option("--output <dir>", "Output directory (default: current directory)")
-    .action(async (specPath: string, opts, cmd: Command) => {
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       process.exitCode = await catalogCommand({
-        specPath,
+        specPath: resolved.spec,
         output: opts.output,
         json: globalJson(cmd),
       });
     });
 
-  // ── guide ──
-  program
-    .command("guide <spec>")
-    .description("Generate test generation guide from OpenAPI spec")
-    .option("--tests-dir <dir>", "Filter to uncovered endpoints only")
-    .option("--tag <tag>", "Generate only for endpoints with this tag")
-    .action(async (specPath: string, opts, cmd: Command) => {
-      process.exitCode = await guideCommand({
-        specPath,
-        testsDir: opts.testsDir,
-        tag: opts.tag,
-        json: globalJson(cmd),
-      });
-    });
 
   // ── export (with subcommand: postman) ──
   const exportCmd = program.command("export").description("Export tests to other formats");
@@ -672,6 +851,40 @@ export function buildProgram(): Command {
       });
     });
 
+  // ── report (with subcommand: export) ──
+  const reportCmd = program.command("report").description("Export run reports for sharing");
+  reportCmd
+    .command("export <run-id>")
+    .description("Export a stored run as a single-file HTML report (shareable, openable in any browser)")
+    .option("--html", "Render as HTML (default and currently the only supported format)")
+    .option("-o, --output <file>", "Output file path (default: zond-run-<id>.html)")
+    .option("--api <name>", "Embed coverage map for this registered API (auto-detected from run.collection_id)")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (runId: string, opts, cmd: Command) => {
+      process.exitCode = await reportExportHtmlCommand({
+        runId,
+        output: opts.output,
+        api: opts.api,
+        dbPath: opts.db,
+        json: globalJson(cmd),
+      });
+    });
+
+  reportCmd
+    .command("case-study <failure-id>")
+    .description("Generate a markdown case-study draft for a single failure (results.id) — ready to pipe into `gh issue create --body-file -`")
+    .option("-o, --output <file>", "Write the draft to a file (default: print to stdout)")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (failureId: string, opts, cmd: Command) => {
+      process.exitCode = await reportCaseStudyCommand({
+        failureId,
+        output: opts.output,
+        dbPath: opts.db,
+        stdout: !opts.output,
+        json: globalJson(cmd),
+      });
+    });
+
   // ── update / self-update ──
   program
     .command("update")
@@ -681,23 +894,6 @@ export function buildProgram(): Command {
     .action(async (opts, cmd: Command) => {
       process.exitCode = await updateCommand({
         check: opts.check === true,
-        json: globalJson(cmd),
-      });
-    });
-
-  // ── sync ──
-  program
-    .command("sync <spec>")
-    .description("Detect new/removed endpoints and generate tests for new ones")
-    .requiredOption("--tests <dir>", "Path to test files directory")
-    .option("--dry-run", "Show what would be generated without writing files")
-    .option("--tag <tag>", "Limit sync to endpoints with this tag")
-    .action(async (specPath: string, opts, cmd: Command) => {
-      process.exitCode = await syncCommand({
-        specPath,
-        testsDir: opts.tests,
-        dryRun: opts.dryRun === true,
-        tag: opts.tag,
         json: globalJson(cmd),
       });
     });
