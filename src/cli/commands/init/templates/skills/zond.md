@@ -304,9 +304,22 @@ candidate), LOW (2xx, no echo — verify side-effects manually), OK
 **Cleanup is state-aware (TASK-151).** On stateful PUT/PATCH endpoints
 probe-security does `GET` → snapshot → attack → `PUT` original back, so
 DSN-keys / team-names / webhook URLs aren't left with the attack
-payload. POST falls back to `DELETE`-counterpart cleanup. Restore
-failures are surfaced in the digest's `cleanup` line. Pass
-`--no-cleanup` only in namespace-isolated test envs.
+payload. POST falls back to `DELETE`-counterpart cleanup with a short
+eventual-consistency retry (200ms / 1s) — read-replica lag on
+write-then-immediate-delete won't generate false leak warnings.
+Restore failures are accumulated into a `## ⚠️ Cleanup failures`
+section at the **top** of the digest (and tagged `🧹 cleanup-failure`
+inline next to each affected verdict). Pass `--no-cleanup` only in
+namespace-isolated test envs.
+
+**CI exit codes.** `zond probe-security` exits non-zero on either:
+- `HIGH > 0` — at least one finding looks like an actual bug (gate the
+  deploy).
+- `cleanup.error > 0` — probe mutated state it could not restore;
+  manual remediation may be needed before the next run.
+
+For CI: `grep -q "Cleanup failures" digest.md` is a reliable signal of
+the second case.
 
 **Partial PUT support (TASK-152).** Sentry / Stripe / GitHub-shaped
 APIs reject the full spec body on PUT (`422 use partial PUT`). When

@@ -6,6 +6,20 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **TASK-151 round-5 follow-up: eventual-consistency retry on POST
+  cleanup.** SaaS APIs that route `POST` to a write replica and read
+  paths through a follower (Sentry observed this round-5) returned
+  404 to immediate `DELETE` cleanup, even though the resource existed
+  ~10s later. `tryCleanup` now retries 404 with two short backoffs
+  (default 200ms / 1s, configurable via `cleanupRetryDelaysMs`). A
+  404 that survives retries is flagged
+  `persisted across retries — likely real leak`. 5xx, network
+  errors, 401/403 fail fast (not transient).
+- **Skill: documented CI exit codes.** Phase 5.2 now states that
+  `zond probe-security` exits non-zero on either `HIGH > 0` or
+  `cleanup.error > 0`, and that `grep -q "Cleanup failures"
+  digest.md` is a reliable signal for the latter.
+
 - **TASK-151 round-4 follow-up: per-field restore + cleanup-failure
   surfacing.** The first cut of snapshot+restore sent the full GET
   body back as a single PUT, which `422`'d on partial-PUT APIs (Sentry,
