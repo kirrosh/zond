@@ -10,6 +10,8 @@ title: "m-8 audit-cli-gaps notes"
 - [feedback-original.md](feedback-original.md) — исходный фидбэк (2 раунда:
   JSONPlaceholder + Sentry Public API), скопирован из
   `~/Projects/zond-test/feedback-zond.md`. Не трогать (исторический документ).
+- [feedback-round3.md](feedback-round3.md) — раунд 3, повторный проход после
+  закрытия HIGH-задач (TASK-135…139). §J–§N плюс skill-замечания.
 
 ## Карта фидбэк → задачи
 
@@ -30,6 +32,11 @@ title: "m-8 audit-cli-gaps notes"
 | Раунд 2 §4 (skill). env_issue early-stop | TASK-147 |
 | Раунд 2 §6 (skill). `zond db compare` в Phase 4 | TASK-148 |
 | Раунд 2 §F (skill-side). baseline-OK для security | TASK-149 |
+| Раунд 3 §J. cleanup-restore на PUT-rename | TASK-151 |
+| Раунд 3 §K. minimal-body fallback для PUT (proven HIGH false-negative) | TASK-152 |
+| Раунд 3 §L. fuzzy-echo classifier (нормализация CR/LF, URL-decode) | TASK-153 |
+| Раунд 3 §M+§N. digest UX (payload в HIGH-строке, run-команда в конце) | TASK-154 |
+| Раунд 3 §skill. warning о мутации state + entry-point security-only | TASK-155 |
 
 ## Раунд 1 (JSONPlaceholder)
 
