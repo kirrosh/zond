@@ -15,6 +15,7 @@ import { probeValidationCommand } from "./commands/probe-validation.ts";
 import { probeMethodsCommand } from "./commands/probe-methods.ts";
 import { lintSpecCommand } from "./commands/lint-spec.ts";
 import { probeMassAssignmentCommand } from "./commands/probe-mass-assignment.ts";
+import { probeSecurityCommand } from "./commands/probe-security.ts";
 import { exportCommand } from "./commands/export.ts";
 import { reportExportHtmlCommand, reportCaseStudyCommand } from "./commands/report.ts";
 import { updateCommand } from "./commands/update.ts";
@@ -803,6 +804,40 @@ export function buildProgram(): Command {
         // Commander: --no-cleanup → opts.cleanup === false; default is true.
         noCleanup: opts.cleanup === false,
         noDiscover: opts.discover === false,
+        timeoutMs: opts.timeout,
+        json: globalJson(cmd),
+      });
+    });
+
+  // ── probe-security ──
+  program
+    .command("probe-security <classes> [spec]")
+    .description(
+      "Live security probes (TASK-138): SSRF / CRLF / open-redirect. Detects vulnerable fields by name+format, sends a baseline-OK then per-field payloads, classifies HIGH (5xx or echo) / LOW (2xx no echo) / OK (4xx). <classes> is a comma-separated subset of: ssrf, crlf, open-redirect.",
+    )
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
+    .option("--env <file>", "Env YAML with base_url + auth_token (live calls require this; --dry-run can run without)")
+    .option("--output <file>", "Write markdown digest to file (default: stdout)")
+    .option("--emit-tests <dir>", "Also emit YAML regression suites locking in safe behaviour for CI")
+    .option("--tag <tag>", "Probe only endpoints with this tag")
+    .option("--list-tags", "List available tags from spec and exit")
+    .option("--no-cleanup", "Skip follow-up DELETE on resources created by baseline / 2xx attacks")
+    .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests")
+    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
+    .action(async (classes: string, specPos: string | undefined, opts, cmd: Command) => {
+      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      process.exitCode = await probeSecurityCommand({
+        specPath: resolved.spec,
+        classes,
+        env: opts.env,
+        output: opts.output,
+        emitTests: opts.emitTests,
+        tag: opts.tag,
+        listTags: opts.listTags,
+        noCleanup: opts.cleanup === false,
+        dryRun: opts.dryRun === true,
         timeoutMs: opts.timeout,
         json: globalJson(cmd),
       });
