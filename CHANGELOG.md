@@ -6,6 +6,23 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-138: `zond probe-security <classes>` — live SSRF / CRLF /
+  open-redirect probes.** Replaces the markdown templates the audit skill
+  used to ship for Phase 5.2/5.3 (one HIGH stored CRLF on Sentry came
+  from one of those templates — but only after hand-copying it per
+  endpoint). Detects vulnerable fields by name + `format` hints
+  (`*_url` / `webhook` / `format: uri` for SSRF; `subject` / `*_prefix`
+  / `name` / `description` for CRLF; `redirect` / `next` / `return_to`
+  for open-redirect), sends a **baseline-OK** request first (skips the
+  endpoint with `INCONCLUSIVE-BASELINE` if baseline ≠ 2xx — eliminates
+  the 5×404 noise the markdown templates produced on scope-locked
+  endpoints), then attacks each detected field with the class's
+  payloads. Classifies HIGH (5xx **or** payload echoed in 2xx body —
+  stored injection candidate), LOW (2xx, no echo — verify manually),
+  OK (4xx). Idempotent cleanup via DELETE counterpart. `--dry-run`
+  enumerates fields without sending requests. `--emit-tests <dir>`
+  produces regression YAML suites with `always: true` cleanup.
+
 - **TASK-137: `probe-mass-assignment` body-FK auto-discovery.** Required
   body fields named `*_id` / `*_slug` / `*_uuid` / `*_key` are now resolved
   pre-baseline by hitting the matching collection list endpoint
