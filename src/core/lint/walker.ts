@@ -197,9 +197,10 @@ function walkSchema(
     }
   }
 
-  if (schema.items) {
+  const arraySchema = schema as OpenAPIV3.ArraySchemaObject;
+  if (arraySchema.items) {
     walkSchema(
-      schema.items as OpenAPIV3.SchemaObject,
+      arraySchema.items as OpenAPIV3.SchemaObject,
       `${pointer}/items`,
       { ...ctx, propertyName: undefined },
       visit,
