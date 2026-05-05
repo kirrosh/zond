@@ -317,9 +317,12 @@ async function probeOneEndpoint(
       }
     }
     if (perFieldBaseline.size > 0 && snapshot) {
-      // Each successful partial baseline mutated state — restore back so
-      // attacks start from the snapshot.
-      await restoreOriginal(ep, snapshot, headers, schemes, vars, opts, verdict);
+      // Each successful partial baseline mutated only its single key; restore
+      // exactly those before attacks start.
+      await restoreOriginal(
+        ep, snapshot, headers, schemes, vars, opts, verdict,
+        perFieldBaseline.keys(),
+      );
     }
   }
 
@@ -335,10 +338,14 @@ async function probeOneEndpoint(
   }
 
   // Cleanup state mutated by the (full) baseline, before issuing attacks.
-  // With a snapshot → restore PUT. Without → DELETE-counterpart.
+  // With a snapshot → restore PUT (full baseline mutated every key).
+  // Without snapshot → DELETE-counterpart (POST flow).
   if (fullOk && fullBaseline.kind === "ok" && !opts.noCleanup) {
     if (snapshot) {
-      await restoreOriginal(ep, snapshot, headers, schemes, vars, opts, verdict);
+      await restoreOriginal(
+        ep, snapshot, headers, schemes, vars, opts, verdict,
+        Object.keys(baseline),
+      );
     } else {
       await tryCleanup(
         ep, allEndpoints, schemes, vars,
@@ -407,10 +414,15 @@ async function probeOneEndpoint(
 
       // Per-finding cleanup. Snapshot path takes precedence — DELETE on a
       // PUT-rename'd resource would wipe a live entity, restore-PUT puts
-      // it back to the captured original.
+      // it back to the captured original. Only restore the single field
+      // this attack mutated — sending a multi-key body trips
+      // `422 use partial PUT` on Sentry / Stripe / GitHub-shaped APIs.
       if (resp.status >= 200 && resp.status < 300 && !opts.noCleanup) {
         if (snapshot) {
-          await restoreOriginal(ep, snapshot, headers, schemes, vars, opts, verdict);
+          await restoreOriginal(
+            ep, snapshot, headers, schemes, vars, opts, verdict,
+            [hit.field],
+          );
         } else {
           await tryCleanup(
             ep, allEndpoints, schemes, vars,
@@ -512,6 +524,17 @@ async function snapshotOriginal(
   };
 }
 
+/**
+ * Restore the original state captured by `snapshotOriginal`. Sends a
+ * minimal PUT/PATCH containing only the fields the probe mutated —
+ * sending the full snapshot body trips `422 use partial PUT` on
+ * Sentry/Stripe-shaped APIs (round-4 regression), so we replay each
+ * dirty field as its own single-key request.
+ *
+ * `verdict.cleanup.error` is **accumulated** across calls (not
+ * overwritten) so a single restore failure during the run is still
+ * visible in the digest.
+ */
 async function restoreOriginal(
   ep: EndpointInfo,
   snapshot: Snapshot,
@@ -520,43 +543,61 @@ async function restoreOriginal(
   vars: Record<string, string>,
   opts: ProbeStepOpts,
   verdict: SecurityVerdict,
+  dirtyFields: Iterable<string>,
 ): Promise<void> {
   const m = ep.method.toUpperCase();
   const { url, unresolved } = buildUrl(ep, vars);
   if (unresolved.length > 0) return;
   const headers: Record<string, string> = { ...baseHeaders };
-  // Strip read-only / server-managed fields the GET response often echoes
-  // (created_at, updated_at, id) — mirroring them back can confuse the
-  // server with "you can't change this". Best-effort: drop common keys.
-  const restoreBody: Record<string, unknown> = { ...snapshot.body };
-  for (const k of ["id", "created_at", "createdAt", "updated_at", "updatedAt"]) {
-    delete restoreBody[k];
-  }
   if (snapshot.etag && ep.requiresEtag) {
     headers["If-Match"] = snapshot.etag;
   }
-  let resp;
-  try {
-    resp = await executeRequest(
-      { method: m, url, headers, body: JSON.stringify(restoreBody) },
-      { timeout: opts.timeoutMs ?? 30000, retries: 0 },
-    );
-  } catch (err) {
-    verdict.cleanup = {
-      attempted: true,
-      error: `restore network error: ${err instanceof Error ? err.message : String(err)}`,
-    };
-    return;
+  // Filter out fields the API will reject as read-only.
+  const READ_ONLY = new Set([
+    "id", "created_at", "createdAt", "updated_at", "updatedAt",
+  ]);
+  const fields = Array.from(new Set(Array.from(dirtyFields))).filter(
+    f => !READ_ONLY.has(f) && f in snapshot.body,
+  );
+
+  // Per-field PUT — works for both partial-PUT APIs (Sentry) and
+  // full-PUT APIs (the body just carries one of the legal keys).
+  const failures: string[] = [];
+  let lastSuccessStatus = 0;
+  let attempted = false;
+  for (const field of fields) {
+    attempted = true;
+    const body: Record<string, unknown> = { [field]: snapshot.body[field] };
+    let resp;
+    try {
+      resp = await executeRequest(
+        { method: m, url, headers, body: JSON.stringify(body) },
+        { timeout: opts.timeoutMs ?? 30000, retries: 0 },
+      );
+    } catch (err) {
+      failures.push(
+        `restore.${field} network error: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      continue;
+    }
+    if (resp.status < 200 || resp.status >= 300) {
+      failures.push(`restore.${field} failed: ${resp.status}`);
+      continue;
+    }
+    lastSuccessStatus = resp.status;
   }
-  if (resp.status < 200 || resp.status >= 300) {
-    verdict.cleanup = {
-      attempted: true,
-      status: resp.status,
-      error: `restore failed: ${resp.status}`,
-    };
-    return;
-  }
-  verdict.cleanup = { attempted: true, status: resp.status };
+
+  // Merge with any prior cleanup state on this verdict.
+  const prior = verdict.cleanup ?? { attempted: false };
+  const allErrors = [
+    ...(prior.error ? [prior.error] : []),
+    ...failures,
+  ];
+  verdict.cleanup = {
+    attempted: attempted || prior.attempted,
+    ...(lastSuccessStatus ? { status: lastSuccessStatus } : prior.status ? { status: prior.status } : {}),
+    ...(allErrors.length > 0 ? { error: allErrors.join(" | ") } : {}),
+  };
 }
 
 function classify(
@@ -655,10 +696,20 @@ async function tryCleanup(
   opts: ProbeStepOpts,
 ): Promise<void> {
   const delEp = findDeleteCounterpart(ep, allEndpoints);
-  if (!delEp) return;
+  if (!delEp) {
+    // Surface the gap. Round-4 dogfooding: 3 DSN keys leaked from
+    // POST /keys/ silently because the spec didn't expose a DELETE
+    // counterpart — flagging it in the digest gives the operator a
+    // chance to clean up by hand instead of finding out later.
+    accumulateCleanupError(verdict, `no DELETE counterpart for ${ep.method.toUpperCase()} ${ep.path}; possible leaked resource`);
+    return;
+  }
   const idField = captureFieldFor(ep);
   const id = pickId(responseBody, idField);
-  if (!id) return;
+  if (!id) {
+    accumulateCleanupError(verdict, `cleanup skipped: response had no usable id for ${ep.method.toUpperCase()} ${ep.path}`);
+    return;
+  }
   // DELETE path has one path-param at the end; replace it with the captured id.
   const concretePath = delEp.path.replace(/\{[^}]+\}/, encodeURIComponent(String(id)));
   const url = `${(vars["base_url"] ?? "").replace(/\/+$/, "")}${concretePath}`;
@@ -668,13 +719,32 @@ async function tryCleanup(
       { method: "DELETE", url, headers },
       { timeout: opts.timeoutMs ?? 30000, retries: 0 },
     );
-    verdict.cleanup = { attempted: true, status: resp.status };
-  } catch (err) {
+    if (resp.status < 200 || resp.status >= 300) {
+      accumulateCleanupError(verdict, `DELETE ${delEp.path} → ${resp.status} (id=${id})`);
+      return;
+    }
+    const prior = verdict.cleanup ?? { attempted: false };
     verdict.cleanup = {
       attempted: true,
-      error: err instanceof Error ? err.message : String(err),
+      status: resp.status,
+      ...(prior.error ? { error: prior.error } : {}),
     };
+  } catch (err) {
+    accumulateCleanupError(
+      verdict,
+      `DELETE ${delEp.path} network error: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
+}
+
+function accumulateCleanupError(verdict: SecurityVerdict, msg: string): void {
+  const prior = verdict.cleanup ?? { attempted: false };
+  const errors = prior.error ? `${prior.error} | ${msg}` : msg;
+  verdict.cleanup = {
+    attempted: true,
+    ...(prior.status ? { status: prior.status } : {}),
+    error: errors,
+  };
 }
 
 function pickId(body: unknown, field: string): string | number | undefined {
@@ -732,6 +802,21 @@ export function formatSecurityDigest(
   lines.push(`Endpoints scanned: ${result.totalEndpoints} · probed: ${result.specProbed}`);
   lines.push("");
 
+  // Cleanup failures section is mandatory and goes FIRST when present —
+  // round-4 dogfooding: a "green" run (HIGH=0) silently leaked DSN keys
+  // and left renamed projects, because cleanup failures were buried in
+  // per-verdict objects. Surface them prominently so a green probe is a
+  // signal the org is clean, not just that nothing crashed.
+  const cleanupFailures = result.verdicts.filter(v => v.cleanup?.error);
+  if (cleanupFailures.length > 0) {
+    lines.push(`## ⚠️ Cleanup failures (${cleanupFailures.length}) — manual remediation may be required`);
+    lines.push("");
+    for (const v of cleanupFailures) {
+      lines.push(`- **${v.method} ${v.path}** — ${v.cleanup!.error}`);
+    }
+    lines.push("");
+  }
+
   const buckets: Record<SecuritySeverity, SecurityVerdict[]> = {
     high: [], low: [], inconclusive: [], "inconclusive-baseline": [], ok: [], skipped: [],
   };
@@ -752,7 +837,8 @@ export function formatSecurityDigest(
     lines.push(`## ${titles[sev]} (${list.length})`);
     lines.push("");
     for (const v of list) {
-      lines.push(`- **${v.method} ${v.path}** — ${v.summary}`);
+      const cleanupTag = v.cleanup?.error ? " 🧹 cleanup-failure" : "";
+      lines.push(`- **${v.method} ${v.path}**${cleanupTag} — ${v.summary}`);
       for (const f of v.findings) {
         lines.push(`  - \`${f.field}\` / ${f.class} → ${f.status} (${f.severity}) — ${f.reason}`);
       }

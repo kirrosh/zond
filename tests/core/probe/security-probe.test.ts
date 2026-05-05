@@ -418,7 +418,176 @@ describe("runSecurityProbes — TASK-151 snapshot+restore on PUT", () => {
     // Cleanup attempted; the post-baseline restore failed with 500.
     const v = result.verdicts[0]!;
     expect(v.cleanup?.attempted).toBe(true);
-    expect(v.cleanup?.error).toMatch(/restore failed: 500|restore network error/);
+    expect(v.cleanup?.error).toMatch(/restore\.\w+ failed: 500|restore\.\w+ network error/);
+  });
+});
+
+describe("runSecurityProbes — round-4 fixes", () => {
+  it("restore on partial-PUT API uses single-key body and actually rolls state back", async () => {
+    // Mirror Sentry behaviour: PUT 422s on multi-key body, accepts only
+    // partial. Snapshot returned full body. Pre-fix, restoreOriginal
+    // sent the full body and the API rejected it -> live state stayed
+    // mutated. Post-fix, restore sends ONE field at a time.
+    const original = { id: "p1", name: "PE Koshelev Kirill", subjectPrefix: "" };
+    let current: Record<string, unknown> = { ...original };
+    let multiKeyPutCount = 0;
+
+    responder = (req) => {
+      if (req.method === "GET") return { status: 200, body: { ...current } };
+      if (req.method === "PUT") {
+        const body = req.body as Record<string, unknown> | undefined;
+        if (!body) return { status: 400 };
+        // Reject any PUT with >1 mutable key.
+        const keys = Object.keys(body);
+        if (keys.length > 1) {
+          multiKeyPutCount++;
+          return { status: 422, body: { error: "use partial PUT" } };
+        }
+        current = { ...current, ...body };
+        return { status: 200, body: { ...current } };
+      }
+      return { status: 200 };
+    };
+
+    const projectSchema: OpenAPIV3.SchemaObject = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        subjectPrefix: { type: "string" },
+      },
+    };
+    const putEp = ep({
+      method: "PUT",
+      path: "/projects/{id}",
+      requestBodySchema: projectSchema,
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    const getEp = ep({
+      method: "GET",
+      path: "/projects/{id}",
+      requestBodySchema: undefined,
+      requestBodyContentType: undefined,
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+
+    const result = await runSecurityProbes({
+      endpoints: [putEp, getEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test", id: "p1" },
+      classes: ["crlf"],
+    });
+
+    // CRITICAL: live state matches the original — the per-field restore
+    // path actually rolled back the rename'd values.
+    expect(current.name).toBe("PE Koshelev Kirill");
+    expect(current.subjectPrefix).toBe("");
+    expect(JSON.stringify(current)).not.toContain("X-Zond-Injected");
+    // Only the initial full-baseline probe sends multi-key (it's the
+    // shape-discovery step). All subsequent traffic — partial baselines,
+    // attacks, restores — must be single-key.
+    expect(multiKeyPutCount).toBe(1);
+    // Sanity: probe still ran.
+    expect(result.verdicts[0]!.findings.length).toBeGreaterThan(0);
+  });
+
+  it("flags 'no DELETE counterpart' in cleanup error for POST without sibling DELETE", async () => {
+    let createdCount = 0;
+    responder = (req) => {
+      if (req.method === "POST") {
+        createdCount++;
+        return { status: 201, body: { id: `wh_${createdCount}` } };
+      }
+      return { status: 200 };
+    };
+    // POST with NO DELETE counterpart in the spec — every 2xx leaks a row.
+    const postEp = ep({
+      method: "POST",
+      path: "/webhooks",
+      requestBodySchema: { type: "object", properties: { url: { type: "string", format: "uri" } } },
+    });
+    const result = await runSecurityProbes({
+      endpoints: [postEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      classes: ["ssrf"],
+    });
+    const v = result.verdicts[0]!;
+    expect(v.cleanup?.error).toMatch(/no DELETE counterpart/);
+  });
+
+  it("findDeleteCounterpart matches across trailing-slash variants", async () => {
+    // POST /keys/  +  DELETE /keys/{key_id}/  — both have trailing slashes,
+    // exactly the Sentry shape that leaked DSN keys in round-4.
+    let leftover: string[] = [];
+    responder = (req) => {
+      if (req.method === "POST" && req.url.endsWith("/keys/")) {
+        const id = `k_${leftover.length + 1}`;
+        leftover.push(id);
+        return { status: 201, body: { id } };
+      }
+      if (req.method === "DELETE") {
+        const m = req.url.match(/\/keys\/([^/?]+)/);
+        if (m) leftover = leftover.filter(x => x !== m[1]);
+        return { status: 204 };
+      }
+      return { status: 200 };
+    };
+    const postEp = ep({
+      method: "POST",
+      path: "/keys/",
+      requestBodySchema: { type: "object", properties: { url: { type: "string", format: "uri" } } },
+    });
+    const delEp = ep({
+      method: "DELETE",
+      path: "/keys/{key_id}/",
+      requestBodySchema: undefined,
+      requestBodyContentType: undefined,
+      parameters: [
+        { name: "key_id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    await runSecurityProbes({
+      endpoints: [postEp, delEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      classes: ["ssrf"],
+    });
+    // Every created key was successfully deleted.
+    expect(leftover).toEqual([]);
+  });
+
+  it("digest surfaces a Cleanup failures section when cleanup.error is set", () => {
+    const md = formatSecurityDigest(
+      {
+        classes: ["ssrf"],
+        totalEndpoints: 1,
+        specProbed: 1,
+        verdicts: [
+          {
+            method: "POST",
+            path: "/keys",
+            severity: "ok",
+            summary: "fields=[url] · OK=3",
+            detectedFields: [{ field: "url", class: "ssrf" }],
+            findings: [],
+            cleanup: {
+              attempted: true,
+              error: "no DELETE counterpart for POST /keys; possible leaked resource",
+            },
+          },
+        ],
+        warnings: [],
+      },
+      "spec.json",
+    );
+    expect(md).toContain("⚠️ Cleanup failures");
+    expect(md).toContain("no DELETE counterpart");
+    // Per-verdict tag also visible in OK section.
+    expect(md).toContain("🧹 cleanup-failure");
   });
 });
 
