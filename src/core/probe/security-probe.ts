@@ -87,6 +87,13 @@ export interface SecurityProbeOptions {
   timeoutMs?: number;
   /** When true, only print which endpoints/fields would be attacked. */
   dryRun?: boolean;
+  /**
+   * DELETE-cleanup retry delays in ms (round-5: handles eventual
+   * consistency between write replica and read replica). Default
+   * `[200, 1000]` — two retries on 404, total worst-case ~1.2s. Tests
+   * pass `[]` to disable; ops can pass longer for laggier replicas.
+   */
+  cleanupRetryDelaysMs?: number[];
 }
 
 export interface SecurityProbeResult {
@@ -170,6 +177,7 @@ const PAYLOADS: Record<SecurityClass, string[]> = {
 interface ProbeStepOpts {
   noCleanup: boolean;
   timeoutMs?: number;
+  cleanupRetryDelaysMs?: number[];
 }
 
 export async function runSecurityProbes(
@@ -215,7 +223,11 @@ export async function runSecurityProbes(
       opts.securitySchemes,
       opts.vars,
       detected,
-      { noCleanup: opts.noCleanup === true, timeoutMs: opts.timeoutMs },
+      {
+        noCleanup: opts.noCleanup === true,
+        timeoutMs: opts.timeoutMs,
+        cleanupRetryDelaysMs: opts.cleanupRetryDelaysMs,
+      },
     );
     verdicts.push(verdict);
   }
@@ -714,26 +726,48 @@ async function tryCleanup(
   const concretePath = delEp.path.replace(/\{[^}]+\}/, encodeURIComponent(String(id)));
   const url = `${(vars["base_url"] ?? "").replace(/\/+$/, "")}${concretePath}`;
   const headers = liveAuthHeaders(delEp, schemes, vars);
-  try {
-    const resp = await executeRequest(
-      { method: "DELETE", url, headers },
-      { timeout: opts.timeoutMs ?? 30000, retries: 0 },
-    );
-    if (resp.status < 200 || resp.status >= 300) {
-      accumulateCleanupError(verdict, `DELETE ${delEp.path} → ${resp.status} (id=${id})`);
-      return;
+
+  // Eventual-consistency retry (round-5 follow-up): POST creates on the
+  // write replica, immediate DELETE hits a read replica that hasn't seen
+  // the new id yet → 404. Two short backoffs swallow that transient
+  // 404; a 404 that survives the backoff is a real leak and lands in
+  // verdict.cleanup.error. Only 404 is retried — 5xx, network errors,
+  // 401/403 fail fast (the situation isn't going to improve).
+  const RETRY_DELAYS_MS = opts.cleanupRetryDelaysMs ?? [200, 1000];
+  let lastResp: { status: number } | null = null;
+  let lastNetErr: string | null = null;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, RETRY_DELAYS_MS[attempt - 1]!));
+    try {
+      const resp = await executeRequest(
+        { method: "DELETE", url, headers },
+        { timeout: opts.timeoutMs ?? 30000, retries: 0 },
+      );
+      lastResp = { status: resp.status };
+      if (resp.status >= 200 && resp.status < 300) {
+        const prior = verdict.cleanup ?? { attempted: false };
+        verdict.cleanup = {
+          attempted: true,
+          status: resp.status,
+          ...(prior.error ? { error: prior.error } : {}),
+        };
+        return;
+      }
+      // Only retry transient 404 (eventual-consistency window).
+      if (resp.status !== 404) break;
+    } catch (err) {
+      lastNetErr = err instanceof Error ? err.message : String(err);
+      // Network errors are not retried — they're not transient in the
+      // eventual-consistency sense (they're config/connectivity issues).
+      break;
     }
-    const prior = verdict.cleanup ?? { attempted: false };
-    verdict.cleanup = {
-      attempted: true,
-      status: resp.status,
-      ...(prior.error ? { error: prior.error } : {}),
-    };
-  } catch (err) {
-    accumulateCleanupError(
-      verdict,
-      `DELETE ${delEp.path} network error: ${err instanceof Error ? err.message : String(err)}`,
-    );
+  }
+
+  if (lastNetErr) {
+    accumulateCleanupError(verdict, `DELETE ${delEp.path} network error: ${lastNetErr}`);
+  } else if (lastResp) {
+    const tail = lastResp.status === 404 ? " (persisted across retries — likely real leak)" : "";
+    accumulateCleanupError(verdict, `DELETE ${delEp.path} → ${lastResp.status} (id=${id})${tail}`);
   }
 }
 

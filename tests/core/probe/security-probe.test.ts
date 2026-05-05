@@ -560,6 +560,86 @@ describe("runSecurityProbes — round-4 fixes", () => {
     expect(leftover).toEqual([]);
   });
 
+  it("DELETE cleanup retries on transient 404 (eventual consistency, round-5)", async () => {
+    // Sentry / many SaaS APIs: POST writes to leader, immediate DELETE
+    // hits a follower that hasn't replicated yet -> 404. The retry path
+    // swallows that 404 and reports success.
+    let leftover: string[] = [];
+    let getCount = 0;
+    responder = (req) => {
+      if (req.method === "POST") {
+        const id = `k_${leftover.length + 1}`;
+        leftover.push(id);
+        return { status: 201, body: { id } };
+      }
+      if (req.method === "DELETE") {
+        getCount++;
+        // First DELETE attempt returns 404 (replica lag); subsequent attempts succeed.
+        if (getCount === 1) return { status: 404, body: { error: "not found" } };
+        const m = req.url.match(/\/keys\/([^/?]+)/);
+        if (m) leftover = leftover.filter(x => x !== m[1]);
+        return { status: 204 };
+      }
+      return { status: 200 };
+    };
+    const postEp = ep({
+      method: "POST",
+      path: "/keys/",
+      requestBodySchema: { type: "object", properties: { url: { type: "string", format: "uri" } } },
+    });
+    const delEp = ep({
+      method: "DELETE",
+      path: "/keys/{key_id}/",
+      requestBodySchema: undefined,
+      requestBodyContentType: undefined,
+      parameters: [
+        { name: "key_id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    const result = await runSecurityProbes({
+      endpoints: [postEp, delEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      classes: ["ssrf"],
+      cleanupRetryDelaysMs: [0, 0], // fast tests
+    });
+    // First attempt 404 swallowed; retry succeeded — no leak.
+    expect(leftover).toEqual([]);
+    // No cleanup error logged for the resolved-by-retry case.
+    expect(result.verdicts[0]!.cleanup?.error).toBeUndefined();
+  });
+
+  it("DELETE cleanup reports leak when 404 persists across retries (round-5)", async () => {
+    responder = (req) => {
+      if (req.method === "POST") return { status: 201, body: { id: "k_persistent" } };
+      if (req.method === "DELETE") return { status: 404, body: { error: "not found" } };
+      return { status: 200 };
+    };
+    const postEp = ep({
+      method: "POST",
+      path: "/keys/",
+      requestBodySchema: { type: "object", properties: { url: { type: "string", format: "uri" } } },
+    });
+    const delEp = ep({
+      method: "DELETE",
+      path: "/keys/{key_id}/",
+      requestBodySchema: undefined,
+      requestBodyContentType: undefined,
+      parameters: [
+        { name: "key_id", in: "path", required: true, schema: { type: "string" } } as any,
+      ],
+    });
+    const result = await runSecurityProbes({
+      endpoints: [postEp, delEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      classes: ["ssrf"],
+      cleanupRetryDelaysMs: [0, 0],
+    });
+    // Retried but 404 stuck — flagged as a real leak.
+    expect(result.verdicts[0]!.cleanup?.error).toMatch(/persisted across retries/);
+  });
+
   it("digest surfaces a Cleanup failures section when cleanup.error is set", () => {
     const md = formatSecurityDigest(
       {
