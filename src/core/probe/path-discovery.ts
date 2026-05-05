@@ -213,7 +213,7 @@ function appendLimitOne(url: string, listEp: EndpointInfo): string {
 }
 
 /** Try several common SaaS list-response shapes. */
-function extractFirstId(body: unknown, listEp: EndpointInfo): string | undefined {
+export function extractFirstId(body: unknown, listEp: EndpointInfo): string | undefined {
   if (Array.isArray(body)) {
     return idFromItem(body[0], listEp);
   }

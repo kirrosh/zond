@@ -10,6 +10,7 @@ import { describeCommand } from "./commands/describe.ts";
 import { dbCommand } from "./commands/db.ts";
 import { requestCommand } from "./commands/request.ts";
 import { generateCommand } from "./commands/generate.ts";
+import { discoverCommand } from "./commands/discover.ts";
 import { probeValidationCommand } from "./commands/probe-validation.ts";
 import { probeMethodsCommand } from "./commands/probe-methods.ts";
 import { lintSpecCommand } from "./commands/lint-spec.ts";
@@ -707,6 +708,39 @@ export function buildProgram(): Command {
         tag: opts.tag,
         uncoveredOnly: opts.uncoveredOnly === true,
         explain: opts.explain === true,
+        json: globalJson(cmd),
+      });
+    });
+
+  // ── discover ──
+  program
+    .command("discover")
+    .description("Auto-fill .env.yaml FK ids by hitting list-endpoints (Phase 2.5 fixture pack — TASK-136)")
+    .requiredOption("--api <name>", "Registered API to discover against (apis/<name>/.env.yaml)")
+    .option("--db <path>", "Path to SQLite database file")
+    .option("--api-dir <path>", "Override apis/<name>/ root (defaults to the collection's base_dir)")
+    .option("--env <path>", "Override .env.yaml path (defaults to <api-dir>/.env.yaml)")
+    .option("--apply", "Write discovered values to .env.yaml (with .env.yaml.bak backup). Default: dry-run.")
+    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
+    .action(async (opts, cmd: Command) => {
+      const resolved = resolveSpecArg(undefined, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      let apiDir = opts.apiDir as string | undefined;
+      if (!apiDir) {
+        try {
+          getDb(opts.db);
+          const col = findCollectionByNameOrId(opts.api);
+          apiDir = col?.base_dir ?? `apis/${opts.api}`;
+        } catch {
+          apiDir = `apis/${opts.api}`;
+        }
+      }
+      process.exitCode = await discoverCommand({
+        specPath: resolved.spec,
+        apiDir,
+        envPath: opts.env,
+        apply: opts.apply === true,
+        timeoutMs: opts.timeout,
         json: globalJson(cmd),
       });
     });

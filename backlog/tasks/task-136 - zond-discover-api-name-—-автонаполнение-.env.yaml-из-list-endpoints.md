@@ -1,8 +1,10 @@
 ---
 id: TASK-136
-title: 'zond discover --api <name> — автонаполнение .env.yaml из list-endpoints'
-status: To Do
+title: zond discover --api <name> — автонаполнение .env.yaml из list-endpoints
+status: Done
 assignee: []
+created_date: ''
+updated_date: '2026-05-05 12:40'
 labels:
   - cli
   - discovery
@@ -14,6 +16,7 @@ priority: high
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-8 feedback §3 раунд 2](../notes/m-8-audit-cli-gaps/feedback-original.md).
@@ -40,16 +43,30 @@ Phase 2.5 в скилле говорит «дополни `.env.yaml` реаль
 5. Логирует, какие endpoints не вернули данных / отдали 4xx (auth-scope
    gap), и подсказывает в выводе.
 6. Уважает `--rate-limit auto`.
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
-- [ ] Команда зарегистрирована в CLI, описана в `ZOND.md`.
-- [ ] `--dry-run` (default) и `--apply` работают, бэкап `.env.yaml.bak`
+<!-- AC:BEGIN -->
+- [ ] #1 Команда зарегистрирована в CLI, описана в `ZOND.md`.
+- [ ] #2 `--dry-run` (default) и `--apply` работают, бэкап `.env.yaml.bak`
       при apply.
-- [ ] Выбор стратегии id (`--prefer slug,id,uuid`).
-- [ ] Авторизация — реюз существующего env-var механизма (`--auth` /
+- [ ] #3 Выбор стратегии id (`--prefer slug,id,uuid`).
+- [ ] #4 Авторизация — реюз существующего env-var механизма (`--auth` /
       `auth_token` в `.env.yaml`).
-- [ ] Тесты на маппинг path-param → env-key и на dry-run/apply.
-- [ ] Скилл-секция «Phase 2.5 fixture pack» обновлена: вместо ручных
+- [ ] #5 Тесты на маппинг path-param → env-key и на dry-run/apply.
+- [ ] #6 Скилл-секция «Phase 2.5 fixture pack» обновлена: вместо ручных
       `zond request` — `zond discover`.
-- [ ] CHANGELOG.
+- [ ] #7 CHANGELOG.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+MVP: zond discover --api <name> [--apply]. Читает .api-resources.yaml, для каждой path-FK var с известным ownerResource хитит owner.endpoints.list, экстрактит первое значение (suffix-aware: *_slug→slug, *_uuid→uuid, *_id→id, fallbacks), пишет diff в stdout/JSON. --apply делает .env.yaml.bak бэкап и upsert через regex-замену. Скипает уже заполненные не-плейсхолдеры. v1 ограничение: только collection-level list endpoints (no nested). 4 unit-теста с Bun.serve мок-сервером. Скилл Phase 2.5 обновлён, CHANGELOG, ZOND.md.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+TASK-136: zond discover MVP. Автонаполнение .env.yaml из list-endpoints, suffix-aware extraction, --apply с бэкапом. v1 не покрывает nested list-paths — отмечено для TASK-137. 940/940 тестов.
+<!-- SECTION:FINAL_SUMMARY:END -->
