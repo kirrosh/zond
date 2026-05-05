@@ -63,6 +63,39 @@ export function pathWithPlaceholders(ep: EndpointInfo, badId: string): string {
   });
 }
 
+/**
+ * Render a path for probe execution. The "attacked" param (if any) is replaced
+ * with `attacked.value`; remaining params are rendered as either runtime
+ * placeholders (`{{name}}`, resolved from `.env.yaml` by `zond run`) when
+ * `useRealParents=true`, or as synthetic-by-type sentinels in the legacy mode.
+ *
+ * The output is the final path string written into the YAML — no further
+ * `convertPath` pass is required (and would in fact corrupt the doubled
+ * braces).
+ *
+ * Why `useRealParents` exists (TASK-135 / m-8): probe-validation used to bake
+ * `nonexistent-zzzzz` into every parent path-param, which short-circuits to
+ * 404 on real APIs (e.g. `/orgs/zzzzz/repos/{repo}/commits` never reaches the
+ * `{repo}` validator). Using the real parent slug from the env restores
+ * recall — the API actually walks past the parent and starts validating the
+ * leaf, so 5xx bugs there become observable.
+ */
+export function renderPath(
+  ep: EndpointInfo,
+  attacked: { name: string; value: string } | null,
+  opts: { useRealParents: boolean },
+): string {
+  return ep.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
+    if (attacked && name === attacked.name) return attacked.value;
+    if (opts.useRealParents) return `{{${name}}}`;
+    const param = ep.parameters.find((p) => p.name === name && p.in === "path");
+    const schema = param?.schema as OpenAPIV3.SchemaObject | undefined;
+    if (schema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
+    if (schema?.type === "integer" || schema?.type === "number") return "999999999";
+    return "nonexistent-zzzzz";
+  });
+}
+
 export function isMutating(method: string): boolean {
   const m = method.toUpperCase();
   return m === "POST" || m === "PUT" || m === "PATCH";

@@ -211,6 +211,82 @@ describe("generateNegativeProbes", () => {
     expect(suite.tests[0]!.headers).toBeUndefined();
   });
 
+  it("TASK-135: emits {{parent}} placeholder for non-attacked path params so .env.yaml resolves them at run time", () => {
+    // Mirrors Sentry shape: org slug is the parent, repo slug is the leaf
+    // probe target. Old behaviour baked `nonexistent-zzzzz` into both, so
+    // every probe 404'd on the parent before the leaf validator fired.
+    const result = generateNegativeProbes({
+      endpoints: [
+        ep({
+          method: "GET",
+          path: "/orgs/{organization_id_or_slug}/repos/{repo_id}/commits",
+          parameters: [
+            { name: "organization_id_or_slug", in: "path", required: true, schema: { type: "string" } } as any,
+            { name: "repo_id", in: "path", required: true, schema: { type: "string", format: "uuid" } } as any,
+          ],
+        }),
+      ],
+      securitySchemes: [],
+    });
+    const suite = result.suites[0]!;
+    const pathProbes = suite.tests.filter(t => t.name.startsWith("path param repo_id="));
+    expect(pathProbes.length).toBeGreaterThan(0);
+    for (const probe of pathProbes) {
+      const url = probe.GET as string;
+      // parent stays as a runtime placeholder
+      expect(url).toContain("/orgs/{{organization_id_or_slug}}/repos/");
+      // leaf gets the synthetic bad value
+      expect(url).not.toContain("{{repo_id}}");
+      expect(url).toMatch(/\/repos\/(?:not-a-uuid|12345|00000000|\.\.)/);
+    }
+  });
+
+  it("TASK-135: body probes keep all path params as {{name}} placeholders by default", () => {
+    const result = generateNegativeProbes({
+      endpoints: [
+        ep({
+          method: "POST",
+          path: "/orgs/{org}/teams/{team}/members",
+          parameters: [
+            { name: "org", in: "path", required: true, schema: { type: "string" } } as any,
+            { name: "team", in: "path", required: true, schema: { type: "string" } } as any,
+          ],
+          requestBodyContentType: "application/json",
+          requestBodySchema: {
+            type: "object",
+            required: ["email"],
+            properties: { email: { type: "string", format: "email" } },
+          },
+        }),
+      ],
+      securitySchemes: [],
+    });
+    const bodyProbe = result.suites[0]!.tests.find(t => /empty body/.test(t.name));
+    expect(bodyProbe).toBeDefined();
+    expect(bodyProbe!.POST as string).toBe("/orgs/{{org}}/teams/{{team}}/members");
+  });
+
+  it("TASK-135: --no-real-parents preserves legacy synthetic-by-type rendering", () => {
+    const result = generateNegativeProbes({
+      endpoints: [
+        ep({
+          method: "GET",
+          path: "/orgs/{org}/repos/{repo_id}",
+          parameters: [
+            { name: "org", in: "path", required: true, schema: { type: "string" } } as any,
+            { name: "repo_id", in: "path", required: true, schema: { type: "string", format: "uuid" } } as any,
+          ],
+        }),
+      ],
+      securitySchemes: [],
+      useRealParents: false,
+    });
+    const probe = result.suites[0]!.tests[0]!;
+    const url = probe.GET as string;
+    expect(url).not.toContain("{{");
+    expect(url).toContain("/orgs/nonexistent-zzzzz/repos/");
+  });
+
   it("emits suite-level base_url so generated YAML is runnable as-is", () => {
     const result = generateNegativeProbes({
       endpoints: [ep({

@@ -105,7 +105,7 @@ selected via `zond use`.
 | `coverage` | API test coverage | `--spec`, `--tests`, `--api`, `--fail-on-coverage <N>` |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
-| `probe-validation [spec]` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup` |
+| `probe-validation [spec]` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup`, `--no-real-parents` |
 | `probe-methods [spec]` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--api <name>`, `--output <dir>`, `--tag` |
 | `probe-mass-assignment [spec]` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--no-discover`, `--timeout <ms>` |
 | `lint-spec [spec]` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--api <name>`, `--strict`, `--rule <list>`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
@@ -243,6 +243,15 @@ Probes are deterministic — same spec → same suites — so generated YAML can
 committed as a regression test. Each probe expects status in
 `[400, 401, 403, 404, 405, 409, 415, 422]`; a 5xx (or unexpected 2xx) is a
 test failure surfaced via the regular runner / reporter / `zond db diagnose`.
+
+**Real parent path-params (default).** For nested paths like
+`/orgs/{organization_id_or_slug}/repos/{repo_id}/commits`, only the *attacked*
+path-param is replaced with a synthetic value; non-attacked parents are
+emitted as runtime placeholders (`{{organization_id_or_slug}}`) and resolved
+from `.env.yaml` at run time. Without this, every probe would 404 on the
+parent before the leaf validator ever fires, hiding nested-path 5xx bugs.
+Pass `--no-real-parents` to keep the legacy fully-synthetic rendering (e.g.
+when you have no real parent fixture).
 
 **Cleanup of leaked resources.** A probe that *unexpectedly* returns 2xx on a
 mutating endpoint (POST/PUT/PATCH) means the API silently accepted bad input

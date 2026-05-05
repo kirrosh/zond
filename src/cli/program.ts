@@ -715,6 +715,7 @@ export function buildProgram(): Command {
     .option("--list-tags", "List available tags from spec and exit")
     .option("--max-per-endpoint <N>", "Cap probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
     .option("--no-cleanup", "Skip emission of follow-up DELETE cleanup steps for mutating probes (use in namespace-isolated test envs)")
+    .option("--no-real-parents", "Bake synthetic-by-type values into all path params (legacy). By default, non-attacked path params are emitted as {{name}} and resolved from .env.yaml at run time — needed to reach the leaf validator on nested paths (TASK-135).")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
@@ -725,6 +726,8 @@ export function buildProgram(): Command {
         maxPerEndpoint: opts.maxPerEndpoint,
         // Commander: --no-cleanup → opts.cleanup === false; default is true.
         noCleanup: opts.cleanup === false,
+        // Commander: --no-real-parents → opts.realParents === false; default is true.
+        useRealParents: opts.realParents !== false,
         json: globalJson(cmd),
         listTags: opts.listTags,
       });

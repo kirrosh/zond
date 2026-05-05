@@ -17,6 +17,13 @@ export interface ProbeValidationOptions {
   tag?: string;
   maxPerEndpoint?: number;
   noCleanup?: boolean;
+  /**
+   * TASK-135: when true (default), non-attacked path-params are emitted as
+   * `{{name}}` runtime placeholders so `zond run` resolves them from
+   * `.env.yaml`. When false, every param is baked as a synthetic sentinel,
+   * which short-circuits to 404 on real APIs and hides nested-path 5xx bugs.
+   */
+  useRealParents?: boolean;
   json?: boolean;
   listTags?: boolean;
 }
@@ -74,6 +81,7 @@ export async function probeValidationCommand(
       securitySchemes,
       maxProbesPerEndpoint: options.maxPerEndpoint,
       noCleanup: options.noCleanup,
+      useRealParents: options.useRealParents,
     });
 
     await mkdir(options.output, { recursive: true });
