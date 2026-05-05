@@ -208,6 +208,14 @@ Findings to flag: 5xx on null/empty/wrong-type body (missing validation /
 unguarded coercion), 2xx on undeclared method (contract drift), `is_admin: true`
 echoed in response (HIGH from `probe-mass-assignment`).
 
+**Body-FK auto-discovery (TASK-137).** `probe-mass-assignment` resolves
+required body fields named `*_id` / `*_slug` / `*_uuid` / `*_key` by
+hitting their sibling list endpoint (e.g. `audience_id` → `GET /audiences`)
+and overlays the real value onto the baseline body. Eliminates most
+`inconclusive-baseline` noise. If the summary still says
+"unresolved body FKs: …" — the auto-discover couldn't reach the owner
+(nested list, scope-locked, etc.); add the value to `.env.yaml` manually.
+
 **Nested paths need real parent fixtures.** `probe-validation` substitutes
 non-attacked path params from `.env.yaml` at run time (`{{organization_id_or_slug}}`),
 so for any `repos/{repo_id}/commits`-style endpoint you need a real parent

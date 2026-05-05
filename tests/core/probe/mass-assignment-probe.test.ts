@@ -179,6 +179,103 @@ describe("runMassAssignmentProbes", () => {
     }
   });
 
+  it("TASK-137: --discover-fk auto-resolves required body FK fields from sibling list endpoints", async () => {
+    // Endpoint with required body FK `audience_id` and a sibling
+    // GET /audiences that returns the real id.
+    const contactsBody: OpenAPIV3.SchemaObject = {
+      type: "object",
+      required: ["email", "audience_id"],
+      properties: {
+        email: { type: "string", format: "email" },
+        audience_id: { type: "string", format: "uuid" },
+      },
+    };
+    const contactsResponse: OpenAPIV3.SchemaObject = {
+      type: "object",
+      properties: { id: { type: "string", format: "uuid" }, audience_id: { type: "string", format: "uuid" } },
+    };
+    const audiencesEp = ep({
+      method: "GET",
+      path: "/audiences",
+      requestBodyContentType: undefined,
+      responses: [{ statusCode: 200, description: "ok" }],
+    });
+    const contactsPostEp = ep({
+      method: "POST",
+      path: "/contacts",
+      requestBodySchema: contactsBody,
+      responses: [{ statusCode: 201, description: "created", schema: contactsResponse }],
+    });
+    const contactsDeleteEp = ep({
+      method: "DELETE",
+      path: "/contacts/{id}",
+      requestBodyContentType: undefined,
+      responses: [{ statusCode: 204, description: "deleted" }],
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } } as any,
+      ],
+    });
+
+    const realAudienceId = "aud_real_42";
+    let baselineSawRealAudience = false;
+
+    responder = (req) => {
+      if (req.method === "GET" && req.url.endsWith("/audiences")) {
+        return { status: 200, body: [{ id: realAudienceId, name: "Marketing" }] };
+      }
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        const body = req.body as Record<string, unknown>;
+        if (body.audience_id === realAudienceId) {
+          baselineSawRealAudience = true;
+          return { status: 201, body: { id: "contact_1", audience_id: realAudienceId } };
+        }
+        // Reject baseline that didn't get the real FK — same FK rejection
+        // pattern that produces INCONCLUSIVE-baseline in the audit.
+        return { status: 422, body: { error: "audience_id is invalid" } };
+      }
+      // Injected probe — pretend extras refused.
+      return { status: 400, body: { error: "additional property not allowed" } };
+    };
+
+    const result = await runMassAssignmentProbes({
+      endpoints: [audiencesEp, contactsPostEp, contactsDeleteEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+
+    // The real audience id reached the baseline — auto-discovery worked.
+    expect(baselineSawRealAudience).toBe(true);
+    const v = result.verdicts.find(x => x.path === "/contacts")!;
+    expect(v.severity).not.toBe("inconclusive-baseline");
+  });
+
+  it("TASK-137: INCONCLUSIVE-baseline summary names body FKs that auto-discovery couldn't resolve", async () => {
+    const orphanBody: OpenAPIV3.SchemaObject = {
+      type: "object",
+      required: ["mystery_id"],
+      properties: { mystery_id: { type: "string", format: "uuid" } },
+    };
+    // No sibling /mysteries list endpoint → discovery misses; baseline 4xx.
+    responder = () => ({ status: 422, body: { error: "mystery_id invalid" } });
+    const result = await runMassAssignmentProbes({
+      endpoints: [
+        ep({
+          method: "POST",
+          path: "/things",
+          requestBodySchema: orphanBody,
+          responses: [{ statusCode: 201, description: "created", schema: { type: "object", properties: { id: { type: "string" } } } }],
+        }),
+      ],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("inconclusive-baseline");
+    expect(v.summary).toContain("unresolved body FKs");
+    expect(v.summary).toContain("mystery_id");
+  });
+
   it("classifies INCONCLUSIVE-baseline when both baseline and injected return 4xx (TASK-91)", async () => {
     responder = () => ({ status: 404, body: { message: "Domain not found" } });
     const result = await runMassAssignmentProbes({
