@@ -1,7 +1,8 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { Check, ChevronRight, Copy, Radio } from "lucide-react";
+import { Check, ChevronRight, Copy, FileText, Send } from "lucide-react";
+import { ReplayPanel } from "./replay-panel";
 import {
   runDetailQueryOptions,
   type AssertionResult,
@@ -9,7 +10,6 @@ import {
   type SourceMetadata,
   type StoredStepResult,
 } from "../lib/api";
-import { useRunProgress } from "../lib/use-run-progress";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { FailureClassBadge } from "../components/failure-class-badge";
@@ -19,7 +19,9 @@ export function RunDetailPage() {
   const { runId } = useParams({ from: "/runs/$runId" });
   const { data } = useSuspenseQuery(runDetailQueryOptions(runId));
   const { run, results } = data;
-  const failures = results.filter((r) => r.status !== "pass");
+  const nonPassing = results.filter((r) => r.status !== "pass");
+  const cascadeSkips = nonPassing.filter((r) => r.failure_class === "cascade");
+  const realFailures = nonPassing.filter((r) => r.failure_class !== "cascade");
 
   return (
     <main className="mx-auto max-w-5xl px-6 py-8 space-y-6">
@@ -30,89 +32,79 @@ export function RunDetailPage() {
         ← All runs
       </Link>
 
-      <RunHeader run={run} failureCount={failures.length} totalCount={results.length} />
-
-      <LiveProgressStrip runId={runId} total={Math.max(run.total, 1)} />
+      <RunHeader
+        run={run}
+        failureCount={realFailures.length}
+        cascadeCount={cascadeSkips.length}
+        totalCount={results.length}
+      />
 
       <section className="space-y-3">
         <div className="flex items-baseline justify-between">
           <h2 className="text-lg font-semibold">Failures</h2>
           <span className="text-xs text-muted-foreground">
-            {failures.length} of {results.length} step{results.length === 1 ? "" : "s"}
+            {realFailures.length} of {results.length} step{results.length === 1 ? "" : "s"}
           </span>
         </div>
-        {failures.length === 0 ? (
+        {realFailures.length === 0 ? (
           <div className="rounded-md border bg-muted p-6 text-sm text-muted-foreground">
-            All steps passed — nothing to investigate.
+            {cascadeSkips.length > 0
+              ? "No failures of their own — only cascade skips below."
+              : "All steps passed — nothing to investigate."}
           </div>
         ) : (
           <ul className="space-y-2">
-            {failures.map((step) => (
+            {realFailures.map((step) => (
               <FailureCard key={step.id} step={step} />
             ))}
           </ul>
         )}
       </section>
+
+      {cascadeSkips.length > 0 && <CascadeGroup steps={cascadeSkips} />}
     </main>
   );
 }
 
-function LiveProgressStrip({ runId, total }: { runId: string; total: number }) {
-  // Spike: server always emits a fake ramp-up so the SSE wiring is observable.
-  // Production would auto-start only for runs with finished_at === null.
+function CascadeGroup({ steps }: { steps: StoredStepResult[] }) {
   const [open, setOpen] = useState(false);
-  const { frame, done, error } = useRunProgress(runId, open);
-
-  if (!open) {
-    return (
-      <div className="flex items-center justify-between rounded-md border bg-muted/40 px-3 py-2 text-xs">
-        <span className="inline-flex items-center gap-2 text-muted-foreground">
-          <Radio className="size-3.5" />
-          SSE live progress (spike stub)
-        </span>
-        <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
-          Replay progress
-        </Button>
-      </div>
-    );
-  }
-
-  const completed = frame?.completed ?? 0;
-  const target = frame?.total ?? total;
-  const pct = target > 0 ? Math.round((completed / target) * 100) : 0;
-
   return (
-    <div className="space-y-2 rounded-md border bg-muted/40 px-3 py-2 text-xs">
-      <div className="flex items-center justify-between">
-        <span className="inline-flex items-center gap-2">
-          <Radio className={cn("size-3.5", !done && "animate-pulse text-emerald-600")} />
-          {done ? "Done" : "Streaming progress…"}
+    <section className="space-y-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 text-left text-sm hover:bg-muted"
+      >
+        <ChevronRight className={cn("size-4 transition-transform", open && "rotate-90")} />
+        <span className="font-medium">Cascade skips</span>
+        <Badge variant="muted">{steps.length}</Badge>
+        <span className="ml-auto text-xs text-muted-foreground">
+          Skipped because an upstream step didn't produce a required capture.
         </span>
-        <span className="font-mono tabular-nums">
-          {completed} / {target} ({pct}%)
-        </span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded bg-background">
-        <div
-          className={cn("h-full transition-[width] duration-200", done ? "bg-emerald-500" : "bg-foreground/70")}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      {error && <p className="text-destructive">SSE error: {error}</p>}
-    </div>
+      </button>
+      {open && (
+        <ul className="space-y-2">
+          {steps.map((step) => (
+            <FailureCard key={step.id} step={step} />
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
 function RunHeader({
   run,
   failureCount,
+  cascadeCount,
   totalCount,
 }: {
   run: RunRecord;
   failureCount: number;
+  cascadeCount: number;
   totalCount: number;
 }) {
-  const overallFailed = run.failed > 0;
+  const overallFailed = failureCount > 0;
   return (
     <header className="space-y-3 rounded-md border p-4">
       <div className="flex items-center gap-3">
@@ -129,7 +121,8 @@ function RunHeader({
         <Meta label="Total" value={String(totalCount)} />
         <Meta label="Passed" value={String(run.passed)} />
         <Meta label="Failed" value={String(failureCount)} />
-        <Meta label="Skipped" value={String(run.skipped)} />
+        <Meta label="Cascade" value={String(cascadeCount)} />
+        <Meta label="Skipped" value={String(Math.max(run.skipped - cascadeCount, 0))} />
         <Meta label="Branch" value={run.branch ?? "—"} />
         <Meta label="Commit" value={run.commit_sha ? run.commit_sha.slice(0, 8) : "—"} />
         <Meta className="col-span-2" label="Environment" value={run.environment ?? "—"} mono />
@@ -193,7 +186,7 @@ function FailureCard({ step }: { step: StoredStepResult }) {
   );
 }
 
-type EvidenceTab = "request" | "response" | "assertions" | "source";
+type EvidenceTab = "request" | "response" | "assertions" | "source" | "replay";
 
 function hasSourceEvidence(step: StoredStepResult): boolean {
   return Boolean(step.provenance) || Boolean(step.spec_pointer) || Boolean(step.spec_excerpt);
@@ -207,6 +200,7 @@ function EvidencePanel({ step }: { step: StoredStepResult }) {
     { id: "response", label: "Response" },
     { id: "assertions", label: `Assertions (${step.assertions.length})` },
     ...(sourceVisible ? [{ id: "source" as const, label: "Source" }] : []),
+    { id: "replay", label: "Replay" },
   ];
   return (
     <div className="border-t bg-muted/20">
@@ -228,13 +222,21 @@ function EvidencePanel({ step }: { step: StoredStepResult }) {
             </button>
           ))}
         </div>
-        <CopyCurlButton step={step} />
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={() => setTab("replay")}>
+            <Send className="size-3.5" />
+            Replay
+          </Button>
+          <CaseStudyDraftButton resultId={step.id} />
+          <CopyCurlButton step={step} />
+        </div>
       </div>
       <div className="p-3">
         {tab === "request" && <RequestPanel step={step} />}
         {tab === "response" && <ResponsePanel step={step} />}
         {tab === "assertions" && <AssertionsPanel assertions={step.assertions} />}
         {tab === "source" && <SourcePanel step={step} />}
+        {tab === "replay" && <ReplayPanel step={step} />}
       </div>
     </div>
   );
@@ -374,40 +376,99 @@ function ResponsePanel({ step }: { step: StoredStepResult }) {
   );
 }
 
+const KIND_ORDER: Record<NonNullable<AssertionResult["kind"]>, number> = {
+  primary: 0,
+  schema: 1,
+  auxiliary: 2,
+};
+
+const KIND_LABEL: Record<NonNullable<AssertionResult["kind"]>, string> = {
+  primary: "primary",
+  schema: "schema",
+  auxiliary: "aux",
+};
+
+function assertionKind(a: AssertionResult): NonNullable<AssertionResult["kind"]> {
+  // Heuristic for legacy runs (no `kind` recorded): schema.* rules → schema;
+  // duration / headers.* → auxiliary; everything else → primary.
+  if (a.kind) return a.kind;
+  const rule = a.rule ?? a.type ?? "";
+  const field = a.field ?? a.path ?? "";
+  if (rule.startsWith("schema.")) return "schema";
+  if (field === "duration" || field.startsWith("headers.")) return "auxiliary";
+  return "primary";
+}
+
 function AssertionsPanel({ assertions }: { assertions: AssertionResult[] }) {
+  const [showAll, setShowAll] = useState(false);
   if (assertions.length === 0) {
     return <p className="text-xs text-muted-foreground">No assertions recorded.</p>;
   }
+  const indexed = assertions.map((a, i) => ({ a, i, kind: assertionKind(a) }));
+  indexed.sort((x, y) => {
+    if (x.a.passed !== y.a.passed) return x.a.passed ? 1 : -1;
+    return KIND_ORDER[x.kind] - KIND_ORDER[y.kind];
+  });
+  const primary = indexed.filter((e) => e.kind === "primary");
+  const secondary = indexed.filter((e) => e.kind !== "primary");
+  const visible = showAll || primary.length === 0 ? indexed : primary;
   return (
-    <ul className="space-y-1.5 text-xs">
-      {assertions.map((a, i) => (
-        <li
-          key={i}
-          className={cn(
-            "rounded border px-2 py-1.5",
-            a.passed ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50",
-          )}
+    <div className="space-y-2">
+      <ul className="space-y-1.5 text-xs">
+        {visible.map((entry) => (
+          <AssertionItem key={entry.i} a={entry.a} kind={entry.kind} />
+        ))}
+      </ul>
+      {primary.length > 0 && secondary.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          className="text-xs text-muted-foreground underline-offset-2 hover:underline"
         >
-          <div className="flex items-center gap-2">
-            <Badge variant={a.passed ? "success" : "destructive"}>{a.type}</Badge>
-            {a.path && <span className="font-mono text-muted-foreground">{a.path}</span>}
+          {showAll
+            ? "Hide schema/auxiliary checks"
+            : `Show ${secondary.length} schema/auxiliary check${secondary.length === 1 ? "" : "s"}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AssertionItem({ a, kind }: { a: AssertionResult; kind: NonNullable<AssertionResult["kind"]> }) {
+  const ruleLabel = a.rule ?? a.type ?? "";
+  const fieldLabel = a.field ?? a.path ?? "";
+  return (
+    <li
+      className={cn(
+        "rounded border px-2 py-1.5",
+        a.passed
+          ? "border-emerald-200 bg-emerald-50"
+          : kind === "primary"
+            ? "border-red-300 bg-red-50 ring-1 ring-red-300/50"
+            : "border-red-200 bg-red-50",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <Badge variant={a.passed ? "success" : "destructive"}>{ruleLabel || "—"}</Badge>
+        <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+          {KIND_LABEL[kind]}
+        </Badge>
+        {fieldLabel && <span className="font-mono text-muted-foreground">{fieldLabel}</span>}
+      </div>
+      {a.message && <div className="mt-1 text-muted-foreground">{a.message}</div>}
+      {!a.passed && (a.expected !== undefined || a.actual !== undefined) && (
+        <div className="mt-1 grid grid-cols-2 gap-2 font-mono text-[11px]">
+          <div>
+            <span className="text-muted-foreground">expected: </span>
+            <span>{prettyValue(a.expected)}</span>
           </div>
-          {a.message && <div className="mt-1 text-muted-foreground">{a.message}</div>}
-          {!a.passed && (a.expected !== undefined || a.actual !== undefined) && (
-            <div className="mt-1 grid grid-cols-2 gap-2 font-mono text-[11px]">
-              <div>
-                <span className="text-muted-foreground">expected: </span>
-                <span>{prettyValue(a.expected)}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">actual: </span>
-                <span>{prettyValue(a.actual)}</span>
-              </div>
-            </div>
-          )}
-        </li>
-      ))}
-    </ul>
+          <div>
+            <span className="text-muted-foreground">actual: </span>
+            <span>{prettyValue(a.actual)}</span>
+          </div>
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -428,6 +489,37 @@ function CodeBlock({ title, content }: { title: string; content: string | null }
         {pretty}
       </pre>
     </div>
+  );
+}
+
+function CaseStudyDraftButton({ resultId }: { resultId: number }) {
+  const [state, setState] = useState<"idle" | "loading" | "copied" | "error">("idle");
+  const onCopy = async () => {
+    setState("loading");
+    try {
+      const resp = await fetch(`/api/results/${resultId}/case-study.md`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const md = await resp.text();
+      await navigator.clipboard.writeText(md);
+      setState("copied");
+      setTimeout(() => setState("idle"), 1800);
+    } catch {
+      setState("error");
+      setTimeout(() => setState("idle"), 1800);
+    }
+  };
+  const label = state === "copied"
+    ? "Copied"
+    : state === "error"
+      ? "Failed"
+      : state === "loading"
+        ? "Generating…"
+        : "Case study draft";
+  return (
+    <Button size="sm" variant="ghost" onClick={onCopy} disabled={state === "loading"}>
+      {state === "copied" ? <Check className="size-3.5" /> : <FileText className="size-3.5" />}
+      {label}
+    </Button>
   );
 }
 

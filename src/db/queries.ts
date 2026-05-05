@@ -21,6 +21,7 @@ export interface CreateRunOpts {
   commit_sha?: string;
   branch?: string;
   collection_id?: number;
+  session_id?: string;
 }
 
 export interface RunRecord {
@@ -37,6 +38,7 @@ export interface RunRecord {
   environment: string | null;
   duration_ms: number | null;
   collection_id: number | null;
+  session_id: string | null;
 }
 
 export interface RunSummary {
@@ -50,6 +52,20 @@ export interface RunSummary {
   environment: string | null;
   duration_ms: number | null;
   collection_id: number | null;
+  session_id: string | null;
+}
+
+export interface SessionSummary {
+  session_id: string;
+  started_at: string;
+  finished_at: string | null;
+  run_count: number;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  duration_ms: number | null;
+  environment: string | null;
 }
 
 // ──────────────────────────────────────────────
@@ -118,8 +134,8 @@ export interface StoredStepResult {
 export function createRun(opts: CreateRunOpts): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch, collection_id)
-    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch, $collection_id)
+    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch, collection_id, session_id)
+    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch, $collection_id, $session_id)
   `);
   const result = stmt.run({
     $started_at: opts.started_at,
@@ -128,6 +144,7 @@ export function createRun(opts: CreateRunOpts): number {
     $commit_sha: opts.commit_sha ?? null,
     $branch: opts.branch ?? null,
     $collection_id: opts.collection_id ?? null,
+    $session_id: opts.session_id ?? null,
   });
   return Number(result.lastInsertRowid);
 }
@@ -216,7 +233,7 @@ export function listRuns(limit = 20, offset = 0, filters?: RunFilters): RunSumma
   if (filters && Object.values(filters).some(Boolean)) {
     const { where, params } = buildRunFilterSQL(filters);
     return db.query(`
-      SELECT r.id, r.started_at, r.finished_at, r.total, r.passed, r.failed, r.skipped, r.environment, r.duration_ms, r.collection_id
+      SELECT r.id, r.started_at, r.finished_at, r.total, r.passed, r.failed, r.skipped, r.environment, r.duration_ms, r.collection_id, r.session_id
       FROM runs r
       ${where}
       ORDER BY r.started_at DESC
@@ -224,11 +241,51 @@ export function listRuns(limit = 20, offset = 0, filters?: RunFilters): RunSumma
     `).all(...(params as (string | number)[]), limit, offset) as RunSummary[];
   }
   return db.query(`
-    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id
+    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id, session_id
     FROM runs
     ORDER BY started_at DESC
     LIMIT ? OFFSET ?
   `).all(limit, offset) as RunSummary[];
+}
+
+export function listSessions(limit = 20, offset = 0): SessionSummary[] {
+  const db = getDb();
+  return db.query(`
+    SELECT
+      session_id,
+      MIN(started_at)        AS started_at,
+      MAX(finished_at)       AS finished_at,
+      COUNT(*)               AS run_count,
+      COALESCE(SUM(total), 0)   AS total,
+      COALESCE(SUM(passed), 0)  AS passed,
+      COALESCE(SUM(failed), 0)  AS failed,
+      COALESCE(SUM(skipped), 0) AS skipped,
+      SUM(duration_ms)       AS duration_ms,
+      MAX(environment)       AS environment
+    FROM runs
+    WHERE session_id IS NOT NULL
+    GROUP BY session_id
+    ORDER BY started_at DESC
+    LIMIT ? OFFSET ?
+  `).all(limit, offset) as SessionSummary[];
+}
+
+export function countSessions(): number {
+  const db = getDb();
+  const row = db.query(
+    "SELECT COUNT(DISTINCT session_id) AS cnt FROM runs WHERE session_id IS NOT NULL"
+  ).get() as { cnt: number };
+  return row.cnt;
+}
+
+export function listRunsBySession(sessionId: string): RunSummary[] {
+  const db = getDb();
+  return db.query(`
+    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id, session_id
+    FROM runs
+    WHERE session_id = ?
+    ORDER BY started_at ASC
+  `).all(sessionId) as RunSummary[];
 }
 
 export function deleteRun(runId: number): boolean {
@@ -300,6 +357,24 @@ function parseProvenance(raw: unknown): import("../core/parser/types.ts").Source
   } catch {
     return null;
   }
+}
+
+export function getResultById(resultId: number): StoredStepResult | null {
+  const db = getDb();
+  const row = db.query("SELECT * FROM results WHERE id = ?").get(resultId) as
+    | (Omit<StoredStepResult, "assertions" | "captures" | "provenance"> & {
+        assertions: string | null;
+        captures: string | null;
+        provenance: string | null;
+      })
+    | null;
+  if (!row) return null;
+  return {
+    ...row,
+    assertions: row.assertions ? JSON.parse(row.assertions) : [],
+    captures: row.captures ? JSON.parse(row.captures) : {},
+    provenance: parseProvenance(row.provenance),
+  };
 }
 
 export function getResultsByRunId(runId: number): StoredStepResult[] {
@@ -470,6 +545,16 @@ export function getCollectionById(id: number): CollectionRecord | null {
   return db.query("SELECT * FROM collections WHERE id = ?").get(id) as CollectionRecord | null;
 }
 
+export function getLatestRunByCollection(collectionId: number): RunRecord | null {
+  const db = getDb();
+  return db.query(`
+    SELECT * FROM runs
+    WHERE collection_id = ? AND finished_at IS NOT NULL
+    ORDER BY started_at DESC
+    LIMIT 1
+  `).get(collectionId) as RunRecord | null;
+}
+
 export function listCollections(): CollectionSummary[] {
   const db = getDb();
   return db.query(`
@@ -539,15 +624,10 @@ export function findCollectionByNameOrId(nameOrId: string): CollectionRecord | n
   return db.query("SELECT * FROM collections WHERE lower(name) = lower(?)").get(nameOrId) as CollectionRecord | null;
 }
 
-export function findCollectionBySpec(spec: string): CollectionRecord | null {
-  const db = getDb();
-  return db.query("SELECT * FROM collections WHERE openapi_spec = ?").get(spec) as CollectionRecord | null;
-}
-
 export function listRunsByCollection(collectionId: number, limit = 20, offset = 0): RunSummary[] {
   const db = getDb();
   return db.query(`
-    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id
+    SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id, session_id
     FROM runs
     WHERE collection_id = ?
     ORDER BY started_at DESC
@@ -633,102 +713,7 @@ export function linkRunToCollection(runId: number, collectionId: number): void {
 }
 
 // ──────────────────────────────────────────────
-// AI Generations
-// ──────────────────────────────────────────────
-
-export interface AIGenerationRecord {
-  id: number;
-  collection_id: number | null;
-  prompt: string;
-  model: string;
-  provider: string;
-  generated_yaml: string | null;
-  output_path: string | null;
-  status: string;
-  error_message: string | null;
-  prompt_tokens: number | null;
-  completion_tokens: number | null;
-  duration_ms: number | null;
-  created_at: string;
-}
-
-export interface SaveAIGenerationOpts {
-  collection_id?: number;
-  prompt: string;
-  model: string;
-  provider: string;
-  generated_yaml?: string;
-  output_path?: string;
-  status: string;
-  error_message?: string;
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  duration_ms?: number;
-}
-
-export function saveAIGeneration(opts: SaveAIGenerationOpts): number {
-  const db = getDb();
-  const result = db.prepare(`
-    INSERT INTO ai_generations
-      (collection_id, prompt, model, provider, generated_yaml, output_path,
-       status, error_message, prompt_tokens, completion_tokens, duration_ms)
-    VALUES ($collection_id, $prompt, $model, $provider, $generated_yaml, $output_path,
-            $status, $error_message, $prompt_tokens, $completion_tokens, $duration_ms)
-  `).run({
-    $collection_id: opts.collection_id ?? null,
-    $prompt: opts.prompt,
-    $model: opts.model,
-    $provider: opts.provider,
-    $generated_yaml: opts.generated_yaml ?? null,
-    $output_path: opts.output_path ?? null,
-    $status: opts.status,
-    $error_message: opts.error_message ?? null,
-    $prompt_tokens: opts.prompt_tokens ?? null,
-    $completion_tokens: opts.completion_tokens ?? null,
-    $duration_ms: opts.duration_ms ?? null,
-  });
-  return Number(result.lastInsertRowid);
-}
-
-export function listAIGenerations(collectionId: number, limit = 10): AIGenerationRecord[] {
-  const db = getDb();
-  return db.query(`
-    SELECT * FROM ai_generations
-    WHERE collection_id = ?
-    ORDER BY created_at DESC
-    LIMIT ?
-  `).all(collectionId, limit) as AIGenerationRecord[];
-}
-
-export function getAIGeneration(id: number): AIGenerationRecord | null {
-  const db = getDb();
-  return db.query("SELECT * FROM ai_generations WHERE id = ?").get(id) as AIGenerationRecord | null;
-}
-
-export function updateAIGenerationOutputPath(id: number, outputPath: string): boolean {
-  const db = getDb();
-  const result = db.prepare("UPDATE ai_generations SET output_path = ? WHERE id = ?").run(outputPath, id);
-  return result.changes > 0;
-}
-
-export function listSavedAIGenerations(collectionId: number): AIGenerationRecord[] {
-  const db = getDb();
-  return db.query(`
-    SELECT * FROM ai_generations
-    WHERE collection_id = ? AND output_path IS NOT NULL AND output_path != ''
-    ORDER BY created_at DESC
-  `).all(collectionId) as AIGenerationRecord[];
-}
-
-export function findAIGenerationByYaml(collectionId: number, yaml: string): AIGenerationRecord | null {
-  const db = getDb();
-  return db.query(
-    "SELECT * FROM ai_generations WHERE collection_id = ? AND generated_yaml = ? ORDER BY created_at DESC LIMIT 1"
-  ).get(collectionId, yaml) as AIGenerationRecord | null;
-}
-
-// ──────────────────────────────────────────────
-// Settings
+// Settings (generic key-value store)
 // ──────────────────────────────────────────────
 
 export function getSetting(key: string): string | null {
@@ -743,128 +728,4 @@ export function setSetting(key: string, value: string): void {
     INSERT INTO settings (key, value) VALUES ($key, $value)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `).run({ $key: key, $value: value });
-}
-
-export interface AISettingsConfig {
-  provider: string;
-  model: string;
-  base_url: string;
-  api_key: string;
-}
-
-export function getAISettings(): AISettingsConfig {
-  return {
-    provider: getSetting("ai_provider") ?? "ollama",
-    model: getSetting("ai_model") ?? "",
-    base_url: getSetting("ai_base_url") ?? "",
-    api_key: getSetting("ai_api_key") ?? "",
-  };
-}
-
-export function setAISettings(config: Partial<AISettingsConfig>): void {
-  if (config.provider !== undefined) setSetting("ai_provider", config.provider);
-  if (config.model !== undefined) setSetting("ai_model", config.model);
-  if (config.base_url !== undefined) setSetting("ai_base_url", config.base_url);
-  if (config.api_key !== undefined) setSetting("ai_api_key", config.api_key);
-}
-
-// ──────────────────────────────────────────────
-// Chat Sessions & Messages
-// ──────────────────────────────────────────────
-
-export interface ChatSessionRecord {
-  id: number;
-  title: string | null;
-  provider: string;
-  model: string;
-  created_at: string;
-  last_active: string;
-}
-
-export interface ChatMessageRecord {
-  id: number;
-  session_id: number;
-  role: string;
-  content: string;
-  tool_name: string | null;
-  tool_args: string | null;
-  tool_result: string | null;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  created_at: string;
-}
-
-export interface SaveChatMessageOpts {
-  session_id: number;
-  role: string;
-  content: string;
-  tool_name?: string;
-  tool_args?: string;
-  tool_result?: string;
-  input_tokens?: number;
-  output_tokens?: number;
-}
-
-export function createChatSession(provider: string, model: string, title?: string): number {
-  const db = getDb();
-  const result = db.prepare(`
-    INSERT INTO chat_sessions (title, provider, model)
-    VALUES ($title, $provider, $model)
-  `).run({
-    $title: title ?? null,
-    $provider: provider,
-    $model: model,
-  });
-  return Number(result.lastInsertRowid);
-}
-
-export function saveChatMessage(opts: SaveChatMessageOpts): number {
-  const db = getDb();
-
-  // Update session last_active
-  db.prepare("UPDATE chat_sessions SET last_active = datetime('now') WHERE id = ?").run(opts.session_id);
-
-  const result = db.prepare(`
-    INSERT INTO chat_messages (session_id, role, content, tool_name, tool_args, tool_result, input_tokens, output_tokens)
-    VALUES ($session_id, $role, $content, $tool_name, $tool_args, $tool_result, $input_tokens, $output_tokens)
-  `).run({
-    $session_id: opts.session_id,
-    $role: opts.role,
-    $content: opts.content,
-    $tool_name: opts.tool_name ?? null,
-    $tool_args: opts.tool_args ?? null,
-    $tool_result: opts.tool_result ?? null,
-    $input_tokens: opts.input_tokens ?? null,
-    $output_tokens: opts.output_tokens ?? null,
-  });
-  return Number(result.lastInsertRowid);
-}
-
-export function getChatMessages(sessionId: number): ChatMessageRecord[] {
-  const db = getDb();
-  return db.query(
-    "SELECT * FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC"
-  ).all(sessionId) as ChatMessageRecord[];
-}
-
-export function listChatSessions(limit = 20): ChatSessionRecord[] {
-  const db = getDb();
-  return db.query(
-    "SELECT * FROM chat_sessions ORDER BY last_active DESC LIMIT ?"
-  ).all(limit) as ChatSessionRecord[];
-}
-
-export interface CoreMessageFormat {
-  role: "user" | "assistant";
-  content: string;
-}
-
-export function loadSessionHistory(sessionId: number): CoreMessageFormat[] {
-  const messages = getChatMessages(sessionId);
-  return messages
-    .filter((m) => m.role === "user" || m.role === "assistant")
-    .map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    }));
 }

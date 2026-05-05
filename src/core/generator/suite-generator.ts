@@ -127,7 +127,7 @@ function getBodyAssertions(ep: EndpointInfo): Record<string, Record<string, stri
 }
 
 /** Derive a variable name for a security scheme's token */
-function schemeVarName(scheme: SecuritySchemeInfo, allSchemes: SecuritySchemeInfo[]): string {
+export function schemeVarName(scheme: SecuritySchemeInfo, allSchemes: SecuritySchemeInfo[]): string {
   // Count how many bearer-like schemes exist
   const bearerSchemes = allSchemes.filter(s =>
     (s.type === "http" && (s.scheme === "bearer" || !s.scheme)) ||

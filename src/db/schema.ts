@@ -51,7 +51,7 @@ export function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 8;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -67,7 +67,8 @@ const SCHEMA = `
     branch        TEXT,
     environment   TEXT,
     duration_ms   INTEGER,
-    collection_id INTEGER REFERENCES collections(id)
+    collection_id INTEGER REFERENCES collections(id),
+    session_id    TEXT
   );
 
   CREATE TABLE IF NOT EXISTS results (
@@ -103,44 +104,6 @@ const SCHEMA = `
     base_dir     TEXT
   );
 
-  CREATE TABLE IF NOT EXISTS ai_generations (
-    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-    collection_id     INTEGER REFERENCES collections(id),
-    prompt            TEXT NOT NULL,
-    model             TEXT NOT NULL,
-    provider          TEXT NOT NULL,
-    generated_yaml    TEXT,
-    output_path       TEXT,
-    status            TEXT NOT NULL DEFAULT 'pending',
-    error_message     TEXT,
-    prompt_tokens     INTEGER,
-    completion_tokens INTEGER,
-    duration_ms       INTEGER,
-    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS chat_sessions (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    title       TEXT,
-    provider    TEXT NOT NULL,
-    model       TEXT NOT NULL,
-    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    last_active TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS chat_messages (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id    INTEGER NOT NULL REFERENCES chat_sessions(id),
-    role          TEXT NOT NULL,
-    content       TEXT NOT NULL,
-    tool_name     TEXT,
-    tool_args     TEXT,
-    tool_result   TEXT,
-    input_tokens  INTEGER,
-    output_tokens INTEGER,
-    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
   CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -148,13 +111,11 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_runs_started      ON runs(started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_runs_collection    ON runs(collection_id);
+  CREATE INDEX IF NOT EXISTS idx_runs_session       ON runs(session_id, started_at DESC);
   CREATE INDEX IF NOT EXISTS idx_results_run        ON results(run_id);
   CREATE INDEX IF NOT EXISTS idx_results_status     ON results(status);
   CREATE INDEX IF NOT EXISTS idx_results_name       ON results(suite_name, test_name);
   CREATE INDEX IF NOT EXISTS idx_collections_name   ON collections(name);
-  CREATE INDEX IF NOT EXISTS idx_ai_gen_collection  ON ai_generations(collection_id);
-  CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id);
-  CREATE INDEX IF NOT EXISTS idx_chat_sessions_active  ON chat_sessions(last_active DESC);
 
   CREATE TABLE IF NOT EXISTS lint_runs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -218,6 +179,20 @@ function runMigrations(db: Database): void {
         );
         CREATE INDEX IF NOT EXISTS idx_lint_runs_spec ON lint_runs(spec_path, started_at DESC);
       `);
+    }
+    if (ver >= 6 && ver < 7) {
+      // Migration v6→v7: add session_id column to runs for grouping CLI invocations
+      // (e.g. `zond hunt`, scripted post-init runs) into one campaign.
+      db.exec("ALTER TABLE runs ADD COLUMN session_id TEXT");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_runs_session ON runs(session_id, started_at DESC)");
+    }
+    if (ver >= 7 && ver < 8) {
+      // Migration v7→v8: drop the unused AI/chat tables. They were a legacy
+      // experiment (in-app chat-driven YAML generation) that never shipped a
+      // user-facing surface and have no consumers in the codebase.
+      db.exec("DROP TABLE IF EXISTS chat_messages");
+      db.exec("DROP TABLE IF EXISTS chat_sessions");
+      db.exec("DROP TABLE IF EXISTS ai_generations");
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

@@ -20,6 +20,7 @@ export interface ExecuteRunOptions {
   envVars?: Record<string, string>;
   dryRun?: boolean;
   rerunFilter?: Set<string>;  // "suite_name::test_name" keys to rerun
+  sessionId?: string;
 }
 
 export interface ExecuteRunResult {
@@ -124,6 +125,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
     environment: effectiveEnvName,
     trigger,
     collection_id: collection?.id,
+    session_id: options.sessionId,
   });
   finalizeRun(runId, results);
   saveResults(runId, results);

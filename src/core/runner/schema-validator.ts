@@ -102,6 +102,7 @@ function ajvErrorToAssertion(err: ErrorObject, body: unknown): AssertionResult {
     passed: false,
     actual,
     expected: humanize(err),
+    kind: "schema",
   };
 }
 

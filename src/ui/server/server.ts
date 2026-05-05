@@ -1,7 +1,25 @@
 import { Hono } from "hono";
 import { resolve } from "node:path";
 import { getDb } from "../../db/schema.ts";
-import { countRuns, getLatestRunForSuite, getResultsByRunId, getRunById, listRuns } from "../../db/queries.ts";
+import {
+  countRuns,
+  countSessions,
+  getCollectionById,
+  getLatestRunForSuite,
+  getResultById,
+  getResultsByRunId,
+  getRunById,
+  listRuns,
+  listRunsBySession,
+  listSessions,
+} from "../../db/queries.ts";
+import { renderCaseStudy } from "../../core/exporter/case-study/index.ts";
+import { resolveAdHocRequest, sendAdHocRequest } from "../../core/runner/send-request.ts";
+import { listCollections } from "../../db/queries.ts";
+import { loadCoverage } from "../../core/coverage/loader.ts";
+import { readCurrentApi } from "../../core/context/current.ts";
+import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
+import { VERSION } from "../../cli/version.ts";
 import { parseDirectorySafe } from "../../core/parser/yaml-parser.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 
@@ -46,60 +64,29 @@ export function createApp() {
     }
   });
 
-  app.get("/api/runs/:id/stream", (c) => {
-    const id = Number(c.req.param("id"));
-    if (!Number.isFinite(id)) return c.json({ error: "invalid run id" }, 400);
-    const run = getRunById(id);
-    if (!run) return c.json({ error: "run not found" }, 404);
+  app.get("/api/sessions", (c) => {
+    const limitRaw = Number(c.req.query("limit") ?? DEFAULT_LIMIT);
+    const offsetRaw = Number(c.req.query("offset") ?? 0);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(1, limitRaw), MAX_LIMIT) : DEFAULT_LIMIT;
+    const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
+    try {
+      const sessions = listSessions(limit, offset);
+      const total = countSessions();
+      return c.json({ sessions, total, limit, offset });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
 
-    // Stub: emits a synthetic ramp-up so the UI wiring is observable on already-finished
-    // local runs. Real runner progress streaming arrives with TASK-104.
-    const total = Math.max(run.total, 1);
-    const stepMs = total > 50 ? 100 : 350;
-
-    let tick: ReturnType<typeof setInterval> | null = null;
-    let closed = false;
-
-    const stream = new ReadableStream({
-      start(controller) {
-        const enc = new TextEncoder();
-        const send = (event: string, payload: unknown) => {
-          if (closed) return;
-          try {
-            controller.enqueue(enc.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
-          } catch {
-            closed = true;
-            if (tick) clearInterval(tick);
-          }
-        };
-        let completed = 0;
-        send("snapshot", { runId: id, completed, total, status: "running" });
-        tick = setInterval(() => {
-          if (closed) return;
-          completed = Math.min(completed + 1, total);
-          send("progress", { runId: id, completed, total });
-          if (completed >= total) {
-            send("done", { runId: id });
-            closed = true;
-            if (tick) clearInterval(tick);
-            try { controller.close(); } catch { /* already closed */ }
-          }
-        }, stepMs);
-      },
-      cancel() {
-        closed = true;
-        if (tick) clearInterval(tick);
-      },
-    });
-
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      },
-    });
+  app.get("/api/sessions/:id/runs", (c) => {
+    const sessionId = c.req.param("id");
+    if (!sessionId) return c.json({ error: "missing session id" }, 400);
+    try {
+      const runs = listRunsBySession(sessionId);
+      return c.json({ session_id: sessionId, runs });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
   });
 
   app.get("/api/suites", async (c) => {
@@ -147,6 +134,161 @@ export function createApp() {
     }
   });
 
+  app.get("/api/apis", (c) => {
+    try {
+      const cols = listCollections();
+      let current: string | null = null;
+      try { current = readCurrentApi(); } catch { /* outside workspace */ }
+      return c.json({
+        current,
+        apis: cols.map((c) => ({
+          name: c.name,
+          base_dir: c.base_dir,
+          openapi_spec: c.openapi_spec,
+          last_run_at: c.last_run_at,
+          last_run_total: c.last_run_total,
+          last_run_passed: c.last_run_passed,
+          last_run_failed: c.last_run_failed,
+        })),
+      });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
+  app.get("/api/coverage", async (c) => {
+    const apiName = c.req.query("api");
+    if (!apiName) return c.json({ error: "missing 'api' query parameter" }, 400);
+    const runIdRaw = c.req.query("runId");
+    const runId = runIdRaw != null ? Number(runIdRaw) : undefined;
+    if (runIdRaw != null && !Number.isFinite(runId)) {
+      return c.json({ error: "invalid runId" }, 400);
+    }
+    const profile = c.req.query("profile") === "safe" ? "safe" : "full";
+    const tagRaw = c.req.query("tag");
+    const tagFilter = tagRaw ? tagRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+    try {
+      const result = await loadCoverage({
+        apiName,
+        ...(runId != null ? { runId } : {}),
+        profile,
+        tagFilter,
+      });
+      return c.json(result);
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  app.post("/api/replay", async (c) => {
+    let payload: {
+      method?: string;
+      url?: string;
+      headers?: Record<string, string>;
+      body?: string;
+      resultId?: number;
+      envName?: string;
+      timeout?: number;
+      dryRun?: boolean;
+    };
+    try {
+      payload = await c.req.json();
+    } catch {
+      return c.json({ error: "invalid JSON body" }, 400);
+    }
+
+    if (!payload.method || typeof payload.method !== "string") {
+      return c.json({ error: "method required" }, 400);
+    }
+    if (!payload.url || typeof payload.url !== "string") {
+      return c.json({ error: "url required" }, 400);
+    }
+
+    let extraVars: Record<string, unknown> | undefined;
+    let collectionName: string | undefined;
+    let envName = payload.envName;
+    if (typeof payload.resultId === "number" && Number.isFinite(payload.resultId)) {
+      const result = getResultById(payload.resultId);
+      if (result) {
+        if (result.captures && Object.keys(result.captures).length > 0) {
+          extraVars = result.captures;
+        }
+        const run = getRunById(result.run_id);
+        if (run?.collection_id != null) {
+          const col = getCollectionById(run.collection_id);
+          if (col) collectionName = col.name;
+        }
+        if (!envName && run?.environment) envName = run.environment;
+      }
+    }
+
+    const opts = {
+      method: payload.method.toUpperCase(),
+      url: payload.url,
+      headers: payload.headers,
+      body: payload.body,
+      timeout: payload.timeout,
+      envName,
+      collectionName,
+      extraVars,
+    };
+
+    try {
+      if (payload.dryRun) {
+        const resolved = await resolveAdHocRequest(opts);
+        return c.json({ resolved });
+      }
+      const resolved = await resolveAdHocRequest(opts);
+      const response = await sendAdHocRequest(opts);
+      return c.json({ resolved, response });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 200);
+    }
+  });
+
+  app.get("/api/results/:id/case-study.md", async (c) => {
+    const id = Number(c.req.param("id"));
+    if (!Number.isFinite(id)) {
+      return c.json({ error: "invalid result id" }, 400);
+    }
+    try {
+      const result = getResultById(id);
+      if (!result) return c.json({ error: "result not found" }, 404);
+      const run = getRunById(result.run_id);
+      if (!run) return c.json({ error: "run not found" }, 404);
+
+      let specTitle: string | null = null;
+      let specVersion: string | null = null;
+      if (run.collection_id != null) {
+        const col = getCollectionById(run.collection_id);
+        if (col?.openapi_spec) {
+          try {
+            const doc = await readOpenApiSpec(col.openapi_spec);
+            specTitle = doc.info?.title ?? null;
+            specVersion = doc.info?.version ?? null;
+          } catch {
+            // Best-effort — leave TODO placeholders in the draft.
+          }
+        }
+      }
+
+      const md = renderCaseStudy({
+        result,
+        run,
+        specTitle,
+        specVersion,
+        zondVersion: VERSION,
+      });
+      return new Response(md, {
+        status: 200,
+        headers: { "content-type": "text/markdown; charset=utf-8" },
+      });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  });
+
   return app;
 }
 
@@ -158,8 +300,6 @@ async function startDev(api: ReturnType<typeof createApp>, port: number, hostnam
     port,
     hostname,
     development: true,
-    // SSE streams can run longer than Bun's default 10s idle timeout.
-    idleTimeout: 255,
     routes: {
       "/api/*": (req) => api.fetch(req),
       "/": indexHtml.default,
@@ -181,7 +321,6 @@ async function startProd(api: ReturnType<typeof createApp>, port: number, hostna
   return Bun.serve({
     port,
     hostname,
-    idleTimeout: 255,
     async fetch(req) {
       const url = new URL(req.url);
       if (url.pathname.startsWith("/api/")) return api.fetch(req);

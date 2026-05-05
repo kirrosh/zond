@@ -19,6 +19,7 @@ import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { getDb } from "../../db/schema.ts";
 import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from "../../db/queries.ts";
 import { AUTH_PATH_RE } from "../../core/runner/execute-run.ts";
+import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
 
 export interface RunOptions {
@@ -48,6 +49,8 @@ export interface RunOptions {
   validateSchema?: boolean;
   /** Explicit OpenAPI spec path/URL (overrides collection.openapi_spec). */
   specPath?: string;
+  /** Group this run under a session id (multi-run campaigns). */
+  sessionId?: string;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -169,6 +172,10 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
+  if (options.sessionId && !options.json) {
+    process.stderr.write(`zond: session ${options.sessionId} (run will be grouped)\n`);
+  }
+
   // Inject CLI auth token — overrides env file value
   if (options.authToken) {
     env.auth_token = options.authToken;
@@ -218,7 +225,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
     if (!specPath) {
       try {
         const collection = findCollectionByTestPath(options.path);
-        if (collection?.openapi_spec) specPath = collection.openapi_spec;
+        if (collection?.openapi_spec) specPath = resolveCollectionSpec(collection.openapi_spec);
       } catch { /* DB not available — fall through */ }
     }
     if (specPath) {
@@ -386,6 +393,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
         started_at: results[0]?.started_at ?? new Date().toISOString(),
         environment: options.env,
         collection_id: collection?.id,
+        session_id: options.sessionId,
       });
       finalizeRun(savedRunId, results);
       saveResults(savedRunId, results);

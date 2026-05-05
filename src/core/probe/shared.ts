@@ -136,6 +136,42 @@ export function headersEqual(a: Record<string, string>, b: Record<string, string
   return true;
 }
 
+/**
+ * Resolve auth headers with live values from `vars` (used by probe runtimes
+ * and path-discovery). Mirrors `getAuthHeaders` but produces concrete header
+ * values, not `{{auth_token}}` placeholders.
+ */
+export function liveAuthHeaders(
+  ep: EndpointInfo,
+  schemes: SecuritySchemeInfo[],
+  vars: Record<string, string>,
+): Record<string, string> {
+  if (ep.security.length === 0) return {};
+  for (const secName of ep.security) {
+    const scheme = schemes.find(s => s.name === secName);
+    if (!scheme) continue;
+    if (scheme.type === "http") {
+      if (scheme.scheme === "bearer" || !scheme.scheme) {
+        const tok = vars["auth_token"];
+        if (tok) return { Authorization: `Bearer ${tok}` };
+      }
+      if (scheme.scheme === "basic") {
+        const tok = vars["auth_token"];
+        if (tok) return { Authorization: `Basic ${tok}` };
+      }
+    }
+    if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
+      if (scheme.apiKeyName === "Authorization") {
+        const tok = vars["auth_token"];
+        if (tok) return { Authorization: `Bearer ${tok}` };
+      }
+      const key = vars["api_key"];
+      if (key) return { [scheme.apiKeyName]: key };
+    }
+  }
+  return {};
+}
+
 export function hasJsonBody(ep: EndpointInfo): boolean {
   return (
     ep.method !== "GET" &&

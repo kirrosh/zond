@@ -4,12 +4,13 @@ title: 'T47: Multi-tenant cross-isolation тесты'
 status: To Do
 assignee: []
 created_date: '2026-04-27 16:42'
+updated_date: '2026-05-03 11:24'
 labels:
   - security
   - bug-hunting
 milestone: m-5
 dependencies: []
-priority: high
+priority: medium
 ---
 
 ## Description

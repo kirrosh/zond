@@ -185,6 +185,76 @@ describe("UI API routes", () => {
     expect(legacy?.failure_class_reason).toBeNull();
   });
 
+  it("GET /api/apis → returns registered collections + current marker", async () => {
+    const res = await app.request("/api/apis");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { apis: Array<{ name: string }>; current: string | null };
+    expect(Array.isArray(body.apis)).toBe(true);
+    expect(body.apis.find((a) => a.name === "Test API")).toBeDefined();
+  });
+
+  it("GET /api/coverage → 400 on missing api", async () => {
+    const res = await app.request("/api/coverage");
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /api/coverage → 400 on unknown api", async () => {
+    const res = await app.request("/api/coverage?api=does-not-exist");
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /api/replay → dryRun resolves vars from collection env without sending", async () => {
+    const res = await app.request("/api/replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        method: "GET",
+        url: "http://localhost/pets",
+        headers: { "X-Trace": "abc" },
+        dryRun: true,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { resolved: { method: string; url: string; headers: Record<string, string> } };
+    expect(body.resolved.method).toBe("GET");
+    expect(body.resolved.url).toBe("http://localhost/pets");
+    expect(body.resolved.headers["X-Trace"]).toBe("abc");
+  });
+
+  it("POST /api/replay → 400 on missing method/url", async () => {
+    const res = await app.request("/api/replay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "http://localhost" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /api/replay → sends and returns response", async () => {
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      })) as unknown as typeof fetch;
+    try {
+      const res = await app.request("/api/replay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ method: "POST", url: "http://localhost/pets", body: '{"name":"x"}' }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json() as {
+        resolved: { headers: Record<string, string> };
+        response: { status: number; body: unknown };
+      };
+      expect(body.response.status).toBe(201);
+      expect(body.resolved.headers["Content-Type"]).toBe("application/json");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
+
   it("GET /api/runs/999999 → 404", async () => {
     const res = await app.request("/api/runs/999999");
     expect(res.status).toBe(404);
@@ -193,6 +263,35 @@ describe("UI API routes", () => {
   it("GET /api/runs/abc → 400 invalid id", async () => {
     const res = await app.request("/api/runs/abc");
     expect(res.status).toBe(400);
+  });
+
+  it("GET /api/sessions → groups runs that share a session_id", async () => {
+    const sid = "test-session-abc";
+    const r1 = createRun({ started_at: new Date().toISOString(), session_id: sid });
+    finalizeRun(r1, [{
+      suite_name: "s1", started_at: new Date().toISOString(), finished_at: new Date().toISOString(),
+      total: 1, passed: 1, failed: 0, skipped: 0, steps: [],
+    }]);
+    const r2 = createRun({ started_at: new Date().toISOString(), session_id: sid });
+    finalizeRun(r2, [{
+      suite_name: "s2", started_at: new Date().toISOString(), finished_at: new Date().toISOString(),
+      total: 2, passed: 1, failed: 1, skipped: 0, steps: [],
+    }]);
+
+    const res = await app.request("/api/sessions");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { sessions: Array<{ session_id: string; run_count: number; total: number; failed: number }>; total: number };
+    const found = body.sessions.find((s) => s.session_id === sid);
+    expect(found).toBeDefined();
+    expect(found!.run_count).toBe(2);
+    expect(found!.total).toBe(3);
+    expect(found!.failed).toBe(1);
+
+    const runsRes = await app.request(`/api/sessions/${sid}/runs`);
+    expect(runsRes.status).toBe(200);
+    const runsBody = await runsRes.json() as { runs: Array<{ id: number; session_id: string }> };
+    expect(runsBody.runs.length).toBe(2);
+    expect(runsBody.runs[0]!.session_id).toBe(sid);
   });
 });
 

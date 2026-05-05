@@ -1,9 +1,10 @@
 ---
 id: TASK-21
 title: 'T21: .env.yaml walk-up до workspace root'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-27 12:39'
+updated_date: '2026-04-30 13:56'
 labels:
   - T21
   - phase-4

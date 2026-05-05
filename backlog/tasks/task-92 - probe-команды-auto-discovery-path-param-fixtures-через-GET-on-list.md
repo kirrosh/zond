@@ -1,18 +1,19 @@
 ---
 id: TASK-92
 title: 'probe-команды: auto-discovery path-param fixtures через GET-on-list'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 12:46'
+updated_date: '2026-05-03 11:36'
 labels:
   - bug-hunting
   - probes
   - ergonomics
+milestone: m-5
 dependencies:
   - TASK-32
   - TASK-65
   - TASK-58
-milestone: m-5
 priority: high
 ---
 

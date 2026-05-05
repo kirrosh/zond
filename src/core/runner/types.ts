@@ -16,12 +16,21 @@ export interface HttpResponse {
   duration_ms: number;
 }
 
+/**
+ * `kind` lets the UI surface the assertion that matches the test's stated
+ * intent (primary) ahead of OpenAPI schema noise (schema) and housekeeping
+ * checks like duration/header asserts (auxiliary). Optional for backwards
+ * compatibility — older runs render as `primary` by default.
+ */
+export type AssertionKind = "primary" | "schema" | "auxiliary";
+
 export interface AssertionResult {
   field: string;
   rule: string;
   passed: boolean;
   actual: unknown;
   expected: unknown;
+  kind?: AssertionKind;
 }
 
 export interface StepResult {

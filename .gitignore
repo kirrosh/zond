@@ -13,7 +13,7 @@ zond-v2
 zond-v2.exe
 
 # code coverage
-coverage
+/coverage
 *.lcov
 
 # logs

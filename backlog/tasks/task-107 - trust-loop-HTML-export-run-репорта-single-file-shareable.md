@@ -1,15 +1,16 @@
 ---
 id: TASK-107
 title: 'trust-loop: HTML export run-репорта (single-file shareable)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 12:16'
+updated_date: '2026-04-30 12:32'
 labels:
   - ui
   - trust-loop
   - reporting
-dependencies: []
 milestone: m-6
+dependencies: []
 priority: high
 ---
 

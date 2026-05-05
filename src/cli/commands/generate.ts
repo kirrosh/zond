@@ -16,8 +16,7 @@ import { parse } from "../../core/parser/yaml-parser.ts";
 import { decycleSchema } from "../../core/generator/schema-utils.ts";
 import { printError, printSuccess } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
-import { readMeta, writeMeta, hashSpec, buildFileMeta } from "../../core/meta/meta-store.ts";
-import { version as ZOND_VERSION } from "../../../package.json";
+import { hashSpec } from "../../core/meta/meta-store.ts";
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByTestPath, updateCollection } from "../../db/queries.ts";
 
@@ -74,27 +73,15 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
     // Write suite files
     const createdFiles: Array<{ file: string; suite: string; tests: number }> = [];
 
-    // Build metadata for written files
-    const metaFiles: Record<string, import("../../core/meta/types.ts").FileMeta> = {};
-
     for (const suite of suites) {
       const yaml = serializeSuite(suite);
       const fileName = `${suite.fileStem ?? suite.name}.yaml`;
       const filePath = join(options.output, fileName);
       await Bun.write(filePath, yaml);
       createdFiles.push({ file: filePath, suite: suite.name, tests: suite.tests.length });
-      metaFiles[fileName] = buildFileMeta(suite, ZOND_VERSION);
     }
 
-    // Write .zond-meta.json (merge with existing meta to preserve info about prior files)
-    const existingMeta = await readMeta(options.output);
     const specContent = typeof doc === "object" ? JSON.stringify(decycleSchema(doc)) : String(doc);
-    await writeMeta(options.output, {
-      zondVersion: ZOND_VERSION,
-      lastSyncedAt: new Date().toISOString(),
-      specHash: hashSpec(specContent),
-      files: { ...(existingMeta?.files ?? {}), ...metaFiles },
-    });
 
     // Generate .api-catalog.yaml (always uses full unfiltered endpoint list)
     const catalog = buildCatalog({
@@ -171,6 +158,13 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
           console.log(`  ⚠ ${w}`);
         }
       }
+      console.log("");
+      console.log("Next steps:");
+      console.log("  1. Fill apis/<name>/.env.yaml with auth_token, real FK ids, verified emails, valid enums");
+      console.log("     (the fixture pack — without it, {{$randomString}} loses 5+ iterations to format-validation)");
+      console.log("  2. zond run <output> --safe --json                              # smoke (GET-only)");
+      console.log(`  3. zond run <output> --tag crud,setup --validate-schema --spec ${options.specPath} --json`);
+      console.log("     (--validate-schema catches contract drift; recommended for every CRUD run)");
     }
 
     return 0;

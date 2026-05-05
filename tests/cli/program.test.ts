@@ -97,8 +97,9 @@ describe("buildProgram — registration", () => {
     const names = new Set(program.commands.map((c) => c.name()));
     for (const expected of [
       "run", "validate", "serve", "ci", "coverage", "init",
-      "describe", "db", "request", "generate", "catalog", "guide",
-      "export", "update", "sync",
+      "add", "refresh-api", "doctor", "session",
+      "describe", "db", "request", "generate", "catalog",
+      "export", "update",
     ]) {
       expect(names.has(expected)).toBe(true);
     }

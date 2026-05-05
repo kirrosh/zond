@@ -25,6 +25,7 @@ export interface ProbeMassAssignmentOptions {
   emitTests?: string;
   tag?: string;
   noCleanup?: boolean;
+  noDiscover?: boolean;
   timeoutMs?: number;
   json?: boolean;
   listTags?: boolean;
@@ -92,6 +93,7 @@ export async function probeMassAssignmentCommand(
       vars,
       noCleanup: options.noCleanup,
       timeoutMs: options.timeoutMs,
+      discover: !options.noDiscover,
     });
 
     const md = formatDigestMarkdown(result, options.specPath);

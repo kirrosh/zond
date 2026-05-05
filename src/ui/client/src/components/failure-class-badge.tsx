@@ -31,6 +31,11 @@ const META: Record<FailureClass, ClassMeta> = {
     variant: "info",
     defaultHint: "Test setup problem (auth, network, missing fixtures) — not an API bug",
   },
+  cascade: {
+    label: "cascade",
+    variant: "muted",
+    defaultHint: "Skipped because an upstream step failed to produce a required capture",
+  },
 };
 
 interface FailureClassBadgeProps {
