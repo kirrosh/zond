@@ -6,6 +6,29 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **TASK-151 round-4 follow-up: per-field restore + cleanup-failure
+  surfacing.** The first cut of snapshot+restore sent the full GET
+  body back as a single PUT, which `422`'d on partial-PUT APIs (Sentry,
+  Stripe) — the round-3 user re-ran the probe and found `org.name`,
+  `project.name`, `project.subjectPrefix` left as the attack payload.
+  Fixes:
+    1. `restoreOriginal` now replays each dirty field as its own
+       single-key PUT, so partial-PUT APIs accept it. Caller passes the
+       set of mutated keys (full-baseline → all body keys, partial
+       baseline / per-attack → just the targeted field).
+    2. `findDeleteCounterpart` / `findGetByIdCounterpart` are
+       trailing-slash tolerant. `POST /keys/` + `DELETE /keys/{id}/`
+       now matches; previously the regex required identical slash forms
+       and silently leaked DSN keys.
+    3. POST cleanup failures (no DELETE counterpart, missing id, DELETE
+       4xx, network error) accumulate into `verdict.cleanup.error`.
+    4. `formatSecurityDigest` prints a mandatory
+       `## ⚠️ Cleanup failures` section first when any verdict has a
+       cleanup error, plus a `🧹 cleanup-failure` tag next to the
+       verdict line in its severity bucket. The CLI now exits non-zero
+       on cleanup failures (data-integrity gate, distinct from the
+       HIGH-finding gate).
+
 - **TASK-151: `probe-security` snapshot+restore cleanup for PUT/PATCH.**
   Cleanup used to be `DELETE-if-2xx`, which silently destroyed live data
   on rename'ы — a probe overwrote a Sentry DSN-key with the attack

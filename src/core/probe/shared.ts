@@ -106,22 +106,41 @@ function escapeRegex(s: string): string {
 }
 
 /**
+ * Strip a single trailing slash so `/keys/` and `/keys` compare equal.
+ * Sentry-style APIs mix both forms; without this normalisation, the
+ * counterpart lookup misses on every collection that ends in `/`,
+ * leaking created resources during probe runs.
+ */
+function stripTrailingSlash(p: string): string {
+  return p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p;
+}
+
+function pathsEqual(a: string, b: string): boolean {
+  return stripTrailingSlash(a) === stripTrailingSlash(b);
+}
+
+/**
  * Find DELETE counterpart for resource-creating endpoint:
  *  - POST  /collection           → DELETE /collection/{id}
  *  - PUT   /collection/{id}      → DELETE /collection/{id}
  *  - PATCH /collection/{id}      → DELETE /collection/{id}
+ *
+ *  Trailing-slash tolerant on both sides (TASK-139-style fix carried
+ *  into shared.ts after round-4 dogfooding showed POST /keys/ on Sentry
+ *  leaked DSN keys because the regex required identical slash forms).
  */
 export function findDeleteCounterpart(
   ep: EndpointInfo,
   all: EndpointInfo[],
 ): EndpointInfo | undefined {
   const m = ep.method.toUpperCase();
+  const base = stripTrailingSlash(ep.path);
   if (m === "POST") {
-    const re = new RegExp(`^${escapeRegex(ep.path)}/\\{[^}]+\\}$`);
+    const re = new RegExp(`^${escapeRegex(base)}/\\{[^}]+\\}/?$`);
     return all.find(e => e.method.toUpperCase() === "DELETE" && !e.deprecated && re.test(e.path));
   }
   if (m === "PUT" || m === "PATCH") {
-    return all.find(e => e.method.toUpperCase() === "DELETE" && !e.deprecated && e.path === ep.path);
+    return all.find(e => e.method.toUpperCase() === "DELETE" && !e.deprecated && pathsEqual(e.path, ep.path));
   }
   return undefined;
 }
@@ -131,18 +150,21 @@ export function findDeleteCounterpart(
  *  - POST  /collection           → GET /collection/{id}
  *  - PUT   /collection/{id}      → GET /collection/{id}    (same path)
  *  - PATCH /collection/{id}      → GET /collection/{id}    (same path)
+ *
+ *  See `findDeleteCounterpart` for the trailing-slash rationale.
  */
 export function findGetByIdCounterpart(
   ep: EndpointInfo,
   all: EndpointInfo[],
 ): EndpointInfo | undefined {
   const m = ep.method.toUpperCase();
+  const base = stripTrailingSlash(ep.path);
   if (m === "POST") {
-    const re = new RegExp(`^${escapeRegex(ep.path)}/\\{[^}]+\\}$`);
+    const re = new RegExp(`^${escapeRegex(base)}/\\{[^}]+\\}/?$`);
     return all.find(e => e.method.toUpperCase() === "GET" && !e.deprecated && re.test(e.path));
   }
   if (m === "PUT" || m === "PATCH") {
-    return all.find(e => e.method.toUpperCase() === "GET" && !e.deprecated && e.path === ep.path);
+    return all.find(e => e.method.toUpperCase() === "GET" && !e.deprecated && pathsEqual(e.path, ep.path));
   }
   return undefined;
 }

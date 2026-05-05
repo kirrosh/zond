@@ -161,7 +161,17 @@ export async function probeSecurityCommand(
       }
     }
 
-    return counts.high > 0 ? 1 : 0;
+    const cleanupFailures = result.verdicts.filter(v => v.cleanup?.error).length;
+    if (cleanupFailures > 0 && !options.json) {
+      printWarning(
+        `${cleanupFailures} endpoint(s) with cleanup failures — see "Cleanup failures" section in the digest. Manual remediation may be required.`,
+      );
+    }
+
+    // Exit non-zero on HIGH (CI gate) or cleanup failures (data
+    // integrity). Cleanup failure means probe-security mutated state
+    // it couldn't restore — the operator needs to act.
+    return counts.high > 0 || cleanupFailures > 0 ? 1 : 0;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (options.json) printJson(jsonError("probe-security", [message]));
