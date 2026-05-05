@@ -6,6 +6,17 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-136: `zond discover --api <name>` — auto-fill `.env.yaml` FK ids
+  from list-endpoints.** Phase 2.5 of an audit used to be manual: hit
+  `GET /audiences`, `GET /projects`, etc., copy slugs into `.env.yaml`,
+  repeat for every FK. `discover` walks `.api-resources.yaml`, finds owner
+  list-endpoints for each path-FK var, calls them with the workspace
+  `auth_token`, and proposes a diff. Suffix-aware extraction (`*_slug` →
+  `slug`, `*_uuid` → `uuid`, `*_id` → `id`). Default dry-run; `--apply`
+  writes with a `.env.yaml.bak` backup. Skips vars already filled with a
+  non-placeholder value. v1 limitation: only collection-level list
+  endpoints (no nested paths — that's TASK-137 territory).
+
 - **TASK-139: `zond generate --explain`.** Prints a per-POST diagnostic table
   (`resource | post | get/{id} | put/patch | delete | list | verdict | reason`)
   without writing files, so you can debug "why didn't `generate` emit a CRUD

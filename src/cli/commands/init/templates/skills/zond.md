@@ -100,11 +100,24 @@ since TASK-139, but the table lets you confirm).
 `zond doctor` already showed which `.env.yaml` keys are missing. Beyond
 the auto-detected list, real-API CRUD usually needs **pre-existing FK
 ids**, **verified resources**, and **valid enums** the spec doesn't
-enforce. Use `zond request` to discover them:
+enforce.
+
+For path-FK ids (the bulk of fixture-pack work), prefer `zond discover`
+over manual `zond request` calls — it walks `.api-resources.yaml`, hits
+each owner list-endpoint with the workspace auth, and proposes a diff:
 
 ```bash
-zond request GET /audiences | jq '.data[0].id'
-zond request GET /domains   | jq '.data[] | select(.status=="verified") | .id'
+zond discover --api <name>            # dry-run: prints var → discovered value
+zond discover --api <name> --apply    # writes to .env.yaml (with .bak backup)
+```
+
+Suffix-aware: `*_slug` captures `slug`, `*_uuid` → `uuid`, `*_id` → `id`.
+Skips vars already filled with a non-placeholder value. For special
+fixtures the spec can't describe (verified-only emails, domain-validated
+records, "real" enum values), fall back to `zond request`:
+
+```bash
+zond request GET /domains | jq '.data[] | select(.status=="verified") | .id'
 ```
 
 Add to `apis/<name>/.env.yaml`:
