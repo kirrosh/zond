@@ -16,7 +16,7 @@ import {
 } from "./rules/heuristics.ts";
 import { RULE_AFFECTS } from "./affects.ts";
 
-export type { Issue, LintConfig, LintResult, Severity, RuleId } from "./types.ts";
+export type { Issue, LintConfig, LintResult, LintStats, Severity, RuleId } from "./types.ts";
 export { loadConfig, defaultConfig } from "./config.ts";
 export { formatHuman, formatNdjson } from "./reporter.ts";
 

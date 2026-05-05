@@ -60,7 +60,7 @@ describe("renderCaseStudy (TASK-110)", () => {
         id: 7, run_id: 42, suite_name: results[0]!.suite_name,
         test_name: step.name, status: step.status, duration_ms: step.duration_ms,
         request_method: step.request.method, request_url: step.request.url,
-        request_body: step.request.body,
+        request_body: step.request.body ?? null,
         response_status: step.response?.status ?? null,
         response_body: step.response?.body ?? null,
         response_headers: JSON.stringify(step.response!.headers),

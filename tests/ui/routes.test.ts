@@ -402,7 +402,7 @@ describe("UI /api/suites", () => {
   it("GET /api/suites: last_run wires through suite_file → step_results", async () => {
     // Seed a run whose results carry suite_file = generated.yaml
     const filePath = join(SUITES_DIR, "generated.yaml");
-    const runId = createRun({ started_at: "2026-01-01T00:00:00.000Z", environment: "test", collection_id: null });
+    const runId = createRun({ started_at: "2026-01-01T00:00:00.000Z", environment: "test" });
     const results: TestRunResult[] = [{
       suite_name: "listPets",
       suite_file: filePath,
