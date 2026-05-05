@@ -10,7 +10,11 @@ import {
   buildCatalog,
   serializeCatalog,
 } from "../../core/generator/index.ts";
-import { generateSuites, findUnresolvedVars } from "../../core/generator/suite-generator.ts";
+import {
+  generateSuites,
+  findUnresolvedVars,
+  detectCrudGroupsWithDiagnostics,
+} from "../../core/generator/suite-generator.ts";
 import { filterByTag } from "../../core/generator/chunker.ts";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import { decycleSchema } from "../../core/generator/schema-utils.ts";
@@ -25,6 +29,10 @@ export interface GenerateOptions {
   output: string;
   tag?: string;
   uncoveredOnly?: boolean;
+  /** TASK-139: dry-run that prints per-resource CRUD detection verdict and
+   *  exits — no files written. Use to debug "why didn't generate emit a
+   *  CRUD chain for resource X?" on real specs. */
+  explain?: boolean;
   json?: boolean;
 }
 
@@ -34,6 +42,48 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
     const allEndpoints = extractEndpoints(doc);
     let endpoints = allEndpoints;
     const securitySchemes = extractSecuritySchemes(doc);
+
+    // --explain short-circuits: print the CRUD detection table and exit.
+    if (options.explain) {
+      let scope = endpoints;
+      if (options.tag) scope = filterByTag(scope, options.tag);
+      const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(scope);
+      if (options.json) {
+        printJson(jsonOk("generate", {
+          mode: "explain",
+          totalCandidates: diagnostics.length,
+          chains: groups.length,
+          diagnostics,
+        }));
+      } else {
+        if (diagnostics.length === 0) {
+          console.log("No POST endpoints in scope — nothing to evaluate.");
+        } else {
+          const chains = diagnostics.filter(d => d.verdict === "chain").length;
+          console.log(`CRUD detection: ${chains}/${diagnostics.length} POST endpoints became chain candidates.\n`);
+          const headers = ["resource", "post", "get/{id}", "put/patch", "delete", "list", "verdict", "reason"];
+          const rows = diagnostics.map(d => [
+            d.resource,
+            d.postPath,
+            d.hasGetById ? "✓" : "—",
+            d.hasUpdate ? "✓" : "—",
+            d.hasDelete ? "✓" : "—",
+            d.hasList ? "✓" : "—",
+            d.verdict,
+            d.reason,
+          ]);
+          const widths = headers.map((h, i) =>
+            Math.max(h.length, ...rows.map(r => r[i]!.length)),
+          );
+          const fmt = (cells: string[]) =>
+            cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
+          console.log(fmt(headers));
+          console.log(widths.map(w => "─".repeat(w)).join("  "));
+          for (const row of rows) console.log(fmt(row));
+        }
+      }
+      return 0;
+    }
     const baseUrl = ((doc as any).servers?.[0]?.url) as string | undefined;
     const apiName = (doc as any).info?.title as string | undefined;
     const apiVersion = (doc as any).info?.version as string | undefined;

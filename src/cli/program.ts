@@ -689,17 +689,24 @@ export function buildProgram(): Command {
     .description("Generate test suites from OpenAPI spec")
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
-    .requiredOption("--output <dir>", "Output directory for generated test files")
+    .option("--output <dir>", "Output directory for generated test files (required unless --explain)")
     .option("--tag <tag>", "Generate only for endpoints with this tag")
     .option("--uncovered-only", "Skip endpoints already covered by existing tests")
+    .option("--explain", "Print the CRUD detection table (which resources became chain candidates and why) without writing files (TASK-139)")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      if (!opts.explain && !opts.output) {
+        printError("--output <dir> is required (omit only when running with --explain).");
+        process.exitCode = 2;
+        return;
+      }
       process.exitCode = await generateCommand({
         specPath: resolved.spec,
-        output: opts.output,
+        output: opts.output ?? "",
         tag: opts.tag,
         uncoveredOnly: opts.uncoveredOnly === true,
+        explain: opts.explain === true,
         json: globalJson(cmd),
       });
     });

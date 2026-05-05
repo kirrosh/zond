@@ -201,16 +201,57 @@ function getSuiteHeaders(
   return allSame ? first : undefined;
 }
 
-/** Find the best field to capture from POST response (for CRUD chains) */
-function getCaptureField(ep: EndpointInfo): string {
+/** Common id-like field names looked up after `id` itself.
+ *  TASK-139: Sentry / many real APIs return `slug`, `uuid`, `version`, `key`,
+ *  or `name` instead of an `id` field on create responses. Without these,
+ *  CRUD chains fall back to capturing `"id"` from a body that doesn't have
+ *  one, breaking the `{id}` substitution in follow-up reads. */
+const ID_LIKE_NAMES = ["slug", "uuid", "key", "version", "name"];
+
+/** Find the best field to capture from POST response (for CRUD chains).
+ *
+ *  Priority:
+ *    1. Field whose name matches the path-param (e.g. `{rule_id}` → `rule_id`
+ *       or `{slug}` → `slug`). The path-param name is the strongest hint —
+ *       whatever the response calls "the id of this resource" is what gets
+ *       interpolated back into the read/update/delete URLs.
+ *    2. `id` (most common case).
+ *    3. Conventional id-like names: `slug`, `uuid`, `key`, `version`, `name`
+ *       — but only if they are typed as a string (avoids capturing a `name`
+ *       object on resources that nest metadata).
+ *    4. Any field with `type: integer` or `format: uuid`.
+ *    5. Fallback: `"id"` (the YAML capture will simply be empty if absent —
+ *       the runner already handles this gracefully).
+ */
+function getCaptureField(ep: EndpointInfo, idParam?: string): string {
   const schema = getSuccessSchema(ep);
-  if (schema?.properties) {
-    if ("id" in schema.properties) return "id";
-    for (const [name, propSchema] of Object.entries(schema.properties)) {
-      const s = propSchema as OpenAPIV3.SchemaObject;
-      if (s.type === "integer" || s.format === "uuid") return name;
+  const props = schema?.properties;
+  if (!props) return "id";
+
+  // 1. Path-param name match.
+  if (idParam) {
+    if (idParam in props) return idParam;
+    // Also try the conventional `<resource>_id` ↔ `id` swap.
+    if (idParam.endsWith("_id") && "id" in props) return "id";
+  }
+
+  // 2. Plain `id`.
+  if ("id" in props) return "id";
+
+  // 3. Conventional id-like names (string-typed only).
+  for (const candidate of ID_LIKE_NAMES) {
+    if (candidate in props) {
+      const s = props[candidate] as OpenAPIV3.SchemaObject;
+      if (s.type === "string") return candidate;
     }
   }
+
+  // 4. Any integer or uuid-shaped field.
+  for (const [name, propSchema] of Object.entries(props)) {
+    const s = propSchema as OpenAPIV3.SchemaObject;
+    if (s.type === "integer" || s.format === "uuid") return name;
+  }
+
   return "id";
 }
 
@@ -310,33 +351,116 @@ export function generateStep(
   return step;
 }
 
-/** Detect CRUD groups from a list of endpoints */
+/** Strip a single trailing slash for comparison purposes. We never rewrite
+ *  endpoint paths in the spec — we just normalise the matching regex so
+ *  `POST /alerts/` + `GET /alerts/{id}/` lines up the same as the no-slash
+ *  variant. */
+function stripTrailingSlash(p: string): string {
+  return p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p;
+}
+
+/** Per-resource diagnostic record used by `zond generate --explain`.
+ *  Captures every POST candidate the detector considered and the verdict
+ *  with a human reason — so users can see "I have a CRUD-looking pair, why
+ *  didn't generate emit a chain?" without grepping the spec. */
+export interface CrudDetectionDiagnostic {
+  resource: string;
+  basePath: string;
+  postPath: string;
+  hasGetById: boolean;
+  hasUpdate: boolean;
+  hasDelete: boolean;
+  hasList: boolean;
+  verdict: "chain" | "skipped";
+  reason: string;
+}
+
+export interface DetectCrudResult {
+  groups: CrudGroup[];
+  diagnostics: CrudDetectionDiagnostic[];
+}
+
+/** Detect CRUD groups from a list of endpoints.
+ *
+ *  Match logic (TASK-139):
+ *    - basePath = POST endpoint's path with any trailing slash trimmed.
+ *    - item path = `<basePath>/{param}` with optional trailing slash.
+ *  This catches Sentry-style `POST /alert-rules/` + `GET /alert-rules/{id}/`
+ *  pairs that previously fell through because the regex required the same
+ *  slash form on both. */
 export function detectCrudGroups(endpoints: EndpointInfo[]): CrudGroup[] {
+  return detectCrudGroupsWithDiagnostics(endpoints).groups;
+}
+
+export function detectCrudGroupsWithDiagnostics(
+  endpoints: EndpointInfo[],
+): DetectCrudResult {
   const groups: CrudGroup[] = [];
-  const postEndpoints = endpoints.filter(ep => ep.method.toUpperCase() === "POST" && !ep.deprecated);
+  const diagnostics: CrudDetectionDiagnostic[] = [];
+  const postEndpoints = endpoints.filter(
+    ep => ep.method.toUpperCase() === "POST" && !ep.deprecated,
+  );
 
   for (const createEp of postEndpoints) {
-    const basePath = createEp.path;
+    const basePath = stripTrailingSlash(createEp.path);
+    const resource = basePath.split("/").filter(Boolean).pop() ?? "resource";
 
-    // Find item endpoints: basePath/{param}
-    const itemPattern = new RegExp(`^${escapeRegex(basePath)}/\\{([^}]+)\\}$`);
-    const itemEndpoints = endpoints.filter(ep => !ep.deprecated && itemPattern.test(ep.path));
-
-    if (itemEndpoints.length === 0) continue;
-
-    const itemPath = itemEndpoints[0]!.path;
-    const idMatch = itemPath.match(/\{([^}]+)\}$/);
-    if (!idMatch) continue;
-    const idParam = idMatch[1]!;
+    // Match `<basePath>/{param}` with optional trailing slash. Tolerates
+    // both `POST /alerts/` + `GET /alerts/{id}` and `POST /alerts` +
+    // `GET /alerts/{id}/`, which Sentry mixes within the same spec.
+    const itemPattern = new RegExp(`^${escapeRegex(basePath)}/\\{([^}]+)\\}/?$`);
+    const itemEndpoints = endpoints.filter(
+      ep => !ep.deprecated && itemPattern.test(ep.path),
+    );
 
     const read = itemEndpoints.find(ep => ep.method.toUpperCase() === "GET");
-    if (!read) continue; // Minimum: POST + GET/{id}
-
-    const update = itemEndpoints.find(ep => ["PUT", "PATCH"].includes(ep.method.toUpperCase()));
+    const update = itemEndpoints.find(
+      ep => ["PUT", "PATCH"].includes(ep.method.toUpperCase()),
+    );
     const del = itemEndpoints.find(ep => ep.method.toUpperCase() === "DELETE");
-    const list = endpoints.find(ep => ep.method.toUpperCase() === "GET" && ep.path === basePath && !ep.deprecated);
+    // List endpoint matches with the same trailing-slash tolerance.
+    const list = endpoints.find(
+      ep =>
+        ep.method.toUpperCase() === "GET" &&
+        stripTrailingSlash(ep.path) === basePath &&
+        !ep.deprecated,
+    );
 
-    const resource = basePath.split("/").filter(Boolean).pop() ?? "resource";
+    const diag: CrudDetectionDiagnostic = {
+      resource,
+      basePath,
+      postPath: createEp.path,
+      hasGetById: !!read,
+      hasUpdate: !!update,
+      hasDelete: !!del,
+      hasList: !!list,
+      verdict: "skipped",
+      reason: "",
+    };
+
+    if (itemEndpoints.length === 0) {
+      diag.reason = `no item endpoint matching ${basePath}/{...}`;
+      diagnostics.push(diag);
+      continue;
+    }
+    if (!read) {
+      diag.reason = "item endpoint exists but no GET-by-id (minimum is POST + GET/{id})";
+      diagnostics.push(diag);
+      continue;
+    }
+
+    const itemPath = itemEndpoints[0]!.path;
+    const idMatch = itemPath.match(/\{([^}]+)\}\/?$/);
+    if (!idMatch) {
+      diag.reason = "item path has no terminal {param}";
+      diagnostics.push(diag);
+      continue;
+    }
+    const idParam = idMatch[1]!;
+
+    diag.verdict = "chain";
+    diag.reason = "POST + GET/{id} matched";
+    diagnostics.push(diag);
 
     groups.push({
       resource,
@@ -351,7 +475,7 @@ export function detectCrudGroups(endpoints: EndpointInfo[]): CrudGroup[] {
     });
   }
 
-  return groups;
+  return { groups, diagnostics };
 }
 
 /** Generate a CRUD chain suite from a CrudGroup */
@@ -359,7 +483,7 @@ export function generateCrudSuite(
   group: CrudGroup,
   securitySchemes: SecuritySchemeInfo[],
 ): RawSuite {
-  const captureField = group.create ? getCaptureField(group.create) : "id";
+  const captureField = group.create ? getCaptureField(group.create, group.idParam) : "id";
   const captureVar = `${group.resource.replace(/s$/, "")}_id`;
   const tests: RawStep[] = [];
 

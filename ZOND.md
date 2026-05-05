@@ -111,7 +111,7 @@ selected via `zond use`.
 | `lint-spec [spec]` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--api <name>`, `--strict`, `--rule <list>`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
 | `catalog [spec]` | Standalone build of `.api-catalog.yaml` (registered APIs already have one in `apis/<name>/`) | `--api <name>`, `--output <dir>` |
 | `describe [spec]` | Describe endpoints from OpenAPI spec | `--api <name>`, `--compact`, `--list-params`, `--method`, `--path` |
-| `generate [spec]` | Autogenerate test suites; combine with `--uncovered-only` to top up after `zond refresh-api` | `--api <name>`, `--output`, `--tag`, `--uncovered-only` |
+| `generate [spec]` | Autogenerate test suites; combine with `--uncovered-only` to top up after `zond refresh-api`. Use `--explain` (no `--output`) to print the CRUD detection table without writing files. | `--api <name>`, `--output`, `--tag`, `--uncovered-only`, `--explain` |
 | `report export <run-id>` | Export a stored run as a single-file shareable HTML report | `-o, --output <file>`, `--db <path>` |
 | `report case-study <failure-id>` | Generate a markdown case-study draft for a single failure | `-o, --output <file>`, `--db <path>` |
 
