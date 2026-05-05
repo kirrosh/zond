@@ -58,12 +58,32 @@ export async function resolveAdHocRequest(options: SendAdHocRequestOptions): Pro
   if (options.collectionName) {
     getDb(options.dbPath);
     const col = findCollectionByNameOrId(options.collectionName);
-    if (col?.base_dir) searchDir = col.base_dir;
+    if (!col) {
+      throw new Error(`API '${options.collectionName}' is not registered. Run \`zond add api <name> --base-url <url>\` first, or check the name with \`zond db collections\`.`);
+    }
+    if (col.base_dir) searchDir = col.base_dir;
   }
   const envVars = await loadEnvironment(options.envName, searchDir);
   const vars = options.extraVars ? { ...envVars, ...options.extraVars } : envVars;
 
-  const resolvedUrl = substituteString(options.url, vars) as string;
+  // Auto-prefix base_url for relative paths when --api is in play.
+  // Mirror the YAML-runner ergonomics: `zond request --api jp GET /users/1`
+  // should work the same as `... GET '{{base_url}}/users/1'`. We touch the URL
+  // only when it's clearly relative (leading "/") and has no scheme/template
+  // already, so absolute URLs and explicit {{var}} templates pass through.
+  let urlToResolve = options.url;
+  if (
+    options.collectionName
+    && typeof vars.base_url === "string"
+    && vars.base_url.length > 0
+    && urlToResolve.startsWith("/")
+    && !urlToResolve.startsWith("//")
+  ) {
+    const base = vars.base_url.replace(/\/+$/, "");
+    urlToResolve = `${base}${urlToResolve}`;
+  }
+
+  const resolvedUrl = substituteString(urlToResolve, vars) as string;
   const parsedHeaders = options.headers ?? {};
   const resolvedHeaders = Object.keys(parsedHeaders).length > 0 ? substituteDeep(parsedHeaders, vars) : {};
   const resolvedBody = options.body ? substituteString(options.body, vars) as string : undefined;
