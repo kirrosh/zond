@@ -21,7 +21,7 @@ import {
   convertPath,
   endpointStem,
   getAuthHeaders,
-  pathWithPlaceholders,
+  renderPath,
   isMutating,
   findDeleteCounterpart,
   captureFieldFor,
@@ -88,6 +88,15 @@ export interface ProbeOptions {
    * (staging dump-and-reset) where cleanup is handled out of band.
    */
   noCleanup?: boolean;
+  /**
+   * TASK-135: when true (default), non-attacked path-params are emitted as
+   * runtime placeholders `{{name}}` so `zond run` substitutes them from
+   * `.env.yaml`. This avoids the short-circuit where every probe targeting a
+   * nested path resolved `{org}=nonexistent-zzzzz` and got 404 before the
+   * leaf validator ever fired. Set to false to keep the legacy behaviour
+   * (synthetic-by-type for every param).
+   */
+  useRealParents?: boolean;
 }
 
 export interface ProbeResult {
@@ -158,6 +167,11 @@ function collectAllProps(
  * Build a step that targets `endpoint`, but with an arbitrary body override.
  * Authentication and required path params are populated with valid placeholders
  * so the request reaches the body-validation layer.
+ *
+ * `pathOverride` (if provided) is treated as already-final — no further
+ * placeholder conversion is applied. Otherwise the path is rendered via
+ * `renderPath` with no attack target (so all path-params become runtime
+ * placeholders / synthetic sentinels depending on `useRealParents`).
  */
 function buildStep(
   ep: EndpointInfo,
@@ -167,10 +181,11 @@ function buildStep(
     json?: unknown;
     pathOverride?: string;
     expectStatusOk?: number[];
+    useRealParents: boolean;
   },
 ): RawStep {
   const method = ep.method.toUpperCase();
-  const path = opts.pathOverride ?? pathWithPlaceholders(ep, "valid-shape");
+  const path = opts.pathOverride ?? renderPath(ep, null, { useRealParents: opts.useRealParents });
   const headers = getAuthHeaders(ep, schemes);
 
   const expectedStatus = opts.expectStatusOk ?? ACCEPTABLE_4XX;
@@ -182,7 +197,7 @@ function buildStep(
       endpoint: `${method} ${ep.path}`,
       response_branch: responseBranch,
     },
-    [method]: convertPath(path),
+    [method]: path,
     expect: {
       status: expectedStatus,
     },
@@ -192,7 +207,11 @@ function buildStep(
   return step;
 }
 
-function probeEmptyBody(ep: EndpointInfo, schemes: SecuritySchemeInfo[]): RawStep | null {
+function probeEmptyBody(
+  ep: EndpointInfo,
+  schemes: SecuritySchemeInfo[],
+  useRealParents: boolean,
+): RawStep | null {
   if (!hasJsonBody(ep)) return null;
   const required = collectRequiredFields(ep.requestBodySchema);
   // Only meaningful when there *is* required data — otherwise {} is valid.
@@ -200,6 +219,7 @@ function probeEmptyBody(ep: EndpointInfo, schemes: SecuritySchemeInfo[]): RawSte
   return buildStep(ep, schemes, {
     name: "empty body — must reject (no 5xx)",
     json: {},
+    useRealParents,
   });
 }
 
@@ -207,6 +227,7 @@ function probeMissingRequired(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   if (!hasJsonBody(ep) || !ep.requestBodySchema) return [];
   const required = collectRequiredFields(ep.requestBodySchema);
@@ -225,6 +246,7 @@ function probeMissingRequired(
       buildStep(ep, schemes, {
         name: `missing required field "${field.name}" — must reject (no 5xx)`,
         json: variant,
+        useRealParents,
       }),
     );
   }
@@ -235,6 +257,7 @@ function probeBoundaryString(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   if (!hasJsonBody(ep) || !ep.requestBodySchema) return [];
   const props = collectAllProps(ep.requestBodySchema).filter(
@@ -253,14 +276,17 @@ function probeBoundaryString(
       buildStep(ep, schemes, {
         name: `${field.name}: empty string — must reject (no 5xx)`,
         json: { ...baseline, [field.name]: "" },
+        useRealParents,
       }),
       buildStep(ep, schemes, {
         name: `${field.name}: 10000-char string — must reject or accept (no 5xx)`,
         json: { ...baseline, [field.name]: LONG_STRING },
+        useRealParents,
       }),
       buildStep(ep, schemes, {
         name: `${field.name}: unicode/emoji/RTL — must not 5xx`,
         json: { ...baseline, [field.name]: UNICODE_MIX },
+        useRealParents,
       }),
     );
   }
@@ -271,6 +297,7 @@ function probeTypeConfusion(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   if (!hasJsonBody(ep) || !ep.requestBodySchema) return [];
   const props = collectAllProps(ep.requestBodySchema);
@@ -288,6 +315,7 @@ function probeTypeConfusion(
       buildStep(ep, schemes, {
         name: `${field.name}: wrong type (${describeType(field.schema)} → ${typeof wrongValue}) — must reject (no 5xx)`,
         json: { ...baseline, [field.name]: wrongValue },
+        useRealParents,
       }),
     );
   }
@@ -298,6 +326,7 @@ function probeInvalidFormat(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   if (!hasJsonBody(ep) || !ep.requestBodySchema) return [];
   const props = collectAllProps(ep.requestBodySchema);
@@ -318,6 +347,7 @@ function probeInvalidFormat(
       buildStep(ep, schemes, {
         name: `${field.name}: invalid ${fmt} (${JSON.stringify(badValue)}) — must reject (no 5xx)`,
         json: { ...baseline, [field.name]: badValue },
+        useRealParents,
       }),
     );
   }
@@ -328,6 +358,7 @@ function probeInvalidEnum(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   if (!hasJsonBody(ep) || !ep.requestBodySchema) return [];
   const baseline = generateFromSchema(ep.requestBodySchema) as Record<string, unknown>;
@@ -342,6 +373,7 @@ function probeInvalidEnum(
         buildStep(ep, schemes, {
           name: `${field.name}: unknown enum value "zond_invalid_value" — must reject (no 5xx)`,
           json: { ...baseline, [field.name]: "zond_invalid_value" },
+          useRealParents,
         }),
       );
     }
@@ -357,6 +389,7 @@ function probeInvalidEnum(
           buildStep(ep, schemes, {
             name: `${field.name}: array with unknown value ["zond.nonexistent.event"] — must reject (no 5xx)`,
             json: { ...baseline, [field.name]: ["zond.nonexistent.event"] },
+            useRealParents,
           }),
         );
       }
@@ -369,6 +402,7 @@ function probeInvalidPathId(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   const params = findUuidPathParams(ep);
   if (params.length === 0) return [];
@@ -377,18 +411,12 @@ function probeInvalidPathId(
   for (const param of params) {
     for (const bad of INVALID_UUID_VALUES) {
       if (out.length >= budget) break;
-      const path = ep.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
-        if (name === param.name) return bad;
-        const other = ep.parameters.find((p) => p.name === name && p.in === "path");
-        const schema = other?.schema as OpenAPIV3.SchemaObject | undefined;
-        if (schema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
-        if (schema?.type === "integer" || schema?.type === "number") return "999999999";
-        return "nonexistent-zzzzz";
-      });
+      const path = renderPath(ep, { name: param.name, value: bad }, { useRealParents });
       out.push(
         buildStep(ep, schemes, {
           name: `path param ${param.name}=${JSON.stringify(bad)} — must reject (no 5xx)`,
           pathOverride: path,
+          useRealParents,
         }),
       );
     }
@@ -420,6 +448,7 @@ function probeNumericQueryParams(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   const numericQuery = ep.parameters.filter(
     (p) => p.in === "query" && isNumericSchema(p.schema as OpenAPIV3.SchemaObject | undefined),
@@ -430,13 +459,14 @@ function probeNumericQueryParams(
   for (const param of numericQuery) {
     for (const { value, label } of NUMERIC_BAD_VALUES) {
       if (out.length >= budget) break;
-      const basePath = pathWithPlaceholders(ep, "valid-shape");
+      const basePath = renderPath(ep, null, { useRealParents });
       const sep = basePath.includes("?") ? "&" : "?";
       const pathWithQuery = `${basePath}${sep}${param.name}=${encodeURIComponent(value)}`;
       out.push(
         buildStep(ep, schemes, {
           name: `query ${param.name}=${JSON.stringify(value)} (${label}) — must reject (no 5xx)`,
           pathOverride: pathWithQuery,
+          useRealParents,
         }),
       );
     }
@@ -448,6 +478,7 @@ function probeNumericPathParams(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   const numericPath = ep.parameters.filter(
     (p) => p.in === "path" && isNumericSchema(p.schema as OpenAPIV3.SchemaObject | undefined),
@@ -459,18 +490,12 @@ function probeNumericPathParams(
     for (const { value, label } of NUMERIC_BAD_VALUES) {
       if (value === "") continue; // empty path segment yields a different endpoint
       if (out.length >= budget) break;
-      const overriddenPath = ep.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
-        if (name === param.name) return value;
-        const other = ep.parameters.find((p) => p.name === name && p.in === "path");
-        const otherSchema = other?.schema as OpenAPIV3.SchemaObject | undefined;
-        if (otherSchema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
-        if (isNumericSchema(otherSchema)) return "1";
-        return "valid-shape";
-      });
+      const overriddenPath = renderPath(ep, { name: param.name, value }, { useRealParents });
       out.push(
         buildStep(ep, schemes, {
           name: `path param ${param.name}=${JSON.stringify(value)} (${label}) — must reject (no 5xx)`,
           pathOverride: overriddenPath,
+          useRealParents,
         }),
       );
     }
@@ -543,6 +568,9 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
   const { endpoints, securitySchemes } = opts;
   const cap = opts.maxProbesPerEndpoint ?? 50;
   const noCleanup = opts.noCleanup === true;
+  // TASK-135: default ON. Non-attacked path-params are emitted as runtime
+  // placeholders `{{name}}` and resolved from `.env.yaml` by `zond run`.
+  const useRealParents = opts.useRealParents !== false;
 
   const suites: RawSuite[] = [];
   const warnings: string[] = [];
@@ -557,25 +585,25 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
     const remaining = () => Math.max(0, cap - steps.length);
 
     // 1. Path-id probes (cheap, deterministic)
-    steps.push(...probeInvalidPathId(ep, securitySchemes, remaining()));
+    steps.push(...probeInvalidPathId(ep, securitySchemes, remaining(), useRealParents));
 
     // 1b. Numeric query / path coercion probes (T67) — float-on-integer,
     //     negative, non-numeric, etc. Catches `GET /x?limit=1.5` → 500.
-    const numericQueryProbes = probeNumericQueryParams(ep, securitySchemes, remaining());
+    const numericQueryProbes = probeNumericQueryParams(ep, securitySchemes, remaining(), useRealParents);
     steps.push(...numericQueryProbes);
-    const numericPathProbes = probeNumericPathParams(ep, securitySchemes, remaining());
+    const numericPathProbes = probeNumericPathParams(ep, securitySchemes, remaining(), useRealParents);
     steps.push(...numericPathProbes);
     const hasNumericCoercion = numericQueryProbes.length + numericPathProbes.length > 0;
 
     // 2. Body probes (only for body-bearing methods)
-    const empty = probeEmptyBody(ep, securitySchemes);
+    const empty = probeEmptyBody(ep, securitySchemes, useRealParents);
     if (empty && steps.length < cap) steps.push(empty);
 
-    steps.push(...probeMissingRequired(ep, securitySchemes, remaining()));
-    steps.push(...probeTypeConfusion(ep, securitySchemes, remaining()));
-    steps.push(...probeInvalidFormat(ep, securitySchemes, remaining()));
-    steps.push(...probeBoundaryString(ep, securitySchemes, remaining()));
-    steps.push(...probeInvalidEnum(ep, securitySchemes, remaining()));
+    steps.push(...probeMissingRequired(ep, securitySchemes, remaining(), useRealParents));
+    steps.push(...probeTypeConfusion(ep, securitySchemes, remaining(), useRealParents));
+    steps.push(...probeInvalidFormat(ep, securitySchemes, remaining(), useRealParents));
+    steps.push(...probeBoundaryString(ep, securitySchemes, remaining(), useRealParents));
+    steps.push(...probeInvalidEnum(ep, securitySchemes, remaining(), useRealParents));
 
     if (steps.length === 0) {
       skippedEndpoints++;

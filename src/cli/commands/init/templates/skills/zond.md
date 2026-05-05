@@ -188,6 +188,14 @@ Findings to flag: 5xx on null/empty/wrong-type body (missing validation /
 unguarded coercion), 2xx on undeclared method (contract drift), `is_admin: true`
 echoed in response (HIGH from `probe-mass-assignment`).
 
+**Nested paths need real parent fixtures.** `probe-validation` substitutes
+non-attacked path params from `.env.yaml` at run time (`{{organization_id_or_slug}}`),
+so for any `repos/{repo_id}/commits`-style endpoint you need a real parent
+slug in env or every probe will 404 on the parent before reaching the leaf
+validator. Pre-flight: `zond doctor --api <name>` and confirm parent
+fixtures are populated. Use `--no-real-parents` only when you intentionally
+want fully-synthetic paths (no real account available).
+
 Filter scope on large APIs: `--tag <spec-tag> [--max-per-endpoint 20]`.
 
 **Auto-discovery of path-param fixtures.** When a probed endpoint depends on

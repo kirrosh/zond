@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **TASK-135: `probe-validation` no longer short-circuits on parent path
+  params.** Probes now emit non-attacked path parameters as runtime
+  placeholders (`{{organization_id_or_slug}}`) so `zond run` resolves them
+  from `.env.yaml`. Previously every parent slot was baked as the
+  synthetic sentinel `nonexistent-zzzzz`, which made nested-path probes
+  return 404 from the parent before the leaf validator ever fired —
+  hiding real 5xx bugs in `repos/{repo}/commits`-style endpoints. Use
+  `--no-real-parents` to keep the legacy fully-synthetic rendering.
+
 ### Added
 
 - **TASK-110: `zond report case-study <failure-id>` — markdown drafts for
