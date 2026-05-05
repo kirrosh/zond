@@ -95,4 +95,19 @@ describe("zond doctor", () => {
     expect(r.exitCode).toBe(2);
     expect(r.stderr + r.stdout).toMatch(/refresh-api/);
   });
+
+  test("spec-less API: exits 0 with mode=run-only and recommendation to attach a spec", async () => {
+    // Register a second API by base-url only (no spec).
+    await setupApi({
+      name: "runonly",
+      envVars: { base_url: "https://example.com" },
+      dbPath: join(workspace, "zond.db"),
+    });
+    closeDb();
+
+    const r = await runCli(workspace, ["doctor", "--api", "runonly", "--json"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/"mode":\s*"run-only"/);
+    expect(r.stdout).toMatch(/refresh-api runonly/);
+  });
 });

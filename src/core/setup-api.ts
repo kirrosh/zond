@@ -234,6 +234,13 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     Object.assign(envVars, options.envVars);
   }
 
+  // Spec-less registration is allowed, but we need a base_url from somewhere
+  // (server URL extracted from the spec, or envVars.base_url passed in by the
+  // caller). Without it the API is useless — `zond run` can't resolve {{base_url}}.
+  if (!spec && !envVars.base_url) {
+    throw new Error("setupApi requires --spec or envVars.base_url to register an API");
+  }
+
   // Write .env.yaml in base_dir
   if (Object.keys(envVars).length > 0) {
     const envFilePath = join(baseDir, ".env.yaml");

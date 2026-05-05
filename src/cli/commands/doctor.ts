@@ -63,6 +63,7 @@ interface ArtifactStaleness {
 
 interface DoctorReport {
   api: string;
+  mode: "spec" | "run-only";
   baseDir: string;
   spec: {
     path: string;
@@ -77,6 +78,14 @@ interface DoctorReport {
   staleArtifacts: ArtifactStaleness[];
   blockedRequired: number;
   warnings: string[];
+}
+
+interface DoctorRunOnlyReport {
+  api: string;
+  mode: "run-only";
+  baseDir: string;
+  envVars: Record<string, string>;
+  recommendation: string;
 }
 
 /** Read & parse a YAML artifact, returning null if missing. */
@@ -142,6 +151,29 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
 
   const baseDir = collection.base_dir
     ?? join(findWorkspaceRoot().root, "apis", apiName);
+
+  // Spec-less API: short-circuit. Such APIs are registered with --base-url
+  // only and have no .api-catalog/.api-resources/.api-fixtures to check. We
+  // surface what we have (env vars, base_dir) and tell the user how to upgrade.
+  if (!collection.openapi_spec) {
+    const envVars = await loadEnvironment(undefined, baseDir);
+    const recommendation =
+      `This API has no OpenAPI spec — generate/probe/validate-schema are disabled. ` +
+      `Run \`zond refresh-api ${apiName} --spec <path|url>\` to attach one.`;
+    const report: DoctorRunOnlyReport = {
+      api: apiName,
+      mode: "run-only",
+      baseDir,
+      envVars,
+      recommendation,
+    };
+    if (opts.json) {
+      printJson(jsonOk("doctor", report));
+    } else {
+      printRunOnlyHuman(report);
+    }
+    return 0;
+  }
 
   // 1. Spec snapshot
   let specAbsPath: string | null = null;
@@ -224,6 +256,7 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
 
   const report: DoctorReport = {
     api: apiName,
+    mode: "spec",
     baseDir,
     spec: {
       path: specAbsPath ?? "",
@@ -322,4 +355,22 @@ function printHuman(r: DoctorReport, envVars: Record<string, string>): void {
   }
 
   for (const w of r.warnings) out.write(`Warning: ${w}\n`);
+}
+
+function printRunOnlyHuman(r: DoctorRunOnlyReport): void {
+  const out = process.stdout;
+  out.write(`API: ${r.api}\n`);
+  out.write(`Mode: run-only (no OpenAPI spec)\n`);
+  out.write(`Workspace dir: ${r.baseDir}\n\n`);
+  const keys = Object.keys(r.envVars);
+  out.write(`Environment variables (${keys.length}):\n`);
+  if (keys.length === 0) {
+    out.write(`  (none) — write \`base_url: ...\` into ${r.baseDir}/.env.yaml\n`);
+  } else {
+    for (const k of keys) {
+      const v = isLikelySecret(k) ? maskSecret(r.envVars[k]!) : r.envVars[k];
+      out.write(`  • ${k.padEnd(20)} ${v}\n`);
+    }
+  }
+  out.write(`\n${r.recommendation}\n`);
 }
