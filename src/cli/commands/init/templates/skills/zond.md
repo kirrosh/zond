@@ -299,12 +299,29 @@ marked `INCONCLUSIVE-BASELINE` and attacks are skipped (no more 5×404
 noise on scope-locked endpoints, see m-8 feedback §F). Verdict per
 finding: HIGH (5xx **or** payload echoed in 2xx body — stored injection
 candidate), LOW (2xx, no echo — verify side-effects manually), OK
-(4xx). Idempotent cleanup via DELETE counterpart, regression YAML via
-`--emit-tests`.
+(4xx). Regression YAML via `--emit-tests`.
+
+**Cleanup is state-aware (TASK-151).** On stateful PUT/PATCH endpoints
+probe-security does `GET` → snapshot → attack → `PUT` original back, so
+DSN-keys / team-names / webhook URLs aren't left with the attack
+payload. POST falls back to `DELETE`-counterpart cleanup. Restore
+failures are surfaced in the digest's `cleanup` line. Pass
+`--no-cleanup` only in namespace-isolated test envs.
+
+**Partial PUT support (TASK-152).** Sentry / Stripe / GitHub-shaped
+APIs reject the full spec body on PUT (`422 use partial PUT`). When
+that happens, probe-security retries the baseline with a single-key
+body per detected field; if any partial baseline succeeds, attacks
+proceed using that shape. Findings using the partial body are annotated
+`[partial-body]` in the digest reason. Without this, the proven-HIGH
+CRLF on `PUT /projects/{org}/{proj}/.subjectPrefix` lands in
+INCONCLUSIVE-BASELINE.
 
 `--dry-run` lists which (endpoint, field) pairs would be attacked
 without sending any requests — useful for sanity-checking field
-detection on a new spec.
+detection on a new spec, and recommended as the **first** invocation
+on shared / prod orgs to confirm no critical-state endpoints (DSN
+rotation, billing settings) are in scope.
 
 When `probe-security` decides a field needs manual triage (e.g., the
 detected field name is unconventional, or you want a custom payload like

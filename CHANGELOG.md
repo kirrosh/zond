@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **TASK-151: `probe-security` snapshot+restore cleanup for PUT/PATCH.**
+  Cleanup used to be `DELETE-if-2xx`, which silently destroyed live data
+  on rename'ы — a probe overwrote a Sentry DSN-key with the attack
+  payload and left it that way. probe-security now does a `GET` before
+  baseline (when there's a GET counterpart on the same path),
+  caches the original body, and restores it via `PUT`/`PATCH` after
+  every 2xx response. Strips read-only fields (`id`, `created_at`,
+  `updated_at`) from the restore body, forwards `If-Match` when
+  `requiresEtag` is set, and surfaces restore failures in
+  `verdict.cleanup.error` so they show up in the digest. POST keeps
+  the existing `DELETE`-counterpart cleanup.
+
+- **TASK-152: `probe-security` partial-body fallback on PUT/PATCH.**
+  Sentry / Stripe / GitHub-shaped APIs accept partial PUT — sending the
+  spec's full body returns `422` and the proven-HIGH CRLF on
+  `subjectPrefix` lands in `INCONCLUSIVE-BASELINE`. probe-security now
+  retries the baseline with a single-key body per detected field; if any
+  partial baseline succeeds, attacks proceed using that shape and the
+  finding `reason` is annotated `[partial-body]`. Only PUT/PATCH —
+  partial bodies on POST would just trip required-field validation.
+
 ### Added
 
 - **TASK-138: `zond probe-security <classes>` — live SSRF / CRLF /

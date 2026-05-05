@@ -21,6 +21,7 @@ import {
   convertPath,
   endpointStem,
   findDeleteCounterpart,
+  findGetByIdCounterpart,
   captureFieldFor,
   hasJsonBody,
   liveAuthHeaders,
@@ -228,6 +229,13 @@ export async function runSecurityProbes(
   };
 }
 
+interface Snapshot {
+  /** Original GET-response body, used to restore state via PUT/PATCH. */
+  body: Record<string, unknown>;
+  /** ETag (if API uses optimistic locking) — sent back as `If-Match` on restore. */
+  etag?: string;
+}
+
 async function probeOneEndpoint(
   ep: EndpointInfo,
   allEndpoints: EndpointInfo[],
@@ -266,40 +274,111 @@ async function probeOneEndpoint(
     ...liveAuthHeaders(ep, schemes, vars),
   };
 
+  // ── Snapshot original state (TASK-151) ────────────────────────────────
+  // For PUT/PATCH we MUST capture original state before any mutation. The
+  // old DELETE-cleanup is wrong for rename'ы — it can't undo a renamed
+  // DSN-key / team-name / webhook URL. Snapshot first, restore after each
+  // 2xx. POST falls back to DELETE-cleanup (correct semantics there).
+  const isUpdate = m === "PUT" || m === "PATCH";
+  const snapshot = isUpdate && !opts.noCleanup
+    ? await snapshotOriginal(ep, allEndpoints, schemes, vars, opts)
+    : null;
+
   // ── Baseline-OK gate ────────────────────────────────────────────────────
-  // The whole reason this command exists is to avoid the "5 × 404" output
-  // the markdown template produced in the audit. If baseline isn't 2xx,
-  // attacks would just hit the same 4xx and tell us nothing.
-  let baselineResp;
-  try {
-    baselineResp = await executeRequest(
-      { method: m, url, headers, body: JSON.stringify(baseline) },
-      { timeout: opts.timeoutMs ?? 30000, retries: 0 },
-    );
-  } catch (err) {
+  // Eliminates the "5 × 404" output the markdown template produced in the
+  // audit. If baseline isn't 2xx, attacks would just hit the same 4xx
+  // wall and tell us nothing.
+  const fullBaseline = await sendBaseline(m, url, headers, baseline, opts);
+  if (fullBaseline.kind === "network") {
     verdict.severity = "high";
-    verdict.summary = `baseline network error: ${err instanceof Error ? err.message : String(err)}`;
+    verdict.summary = `baseline network error: ${fullBaseline.reason}`;
     return verdict;
   }
-  verdict.baseline = { status: baselineResp.status };
-  const baselineOk = baselineResp.status >= 200 && baselineResp.status < 300;
-  if (!baselineOk) {
+  verdict.baseline = { status: fullBaseline.status };
+
+  // ── Partial-body fallback (TASK-152) ──────────────────────────────────
+  // Sentry / Stripe / GitHub-style APIs accept partial PUT — full bodies
+  // generated from spec get rejected (422 / 400). Walking each detected
+  // field with a single-key body recovers the proven-HIGH cases that
+  // otherwise fall into INCONCLUSIVE-BASELINE.
+  let fullOk = fullBaseline.kind === "ok" && fullBaseline.status >= 200 && fullBaseline.status < 300;
+  const perFieldBaseline = new Map<string, Record<string, unknown>>();
+  if (!fullOk && isUpdate && fullBaseline.kind === "ok") {
+    for (const hit of detected) {
+      // Reuse spec value when present; otherwise fall back to the substituted
+      // generator output for the field. Either way the partial body has
+      // exactly one key, which is what partial-PUT APIs accept.
+      const partial: Record<string, unknown> = {};
+      if (hit.field in baseline) partial[hit.field] = baseline[hit.field];
+      else partial[hit.field] = "";
+      const partResp = await sendBaseline(m, url, headers, partial, opts);
+      if (partResp.kind === "ok" && partResp.status >= 200 && partResp.status < 300) {
+        perFieldBaseline.set(hit.field, partial);
+      }
+    }
+    if (perFieldBaseline.size > 0 && snapshot) {
+      // Each successful partial baseline mutated state — restore back so
+      // attacks start from the snapshot.
+      await restoreOriginal(ep, snapshot, headers, schemes, vars, opts, verdict);
+    }
+  }
+
+  if (!fullOk && perFieldBaseline.size === 0) {
+    // fullBaseline.kind === "network" was already returned above; here it
+    // must be "ok" with non-2xx status.
+    const status = fullBaseline.kind === "ok" ? fullBaseline.status : 0;
     verdict.severity = "inconclusive-baseline";
-    verdict.summary = `baseline ${baselineResp.status} — endpoint unreachable or fixture invalid; skipping attacks`;
+    verdict.summary = isUpdate
+      ? `baseline ${status} on full body; partial-body per-field also rejected — fixture/scope issue`
+      : `baseline ${status} — endpoint unreachable or fixture invalid; skipping attacks`;
     return verdict;
   }
 
-  // If baseline created a stateful resource, cleanup before each attack so
-  // we don't pile up uniqueness violations and don't leak rows. This also
-  // matches what the manual YAML templates did via `always: true` cleanup.
-  if (!opts.noCleanup) {
-    await tryCleanup(ep, allEndpoints, schemes, vars, baselineResp.body_parsed ?? baselineResp.body, verdict, opts);
+  // Cleanup state mutated by the (full) baseline, before issuing attacks.
+  // With a snapshot → restore PUT. Without → DELETE-counterpart.
+  if (fullOk && fullBaseline.kind === "ok" && !opts.noCleanup) {
+    if (snapshot) {
+      await restoreOriginal(ep, snapshot, headers, schemes, vars, opts, verdict);
+    } else {
+      await tryCleanup(
+        ep, allEndpoints, schemes, vars,
+        fullBaseline.body, verdict, opts,
+      );
+    }
   }
 
   // ── Attacks ──────────────────────────────────────────────────────────────
   for (const hit of detected) {
+    // Pick the body shape that this endpoint actually accepts.
+    let baseBody: Record<string, unknown> | undefined;
+    let mode: "full" | "partial" | "none" = "none";
+    if (fullOk) {
+      baseBody = baseline;
+      mode = "full";
+    } else if (perFieldBaseline.has(hit.field)) {
+      baseBody = perFieldBaseline.get(hit.field)!;
+      mode = "partial";
+    }
+
+    if (mode === "none" || !baseBody) {
+      // Field doesn't have a usable baseline body shape — record one
+      // INCONCLUSIVE per payload so the digest still exposes the field.
+      for (const payload of PAYLOADS[hit.class]) {
+        verdict.findings.push({
+          field: hit.field,
+          class: hit.class,
+          payload,
+          status: 0,
+          echoed: false,
+          severity: "inconclusive",
+          reason: "no baseline body shape accepted (full+partial both rejected)",
+        });
+      }
+      continue;
+    }
+
     for (const payload of PAYLOADS[hit.class]) {
-      const body = { ...baseline, [hit.field]: payload };
+      const body = { ...baseBody, [hit.field]: payload };
       let resp;
       try {
         resp = await executeRequest(
@@ -319,11 +398,25 @@ async function probeOneEndpoint(
         continue;
       }
       const finding = classify(hit, payload, resp);
+      // Annotate which body shape was used for this attack — useful for
+      // case-studies and emit-tests.
+      finding.reason = mode === "partial"
+        ? `${finding.reason} [partial-body]`
+        : finding.reason;
       verdict.findings.push(finding);
 
-      // Per-finding cleanup if attack happened to create a resource.
+      // Per-finding cleanup. Snapshot path takes precedence — DELETE on a
+      // PUT-rename'd resource would wipe a live entity, restore-PUT puts
+      // it back to the captured original.
       if (resp.status >= 200 && resp.status < 300 && !opts.noCleanup) {
-        await tryCleanup(ep, allEndpoints, schemes, vars, resp.body_parsed ?? resp.body, verdict, opts);
+        if (snapshot) {
+          await restoreOriginal(ep, snapshot, headers, schemes, vars, opts, verdict);
+        } else {
+          await tryCleanup(
+            ep, allEndpoints, schemes, vars,
+            resp.body_parsed ?? resp.body, verdict, opts,
+          );
+        }
       }
     }
   }
@@ -337,6 +430,133 @@ async function probeOneEndpoint(
 
   verdict.summary = summaryLine(verdict);
   return verdict;
+}
+
+// ──────────────────────────────────────────────
+// Baseline send — wraps executeRequest with shape that distinguishes a real
+// HTTP response from a network error (so the caller can decide whether to
+// retry partial-body / mark the endpoint unreachable).
+// ──────────────────────────────────────────────
+
+type BaselineResult =
+  | { kind: "ok"; status: number; body: unknown; headers: Record<string, string> }
+  | { kind: "network"; reason: string };
+
+async function sendBaseline(
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  opts: ProbeStepOpts,
+): Promise<BaselineResult> {
+  try {
+    const resp = await executeRequest(
+      { method, url, headers, body: JSON.stringify(body) },
+      { timeout: opts.timeoutMs ?? 30000, retries: 0 },
+    );
+    return {
+      kind: "ok",
+      status: resp.status,
+      body: resp.body_parsed ?? resp.body,
+      headers: resp.headers ?? {},
+    };
+  } catch (err) {
+    return {
+      kind: "network",
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+// ──────────────────────────────────────────────
+// TASK-151: snapshot + restore for stateful PUT/PATCH endpoints.
+// ──────────────────────────────────────────────
+
+async function snapshotOriginal(
+  ep: EndpointInfo,
+  allEndpoints: EndpointInfo[],
+  schemes: SecuritySchemeInfo[],
+  vars: Record<string, string>,
+  opts: ProbeStepOpts,
+): Promise<Snapshot | null> {
+  const getEp = findGetByIdCounterpart(ep, allEndpoints);
+  if (!getEp) return null;
+  const { url, unresolved } = buildUrl(getEp, vars);
+  if (unresolved.length > 0) return null;
+  const reqHeaders: Record<string, string> = {
+    accept: "application/json",
+    ...liveAuthHeaders(getEp, schemes, vars),
+  };
+  let resp;
+  try {
+    resp = await executeRequest(
+      { method: "GET", url, headers: reqHeaders },
+      { timeout: opts.timeoutMs ?? 30000, retries: 0 },
+    );
+  } catch {
+    return null;
+  }
+  if (resp.status < 200 || resp.status >= 300) return null;
+  const body = resp.body_parsed ?? resp.body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+
+  const respHeaders = resp.headers ?? {};
+  const etag =
+    respHeaders["etag"] ??
+    respHeaders["ETag"] ??
+    respHeaders["Etag"];
+
+  return {
+    body: body as Record<string, unknown>,
+    etag: typeof etag === "string" ? etag : undefined,
+  };
+}
+
+async function restoreOriginal(
+  ep: EndpointInfo,
+  snapshot: Snapshot,
+  baseHeaders: Record<string, string>,
+  _schemes: SecuritySchemeInfo[],
+  vars: Record<string, string>,
+  opts: ProbeStepOpts,
+  verdict: SecurityVerdict,
+): Promise<void> {
+  const m = ep.method.toUpperCase();
+  const { url, unresolved } = buildUrl(ep, vars);
+  if (unresolved.length > 0) return;
+  const headers: Record<string, string> = { ...baseHeaders };
+  // Strip read-only / server-managed fields the GET response often echoes
+  // (created_at, updated_at, id) — mirroring them back can confuse the
+  // server with "you can't change this". Best-effort: drop common keys.
+  const restoreBody: Record<string, unknown> = { ...snapshot.body };
+  for (const k of ["id", "created_at", "createdAt", "updated_at", "updatedAt"]) {
+    delete restoreBody[k];
+  }
+  if (snapshot.etag && ep.requiresEtag) {
+    headers["If-Match"] = snapshot.etag;
+  }
+  let resp;
+  try {
+    resp = await executeRequest(
+      { method: m, url, headers, body: JSON.stringify(restoreBody) },
+      { timeout: opts.timeoutMs ?? 30000, retries: 0 },
+    );
+  } catch (err) {
+    verdict.cleanup = {
+      attempted: true,
+      error: `restore network error: ${err instanceof Error ? err.message : String(err)}`,
+    };
+    return;
+  }
+  if (resp.status < 200 || resp.status >= 300) {
+    verdict.cleanup = {
+      attempted: true,
+      status: resp.status,
+      error: `restore failed: ${resp.status}`,
+    };
+    return;
+  }
+  verdict.cleanup = { attempted: true, status: resp.status };
 }
 
 function classify(
