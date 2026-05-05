@@ -88,6 +88,13 @@ zond validate apis/<name>/tests
 `generate` fills bodies with `{{$randomString}}`. Format-strict APIs reject
 many of these — that's a **test-fix**, not a backend bug (Phase 4a).
 
+If a CRUD chain you expected isn't in the output, run
+`zond generate <spec> --explain` (no `--output` needed). The diagnostic
+table shows every POST endpoint with its verdict and reason — usually one
+of: no GET-by-id, item path uses a non-`{id}` param the detector couldn't
+match, or trailing-slash mismatch (Sentry-style — already auto-handled
+since TASK-139, but the table lets you confirm).
+
 ## Phase 2.5 — Fixture pack
 
 `zond doctor` already showed which `.env.yaml` keys are missing. Beyond

@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **TASK-139: `zond generate --explain`.** Prints a per-POST diagnostic table
+  (`resource | post | get/{id} | put/patch | delete | list | verdict | reason`)
+  without writing files, so you can debug "why didn't `generate` emit a CRUD
+  chain for resource X?" against a real spec. Pairs with the relaxed
+  detector below.
+
+### Changed
+
+- **TASK-139: relaxed CRUD detector — trailing slashes and id-like field
+  names.** `detectCrudGroups` now matches `POST /alerts/` against
+  `GET /alerts/{id}` (and any combination of trailing slashes), and
+  `getCaptureField` looks for the path-param name (`{slug}` → `slug`,
+  `{rule_id}` → `id`/`rule_id`) plus `slug`/`uuid`/`key`/`version`/`name`
+  string fields before falling back to type-shape heuristics. Together
+  these produce CRUD chains for Sentry-style resources (alert-rules,
+  dashboards, releases) that previously fell through the strict regex.
+
 ### Changed
 
 - **TASK-135: `probe-validation` no longer short-circuits on parent path

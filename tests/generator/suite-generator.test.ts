@@ -2,6 +2,7 @@ import { describe, test, expect } from "bun:test";
 import {
   generateStep,
   detectCrudGroups,
+  detectCrudGroupsWithDiagnostics,
   generateCrudSuite,
   generateSuites,
   generateAuthSuite,
@@ -285,6 +286,58 @@ describe("detectCrudGroups", () => {
     const groups = detectCrudGroups(endpoints);
     expect(groups).toHaveLength(0);
   });
+
+  test("TASK-139: matches Sentry-style trailing-slash POST + non-slash GET", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/alert-rules/", method: "POST" }),
+      makeEndpoint({ path: "/alert-rules/{ruleId}", method: "GET" }),
+      makeEndpoint({ path: "/alert-rules/{ruleId}", method: "DELETE" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.basePath).toBe("/alert-rules");
+    expect(groups[0]!.idParam).toBe("ruleId");
+    expect(groups[0]!.delete).toBeDefined();
+  });
+
+  test("TASK-139: matches POST + GET both with trailing slash", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/alert-rules/", method: "POST" }),
+      makeEndpoint({ path: "/alert-rules/{ruleId}/", method: "GET" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.idParam).toBe("ruleId");
+  });
+
+  test("TASK-139: list endpoint matches across slash variants", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/alert-rules", method: "GET" }), // list, no slash
+      makeEndpoint({ path: "/alert-rules/", method: "POST" }), // create, slash
+      makeEndpoint({ path: "/alert-rules/{ruleId}", method: "GET" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.list).toBeDefined();
+  });
+
+  test("TASK-139: diagnostics report skipped POSTs with reason", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/alerts", method: "POST" }), // no item endpoint
+      makeEndpoint({ path: "/audit", method: "POST" }),
+      makeEndpoint({ path: "/audit/{id}", method: "DELETE" }), // has item, but no GET
+    ];
+    const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
+    expect(groups).toHaveLength(0);
+    expect(diagnostics).toHaveLength(2);
+    const alerts = diagnostics.find(d => d.basePath === "/alerts")!;
+    expect(alerts.verdict).toBe("skipped");
+    expect(alerts.reason).toMatch(/no item endpoint/);
+    const audit = diagnostics.find(d => d.basePath === "/audit")!;
+    expect(audit.verdict).toBe("skipped");
+    expect(audit.reason).toMatch(/no GET-by-id/);
+    expect(audit.hasDelete).toBe(true);
+  });
 });
 
 // ── generateCrudSuite ──
@@ -369,6 +422,56 @@ describe("generateCrudSuite", () => {
     expect(suite.tests[0]!.GET).toBe("/pets");
     expect(suite.tests[0]!.name).toBe("listPets");
     expect(suite.tests[1]!.POST).toBe("/pets");
+  });
+
+  test("TASK-139: captures slug field when path-param matches and response has no `id`", () => {
+    const endpoints = [
+      makeEndpoint({
+        path: "/projects",
+        method: "POST",
+        operationId: "createProject",
+        responses: [{
+          statusCode: 201,
+          description: "Created",
+          schema: {
+            type: "object",
+            properties: {
+              slug: { type: "string" } as OpenAPIV3.SchemaObject,
+              name: { type: "string" } as OpenAPIV3.SchemaObject,
+            },
+          } as OpenAPIV3.SchemaObject,
+        }],
+      }),
+      makeEndpoint({ path: "/projects/{slug}", method: "GET", operationId: "getProject" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    const suite = generateCrudSuite(groups[0]!, noSecurity);
+    // Create step captures `slug`, not `id`
+    const createStep = suite.tests[0]!;
+    expect(createStep.expect.body?.slug).toEqual({ capture: "project_id" });
+    // Read uses the captured slug interpolated into the {slug} path-param
+    expect(suite.tests[1]!.GET).toBe("/projects/{{project_id}}");
+  });
+
+  test("TASK-139: rule_id path-param maps to id field on response", () => {
+    const endpoints = [
+      makeEndpoint({
+        path: "/alert-rules",
+        method: "POST",
+        responses: [{
+          statusCode: 201,
+          description: "Created",
+          schema: {
+            type: "object",
+            properties: { id: { type: "string" } as OpenAPIV3.SchemaObject },
+          } as OpenAPIV3.SchemaObject,
+        }],
+      }),
+      makeEndpoint({ path: "/alert-rules/{rule_id}", method: "GET" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    const suite = generateCrudSuite(groups[0]!, noSecurity);
+    expect(suite.tests[0]!.expect.body?.id).toBeDefined();
   });
 
   test("minimal CRUD (POST + GET only) — no verify step", () => {
