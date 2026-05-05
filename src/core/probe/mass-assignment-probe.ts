@@ -41,6 +41,7 @@ import {
 import {
   createDiscoveryCache,
   discoverPathParams,
+  discoverBodyFkVars,
   type DiscoveryCache,
 } from "./path-discovery.ts";
 
@@ -146,7 +147,10 @@ export interface MassAssignmentOptions {
   noCleanup?: boolean;
   /** Per-request fetch timeout (ms). */
   timeoutMs?: number;
-  /** When false, skip auto-discovery of path-param fixtures via GET-on-list (TASK-92). */
+  /** When false, skip auto-discovery of path-param fixtures via GET-on-list (TASK-92).
+   *  TASK-137: this flag now also controls body-FK discovery (required body
+   *  fields named `*_id` / `*_slug` / `*_uuid` get filled from the matching
+   *  collection list endpoint, eliminating most INCONCLUSIVE-baseline noise). */
   discover?: boolean;
 }
 
@@ -298,9 +302,49 @@ export async function runMassAssignmentProbes(
       effectiveVars = { ...vars, ...discovered.values };
     }
 
+    // TASK-137: body-FK discovery. Required body fields named `audience_id`,
+    // `project_slug`, `team_uuid`… get filled from sibling collection
+    // endpoints. Without this, baseline POST hits 4xx because the random
+    // string we'd otherwise send fails FK validation, and the verdict
+    // becomes INCONCLUSIVE-baseline — a noise class that buried 51 verdicts
+    // in the dogfooding audit (m-8 feedback §B).
+    const bodyFkMisses: Array<{ field: string; reason: string }> = [];
+    if (discover) {
+      const bodyDiscovery = await discoverBodyFkVars({
+        ep,
+        allEndpoints: endpoints,
+        schemes: securitySchemes,
+        vars: effectiveVars,
+        cache,
+        timeoutMs,
+      });
+      if (Object.keys(bodyDiscovery.values).length > 0) {
+        effectiveVars = { ...effectiveVars, ...bodyDiscovery.values };
+      }
+      bodyFkMisses.push(...bodyDiscovery.misses);
+    }
+
+    // Body-FK overlays. discoverBodyFkVars wrote into effectiveVars but the
+    // baseline body is generated from spec via fake UUIDs / random strings —
+    // substituteDeep only handles literal `{{var}}` markers, not field-name
+    // matches. So we pass the resolved field→value map separately and the
+    // probe overlays it onto baseline directly.
+    let bodyFkOverlay: Record<string, string> | undefined;
+    if (discover) {
+      bodyFkOverlay = {};
+      for (const k of Object.keys(effectiveVars)) {
+        if (vars[k] === undefined && k.includes("_") && /(_id|_slug|_uuid|_key)$/.test(k)) {
+          bodyFkOverlay[k] = effectiveVars[k]!;
+        }
+      }
+      if (Object.keys(bodyFkOverlay).length === 0) bodyFkOverlay = undefined;
+    }
+
     const verdict = await probeEndpoint(ep, endpoints, securitySchemes, effectiveVars, {
       noCleanup: noCleanup === true,
       timeoutMs,
+      bodyFkMisses,
+      bodyFkOverlay,
     });
     verdicts.push(verdict);
   }
@@ -331,7 +375,14 @@ async function probeEndpoint(
   allEndpoints: EndpointInfo[],
   schemes: SecuritySchemeInfo[],
   vars: Record<string, string>,
-  opts: { noCleanup: boolean; timeoutMs?: number },
+  opts: {
+    noCleanup: boolean;
+    timeoutMs?: number;
+    bodyFkMisses?: Array<{ field: string; reason: string }>;
+    /** TASK-137: field→value pairs from body-FK discovery. Overlaid on baseline
+     *  after generation so a real id/slug replaces the random sentinel. */
+    bodyFkOverlay?: Record<string, string>;
+  },
 ): Promise<EndpointVerdict> {
   const m = ep.method.toUpperCase();
   const strict = isStrictContract(ep.requestBodySchema);
@@ -343,6 +394,14 @@ async function probeEndpoint(
   const baseline = substituteDeep(rawBaseline, vars) as Record<string, unknown>;
   if (typeof baseline !== "object" || baseline === null || Array.isArray(baseline)) {
     return skipped(ep, "request body not a JSON object");
+  }
+  // TASK-137: overlay discovered FK values directly by field name so the
+  // baseline body actually carries the real audience_id / project_slug / …
+  // instead of the random UUID generateFromSchema synthesised.
+  if (opts.bodyFkOverlay) {
+    for (const [k, v] of Object.entries(opts.bodyFkOverlay)) {
+      if (k in baseline) baseline[k] = v;
+    }
   }
 
   const suspects = suspectedExtras(ep);
@@ -443,7 +502,11 @@ async function probeEndpoint(
     if (!baselineOk) {
       // Baseline body itself invalid — extras never reached validation.
       verdict.severity = "inconclusive-baseline";
-      verdict.summary = inconclusiveBaselineSummary(baselineResp.status, baselineBody);
+      verdict.summary = inconclusiveBaselineSummary(
+        baselineResp.status,
+        baselineBody,
+        opts.bodyFkMisses,
+      );
       for (const f of verdict.fields) f.outcome = "unknown";
       return verdict;
     }
@@ -604,11 +667,25 @@ async function tryCleanupBaseline(
  * the server's error code/name when present so the user can immediately
  * see *which* FK / scope / fixture failed and fix it before re-probing.
  */
-function inconclusiveBaselineSummary(status: number, body: unknown): string {
+function inconclusiveBaselineSummary(
+  status: number,
+  body: unknown,
+  bodyFkMisses?: Array<{ field: string; reason: string }>,
+): string {
   const hint = extractBaselineHint(body);
   const base = `baseline body invalid — server returned ${status}`;
   const tail = " — fix fixture / FK value / path-params and re-probe";
-  return hint ? `${base} (${hint})${tail}` : `${base}${tail}`;
+  // TASK-137: if body-FK auto-discovery couldn't fill required FK fields, name
+  // them in the summary so the user knows exactly what to add to env (or
+  // why discover-fk missed — e.g. nested list endpoint, 403 from scope).
+  let fkClause = "";
+  if (bodyFkMisses && bodyFkMisses.length > 0) {
+    const names = bodyFkMisses.map(m => m.field).join(", ");
+    fkClause = ` — unresolved body FKs: ${names}`;
+  }
+  return hint
+    ? `${base} (${hint})${fkClause}${tail}`
+    : `${base}${fkClause}${tail}`;
 }
 
 function extractBaselineHint(body: unknown): string | undefined {

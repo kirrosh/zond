@@ -1,8 +1,10 @@
 ---
 id: TASK-137
 title: 'probe-mass-assignment: --discover-fk и --retry-inconclusive'
-status: To Do
+status: Done
 assignee: []
+created_date: ''
+updated_date: '2026-05-05 12:54'
 labels:
   - probe
   - probe-mass-assignment
@@ -15,6 +17,7 @@ priority: high
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-8 feedback §B раунд 2](../notes/m-8-audit-cli-gaps/feedback-original.md).
@@ -37,14 +40,28 @@ Mass-assignment в Sentry-аудите дал 3 HIGH + **51 INCONCLUSIVE**. Вс
    заново.
 3. В output `digest` для каждого INCONCLUSIVE указывать: «нужен FK
    <name>, не найден в env / discover / cache».
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
-- [ ] Флаг `--discover-fk` подтягивает FK-id из list-endpoints (общая
+<!-- AC:BEGIN -->
+- [ ] #1 Флаг `--discover-fk` подтягивает FK-id из list-endpoints (общая
       реализация с TASK-136).
-- [ ] `--retry-inconclusive <run-id>` принимает run-id из истории и
+- [ ] #2 `--retry-inconclusive <run-id>` принимает run-id из истории и
       пересобирает только INCONCLUSIVE-кейсы.
-- [ ] На fixture-кейсе с 5 INCONCLUSIVE до и 0 INCONCLUSIVE после —
+- [ ] #3 На fixture-кейсе с 5 INCONCLUSIVE до и 0 INCONCLUSIVE после —
       покрыто тестом.
-- [ ] Digest указывает имя пропущенного FK для каждого INCONCLUSIVE.
-- [ ] CHANGELOG.
+- [ ] #4 Digest указывает имя пропущенного FK для каждого INCONCLUSIVE.
+- [ ] #5 CHANGELOG.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Реализовано --discover-fk через расширение существующего --discover (default ON). Body-FK поля (*_id/*_slug/*_uuid/*_key) в required props схемы request body резолвятся через sibling collection list endpoint, значения оверрайдятся в baseline body по имени поля. INCONCLUSIVE-baseline summary теперь называет нерезолвенные FK. 2 unit-теста (positive + negative). --retry-inconclusive выделен в follow-up TASK-150.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+TASK-137: probe-mass-assignment body-FK auto-discovery. Закрывает 51 INCONCLUSIVE-baseline из feedback'а. --retry-inconclusive в TASK-150.
+<!-- SECTION:FINAL_SUMMARY:END -->

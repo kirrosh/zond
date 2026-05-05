@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-137: `probe-mass-assignment` body-FK auto-discovery.** Required
+  body fields named `*_id` / `*_slug` / `*_uuid` / `*_key` are now resolved
+  pre-baseline by hitting the matching collection list endpoint
+  (`audience_id` → `GET /audiences`). Eliminates most
+  `inconclusive-baseline` noise, where the spec-generated random UUID was
+  rejected before extras ever reached validation. Enabled by default
+  (gated by the existing `--discover` / `--no-discover` flag — same as
+  the path-param discovery from TASK-92). When discovery still misses an
+  FK, the INCONCLUSIVE summary now lists the unresolved field names so
+  the user knows exactly what to add to env. Follow-up
+  `--retry-inconclusive <run-id>` tracked as TASK-150.
+
 - **TASK-136: `zond discover --api <name>` — auto-fill `.env.yaml` FK ids
   from list-endpoints.** Phase 2.5 of an audit used to be manual: hit
   `GET /audiences`, `GET /projects`, etc., copy slugs into `.env.yaml`,
