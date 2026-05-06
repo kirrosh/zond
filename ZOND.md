@@ -757,6 +757,33 @@ fixtures, stale artifacts (specHash mismatch), and missing snapshots in
 one report. JSON envelope mode (`--json`) is the integration point for
 agents.
 
+### Auto-redaction of secret values (m-10)
+
+`zond` keeps a runtime `SecretRegistry` of every value it knows is
+sensitive (currently populated from `.env.yaml` keys; later from
+`@secret:` references and `.secrets.yaml`). Before any value is
+persisted — DB rows, HTML / JSON / JUnit exports, case-study Markdown,
+digest files, `--verbose` stdout — it goes through a sanitizer pass that
+replaces each registered value with the marker:
+
+    <redacted:<var-name>>
+
+For example, `Authorization: Bearer abc123…xyz` becomes
+`Authorization: <redacted:auth_token>`. The marker carries the variable
+*name* (not the value), so a teammate opening a redacted artifact knows
+which env var to pull locally.
+
+Pass `--no-redact` (global flag) to disable the pass for local debugging.
+The flag never leaves your shell — it does **not** survive into shared
+artifacts.
+
+Rules:
+- Exact-match only — no heuristics. A value is redacted only if it was
+  explicitly registered.
+- Values shorter than 8 characters are silently ignored, so `id: 1`
+  cannot accidentally turn every "1" in a report into `<redacted>`.
+- Longer registered values redact before shorter ones (specificity).
+
 ### `.env.yaml` is API-level, never duplicated under `tests/`
 
 Runtime variables live in **one** file per API: `apis/<name>/.env.yaml`.

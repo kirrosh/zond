@@ -1,15 +1,16 @@
 ---
 id: TASK-166
 title: redaction registry + sanitizer infrastructure
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:52'
+updated_date: '2026-05-06 09:59'
 labels:
   - redaction
   - secrets
   - infra
-dependencies: []
 milestone: m-10
+dependencies: []
 priority: high
 ---
 
@@ -50,11 +51,19 @@ priority: high
 6. **Unit-тесты:** регистрация, redact в string, redact в nested object, no-redact mode, минимальная длина.
 
 ## Acceptance Criteria
-
-- [ ] Модуль `src/core/secrets/registry.ts` с публичным API.
-- [ ] `redact()` корректно заменяет registered values в строках.
-- [ ] `redactObject()` рекурсивно обрабатывает nested objects/arrays.
-- [ ] `--no-redact` флаг отключает обработку.
-- [ ] Unit-тесты покрывают: registration, redact, deep redact, no-redact, edge cases (empty value, very short value).
-- [ ] Документирован marker format `<redacted:<name>>`.
+<!-- AC:BEGIN -->
+- [ ] #1 Модуль `src/core/secrets/registry.ts` с публичным API.
+- [ ] #2 `redact()` корректно заменяет registered values в строках.
+- [ ] #3 `redactObject()` рекурсивно обрабатывает nested objects/arrays.
+- [ ] #4 `--no-redact` флаг отключает обработку.
+- [ ] #5 Unit-тесты покрывают: registration, redact, deep redact, no-redact, edge cases (empty value, very short value).
+- [ ] #6 Документирован marker format `<redacted:<name>>`.
 <!-- SECTION:DESCRIPTION:END -->
+
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+src/core/secrets/registry.ts: SecretRegistry class with register/registerAll/redact/redactObject/setEnabled/clear, MIN_SECRET_LENGTH=8 guard, longest-first redaction, marker <redacted:<name>>. Global --no-redact flag wired via preAction hook. 14 unit tests covering registration, deep redact, no-redact mode, edge cases. ZOND.md documents marker format. Foundation for TASK-167/168.
+<!-- SECTION:NOTES:END -->
