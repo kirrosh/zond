@@ -6,6 +6,7 @@ import { serveCommand } from "./commands/serve.ts";
 import { coverageCommand } from "./commands/coverage.ts";
 import { ciInitCommand } from "./commands/ci-init.ts";
 import { cleanCommand } from "./commands/clean.ts";
+import { getSecretRegistry } from "../core/secrets/registry.ts";
 import { initCommand } from "./commands/init.ts";
 import { describeCommand } from "./commands/describe.ts";
 import { dbCommand } from "./commands/db.ts";
@@ -221,7 +222,19 @@ export function buildProgram(): Command {
     .version(`${VERSION} (${getRuntimeInfo()})`, "-v, --version", "Show version")
     .helpOption("-h, --help", "Show this help")
     .showHelpAfterError("(run 'zond --help' for usage)")
-    .exitOverride();
+    .exitOverride()
+    // TASK-166 (m-10): global escape hatch for local debugging — disables
+    // the secret registry's redaction pass everywhere (DB writes,
+    // exporters, stdout). Default is redact-on. Hook is read from the
+    // env var so it survives across nested subcommand parsers.
+    .option("--no-redact", "Disable auto-redaction of registered secret values (debug only)")
+    .hook("preAction", (thisCommand) => {
+      const enabled = thisCommand.opts().redact !== false;
+      // Mirror the flag into env so deeply-nested code that doesn't have
+      // access to `cmd` (e.g. setup-api, exporters) can still consult it.
+      process.env.ZOND_REDACT = enabled ? "1" : "0";
+      getSecretRegistry().setEnabled(enabled);
+    });
 
   // ── run ──
   program
