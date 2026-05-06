@@ -1,4 +1,5 @@
-import { join, dirname } from "path";
+import { join, resolve as resolvePath } from "path";
+import { existsSync } from "fs";
 import { mkdir } from "fs/promises";
 import {
   readOpenApiSpec,
@@ -7,8 +8,6 @@ import {
   scanCoveredEndpoints,
   filterUncoveredEndpoints,
   serializeSuite,
-  buildCatalog,
-  serializeCatalog,
 } from "../../core/generator/index.ts";
 import {
   generateSuites,
@@ -17,14 +16,41 @@ import {
 } from "../../core/generator/suite-generator.ts";
 import { filterByTag } from "../../core/generator/chunker.ts";
 import { parse } from "../../core/parser/yaml-parser.ts";
-import { decycleSchema } from "../../core/generator/schema-utils.ts";
 import { printError, printSuccess } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
-import { hashSpec } from "../../core/meta/meta-store.ts";
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByTestPath, updateCollection } from "../../db/queries.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 import { recordGeneratedFiles, inferApiName, autoGenHeader, type RecordInput } from "../../core/workspace/manifest.ts";
+
+/**
+ * Walk up from outputDir looking for the API root — the first ancestor
+ * that already contains `.api-catalog.yaml` (= a directory `zond add api`
+ * has owned). Falls back to undefined when called from a non-conventional
+ * layout, in which case the caller writes `.env.yaml` next to outputDir.
+ *
+ * The walk stops at filesystem root (or HOME). The optional baseUrl is
+ * unused at the moment but kept on the signature so callers don't have
+ * to recompute the conditions for "should we even bother" — when no
+ * env vars are needed, the caller skips this entirely.
+ */
+function resolveApiRoot(outputDir: string, _baseUrl: string | undefined): string | undefined {
+  const abs = resolvePath(outputDir);
+  // 1) Walk up looking for an existing `.api-catalog.yaml` — strongest signal.
+  let dir = abs;
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(join(dir, ".api-catalog.yaml"))) return dir;
+    const parent = resolvePath(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // 2) Fall back to the conventional layout: …/apis/<name>/[anything]/. The
+  //    API root is the directory immediately under `apis/`. Picks up the
+  //    case where the user runs `zond generate` before `zond add api`.
+  const norm = abs.replace(/\\/g, "/");
+  const m = norm.match(/^(.*?\/apis\/[^/]+)(?:\/|$)/);
+  return m?.[1];
+}
 
 export interface GenerateOptions {
   specPath: string;
@@ -87,8 +113,6 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       return 0;
     }
     const baseUrl = ((doc as any).servers?.[0]?.url) as string | undefined;
-    const apiName = (doc as any).info?.title as string | undefined;
-    const apiVersion = (doc as any).info?.version as string | undefined;
     const warnings: string[] = [];
 
     // Filter to uncovered only
@@ -142,26 +166,10 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       });
     }
 
-    const specContent = typeof doc === "object" ? JSON.stringify(decycleSchema(doc)) : String(doc);
-
-    // Generate .api-catalog.yaml (always uses full unfiltered endpoint list)
-    const catalog = buildCatalog({
-      endpoints: allEndpoints,
-      securitySchemes,
-      specSource: options.specPath,
-      specHash: hashSpec(specContent),
-      apiName,
-      apiVersion,
-      baseUrl,
-    });
-    const catalogPath = join(options.output, ".api-catalog.yaml");
-    await Bun.write(catalogPath, serializeCatalog(catalog));
-    manifestEntries.push({
-      path: catalogPath,
-      by: "zond generate",
-      api: inferredApi,
-      category: "catalog",
-    });
+    // TASK-157 (m-9 P1): generate no longer writes `.api-catalog.yaml` into
+    // options.output. The API-level catalog at `apis/<name>/.api-catalog.yaml`
+    // is the single source of truth — `zond add api` / `zond refresh-api`
+    // emit it.
 
     // Sync DB collection spec reference if one is registered for this output directory
     try {
@@ -175,8 +183,15 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       // DB unavailable — not fatal
     }
 
-    // Create .env.yaml with base_url and unresolved variables as placeholders
-    const envPath = join(options.output, ".env.yaml");
+    // TASK-158 (m-9 P2): the API-level `apis/<name>/.env.yaml` is the only
+    // source of truth for runtime variables. We never write a duplicate
+    // `tests/.env.yaml` — it would silently override the API-level file via
+    // deeper-scope precedence, wiping the user's auth_token / FK ids on
+    // every `zond generate`. If the API-level file is missing, we create it
+    // there; if it already exists, we leave it alone (re-running generate
+    // never clobbers values the user filled in).
+    const envTargetDir = resolveApiRoot(options.output, baseUrl) ?? options.output;
+    const envPath = join(envTargetDir, ".env.yaml");
     const envFile = Bun.file(envPath);
     if (!(await envFile.exists())) {
       const unresolvedVars = new Set<string>();
@@ -189,6 +204,7 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
         lines.push(`${v}: "" # TODO: fill in`);
       }
       if (lines.length > 0) {
+        await mkdir(envTargetDir, { recursive: true });
         await Bun.write(envPath, lines.join("\n") + "\n");
         warnings.push(`Created ${envPath} with ${unresolvedVars.size} placeholder variable(s)`);
         manifestEntries.push({

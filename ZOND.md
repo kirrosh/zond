@@ -757,6 +757,19 @@ fixtures, stale artifacts (specHash mismatch), and missing snapshots in
 one report. JSON envelope mode (`--json`) is the integration point for
 agents.
 
+### `.env.yaml` is API-level, never duplicated under `tests/`
+
+Runtime variables live in **one** file per API: `apis/<name>/.env.yaml`.
+`zond generate` will create it the first time (when missing) and never
+overwrites it on subsequent runs — values you fill in (`auth_token`, FK
+ids) survive every regeneration. There is no `tests/.env.yaml`; if you
+see one from an older zond, delete it (the API-level file is the source
+of truth).
+
+Likewise, `.api-catalog.yaml` lives only at the API root
+(`apis/<name>/.api-catalog.yaml`). `zond generate` no longer emits a
+duplicate inside the test output directory.
+
 ### `zond clean` — remove auto-generated files
 
 `zond` tracks every file it writes (catalog/resources/fixtures, `.env.yaml`,

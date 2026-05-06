@@ -1,16 +1,17 @@
 ---
 id: TASK-158
 title: 'zond generate: не перезаписывать API-level .env.yaml через tests/.env.yaml'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:38'
+updated_date: '2026-05-06 09:56'
 labels:
   - lifecycle
   - generate
   - env
   - bug
-dependencies: []
 milestone: m-9
+dependencies: []
 priority: high
 ---
 
@@ -38,8 +39,16 @@ priority: high
    для уже заполненных переменных.
 
 ## Acceptance Criteria
-
-- [ ] После `zond generate` `tests/.env.yaml` не создаётся, если API-level есть.
-- [ ] API-level `.env.yaml` сохраняет существующие значения после re-generate.
-- [ ] Если deeper-scope merge нужен — задокументирован с явным merge-поведением.
+<!-- AC:BEGIN -->
+- [ ] #1 После `zond generate` `tests/.env.yaml` не создаётся, если API-level есть.
+- [ ] #2 API-level `.env.yaml` сохраняет существующие значения после re-generate.
+- [ ] #3 Если deeper-scope merge нужен — задокументирован с явным merge-поведением.
 <!-- SECTION:DESCRIPTION:END -->
+
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Env target dir resolved via resolveApiRoot(): walks up to nearest .api-catalog.yaml or matches apis/<name>/ pattern. Re-generate preserves existing API-level values. Verified end-to-end.
+<!-- SECTION:NOTES:END -->
