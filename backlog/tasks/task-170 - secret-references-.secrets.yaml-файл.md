@@ -1,21 +1,23 @@
 ---
 id: TASK-170
 title: '@secret references + .secrets.yaml файл'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:55'
+updated_date: '2026-05-06 11:09'
 labels:
   - secrets
   - env
   - loader
+milestone: m-10
 dependencies:
   - TASK-166
-milestone: m-10
 priority: medium
 ---
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-10 feedback round 5](../notes/m-10-secrets-and-redaction/feedback-original.md), §1+§2.
@@ -55,13 +57,21 @@ base_url: "https://us.sentry.io"
    - дописывает в `.gitignore` строку для `.secrets.yaml` если её нет.
 4. **`zond doctor`** упоминает `.secrets.yaml` (set/unset, не показывает values).
 5. Документация: ZOND.md секция «Secrets — .secrets.yaml + @secret references».
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 `.secrets.yaml` создаётся при `zond add api` (placeholder + gitignored).
+- [ ] #2 Loader читает `.secrets.yaml` и регистрирует все values в SecretRegistry.
+- [ ] #3 `@secret:<name>` в `.env.yaml` резолвится в значение из `.secrets.yaml`.
+- [ ] #4 Missing `@secret:<name>` → fail-loud.
+- [ ] #5 `.gitignore` обновляется автоматически.
+- [ ] #6 `zond doctor` показывает `.secrets.yaml` status (set/unset, длина).
+- [ ] #7 Документировано.
+<!-- AC:END -->
 
-- [ ] `.secrets.yaml` создаётся при `zond add api` (placeholder + gitignored).
-- [ ] Loader читает `.secrets.yaml` и регистрирует все values в SecretRegistry.
-- [ ] `@secret:<name>` в `.env.yaml` резолвится в значение из `.secrets.yaml`.
-- [ ] Missing `@secret:<name>` → fail-loud.
-- [ ] `.gitignore` обновляется автоматически.
-- [ ] `zond doctor` показывает `.secrets.yaml` status (set/unset, длина).
-- [ ] Документировано.
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+src/core/secrets/secrets-file.ts: loadSecretsFile + resolveSecretRefs + loadSecretsFromAncestor. setup-api: создаёт placeholder .secrets.yaml + .gitignore pin. Loader подключен в loadEnvFile (после ENV interp). 6 unit-тестов. E2E проверено: ${VAR} default + override + @secret: → <redacted:auth_token> в JSON output.
+<!-- SECTION:NOTES:END -->

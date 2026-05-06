@@ -1,21 +1,23 @@
 ---
 id: TASK-169
 title: '${ENV_VAR} substitution в .env.yaml'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:55'
+updated_date: '2026-05-06 11:09'
 labels:
   - env
   - secrets
   - loader
+milestone: m-10
 dependencies:
   - TASK-166
-milestone: m-10
 priority: medium
 ---
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-10 feedback round 5](../notes/m-10-secrets-and-redaction/feedback-original.md), §2.
@@ -50,13 +52,21 @@ environment / CI secrets).
 4. **Escape:** `\${LITERAL}` → `${LITERAL}` без подстановки.
 5. Документация в ZOND.md секция `.env.yaml` — формат, escape, default.
 6. Тесты: подстановка, default, undefined fail, escape, env-var с спецсимволами.
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 `${VAR}` подставляется из `process.env` при загрузке `.env.yaml`.
+- [ ] #2 `${VAR:-default}` использует default при отсутствии env.
+- [ ] #3 Undefined `${VAR}` без default → ошибка с указанием файла и ключа.
+- [ ] #4 Escape `\${...}` работает.
+- [ ] #5 Var с suspicious-name (TOKEN/SECRET/...) выдаёт warn с suggest.
+- [ ] #6 Документировано в ZOND.md.
+- [ ] #7 Тесты на основные сценарии.
+<!-- AC:END -->
 
-- [ ] `${VAR}` подставляется из `process.env` при загрузке `.env.yaml`.
-- [ ] `${VAR:-default}` использует default при отсутствии env.
-- [ ] Undefined `${VAR}` без default → ошибка с указанием файла и ключа.
-- [ ] Escape `\${...}` работает.
-- [ ] Var с suspicious-name (TOKEN/SECRET/...) выдаёт warn с suggest.
-- [ ] Документировано в ZOND.md.
-- [ ] Тесты на основные сценарии.
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+src/core/parser/env-interpolation.ts: ${VAR}/${VAR:-default}/escape \${...}. Suspicious-name warn (TOKEN/SECRET/...) deduped. Подключено в loadEnvFile. 9 unit-тестов.
+<!-- SECTION:NOTES:END -->
