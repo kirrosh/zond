@@ -1,21 +1,23 @@
 ---
 id: TASK-167
 title: apply sanitizer in DB-write path (results table)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:55'
+updated_date: '2026-05-06 10:07'
 labels:
   - redaction
   - db
   - secrets
+milestone: m-10
 dependencies:
   - TASK-166
-milestone: m-10
 priority: high
 ---
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-10 feedback round 5](../notes/m-10-secrets-and-redaction/feedback-original.md), §3.
@@ -43,11 +45,19 @@ priority: high
    зарегистрированный токен → в БД лежит `<redacted:auth_token>`.
 6. **Backward compat:** существующие runs (до фичи) не трогаются
    автоматически. Их чистит `zond redact` (TASK-171).
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 Все строковые поля `results` проходят через sanitizer перед INSERT.
+- [ ] #2 Регистрированный токен не попадает в БД ни через одно из полей.
+- [ ] #3 `--no-redact` сохраняет raw values (для локального дебага).
+- [ ] #4 Тест: prepared run с echo-payload → в БД нет raw-токена.
+- [ ] #5 Производительность: sanitizer не делает БД-write заметно медленнее (< 5% overhead на больших responses).
+<!-- AC:END -->
 
-- [ ] Все строковые поля `results` проходят через sanitizer перед INSERT.
-- [ ] Регистрированный токен не попадает в БД ни через одно из полей.
-- [ ] `--no-redact` сохраняет raw values (для локального дебага).
-- [ ] Тест: prepared run с echo-payload → в БД нет raw-токена.
-- [ ] Производительность: sanitizer не делает БД-write заметно медленнее (< 5% overhead на больших responses).
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+saveResults() в src/db/queries.ts: redactString/redactJson обёртки вокруг каждого potentially-leaky поля (request_url/body, response_body/headers, error_message, assertions, captures, spec_excerpt). Numeric/enum поля не трогаются. Registry заполняется в execute-run.ts через registerAll(env). 3 новых регрессионных теста. Микробенчмарк: 0.027ms/call на 50KB body — <1% overhead, в рамках 5% acceptance criteria. 993/993 tests pass.
+<!-- SECTION:NOTES:END -->

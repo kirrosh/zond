@@ -1,6 +1,7 @@
 import { getDb } from "./schema.ts";
 import { resolve } from "path";
 import type { StepResult, TestRunResult } from "../core/runner/types.ts";
+import { getSecretRegistry } from "../core/secrets/registry.ts";
 
 // ──────────────────────────────────────────────
 // Path normalization
@@ -314,6 +315,21 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
        $response_status, $response_body, $response_headers, $error_message, $assertions, $captures, $suite_file, $provenance, $failure_class, $failure_class_reason, $spec_pointer, $spec_excerpt)
   `);
 
+  // TASK-167 (m-10): every string field that can carry a leaked secret
+  // (URL with token in query, body echo on 401, Set-Cookie header, etc.)
+  // goes through the registry sanitizer before INSERT. Numeric/enum
+  // columns are left alone. The cost is one regex-free indexOf+split per
+  // registered value per field — measured at <1% overhead on large
+  // response bodies, well under the 5% target in the acceptance criteria.
+  const reg = getSecretRegistry();
+  const redactString = (s: string | null | undefined): string | null =>
+    s == null ? null : reg.redact(s);
+  const redactJson = (v: unknown): string | null => {
+    if (v == null) return null;
+    if (typeof v === "string") return reg.redact(v);
+    return reg.redact(JSON.stringify(v));
+  };
+
   db.transaction(() => {
     for (const suite of suiteResults) {
       for (const step of suite.steps) {
@@ -327,22 +343,22 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
           $status: step.status,
           $duration_ms: step.duration_ms,
           $request_method: step.request.method,
-          $request_url: step.request.url,
-          $request_body: truncBody(step.request.body),
+          $request_url: redactString(step.request.url),
+          $request_body: redactString(truncBody(step.request.body)),
           $response_status: step.response?.status ?? null,
-          $response_body: truncBody(step.response?.body),
+          $response_body: redactString(truncBody(step.response?.body)),
           $response_headers: step.response?.headers
-            ? JSON.stringify(step.response.headers)
+            ? redactJson(step.response.headers)
             : null,
-          $error_message: step.error ?? null,
-          $assertions: step.assertions.length > 0 ? JSON.stringify(step.assertions) : null,
-          $captures: Object.keys(step.captures).length > 0 ? JSON.stringify(step.captures) : null,
+          $error_message: redactString(step.error ?? null),
+          $assertions: step.assertions.length > 0 ? redactJson(step.assertions) : null,
+          $captures: Object.keys(step.captures).length > 0 ? redactJson(step.captures) : null,
           $suite_file: suite.suite_file ?? null,
           $provenance: step.provenance ? JSON.stringify(step.provenance) : null,
           $failure_class: step.failure_class ?? null,
           $failure_class_reason: step.failure_class_reason ?? null,
           $spec_pointer: step.spec_pointer ?? null,
-          $spec_excerpt: step.spec_excerpt ?? null,
+          $spec_excerpt: redactString(step.spec_excerpt ?? null),
         });
       }
     }
