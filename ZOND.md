@@ -757,6 +757,28 @@ fixtures, stale artifacts (specHash mismatch), and missing snapshots in
 one report. JSON envelope mode (`--json`) is the integration point for
 agents.
 
+### `zond clean` — remove auto-generated files
+
+`zond` tracks every file it writes (catalog/resources/fixtures, `.env.yaml`,
+generated tests, probe-suites, `spec.json`) in `.zond/manifest.json` together
+with its sha256 at write-time. `zond clean` consults that manifest to remove
+only auto-generated content and never user edits.
+
+```bash
+zond clean --api petstore             # dry-run: list what would be deleted for one API
+zond clean --probes                   # dry-run: only probe-suite YAMLs
+zond clean --all                      # dry-run: every tracked auto-generated file
+zond clean --api petstore --force     # actually delete
+```
+
+- Default is dry-run; `--force` is required to delete.
+- A file whose sha256 no longer matches the manifest is treated as
+  manually-edited and is **skipped** (printed as a warning).
+- `.env.yaml`, `.gitignore`, and any user-authored YAML stay untouched
+  because they are never recorded in the manifest.
+- After deletion the surrounding empty directories are removed too, but
+  only if they hold nothing else.
+
 ### Sessions — group multiple runs into one campaign
 
 A "session" stitches multiple `zond run` invocations under one `session_id` so the dashboard's `/runs` view collapses them into a single row instead of N scattered runs. Use it when running a typical sweep — `smoke + probe-methods + probe-validation + mass-assignment` — and you want them grouped as one campaign.

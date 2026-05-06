@@ -5,6 +5,7 @@ import { validateCommand } from "./commands/validate.ts";
 import { serveCommand } from "./commands/serve.ts";
 import { coverageCommand } from "./commands/coverage.ts";
 import { ciInitCommand } from "./commands/ci-init.ts";
+import { cleanCommand } from "./commands/clean.ts";
 import { initCommand } from "./commands/init.ts";
 import { describeCommand } from "./commands/describe.ts";
 import { dbCommand } from "./commands/db.ts";
@@ -681,6 +682,24 @@ export function buildProgram(): Command {
         api,
         jsonPath: opts.jsonPath,
         dbPath: opts.db,
+        json: globalJson(cmd),
+      });
+    });
+
+  // ── clean ──
+  program
+    .command("clean")
+    .description("Remove auto-generated files tracked in .zond/manifest.json (TASK-156, m-9)")
+    .option("--api <name>", "Limit to a single API (apis/<name>/)")
+    .option("--probes", "Limit to probe-suite files only")
+    .option("--all", "Remove every tracked auto-generated file in the workspace")
+    .option("--force", "Actually delete files (default is dry-run)")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await cleanCommand({
+        api: opts.api,
+        probes: opts.probes === true,
+        all: opts.all === true,
+        force: opts.force === true,
         json: globalJson(cmd),
       });
     });

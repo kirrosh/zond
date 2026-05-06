@@ -23,6 +23,8 @@ import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { hashSpec } from "../../core/meta/meta-store.ts";
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByTestPath, updateCollection } from "../../db/queries.ts";
+import { findWorkspaceRoot } from "../../core/workspace/root.ts";
+import { recordGeneratedFiles, inferApiName, autoGenHeader, type RecordInput } from "../../core/workspace/manifest.ts";
 
 export interface GenerateOptions {
   specPath: string;
@@ -122,13 +124,22 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
 
     // Write suite files
     const createdFiles: Array<{ file: string; suite: string; tests: number }> = [];
+    const manifestEntries: RecordInput[] = [];
+    const inferredApi = inferApiName(options.output);
 
     for (const suite of suites) {
       const yaml = serializeSuite(suite);
       const fileName = `${suite.fileStem ?? suite.name}.yaml`;
       const filePath = join(options.output, fileName);
-      await Bun.write(filePath, yaml);
+      const header = autoGenHeader("zond generate", `zond generate --api <name> --output ${options.output}`);
+      await Bun.write(filePath, header + yaml);
       createdFiles.push({ file: filePath, suite: suite.name, tests: suite.tests.length });
+      manifestEntries.push({
+        path: filePath,
+        by: "zond generate",
+        api: inferredApi,
+        category: "tests",
+      });
     }
 
     const specContent = typeof doc === "object" ? JSON.stringify(decycleSchema(doc)) : String(doc);
@@ -143,7 +154,14 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       apiVersion,
       baseUrl,
     });
-    await Bun.write(join(options.output, ".api-catalog.yaml"), serializeCatalog(catalog));
+    const catalogPath = join(options.output, ".api-catalog.yaml");
+    await Bun.write(catalogPath, serializeCatalog(catalog));
+    manifestEntries.push({
+      path: catalogPath,
+      by: "zond generate",
+      api: inferredApi,
+      category: "catalog",
+    });
 
     // Sync DB collection spec reference if one is registered for this output directory
     try {
@@ -173,7 +191,23 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       if (lines.length > 0) {
         await Bun.write(envPath, lines.join("\n") + "\n");
         warnings.push(`Created ${envPath} with ${unresolvedVars.size} placeholder variable(s)`);
+        manifestEntries.push({
+          path: envPath,
+          by: "zond generate",
+          api: inferredApi,
+          category: "env",
+        });
       }
+    }
+
+    // Record everything we wrote into .zond/manifest.json (TASK-156).
+    try {
+      const ws = findWorkspaceRoot();
+      if (!ws.fromFallback && manifestEntries.length > 0) {
+        recordGeneratedFiles(ws.root, manifestEntries);
+      }
+    } catch {
+      // Manifest is best-effort; never fail the generate command on it.
     }
 
     // Validate generated files

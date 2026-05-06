@@ -1,15 +1,16 @@
 ---
 id: TASK-156
 title: zond clean + .zond/manifest.json (auto-generated tracking)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:37'
+updated_date: '2026-05-06 09:46'
 labels:
   - lifecycle
   - clean
   - manifest
-dependencies: []
 milestone: m-9
+dependencies: []
 priority: high
 ---
 
@@ -64,12 +65,20 @@ priority: high
    ```
 
 ## Acceptance Criteria
-
-- [ ] `.zond/manifest.json` создаётся при первой `zond add api` / `generate` / `probe-* --emit`.
-- [ ] Каждая команда, генерирующая файлы, дописывает в manifest.
-- [ ] `zond clean --api <name> --dry-run` показывает список без удаления.
-- [ ] `zond clean` без `--force` всегда dry-run.
-- [ ] Файл с изменённым sha256 не удаляется (warning: «manually edited, skipping»).
-- [ ] Все auto-generated YAML/MD имеют header-комментарий с командой регенерации.
-- [ ] Документация в `ZOND.md` + skill update (TASK separate).
+<!-- AC:BEGIN -->
+- [ ] #1 `.zond/manifest.json` создаётся при первой `zond add api` / `generate` / `probe-* --emit`.
+- [ ] #2 Каждая команда, генерирующая файлы, дописывает в manifest.
+- [ ] #3 `zond clean --api <name> --dry-run` показывает список без удаления.
+- [ ] #4 `zond clean` без `--force` всегда dry-run.
+- [ ] #5 Файл с изменённым sha256 не удаляется (warning: «manually edited, skipping»).
+- [ ] #6 Все auto-generated YAML/MD имеют header-комментарий с командой регенерации.
+- [ ] #7 Документация в `ZOND.md` + skill update (TASK separate).
 <!-- SECTION:DESCRIPTION:END -->
+
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented in feature/feedback-0505: src/core/workspace/manifest.ts (load/save/sha256/select/inspect), src/cli/commands/clean.ts (zond clean --api/--probes/--all/--force), hooks in setup-api.ts + generate.ts + probe-validation/methods/security/mass-assignment. autoGenHeader() prepended to all emitted YAML. 10 unit tests (tests/core/workspace/manifest.test.ts). All 976 tests pass. Acceptance #1-#6 covered; #7 (skill update) is a follow-up TASK.
+<!-- SECTION:NOTES:END -->

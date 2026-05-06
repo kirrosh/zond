@@ -16,6 +16,7 @@ import {
 import { decycleSchema } from "./generator/schema-utils.ts";
 import { hashSpec } from "./meta/meta-store.ts";
 import { findWorkspaceRoot } from "./workspace/root.ts";
+import { recordGeneratedFiles, type RecordInput } from "./workspace/manifest.ts";
 
 /** Filename of the dereferenced spec snapshot inside `apis/<name>/`. */
 export const SPEC_SNAPSHOT_FILENAME = "spec.json";
@@ -31,6 +32,8 @@ interface WriteArtifactsParams {
   baseUrl: string;
   /** Absolute workspace root, used to compute the relative specSource. */
   workspaceRoot: string;
+  /** Caller label for manifest entries (defaults to "zond add api"). */
+  by?: string;
 }
 
 /**
@@ -40,7 +43,7 @@ interface WriteArtifactsParams {
  * register time and from `refreshApi` for re-snapshot.
  */
 export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
-  const { doc, baseDir, apiName, baseUrl, workspaceRoot } = params;
+  const { doc, baseDir, apiName, baseUrl, workspaceRoot, by = "zond add api" } = params;
   const localSpecAbsPath = join(baseDir, SPEC_SNAPSHOT_FILENAME);
   writeFileSync(localSpecAbsPath, JSON.stringify(doc, null, 2) + "\n", "utf-8");
 
@@ -58,10 +61,12 @@ export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
     apiVersion: (doc as any).info?.version,
     baseUrl,
   });
-  writeFileSync(join(baseDir, ".api-catalog.yaml"), serializeCatalog(catalog), "utf-8");
+  const catalogPath = join(baseDir, ".api-catalog.yaml");
+  writeFileSync(catalogPath, serializeCatalog(catalog), "utf-8");
 
   const resources = buildApiResourceMap({ endpoints, specHash });
-  writeFileSync(join(baseDir, ".api-resources.yaml"), serializeApiResourceMap(resources), "utf-8");
+  const resourcesPath = join(baseDir, ".api-resources.yaml");
+  writeFileSync(resourcesPath, serializeApiResourceMap(resources), "utf-8");
 
   const fixtures = buildApiFixtureManifest({
     endpoints,
@@ -69,7 +74,21 @@ export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
     baseUrl: baseUrl || undefined,
     specHash,
   });
-  writeFileSync(join(baseDir, ".api-fixtures.yaml"), serializeApiFixtureManifest(fixtures), "utf-8");
+  const fixturesPath = join(baseDir, ".api-fixtures.yaml");
+  writeFileSync(fixturesPath, serializeApiFixtureManifest(fixtures), "utf-8");
+
+  // Record artifacts in .zond/manifest.json (TASK-156).
+  try {
+    const entries: RecordInput[] = [
+      { path: localSpecAbsPath, by, api: apiName, category: "spec" },
+      { path: catalogPath, by, api: apiName, category: "catalog" },
+      { path: resourcesPath, by, api: apiName, category: "resources" },
+      { path: fixturesPath, by, api: apiName, category: "fixtures" },
+    ];
+    recordGeneratedFiles(workspaceRoot, entries);
+  } catch {
+    // best-effort
+  }
 }
 
 /**
