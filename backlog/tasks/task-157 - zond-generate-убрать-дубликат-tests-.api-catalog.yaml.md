@@ -1,15 +1,16 @@
 ---
 id: TASK-157
 title: 'zond generate: убрать дубликат tests/.api-catalog.yaml'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:38'
+updated_date: '2026-05-06 09:56'
 labels:
   - lifecycle
   - generate
   - bug
-dependencies: []
 milestone: m-9
+dependencies: []
 priority: high
 ---
 
@@ -34,8 +35,16 @@ priority: high
    `.api-catalog.yaml`.
 
 ## Acceptance Criteria
-
-- [ ] После `zond generate` в `apis/<name>/tests/` отсутствует `.api-catalog.yaml`.
-- [ ] Existing tests/runs не ломаются (root-level catalog остаётся).
-- [ ] Если функционал нужен — есть отдельный флаг с явным opt-in.
+<!-- AC:BEGIN -->
+- [ ] #1 После `zond generate` в `apis/<name>/tests/` отсутствует `.api-catalog.yaml`.
+- [ ] #2 Existing tests/runs не ломаются (root-level catalog остаётся).
+- [ ] #3 Если функционал нужен — есть отдельный флаг с явным opt-in.
 <!-- SECTION:DESCRIPTION:END -->
+
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Generate stopped writing tests/.api-catalog.yaml. apis/<name>/.api-catalog.yaml from add-api/refresh-api is the only catalog. Verified: after generate, tests/ contains only suite YAMLs.
+<!-- SECTION:NOTES:END -->
