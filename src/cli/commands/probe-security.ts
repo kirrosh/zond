@@ -18,6 +18,8 @@ import {
 } from "../../core/probe/security-probe.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
+import { findWorkspaceRoot } from "../../core/workspace/root.ts";
+import { recordGeneratedFiles, inferApiName, autoGenHeader, type RecordInput } from "../../core/workspace/manifest.ts";
 
 export interface ProbeSecurityOptions {
   specPath: string;
@@ -126,12 +128,27 @@ export async function probeSecurityCommand(
     let emittedSuites: Array<{ file: string; suite: string; tests: number }> = [];
     if (options.emitTests && !options.dryRun) {
       const suites = emitSecurityRegressionSuites(result, endpoints, securitySchemes);
-      await mkdir(options.emitTests, { recursive: true });
+      const manifestEntries: RecordInput[] = [];
+      const inferredApi = inferApiName(options.emitTests);
+      // m-9 P5: do not create empty --emit-tests/ directories.
+      if (suites.length > 0) await mkdir(options.emitTests, { recursive: true });
       for (const suite of suites) {
         const file = join(options.emitTests, `${suite.fileStem ?? suite.name}.yaml`);
-        await Bun.write(file, serializeSuite(suite));
+        await Bun.write(file, autoGenHeader("zond probe-security --emit-tests", `zond probe-security --api <name> --emit-tests ${options.emitTests}`) + serializeSuite(suite));
         emittedSuites.push({ file, suite: suite.name, tests: suite.tests.length });
+        manifestEntries.push({
+          path: file,
+          by: "zond probe-security --emit-tests",
+          api: inferredApi,
+          category: "probes",
+        });
       }
+      try {
+        const ws = findWorkspaceRoot();
+        if (!ws.fromFallback && manifestEntries.length > 0) {
+          recordGeneratedFiles(ws.root, manifestEntries);
+        }
+      } catch { /* best-effort */ }
     }
 
     const counts = countBuckets(result.verdicts);

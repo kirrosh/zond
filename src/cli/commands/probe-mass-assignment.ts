@@ -15,6 +15,8 @@ import {
 } from "../../core/probe/mass-assignment-probe.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
+import { findWorkspaceRoot } from "../../core/workspace/root.ts";
+import { recordGeneratedFiles, inferApiName, autoGenHeader, type RecordInput } from "../../core/workspace/manifest.ts";
 
 export interface ProbeMassAssignmentOptions {
   specPath: string;
@@ -105,12 +107,27 @@ export async function probeMassAssignmentCommand(
     let emittedSuites: Array<{ file: string; suite: string; tests: number }> = [];
     if (options.emitTests) {
       const suites = emitRegressionSuites(result, endpoints, securitySchemes);
-      await mkdir(options.emitTests, { recursive: true });
+      const manifestEntries: RecordInput[] = [];
+      const inferredApi = inferApiName(options.emitTests);
+      // Only create the directory if there's something to emit (m-9 P5).
+      if (suites.length > 0) await mkdir(options.emitTests, { recursive: true });
       for (const suite of suites) {
         const file = join(options.emitTests, `${suite.fileStem ?? suite.name}.yaml`);
-        await Bun.write(file, serializeSuite(suite));
+        await Bun.write(file, autoGenHeader("zond probe-mass-assignment --emit-tests", `zond probe-mass-assignment --api <name> --emit-tests ${options.emitTests}`) + serializeSuite(suite));
         emittedSuites.push({ file, suite: suite.name, tests: suite.tests.length });
+        manifestEntries.push({
+          path: file,
+          by: "zond probe-mass-assignment --emit-tests",
+          api: inferredApi,
+          category: "probes",
+        });
       }
+      try {
+        const ws = findWorkspaceRoot();
+        if (!ws.fromFallback && manifestEntries.length > 0) {
+          recordGeneratedFiles(ws.root, manifestEntries);
+        }
+      } catch { /* best-effort */ }
     }
 
     const counts = countBuckets(result.verdicts);

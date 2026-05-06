@@ -10,6 +10,8 @@ import { filterByTag, collectTags } from "../../core/generator/chunker.ts";
 import { generateNegativeProbes } from "../../core/probe/negative-probe.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
+import { findWorkspaceRoot } from "../../core/workspace/root.ts";
+import { recordGeneratedFiles, inferApiName, autoGenHeader, type RecordInput } from "../../core/workspace/manifest.ts";
 
 export interface ProbeValidationOptions {
   specPath: string;
@@ -87,12 +89,27 @@ export async function probeValidationCommand(
     await mkdir(options.output, { recursive: true });
 
     const created: Array<{ file: string; suite: string; tests: number }> = [];
+    const manifestEntries: RecordInput[] = [];
+    const inferredApi = inferApiName(options.output);
     for (const suite of result.suites) {
       const fileName = `${suite.fileStem ?? suite.name}.yaml`;
       const filePath = join(options.output, fileName);
-      await Bun.write(filePath, serializeSuite(suite));
+      await Bun.write(filePath, autoGenHeader("zond probe-validation --emit", `zond probe-validation --api <name> --output ${options.output}`) + serializeSuite(suite));
       created.push({ file: filePath, suite: suite.name, tests: suite.tests.length });
+      manifestEntries.push({
+        path: filePath,
+        by: "zond probe-validation --emit",
+        api: inferredApi,
+        category: "probes",
+      });
     }
+
+    try {
+      const ws = findWorkspaceRoot();
+      if (!ws.fromFallback && manifestEntries.length > 0) {
+        recordGeneratedFiles(ws.root, manifestEntries);
+      }
+    } catch { /* best-effort */ }
 
     if (options.json) {
       printJson(
