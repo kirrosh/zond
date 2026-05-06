@@ -7,6 +7,7 @@ import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from ".
 import { dirname, resolve } from "path";
 import { stat } from "node:fs/promises";
 import type { TestRunResult } from "./types.ts";
+import { getSecretRegistry } from "../secrets/registry.ts";
 
 export const AUTH_PATH_RE = /\/(auth|login|signin|token|oauth)\b/i;
 
@@ -83,6 +84,10 @@ export async function executeRun(options: ExecuteRunOptions): Promise<ExecuteRun
     if (options.envVars && Object.keys(options.envVars).length > 0) {
       Object.assign(env, options.envVars);
     }
+    // TASK-167 (m-10): every value the runner sees becomes a candidate for
+    // redaction in DB-write / exporter paths. The registry filters out
+    // values shorter than 8 chars, so registering everything is safe.
+    getSecretRegistry().registerAll(env);
     return env;
   }
 
