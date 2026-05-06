@@ -757,6 +757,43 @@ fixtures, stale artifacts (specHash mismatch), and missing snapshots in
 one report. JSON envelope mode (`--json`) is the integration point for
 agents.
 
+### `.env.yaml` interpolation and secrets
+
+`.env.yaml` is the API-level fixture file. Two indirection mechanisms keep
+it committable while the actual secret values stay out of git.
+
+**`${VAR}` / `${VAR:-default}` (TASK-169):** values are pulled from the
+shell environment when the file is loaded.
+
+```yaml
+# apis/sentry/.env.yaml (committable)
+base_url:   "${SENTRY_BASE_URL:-https://us.sentry.io}"
+auth_token: "${SENTRY_AUTH_TOKEN}"
+```
+
+- An unresolved `${VAR}` without a `:-default` fails fast with the file
+  path and key.
+- `\${LITERAL}` keeps the literal `${LITERAL}` (the backslash is stripped).
+- One level of resolution only; values are not re-scanned for further `${...}`.
+- Variable names that look like secrets (`TOKEN`, `SECRET`, `PASSWORD`,
+  `API_KEY`, `DSN`) get a one-line warning suggesting `@secret:` instead.
+
+**`@secret:<name>` (TASK-170):** values come from a sibling `.secrets.yaml`
+which is gitignored and auto-populated by `zond add api`.
+
+```yaml
+# apis/sentry/.secrets.yaml (NEVER committed)
+auth_token: "sntryu_..."
+
+# apis/sentry/.env.yaml
+auth_token: "@secret:auth_token"
+```
+
+Loading `.secrets.yaml` registers every value with the `SecretRegistry`
+(see below), so anything echoed in a request URL, response body, header,
+digest, or report is replaced with `<redacted:<name>>` before it lands on
+disk. A missing `@secret:<name>` reference fails loud — never silent.
+
 ### Auto-redaction of secret values (m-10)
 
 `zond` keeps a runtime `SecretRegistry` of every value it knows is

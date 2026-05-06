@@ -266,13 +266,41 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     writeFileSync(envFilePath, toYaml(envVars) + "\n", "utf-8");
   }
 
-  // Create/update .gitignore to exclude env files
+  // Create/update .gitignore to exclude env / secret files
   const gitignorePath = join(baseDir, ".gitignore");
-  const gitignoreContent = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
+  let gitignoreContent = existsSync(gitignorePath) ? readFileSync(gitignorePath, "utf-8") : "";
+  let gitignoreDirty = false;
   if (!gitignoreContent.includes(".env*.yaml")) {
+    gitignoreContent +=
+      (gitignoreContent.endsWith("\n") || !gitignoreContent ? "" : "\n") + ".env*.yaml\n";
+    gitignoreDirty = true;
+  }
+  // TASK-170 (m-10): keep `.secrets.yaml` git-invisible. Older `.env*.yaml`
+  // pattern matched it accidentally; pin it explicitly so a future glob
+  // narrowing can't regress.
+  if (!gitignoreContent.includes(".secrets.yaml")) {
+    gitignoreContent += ".secrets.yaml\n";
+    gitignoreDirty = true;
+  }
+  if (gitignoreDirty) {
+    writeFileSync(gitignorePath, gitignoreContent, "utf-8");
+  }
+
+  // Seed `.secrets.yaml` placeholder once. The file lives gitignored
+  // alongside `.env.yaml`; values placed here are auto-registered with
+  // the SecretRegistry on load and never appear in artifacts.
+  const secretsPath = join(baseDir, ".secrets.yaml");
+  if (!existsSync(secretsPath)) {
     writeFileSync(
-      gitignorePath,
-      gitignoreContent + (gitignoreContent.endsWith("\n") || !gitignoreContent ? "" : "\n") + ".env*.yaml\n",
+      secretsPath,
+      [
+        "# .secrets.yaml — gitignored, holds raw secret values.",
+        "# Reference these in .env.yaml as @secret:<key>.",
+        "# Values here are auto-registered for redaction in DB writes,",
+        "# HTML/JSON/JUnit reports, case-studies, and probe digests.",
+        "auth_token: \"\"  # required for live probes",
+        "",
+      ].join("\n"),
       "utf-8",
     );
   }
