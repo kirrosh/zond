@@ -823,6 +823,7 @@ export function buildProgram(): Command {
     .option("--no-cleanup", "Skip follow-up DELETE for resources accidentally created by 2xx probes")
     .option("--no-discover", "Disable auto-discovery of path-param fixtures via GET-on-list (TASK-92)")
     .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
+    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
@@ -837,6 +838,7 @@ export function buildProgram(): Command {
         noCleanup: opts.cleanup === false,
         noDiscover: opts.discover === false,
         timeoutMs: opts.timeout,
+        overwrite: opts.overwrite === true,
         json: globalJson(cmd),
       });
     });
@@ -857,6 +859,7 @@ export function buildProgram(): Command {
     .option("--no-cleanup", "Skip follow-up DELETE on resources created by baseline / 2xx attacks")
     .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests")
     .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
+    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .action(async (classes: string, specPos: string | undefined, opts, cmd: Command) => {
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
@@ -871,6 +874,7 @@ export function buildProgram(): Command {
         noCleanup: opts.cleanup === false,
         dryRun: opts.dryRun === true,
         timeoutMs: opts.timeout,
+        overwrite: opts.overwrite === true,
         json: globalJson(cmd),
       });
     });
@@ -971,12 +975,14 @@ export function buildProgram(): Command {
     .option("-o, --output <file>", "Output file path (default: zond-run-<id>.html)")
     .option("--api <name>", "Embed coverage map for this registered API (auto-detected from run.collection_id)")
     .option("--db <path>", "Path to SQLite database file")
+    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .action(async (runId: string, opts, cmd: Command) => {
       process.exitCode = await reportExportHtmlCommand({
         runId,
         output: opts.output,
         api: opts.api,
         dbPath: opts.db,
+        overwrite: opts.overwrite === true,
         json: globalJson(cmd),
       });
     });
@@ -986,12 +992,14 @@ export function buildProgram(): Command {
     .description("Generate a markdown case-study draft for a single failure (results.id) — ready to pipe into `gh issue create --body-file -`")
     .option("-o, --output <file>", "Write the draft to a file (default: print to stdout)")
     .option("--db <path>", "Path to SQLite database file")
+    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .action(async (failureId: string, opts, cmd: Command) => {
       process.exitCode = await reportCaseStudyCommand({
         failureId,
         output: opts.output,
         dbPath: opts.db,
         stdout: !opts.output,
+        overwrite: opts.overwrite === true,
         json: globalJson(cmd),
       });
     });

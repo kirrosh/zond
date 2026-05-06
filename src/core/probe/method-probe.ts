@@ -18,6 +18,7 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
+import { pathWithByAliases } from "./shared.ts";
 
 // ──────────────────────────────────────────────
 // Constants
@@ -67,8 +68,9 @@ function slugify(s: string): string {
 }
 
 function pathStem(path: string): string {
-  const cleaned = path
-    .replace(/\{[^}]+\}/g, "by-id")
+  // TASK-159 (m-9 P3): preserve placeholder name (`by-org`, `by-proj`)
+  // instead of collapsing every `{x}` to a generic `by-id`.
+  const cleaned = pathWithByAliases(path)
     .replace(/^\//, "")
     .replace(/\//g, "-");
   return slugify(cleaned) || "root";

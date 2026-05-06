@@ -21,6 +21,7 @@ import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 import { recordGeneratedFiles, inferApiName, autoGenHeader, type RecordInput } from "../../core/workspace/manifest.ts";
 import { getSecretRegistry, redact } from "../../core/secrets/registry.ts";
+import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 
 export interface ProbeSecurityOptions {
   specPath: string;
@@ -34,6 +35,7 @@ export interface ProbeSecurityOptions {
   dryRun?: boolean;
   json?: boolean;
   listTags?: boolean;
+  overwrite?: boolean;
 }
 
 function parseClasses(input: string): SecurityClass[] | string {
@@ -126,6 +128,7 @@ export async function probeSecurityCommand(
     const md = redact(formatSecurityDigest(result, options.specPath));
     if (options.output) {
       await mkdir(join(options.output, "..").replace(/\/\.$/, ""), { recursive: true }).catch(() => {});
+      rotateOutputTarget(options.output, { overwrite: options.overwrite });
       await writeFile(options.output, md, "utf-8");
     }
 

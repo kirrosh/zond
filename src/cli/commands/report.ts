@@ -14,6 +14,7 @@ import { loadCoverage } from "../../core/coverage/loader.ts";
 import type { CoverageMatrix } from "../../core/coverage/reasons.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { redact } from "../../core/secrets/registry.ts";
+import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
 
@@ -23,6 +24,9 @@ export interface ReportExportOptions {
   api?: string;
   dbPath?: string;
   json?: boolean;
+  /** TASK-162 (m-9 P6): when true, overwrite existing target instead of
+   *  rotating it to <stem>-vN<ext>. */
+  overwrite?: boolean;
 }
 
 function parseRunId(raw: string): number | null {
@@ -84,6 +88,7 @@ export async function reportExportHtmlCommand(
   });
 
   const outputPath = resolve(options.output ?? `zond-run-${runId}.html`);
+  const rotation = rotateOutputTarget(outputPath, { overwrite: options.overwrite });
 
   try {
     // TASK-168 (m-10): defensive redact pass on the final HTML. Most data
@@ -102,6 +107,9 @@ export async function reportExportHtmlCommand(
   const warnings: string[] = [];
   if (sizeKb > 2048) {
     warnings.push(`Report is ${sizeKb} KB (>2 MB) — consider trimming response bodies before re-running`);
+  }
+  if (rotation.rotatedTo) {
+    warnings.push(`Previous report rotated to ${rotation.rotatedTo}`);
   }
 
   if (options.json) {
@@ -140,6 +148,8 @@ export interface ReportCaseStudyOptions {
   /** Print to stdout instead of (or in addition to) writing a file. */
   stdout?: boolean;
   json?: boolean;
+  /** TASK-162 (m-9 P6): overwrite-in-place instead of rotating. */
+  overwrite?: boolean;
 }
 
 export async function reportCaseStudyCommand(
@@ -219,7 +229,10 @@ export async function reportCaseStudyCommand(
     if (options.output) {
       // Both: write file AND print to stdout
       try {
-        await Bun.write(resolve(options.output), md);
+        const outAbs = resolve(options.output);
+      const rot = rotateOutputTarget(outAbs, { overwrite: options.overwrite });
+      if (rot.rotatedTo) warnings.push(`Previous draft rotated to ${rot.rotatedTo}`);
+      await Bun.write(outAbs, md);
       } catch (err) {
         const msg = `Failed to write draft: ${(err as Error).message}`;
         if (options.json) printJson(jsonError("report case-study", [msg]));
@@ -234,7 +247,10 @@ export async function reportCaseStudyCommand(
     }
   } else {
     try {
-      await Bun.write(resolve(options.output), md);
+      const outAbs = resolve(options.output);
+      const rot = rotateOutputTarget(outAbs, { overwrite: options.overwrite });
+      if (rot.rotatedTo) warnings.push(`Previous draft rotated to ${rot.rotatedTo}`);
+      await Bun.write(outAbs, md);
     } catch (err) {
       const msg = `Failed to write draft: ${(err as Error).message}`;
       if (options.json) printJson(jsonError("report case-study", [msg]));

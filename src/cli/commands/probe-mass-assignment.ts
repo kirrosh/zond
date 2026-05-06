@@ -18,6 +18,7 @@ import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 import { recordGeneratedFiles, inferApiName, autoGenHeader, type RecordInput } from "../../core/workspace/manifest.ts";
 import { getSecretRegistry, redact } from "../../core/secrets/registry.ts";
+import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 
 export interface ProbeMassAssignmentOptions {
   specPath: string;
@@ -32,6 +33,7 @@ export interface ProbeMassAssignmentOptions {
   timeoutMs?: number;
   json?: boolean;
   listTags?: boolean;
+  overwrite?: boolean;
 }
 
 export async function probeMassAssignmentCommand(
@@ -105,6 +107,9 @@ export async function probeMassAssignmentCommand(
     const md = redact(formatDigestMarkdown(result, options.specPath));
     if (options.output) {
       await mkdir(join(options.output, "..").replace(/\/\.$/, ""), { recursive: true }).catch(() => {});
+      // TASK-162 (m-9 P6): rotate previous digest to <stem>-vN.md instead
+      // of silent overwrite. --overwrite opts back into the old behaviour.
+      rotateOutputTarget(options.output, { overwrite: options.overwrite });
       await writeFile(options.output, md, "utf-8");
     }
 
