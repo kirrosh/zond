@@ -67,6 +67,7 @@ If any artifact is missing or stale (`zond doctor` flags it), run
 | "tests are failing", "diagnose run X", "fix failures" | 4 (Diagnose) | 1–3 |
 | "the run after my fix" | 3 (Run) → 4 (Diagnose) | 1–2 |
 | "what variables does this API need", "is auth_token set" | `zond doctor --api <name> --json` | direct file reads |
+| "workspace looks messy", "start clean", "remove auto-generated files" | `zond clean --api <name>` (dry-run) → `--force` | — |
 | "share these results", "case study", "draft an issue" | 7 (Share) | 1–6 |
 
 ## Secrets & redaction
@@ -96,9 +97,45 @@ returns `{ key, scope: "secret"|"identity"|"env", set: bool, length }` —
 that is enough to tell the user which placeholders to fill.
 
 Before sharing artifacts outbound (case-study, HTML report) pass
-`--redact-identity` so org/member/project values become `<redacted:...>`.
-Never recommend `--no-redact` for shared artifacts — it strips the
-secret-redaction pass for local debugging only.
+`--redact-identity` so org/member/project values become `<identity:...>`
+placeholders. Never recommend `--no-redact` for shared artifacts — it
+strips the secret-redaction pass for local debugging only.
+
+## File lifecycle
+
+Everything `zond` writes is tracked in `.zond/manifest.json` together
+with its sha256 at write-time. That file is the source of truth for
+"what came from `zond` vs. what the user wrote by hand". Read it before
+you assume a YAML file is hand-rolled.
+
+| Layer | Where | Authored by | Tracked |
+|---|---|---|---|
+| Workspace | `zond.config.yml`, `.zond/`, `apis/` | `zond init` | yes |
+| API artifacts | `apis/<name>/spec.json`, `.api-catalog.yaml`, `.api-resources.yaml`, `.api-fixtures.yaml` | `zond add api` / `zond refresh-api` | yes |
+| Generated tests | `apis/<name>/tests/*.yaml` | `zond generate` | yes |
+| Probe suites | `apis/<name>/probes/<class>/*.yaml` | `zond probe-* --emit` | yes |
+| User fixtures | `apis/<name>/.env.yaml`, `.secrets.yaml`, `.identity.yaml` | the user | **no** |
+| Triage artifacts | `triage/<api>/<run-id>/*` | `zond report *` (default path) | yes |
+
+Cleanup recipe:
+
+```bash
+zond clean --api <name>                  # dry-run: lists what would be removed
+zond clean --api <name> --force          # actually delete
+zond clean --probes --force              # only probe-suite YAMLs (after a template fix)
+zond clean --all --force                 # nuclear: remove every tracked file
+```
+
+Files whose sha256 no longer matches the manifest are **skipped**
+(printed as a warning) so user edits stay safe. Re-running a generator
+overwrites the entry — manual edits to a generator-owned file are lost
+on regenerate, so promote them to a separate suite first.
+
+Triage outputs default to `triage/<api>/<run-id>/<command>-<ts>.<ext>`
+— do NOT pass `--output` unless the user has a specific destination.
+Existing files at the target path are auto-rotated to `<stem>-vN<ext>`;
+pass `--overwrite` to opt out. Bodies are capped at 8 KB by default;
+pass `--no-body-cap` only when triaging body-shape bugs.
 
 ## Phase 1 — Orient
 

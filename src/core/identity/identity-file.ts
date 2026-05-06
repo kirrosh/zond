@@ -86,6 +86,25 @@ export function loadIdentityFromAncestor(start: string, stopAt?: string): Identi
   return null;
 }
 
+/**
+ * Replace every value from an identity map with `<identity:<key>>`
+ * inside `text`. Used by `--redact-identity` (TASK-173). Mirrors the
+ * SecretRegistry's logic — longest values first so a containing value
+ * wins, minimum length 2 (identity slugs can be short like `acme`).
+ */
+export function redactIdentityIn(text: string, values: Record<string, string>): string {
+  if (!text || Object.keys(values).length === 0) return text;
+  const entries = Object.entries(values)
+    .filter(([, v]) => typeof v === "string" && v.length >= 2)
+    .sort((a, b) => b[1].length - a[1].length);
+  let out = text;
+  for (const [name, value] of entries) {
+    if (out.indexOf(value) === -1) continue;
+    out = out.split(value).join(`<identity:${name}>`);
+  }
+  return out;
+}
+
 export function resolveIdentityRefs(
   envValues: Record<string, string>,
   identity: IdentityFile | null,

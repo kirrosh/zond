@@ -978,6 +978,7 @@ export function buildProgram(): Command {
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .option("--body-cap <n>", "Truncate request/response bodies to N bytes (default 8192). Set 0 / use --no-body-cap to disable.", parsePositiveInt("--body-cap"))
     .option("--no-body-cap", "Keep full request/response bodies (overrides --body-cap)")
+    .option("--redact-identity", "Replace values from .identity.yaml with <identity:<key>> placeholders (for outbound sharing)")
     .action(async (runId: string, opts, cmd: Command) => {
       // Commander: --no-body-cap → opts.bodyCap === false, --body-cap N → opts.bodyCap === N.
       const bodyCapBytes = opts.bodyCap === false ? 0 : (typeof opts.bodyCap === "number" ? opts.bodyCap : undefined);
@@ -988,6 +989,7 @@ export function buildProgram(): Command {
         dbPath: opts.db,
         overwrite: opts.overwrite === true,
         bodyCapBytes,
+        redactIdentity: opts.redactIdentity === true,
         json: globalJson(cmd),
       });
     });
@@ -1001,6 +1003,7 @@ export function buildProgram(): Command {
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .option("--body-cap <n>", "Truncate response body to N bytes (default 8192). Set 0 / use --no-body-cap to disable.", parsePositiveInt("--body-cap"))
     .option("--no-body-cap", "Keep full response body (overrides --body-cap)")
+    .option("--redact-identity", "Replace values from .identity.yaml with <identity:<key>> placeholders (for outbound sharing)")
     .action(async (failureId: string, opts, cmd: Command) => {
       const bodyCapBytes = opts.bodyCap === false ? 0 : (typeof opts.bodyCap === "number" ? opts.bodyCap : undefined);
       process.exitCode = await reportCaseStudyCommand({
@@ -1010,6 +1013,7 @@ export function buildProgram(): Command {
         stdout: opts.stdout === true,
         overwrite: opts.overwrite === true,
         bodyCapBytes,
+        redactIdentity: opts.redactIdentity === true,
         json: globalJson(cmd),
       });
     });

@@ -1,10 +1,10 @@
 ---
 id: TASK-165
 title: 'skill: zond clean / file-lifecycle секция (manifest, triage/)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:39'
-updated_date: '2026-05-06 06:40'
+updated_date: '2026-05-06 11:25'
 labels:
   - skill
   - docs
@@ -59,4 +59,11 @@ TASK-162 (auto-rotate digest).
 - [ ] #4 Phase про обновление manifest при ручном edit'е (sha256 mismatch → skip).
 - [ ] #5 Skill в `init` template обновлён (не забыть pre-installed для new workspaces).
 <!-- SECTION:DESCRIPTION:END -->
+
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+init/templates/skills/zond.md: новая секция 'File lifecycle' (manifest source-of-truth, layer table, zond clean recipes, triage path defaults, body-cap). Entry-point row для zond clean.
+<!-- SECTION:NOTES:END -->
