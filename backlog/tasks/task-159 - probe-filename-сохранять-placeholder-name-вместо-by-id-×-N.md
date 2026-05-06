@@ -1,16 +1,17 @@
 ---
 id: TASK-159
 title: 'probe filename: сохранять placeholder name вместо by-id × N'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:38'
+updated_date: '2026-05-06 10:59'
 labels:
   - lifecycle
   - probe
   - naming
   - qol
-dependencies: []
 milestone: m-9
+dependencies: []
 priority: medium
 ---
 
@@ -48,9 +49,17 @@ Sentry такие имена встречаются повсюду — by-id × 
 `probe-methods-api-0-projects-by-org-by-proj-replays-by-replay-recording-segments-by-segment.yaml`
 
 ## Acceptance Criteria
-
-- [ ] Generator использует placeholder name, не `by-id`.
-- [ ] Алиасы для длинных имён задокументированы (или generator usese canonical short alias).
-- [ ] На Sentry-spec нет одинаковых имён файлов в `probe-methods/` и `probe-validation/`.
-- [ ] Backward compat: при наличии существующих файлов с `by-id` — warning + флаг `--rename` для миграции (опционально).
+<!-- AC:BEGIN -->
+- [ ] #1 Generator использует placeholder name, не `by-id`.
+- [ ] #2 Алиасы для длинных имён задокументированы (или generator usese canonical short alias).
+- [ ] #3 На Sentry-spec нет одинаковых имён файлов в `probe-methods/` и `probe-validation/`.
+- [ ] #4 Backward compat: при наличии существующих файлов с `by-id` — warning + флаг `--rename` для миграции (опционально).
 <!-- SECTION:DESCRIPTION:END -->
+
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+src/core/probe/shared.ts: placeholderAlias() + pathWithByAliases() — strip trailing _id/_slug/_or_slug, canonicalise organization→org, project→proj, etc. Cap 12 chars. endpointStem() и method-probe.pathStem() переключены на pathWithByAliases. 6 unit-тестов.
+<!-- SECTION:NOTES:END -->

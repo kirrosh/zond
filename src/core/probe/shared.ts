@@ -15,9 +15,58 @@ export function slugify(s: string): string {
     .replace(/^-|-$/g, "");
 }
 
+/**
+ * Build a short, distinguishable alias for an OpenAPI path-param name —
+ * used to keep probe filenames readable when several `{...id}` segments
+ * collapse to the same `by-id` (TASK-159, m-9 P3).
+ *
+ *   organization_id_or_slug → "org"
+ *   project_id_or_slug      → "proj"
+ *   replay_id               → "replay"
+ *   userId                  → "user"
+ *   foo                     → "foo"
+ *   id                      → "id"
+ *
+ * The general rule: drop trailing `_id` / `_slug` / `_or_slug` /
+ * `Id` / `Slug`, then slugify and trim to the first segment. We also
+ * canonicalise a couple of common Sentry-style names to short aliases
+ * (`organization` → `org`, `project` → `proj`).
+ */
+export function placeholderAlias(rawName: string): string {
+  let name = rawName.trim();
+  // Strip the OpenAPI noisy suffixes.
+  name = name.replace(/_or_slug$/i, "");
+  name = name.replace(/(_id|_slug)$/i, "");
+  name = name.replace(/(Id|Slug)$/g, "");
+  const slug = slugify(name);
+  if (!slug || slug === "id") return "id";
+  // Canonical short aliases for frequent long names.
+  const canonical: Record<string, string> = {
+    organization: "org",
+    project: "proj",
+    repository: "repo",
+    environment: "env",
+    application: "app",
+    integration: "intg",
+    notification: "notif",
+  };
+  const first = slug.split("-")[0]!;
+  if (canonical[first]) return canonical[first];
+  // Fall back to the slug, capped at 12 chars so really long names don't
+  // blow up the filename.
+  return slug.length > 12 ? slug.slice(0, 12) : slug;
+}
+
+/**
+ * Replace every `{name}` segment in an OpenAPI path with `by-<alias>`,
+ * preserving placeholder identity (TASK-159).
+ */
+export function pathWithByAliases(path: string): string {
+  return path.replace(/\{([^}]+)\}/g, (_, name) => `by-${placeholderAlias(name)}`);
+}
+
 export function endpointStem(ep: EndpointInfo): string {
-  const path = ep.path
-    .replace(/\{[^}]+\}/g, "by-id")
+  const path = pathWithByAliases(ep.path)
     .replace(/^\//, "")
     .replace(/\//g, "-");
   return slugify(`${ep.method.toLowerCase()}-${path}`);
