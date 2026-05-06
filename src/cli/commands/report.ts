@@ -15,6 +15,9 @@ import type { CoverageMatrix } from "../../core/coverage/reasons.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { redact } from "../../core/secrets/registry.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
+import { resolveTriageOutput } from "../../core/workspace/triage-path.ts";
+import { recordGeneratedFile } from "../../core/workspace/manifest.ts";
+import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
 
@@ -27,7 +30,14 @@ export interface ReportExportOptions {
   /** TASK-162 (m-9 P6): when true, overwrite existing target instead of
    *  rotating it to <stem>-vN<ext>. */
   overwrite?: boolean;
+  /** TASK-164 (m-9 P8): cap each request/response body to N bytes
+   *  (default 8192). Pass 0 to disable. */
+  bodyCapBytes?: number;
 }
+
+/** TASK-164: shared default cap. ≤ 8 KB per body keeps Sentry-class
+ *  exports under ~150 KB while preserving the first page of every body. */
+export const DEFAULT_BODY_CAP_BYTES = 8192;
 
 function parseRunId(raw: string): number | null {
   const n = Number.parseInt(raw, 10);
@@ -84,10 +94,20 @@ export async function reportExportHtmlCommand(
     zondVersion: VERSION,
     generatedAt: new Date(),
     collectionName: collection?.name ?? null,
+    bodyCapBytes: options.bodyCapBytes ?? DEFAULT_BODY_CAP_BYTES,
     ...(coverageMatrix ? { coverageMatrix } : {}),
   });
 
-  const outputPath = resolve(options.output ?? `zond-run-${runId}.html`);
+  // TASK-163 (m-9 P7): default to triage/<api>/<run>/ when --output is
+  // missing or just a filename. Explicit dir paths are honoured verbatim.
+  const triage = resolveTriageOutput({
+    command: "html",
+    runId,
+    api: apiName,
+    ext: "html",
+    userOutput: options.output,
+  });
+  const outputPath = triage.absolute;
   const rotation = rotateOutputTarget(outputPath, { overwrite: options.overwrite });
 
   try {
@@ -96,6 +116,17 @@ export async function reportExportHtmlCommand(
     // re-ran the same session they may have just registered a new value
     // — wrap the export so it can never out-pace the registry.
     await Bun.write(outputPath, redact(html));
+    // TASK-156: register so `zond clean --all` later removes it.
+    try {
+      const ws = findWorkspaceRoot();
+      if (!ws.fromFallback) {
+        recordGeneratedFile(ws.root, {
+          path: outputPath,
+          by: "zond report export",
+          api: apiName ?? undefined,
+        });
+      }
+    } catch { /* best-effort */ }
   } catch (err) {
     const msg = `Failed to write report: ${(err as Error).message}`;
     if (options.json) printJson(jsonError("report export --html", [msg]));
@@ -150,6 +181,9 @@ export interface ReportCaseStudyOptions {
   json?: boolean;
   /** TASK-162 (m-9 P6): overwrite-in-place instead of rotating. */
   overwrite?: boolean;
+  /** TASK-164 (m-9 P8): cap response body to N bytes (default 8192,
+   *  0 = disabled). */
+  bodyCapBytes?: number;
 }
 
 export async function reportCaseStudyCommand(
@@ -216,6 +250,7 @@ export async function reportCaseStudyCommand(
     specTitle,
     specVersion,
     zondVersion: VERSION,
+    bodyCapBytes: options.bodyCapBytes ?? DEFAULT_BODY_CAP_BYTES,
   }));
 
   // Heuristic: if the failure isn't classified as a bug, surface a hint.
@@ -225,41 +260,53 @@ export async function reportCaseStudyCommand(
     );
   }
 
-  if (options.stdout || !options.output) {
-    if (options.output) {
-      // Both: write file AND print to stdout
-      try {
-        const outAbs = resolve(options.output);
-      const rot = rotateOutputTarget(outAbs, { overwrite: options.overwrite });
-      if (rot.rotatedTo) warnings.push(`Previous draft rotated to ${rot.rotatedTo}`);
-      await Bun.write(outAbs, md);
-      } catch (err) {
-        const msg = `Failed to write draft: ${(err as Error).message}`;
-        if (options.json) printJson(jsonError("report case-study", [msg]));
-        else printError(msg);
-        return 2;
-      }
-    }
+  // TASK-163 (m-9 P7): when no --output is given, default to a per-run
+  // triage path. When the user passes --stdout alone, preserve the
+  // pipe-friendly stdout-only path. When both --output and --stdout are
+  // set, write to disk AND echo to stdout.
+  const stdoutOnly = options.stdout === true && !options.output;
+  const apiNameForCs = run.collection_id != null ? getCollectionById(run.collection_id)?.name ?? null : null;
+  let writtenAbs: string | null = null;
+
+  if (stdoutOnly) {
     if (!options.json) {
       // For human consumption, dump the markdown to stdout so the user can
       // pipe it into `pbcopy`, `gh issue create --body-file -`, etc.
       process.stdout.write(md);
     }
   } else {
+    const triage = resolveTriageOutput({
+      command: "case-study",
+      runId: run.id,
+      api: apiNameForCs,
+      ext: "md",
+      userOutput: options.output,
+    });
     try {
-      const outAbs = resolve(options.output);
-      const rot = rotateOutputTarget(outAbs, { overwrite: options.overwrite });
+      const rot = rotateOutputTarget(triage.absolute, { overwrite: options.overwrite });
       if (rot.rotatedTo) warnings.push(`Previous draft rotated to ${rot.rotatedTo}`);
-      await Bun.write(outAbs, md);
+      await Bun.write(triage.absolute, md);
+      writtenAbs = triage.absolute;
+      try {
+        const ws = findWorkspaceRoot();
+        if (!ws.fromFallback) {
+          recordGeneratedFile(ws.root, {
+            path: triage.absolute,
+            by: "zond report case-study",
+            api: apiNameForCs ?? undefined,
+          });
+        }
+      } catch { /* best-effort */ }
     } catch (err) {
       const msg = `Failed to write draft: ${(err as Error).message}`;
       if (options.json) printJson(jsonError("report case-study", [msg]));
       else printError(msg);
       return 2;
     }
+    if (options.stdout && !options.json) process.stdout.write(md);
     if (!options.json) {
       for (const w of warnings) printWarning(w);
-      printSuccess(`Wrote case-study draft → ${resolve(options.output)}`);
+      printSuccess(`Wrote case-study draft → ${triage.relative}`);
     }
   }
 
@@ -270,7 +317,7 @@ export async function reportCaseStudyCommand(
         {
           failureId,
           runId: run.id,
-          output: options.output ? resolve(options.output) : null,
+          output: writtenAbs,
           markdown: md,
           failureClass: result.failure_class,
         },

@@ -1,17 +1,18 @@
 ---
 id: TASK-164
 title: 'report HTML --body-cap: truncate response bodies'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:39'
+updated_date: '2026-05-06 11:16'
 labels:
   - lifecycle
   - report
   - html
   - size
+milestone: m-9
 dependencies:
   - TASK-141
-milestone: m-9
 priority: medium
 ---
 
@@ -43,10 +44,18 @@ TASK-141 уже добавляет `--body-cap` для case-study; эта зад
 5. Применимо и к case-study (унификация с TASK-141 — единый флаг).
 
 ## Acceptance Criteria
-
-- [ ] `zond report html` поддерживает `--body-cap <n>` и `--no-body-cap`.
-- [ ] Дефолт включает разумный cap (≤ 8 KB на body).
-- [ ] Размер HTML-export'а на Sentry-runner падает в ≥ 5 раз.
-- [ ] Truncation marker виден в HTML.
-- [ ] Флаг унифицирован с case-study (TASK-141).
+<!-- AC:BEGIN -->
+- [ ] #1 `zond report html` поддерживает `--body-cap <n>` и `--no-body-cap`.
+- [ ] #2 Дефолт включает разумный cap (≤ 8 KB на body).
+- [ ] #3 Размер HTML-export'а на Sentry-runner падает в ≥ 5 раз.
+- [ ] #4 Truncation marker виден в HTML.
+- [ ] #5 Флаг унифицирован с case-study (TASK-141).
 <!-- SECTION:DESCRIPTION:END -->
+
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+capBody() shared helper (HTML + case-study), default 8192 bytes, --body-cap <n> + --no-body-cap CLI флаги. Marker '[truncated N bytes; first M shown; full body in run DB]' унифицирован с DB-truncation. 4 unit-теста.
+<!-- SECTION:NOTES:END -->

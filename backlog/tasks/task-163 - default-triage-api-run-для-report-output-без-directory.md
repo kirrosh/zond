@@ -1,16 +1,17 @@
 ---
 id: TASK-163
 title: default triage/<api>/<run>/ для report --output без directory
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:39'
+updated_date: '2026-05-06 11:16'
 labels:
   - lifecycle
   - report
   - convention
   - ux
-dependencies: []
 milestone: m-9
+dependencies: []
 priority: medium
 ---
 
@@ -43,10 +44,18 @@ priority: medium
 думать о конвенциях.
 
 ## Acceptance Criteria
-
-- [ ] `zond report digest <run-id>` без `--output` пишет в `triage/<api>/<run>/digest-<ts>.md`.
-- [ ] `zond report case-study <run-id>` аналогично.
-- [ ] HTML-export тоже по этой конвенции.
-- [ ] Существующее `--output path/file.md` поведение не меняется.
-- [ ] Skill update — упомянуть `triage/` как канонический путь.
+<!-- AC:BEGIN -->
+- [ ] #1 `zond report digest <run-id>` без `--output` пишет в `triage/<api>/<run>/digest-<ts>.md`.
+- [ ] #2 `zond report case-study <run-id>` аналогично.
+- [ ] #3 HTML-export тоже по этой конвенции.
+- [ ] #4 Существующее `--output path/file.md` поведение не меняется.
+- [ ] #5 Skill update — упомянуть `triage/` как канонический путь.
 <!-- SECTION:DESCRIPTION:END -->
+
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+src/core/workspace/triage-path.ts: resolveTriageOutput() — default path triage/<api>/<run-id>/<command>-<ts>.<ext>. Bare filename → triage/<api>/<run>/<filename>; path с директорией — verbatim. Применен в report export (HTML) и report case-study. Manifest registration. case-study --stdout стал opt-in (раньше был по умолчанию).
+<!-- SECTION:NOTES:END -->

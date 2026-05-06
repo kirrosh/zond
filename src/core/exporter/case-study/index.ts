@@ -9,6 +9,16 @@ export interface CaseStudyOptions {
   specTitle?: string | null;
   specVersion?: string | null;
   zondVersion: string;
+  /** TASK-164 (m-9 P8): cap response/request bodies to N bytes. 0 or
+   *  unset = no cap. The CLI wrapper defaults to 8 KB. */
+  bodyCapBytes?: number;
+}
+
+function capBody(content: string | null | undefined, capBytes: number | undefined): string | null {
+  if (!content) return content ?? null;
+  if (!capBytes || capBytes <= 0 || content.length <= capBytes) return content;
+  const dropped = content.length - capBytes;
+  return `${content.slice(0, capBytes)}\n[truncated ${dropped} bytes; first ${capBytes} shown; full body in run DB]`;
 }
 
 const CLASS_HUMAN: Record<FailureClass, string> = {
@@ -136,8 +146,9 @@ export function renderCaseStudy(opts: CaseStudyOptions): string {
     : (run.collection_id != null ? TODO("API title — spec was not loadable at export time") : TODO("API name"));
 
   const responseStatus = result.response_status != null ? String(result.response_status) : "no response";
-  const responseBody = result.response_body
-    ? "```json\n" + tryPretty(result.response_body) + "\n```"
+  const cappedBody = capBody(result.response_body, opts.bodyCapBytes);
+  const responseBody = cappedBody
+    ? "```json\n" + tryPretty(cappedBody) + "\n```"
     : (result.error_message ? `Network/runtime error: \`${result.error_message}\`` : "_(empty body)_");
 
   return `# ${method} ${path} — ${shortDescription(result)}

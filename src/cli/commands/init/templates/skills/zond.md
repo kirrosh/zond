@@ -26,8 +26,16 @@ Run `zond --version` first; if missing:
   `apis/<name>/spec.json` only when probe-* needs full schemas.
 - **NEVER `curl` or `wget`** — use `zond request <method> <url>` for ad-hoc
   HTTP so it lands in the run DB and respects auth.
-- **NEVER hardcode tokens** — put in `apis/<name>/.env.yaml` (auto-gitignored),
-  reference as `{{auth_token}}`.
+- **NEVER hardcode tokens** — put values in `apis/<name>/.secrets.yaml`
+  (auto-gitignored), reference from `.env.yaml` as `@secret:auth_token`.
+  Plain shell-env references (`${SENTRY_AUTH_TOKEN}`) also work. Tests
+  read the resolved value as `{{auth_token}}` like before.
+- **NEVER read `.secrets.yaml` directly.** Use `zond doctor --api <name> --json`
+  — it reports `set | unset` and value length only, never the raw value.
+  The redaction registry will replace any echoed secret with
+  `<redacted:<name>>` in DB rows / HTML / JSON / JUnit / case-study /
+  digest, so reading the secret to "double-check" is both unsafe and
+  redundant.
 - **`recommended_action: report_backend_bug` / any 5xx → STOP.** Surface the
   request/response excerpt to the user; do NOT edit `expect:` to mask it.
 - `--safe` enforces GET-only — required for first-pass smoke against unknown
@@ -58,7 +66,39 @@ If any artifact is missing or stale (`zond doctor` flags it), run
 | "find bugs", "probe this API", "test for 5xx" | 1 then 5 (Probes) | — |
 | "tests are failing", "diagnose run X", "fix failures" | 4 (Diagnose) | 1–3 |
 | "the run after my fix" | 3 (Run) → 4 (Diagnose) | 1–2 |
+| "what variables does this API need", "is auth_token set" | `zond doctor --api <name> --json` | direct file reads |
 | "share these results", "case study", "draft an issue" | 7 (Share) | 1–6 |
+
+## Secrets & redaction
+
+The workspace has three sibling files next to `apis/<name>/`:
+
+- **`.env.yaml`** — committable. Holds `base_url`, ids, and references
+  (`@secret:`, `@identity:`, `${ENV_VAR}`). Plain values are fine here too.
+- **`.secrets.yaml`** — gitignored. Holds raw secret values; every value
+  is auto-registered with the redaction registry on load. Reference from
+  `.env.yaml` as `@secret:<key>`.
+- **`.identity.yaml`** — gitignored. Holds non-secret-but-identifying
+  values (org slug, member id). Reference as `@identity:<key>`. Not
+  redacted by default; `--redact-identity` swaps for placeholders when
+  sharing outbound.
+
+Reference syntax in `.env.yaml`:
+
+```yaml
+auth_token: "@secret:auth_token"            # from .secrets.yaml
+organization_id_or_slug: "@identity:organization_id_or_slug"
+base_url: "${SENTRY_BASE_URL:-https://us.sentry.io}"  # from shell env
+```
+
+Iron rule: do not `cat` `.secrets.yaml`. `zond doctor --api <name> --json`
+returns `{ key, scope: "secret"|"identity"|"env", set: bool, length }` —
+that is enough to tell the user which placeholders to fill.
+
+Before sharing artifacts outbound (case-study, HTML report) pass
+`--redact-identity` so org/member/project values become `<redacted:...>`.
+Never recommend `--no-redact` for shared artifacts — it strips the
+secret-redaction pass for local debugging only.
 
 ## Phase 1 — Orient
 
@@ -419,11 +459,18 @@ zond refresh-api <name> --spec <new-spec>          # re-snapshot when upstream s
 After a run is in `zond.db`, materialise it as a shareable file:
 
 ```bash
-zond report export <run-id> -o triage/run-<id>.html         # whole run, single-file HTML
-zond report case-study <failure-id>                          # → stdout (pipe to gh issue create --body-file -)
-zond report case-study <failure-id> -o draft.md
+zond report export <run-id>                                  # default: triage/<api>/run-<id>/html-<ts>.html
+zond report export <run-id> -o triage/run-<id>.html          # explicit path
+zond report case-study <failure-id>                          # default: triage/<api>/run-<id>/case-study-<ts>.md
+zond report case-study <failure-id> --stdout                 # also pipe to gh issue create --body-file -
 zond report case-study <failure-id> --json                   # envelope with `markdown`
 ```
+
+Defaults: bodies > 8 KB are truncated with a marker (`--no-body-cap` to
+keep full); existing files at `--output` are rotated to `<stem>-vN<ext>`
+(`--overwrite` to silence). Both digests and exports run through the
+secret-redaction pass. For outbound sharing on a personal account, also
+pass `--redact-identity` so org/member/project slugs become placeholders.
 
 `<run-id>` from `zond db runs`; `<failure-id>` is `results.id` from
 `zond db run <run-id>`. **Offer this proactively** after a run surfaces a

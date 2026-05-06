@@ -17,6 +17,7 @@ import { decycleSchema } from "./generator/schema-utils.ts";
 import { hashSpec } from "./meta/meta-store.ts";
 import { findWorkspaceRoot } from "./workspace/root.ts";
 import { recordGeneratedFiles, type RecordInput } from "./workspace/manifest.ts";
+import { CANONICAL_IDENTITY_KEYS } from "./identity/identity-file.ts";
 
 /** Filename of the dereferenced spec snapshot inside `apis/<name>/`. */
 export const SPEC_SNAPSHOT_FILENAME = "spec.json";
@@ -282,6 +283,12 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     gitignoreContent += ".secrets.yaml\n";
     gitignoreDirty = true;
   }
+  // TASK-174 (m-10): identity values are not secrets but they identify
+  // the user's account; keep them out of git too.
+  if (!gitignoreContent.includes(".identity.yaml")) {
+    gitignoreContent += ".identity.yaml\n";
+    gitignoreDirty = true;
+  }
   if (gitignoreDirty) {
     writeFileSync(gitignorePath, gitignoreContent, "utf-8");
   }
@@ -303,6 +310,31 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
       ].join("\n"),
       "utf-8",
     );
+  }
+
+  // TASK-174 (m-10): seed `.identity.yaml` with placeholders for any
+  // canonical identity-keys that appear as path-params in the spec. The
+  // file is gitignored — values are visible locally for triage and
+  // hidden from outbound shares only when --redact-identity is set.
+  const identityKeys = [...pathParams.keys()].filter((k) =>
+    CANONICAL_IDENTITY_KEYS.has(k),
+  );
+  if (identityKeys.length > 0) {
+    const identityPath = join(baseDir, ".identity.yaml");
+    if (!existsSync(identityPath)) {
+      const lines = [
+        "# .identity.yaml — gitignored, holds non-secret-but-identifying values.",
+        "# Reference these in .env.yaml as @identity:<key>.",
+        "# Values are visible locally and in case-study drafts; pass",
+        "# --redact-identity (TASK-173) to swap them for placeholders when",
+        "# sharing reports outbound.",
+      ];
+      for (const k of identityKeys.sort()) {
+        lines.push(`${k}: ""  # fill with your ${k}`);
+      }
+      lines.push("");
+      writeFileSync(identityPath, lines.join("\n"), "utf-8");
+    }
   }
 
   const workspaceRoot = findWorkspaceRoot().root;
