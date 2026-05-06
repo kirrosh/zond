@@ -1,4 +1,5 @@
 import type { TestRunResult, StepResult } from "../runner/types.ts";
+import { redact } from "../secrets/registry.ts";
 import type { Reporter, ReporterOptions } from "./types.ts";
 
 function escapeXml(str: string): string {
@@ -63,12 +64,13 @@ export function generateJunitXml(results: TestRunResult[]): string {
 
   const suites = results.map(renderTestsuite).join("\n");
 
-  return [
+  // TASK-168 (m-10): redact registered secret values before returning.
+  return redact([
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<testsuites tests="${totalTests}" failures="${totalFailures}" errors="${totalErrors}" time="${totalTime}">`,
     suites,
     `</testsuites>`,
-  ].join("\n");
+  ].join("\n"));
 }
 
 export const junitReporter: Reporter = {

@@ -17,6 +17,7 @@ import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 import { recordGeneratedFiles, inferApiName, autoGenHeader, type RecordInput } from "../../core/workspace/manifest.ts";
+import { getSecretRegistry, redact } from "../../core/secrets/registry.ts";
 
 export interface ProbeMassAssignmentOptions {
   specPath: string;
@@ -98,7 +99,10 @@ export async function probeMassAssignmentCommand(
       discover: !options.noDiscover,
     });
 
-    const md = formatDigestMarkdown(result, options.specPath);
+    // TASK-168 (m-10): vars came from .env.yaml — register them so any
+    // echoed token (URL, body, header) gets redacted in the digest.
+    getSecretRegistry().registerAll(vars);
+    const md = redact(formatDigestMarkdown(result, options.specPath));
     if (options.output) {
       await mkdir(join(options.output, "..").replace(/\/\.$/, ""), { recursive: true }).catch(() => {});
       await writeFile(options.output, md, "utf-8");

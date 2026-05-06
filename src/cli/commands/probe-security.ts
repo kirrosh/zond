@@ -20,6 +20,7 @@ import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 import { recordGeneratedFiles, inferApiName, autoGenHeader, type RecordInput } from "../../core/workspace/manifest.ts";
+import { getSecretRegistry, redact } from "../../core/secrets/registry.ts";
 
 export interface ProbeSecurityOptions {
   specPath: string;
@@ -119,7 +120,10 @@ export async function probeSecurityCommand(
       dryRun: options.dryRun,
     });
 
-    const md = formatSecurityDigest(result, options.specPath);
+    // TASK-168 (m-10): register env vars + redact the digest before
+    // either writing to disk or echoing to stdout.
+    getSecretRegistry().registerAll(vars);
+    const md = redact(formatSecurityDigest(result, options.specPath));
     if (options.output) {
       await mkdir(join(options.output, "..").replace(/\/\.$/, ""), { recursive: true }).catch(() => {});
       await writeFile(options.output, md, "utf-8");

@@ -784,6 +784,23 @@ Rules:
   cannot accidentally turn every "1" in a report into `<redacted>`.
 - Longer registered values redact before shorter ones (specificity).
 
+Redaction points:
+
+| Path                                  | When                | Source            |
+|---------------------------------------|---------------------|-------------------|
+| `results` table INSERT                | every `zond run`    | TASK-167          |
+| JSON reporter (`--report json`)       | live runner         | reporter wrap     |
+| JUnit reporter (`--report junit`)     | live runner         | reporter wrap     |
+| `report export` (HTML)                | export from DB      | defensive wrap    |
+| `report case-study` (Markdown)        | export from DB      | defensive wrap    |
+| `probe-mass-assignment` digest        | live probe run      | digest wrap       |
+| `probe-security` digest               | live probe run      | digest wrap       |
+
+The `results`-table redaction (TASK-167) is the main barrier — anything
+read back from the DB is already clean. The exporter wraps are defensive
+so a future code path that synthesises new strings (renderProvenance,
+coverage hints, etc.) cannot regress the guarantee.
+
 ### `.env.yaml` is API-level, never duplicated under `tests/`
 
 Runtime variables live in **one** file per API: `apis/<name>/.env.yaml`.

@@ -1,21 +1,23 @@
 ---
 id: TASK-168
 title: apply sanitizer in exporters (HTML / JSON / JUnit / case-study / digest)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:55'
+updated_date: '2026-05-06 10:11'
 labels:
   - redaction
   - exporter
   - secrets
+milestone: m-10
 dependencies:
   - TASK-166
-milestone: m-10
 priority: high
 ---
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-10 feedback round 5](../notes/m-10-secrets-and-redaction/feedback-original.md), §3.
@@ -46,14 +48,22 @@ runtime'ом и могут содержать секрет:
    проходят через registry. Документировать список интеграций в
    `docs/secrets.md` (или ZOND.md).
 8. `--no-redact` распространить на все эти пути.
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 HTML-report не содержит зарегистрированных секретов (smoke test с echo-API).
+- [ ] #2 JSON reporter не содержит секретов.
+- [ ] #3 JUnit XML не содержит секретов.
+- [ ] #4 case-study `.md` не содержит секретов.
+- [ ] #5 probe-digest файлы не содержат секретов.
+- [ ] #6 stdout `--verbose` показывает `<redacted:auth_token>` вместо raw.
+- [ ] #7 `--no-redact` отключает на всех путях.
+- [ ] #8 Документация: список redaction points в `docs/secrets.md`.
+<!-- AC:END -->
 
-- [ ] HTML-report не содержит зарегистрированных секретов (smoke test с echo-API).
-- [ ] JSON reporter не содержит секретов.
-- [ ] JUnit XML не содержит секретов.
-- [ ] case-study `.md` не содержит секретов.
-- [ ] probe-digest файлы не содержат секретов.
-- [ ] stdout `--verbose` показывает `<redacted:auth_token>` вместо raw.
-- [ ] `--no-redact` отключает на всех путях.
-- [ ] Документация: список redaction points в `docs/secrets.md`.
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+JSON/JUnit reporters: generateJunitXml/generateJsonReport применяют redact() к финальному payload. probe-security и probe-mass-assignment: registerAll(vars) + redact(formatDigest) перед write/stdout. report export (HTML) и report case-study: defensive redact() на финальный output. ZOND.md содержит таблицу redaction points. 3 новых регрессионных теста (json/junit/disabled). 996/996 tests pass.
+<!-- SECTION:NOTES:END -->
