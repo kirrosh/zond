@@ -14,6 +14,7 @@ import { loadCoverage } from "../../core/coverage/loader.ts";
 import type { CoverageMatrix } from "../../core/coverage/reasons.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { redact } from "../../core/secrets/registry.ts";
+import { loadIdentityFromAncestor, redactIdentityIn } from "../../core/identity/identity-file.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 import { resolveTriageOutput } from "../../core/workspace/triage-path.ts";
 import { recordGeneratedFile } from "../../core/workspace/manifest.ts";
@@ -33,6 +34,9 @@ export interface ReportExportOptions {
   /** TASK-164 (m-9 P8): cap each request/response body to N bytes
    *  (default 8192). Pass 0 to disable. */
   bodyCapBytes?: number;
+  /** TASK-173 (m-10): replace every value from `.identity.yaml` with
+   *  `<identity:<key>>`. Off by default; opt-in for outbound shares. */
+  redactIdentity?: boolean;
 }
 
 /** TASK-164: shared default cap. ≤ 8 KB per body keeps Sentry-class
@@ -115,7 +119,12 @@ export async function reportExportHtmlCommand(
     // is already redacted at DB-write time (TASK-167), but if the user
     // re-ran the same session they may have just registered a new value
     // — wrap the export so it can never out-pace the registry.
-    await Bun.write(outputPath, redact(html));
+    let payload = redact(html);
+    if (options.redactIdentity && collection?.base_dir) {
+      const id = loadIdentityFromAncestor(collection.base_dir);
+      if (id) payload = redactIdentityIn(payload, id.values);
+    }
+    await Bun.write(outputPath, payload);
     // TASK-156: register so `zond clean --all` later removes it.
     try {
       const ws = findWorkspaceRoot();
@@ -184,6 +193,8 @@ export interface ReportCaseStudyOptions {
   /** TASK-164 (m-9 P8): cap response body to N bytes (default 8192,
    *  0 = disabled). */
   bodyCapBytes?: number;
+  /** TASK-173 (m-10): swap identity values for placeholders in the draft. */
+  redactIdentity?: boolean;
 }
 
 export async function reportCaseStudyCommand(
@@ -244,7 +255,7 @@ export async function reportCaseStudyCommand(
   }
 
   // TASK-168 (m-10): defensive redact on the rendered draft.
-  const md = redact(renderCaseStudy({
+  let md = redact(renderCaseStudy({
     result,
     run,
     specTitle,
@@ -252,6 +263,17 @@ export async function reportCaseStudyCommand(
     zondVersion: VERSION,
     bodyCapBytes: options.bodyCapBytes ?? DEFAULT_BODY_CAP_BYTES,
   }));
+  // TASK-173 (m-10): swap identity values for placeholders if requested.
+  if (options.redactIdentity && run.collection_id != null) {
+    const collection = getCollectionById(run.collection_id);
+    if (collection?.base_dir) {
+      const id = loadIdentityFromAncestor(collection.base_dir);
+      if (id) {
+        md = redactIdentityIn(md, id.values);
+        warnings.push(`Identity values from ${id.filePath} replaced with placeholders. Re-run without --redact-identity to keep originals.`);
+      }
+    }
+  }
 
   // Heuristic: if the failure isn't classified as a bug, surface a hint.
   if (result.failure_class && result.failure_class !== "definitely_bug" && result.failure_class !== "likely_bug") {

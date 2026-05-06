@@ -28,6 +28,8 @@ import { findCollectionByNameOrId, listCollections } from "../../db/queries.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
+import { loadSecretsFromAncestor } from "../../core/secrets/secrets-file.ts";
+import { loadIdentityFromAncestor } from "../../core/identity/identity-file.ts";
 import { hashSpec } from "../../core/meta/meta-store.ts";
 import { decycleSchema } from "../../core/generator/schema-utils.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
@@ -61,6 +63,29 @@ interface ArtifactStaleness {
   fresh: boolean;
 }
 
+/** TASK-172 (m-10): per-fixture metadata returned by doctor. Secrets
+ *  carry no value (only set/length/secret:true); identity values are
+ *  visible because that's the whole point of `.identity.yaml` (locally
+ *  triagable, opt-in redaction with --redact-identity). */
+export interface FixtureMetaRow {
+  name: string;
+  set: boolean;
+  /** UTF-16 length (string.length). Useful for "is the right token
+   *  pasted, is it the 64-char one or the 32-char one?" */
+  length: number;
+  source: string;
+  description: string;
+  affectedEndpoints: string[];
+  /** True when the value came from `.secrets.yaml` or is otherwise
+   *  registered in the SecretRegistry. `value` is omitted for secrets. */
+  secret?: true;
+  /** True when the value came from `.identity.yaml`. */
+  identity?: true;
+  /** Resolved value — present for env / identity entries, omitted for
+   *  secrets so doctor never echoes a token. */
+  value?: string;
+}
+
 interface DoctorReport {
   api: string;
   mode: "spec" | "run-only";
@@ -71,8 +96,8 @@ interface DoctorReport {
     sha: string | null;
   };
   fixtures: {
-    required: { name: string; set: boolean; source: string; description: string; affectedEndpoints: string[] }[];
-    optional: { name: string; set: boolean; source: string; description: string; affectedEndpoints: string[] }[];
+    required: FixtureMetaRow[];
+    optional: FixtureMetaRow[];
     extraInEnv: string[];   // keys in .env.yaml that aren't in the manifest (informational)
   };
   staleArtifacts: ArtifactStaleness[];
@@ -227,6 +252,15 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   const manifest = readYamlIfExists<FixtureManifestShape>(manifestPath);
   const envVars = await loadEnvironment(undefined, baseDir);
 
+  // TASK-172 (m-10): classify each fixture as secret / identity / plain
+  // env so doctor never echoes a raw secret. The secret registry was
+  // populated by loadEnvironment above (which loads .secrets.yaml as a
+  // side-effect); identity comes from `.secrets`'s sibling file.
+  const secretRaw = loadSecretsFromAncestor(baseDir);
+  const identityRaw = loadIdentityFromAncestor(baseDir);
+  const secretKeys = new Set(secretRaw ? Object.keys(secretRaw.values) : []);
+  const identityKeys = new Set(identityRaw ? Object.keys(identityRaw.values) : []);
+
   const requiredOut: DoctorReport["fixtures"]["required"] = [];
   const optionalOut: DoctorReport["fixtures"]["optional"] = [];
   const declaredVars = new Set<string>();
@@ -234,13 +268,23 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   if (manifest?.fixtures) {
     for (const f of manifest.fixtures) {
       declaredVars.add(f.name);
-      const set = typeof envVars[f.name] === "string" && envVars[f.name]!.length > 0;
-      const row = {
+      const value = envVars[f.name];
+      const set = typeof value === "string" && value.length > 0;
+      const isSecret = secretKeys.has(f.name);
+      const isIdentity = identityKeys.has(f.name);
+      const row: FixtureMetaRow = {
         name: f.name,
         set,
+        length: typeof value === "string" ? value.length : 0,
         source: f.source,
         description: f.description,
         affectedEndpoints: f.affectedEndpoints ?? [],
+        ...(isSecret ? { secret: true as const } : {}),
+        ...(isIdentity ? { identity: true as const } : {}),
+        // Identity values stay visible (mental model: identity is for
+        // locally-triagable but personally-identifying data; `--redact-
+        // identity` swaps it for placeholders only at outbound time).
+        ...(!isSecret && set ? { value } : {}),
       };
       if (f.required) requiredOut.push(row);
       else optionalOut.push(row);
@@ -318,9 +362,15 @@ function printHuman(r: DoctorReport, envVars: Record<string, string>): void {
   } else {
     for (const f of r.fixtures.required) {
       const icon = f.set ? "✓" : "✗";
-      const value = f.set
-        ? (isLikelySecret(f.name) ? maskSecret(envVars[f.name]!) : envVars[f.name])
-        : "UNSET";
+      // TASK-172 (m-10): secrets show metadata only (set + length); identity
+      // is visible because the user owns those values; plain env shows raw.
+      const value = !f.set
+        ? "UNSET"
+        : f.secret
+          ? `set (${f.length} chars, secret)`
+          : f.identity
+            ? `${envVars[f.name]} (identity)`
+            : envVars[f.name];
       const detail = f.set ? "" : ` (${f.affectedEndpoints.length === 1 && f.affectedEndpoints[0] === "*" ? "all endpoints" : `blocks ${f.affectedEndpoints.length} endpoint${f.affectedEndpoints.length === 1 ? "" : "s"}`})`;
       out.write(`  ${icon} ${f.name.padEnd(20)} ${String(value).padEnd(40)} [${f.source}]${detail}\n`);
     }

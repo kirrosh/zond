@@ -1,21 +1,23 @@
 ---
 id: TASK-172
 title: 'zond doctor: секреты как metadata (set/unset + длина), не raw'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:55'
+updated_date: '2026-05-06 11:25'
 labels:
   - secrets
   - doctor
   - ux
+milestone: m-10
 dependencies:
   - TASK-166
-milestone: m-10
 priority: low
 ---
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-10 feedback round 5](../notes/m-10-secrets-and-redaction/feedback-original.md), §5.
@@ -61,12 +63,20 @@ fixture-pack, где секреты — metadata, не values:
    — `doctor` про metadata, не дебаг).
 4. Skill update — упомянуть `zond doctor --json` как entry-point для
    агентов вместо `Read .env.yaml`.
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 `zond doctor --api <name> --json` возвращает metadata-only для секретов.
+- [ ] #2 Human-readable вывод не показывает raw значения секретов.
+- [ ] #3 Поле `secret: true` ставится для всех, что в registry.
+- [ ] #4 Поле `length` корректно для set/unset значений.
+- [ ] #5 `--no-redact` не меняет поведение `doctor` (metadata-only contract).
+- [ ] #6 Skill упоминает `zond doctor --json` как preferred entry-point для агентов.
+<!-- AC:END -->
 
-- [ ] `zond doctor --api <name> --json` возвращает metadata-only для секретов.
-- [ ] Human-readable вывод не показывает raw значения секретов.
-- [ ] Поле `secret: true` ставится для всех, что в registry.
-- [ ] Поле `length` корректно для set/unset значений.
-- [ ] `--no-redact` не меняет поведение `doctor` (metadata-only contract).
-- [ ] Skill упоминает `zond doctor --json` как preferred entry-point для агентов.
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+DoctorReport.fixtures.{required,optional}: новый FixtureMetaRow с полями set/length/secret/identity/value. Secrets возвращают set+length, identity и env — value visible. Human-readable вывод: 'set (64 chars, secret)' / 'acme-eng (identity)' / raw для env.
+<!-- SECTION:NOTES:END -->

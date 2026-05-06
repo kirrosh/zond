@@ -1,21 +1,23 @@
 ---
 id: TASK-173
 title: 'report --redact-identity: opt-in для outbound шеринга'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:55'
+updated_date: '2026-05-06 11:25'
 labels:
   - redaction
   - report
   - identity
+milestone: m-10
 dependencies:
   - TASK-174
-milestone: m-10
 priority: low
 ---
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-10 feedback round 5](../notes/m-10-secrets-and-redaction/feedback-original.md), §6.
@@ -42,12 +44,20 @@ Y»). Outbound-шеринг — нет: коллеге не нужен `pe-koshe
 6. По дефолту identity видно (локальный workflow не страдает).
 7. Документация: ZOND.md секция «Sharing reports» — когда использовать
    `--redact-identity`.
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 `--redact-identity` доступен на `report case-study`, `report html`, `report digest`.
+- [ ] #2 Без флага — identity values видны как обычно.
+- [ ] #3 С флагом — identity заменяется на `<identity:<key>>`.
+- [ ] #4 Placeholder отличается от secret-redaction marker.
+- [ ] #5 Документация: когда использовать.
+- [ ] #6 Тест: HTML с `--redact-identity` не содержит org_slug из `.identity.yaml`.
+<!-- AC:END -->
 
-- [ ] `--redact-identity` доступен на `report case-study`, `report html`, `report digest`.
-- [ ] Без флага — identity values видны как обычно.
-- [ ] С флагом — identity заменяется на `<identity:<key>>`.
-- [ ] Placeholder отличается от secret-redaction marker.
-- [ ] Документация: когда использовать.
-- [ ] Тест: HTML с `--redact-identity` не содержит org_slug из `.identity.yaml`.
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+redactIdentityIn() в core/identity/identity-file.ts (longest-first, min length 2). --redact-identity флаг для report export (HTML) и report case-study; стрипает identity values на <identity:<key>>. 4 unit-теста.
+<!-- SECTION:NOTES:END -->
