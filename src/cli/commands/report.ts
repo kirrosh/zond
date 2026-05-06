@@ -13,6 +13,7 @@ import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { loadCoverage } from "../../core/coverage/loader.ts";
 import type { CoverageMatrix } from "../../core/coverage/reasons.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
+import { redact } from "../../core/secrets/registry.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
 
@@ -85,7 +86,11 @@ export async function reportExportHtmlCommand(
   const outputPath = resolve(options.output ?? `zond-run-${runId}.html`);
 
   try {
-    await Bun.write(outputPath, html);
+    // TASK-168 (m-10): defensive redact pass on the final HTML. Most data
+    // is already redacted at DB-write time (TASK-167), but if the user
+    // re-ran the same session they may have just registered a new value
+    // — wrap the export so it can never out-pace the registry.
+    await Bun.write(outputPath, redact(html));
   } catch (err) {
     const msg = `Failed to write report: ${(err as Error).message}`;
     if (options.json) printJson(jsonError("report export --html", [msg]));
@@ -194,13 +199,14 @@ export async function reportCaseStudyCommand(
     }
   }
 
-  const md = renderCaseStudy({
+  // TASK-168 (m-10): defensive redact on the rendered draft.
+  const md = redact(renderCaseStudy({
     result,
     run,
     specTitle,
     specVersion,
     zondVersion: VERSION,
-  });
+  }));
 
   // Heuristic: if the failure isn't classified as a bug, surface a hint.
   if (result.failure_class && result.failure_class !== "definitely_bug" && result.failure_class !== "likely_bug") {
