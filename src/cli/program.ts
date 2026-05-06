@@ -976,13 +976,18 @@ export function buildProgram(): Command {
     .option("--api <name>", "Embed coverage map for this registered API (auto-detected from run.collection_id)")
     .option("--db <path>", "Path to SQLite database file")
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
+    .option("--body-cap <n>", "Truncate request/response bodies to N bytes (default 8192). Set 0 / use --no-body-cap to disable.", parsePositiveInt("--body-cap"))
+    .option("--no-body-cap", "Keep full request/response bodies (overrides --body-cap)")
     .action(async (runId: string, opts, cmd: Command) => {
+      // Commander: --no-body-cap → opts.bodyCap === false, --body-cap N → opts.bodyCap === N.
+      const bodyCapBytes = opts.bodyCap === false ? 0 : (typeof opts.bodyCap === "number" ? opts.bodyCap : undefined);
       process.exitCode = await reportExportHtmlCommand({
         runId,
         output: opts.output,
         api: opts.api,
         dbPath: opts.db,
         overwrite: opts.overwrite === true,
+        bodyCapBytes,
         json: globalJson(cmd),
       });
     });
@@ -990,16 +995,21 @@ export function buildProgram(): Command {
   reportCmd
     .command("case-study <failure-id>")
     .description("Generate a markdown case-study draft for a single failure (results.id) — ready to pipe into `gh issue create --body-file -`")
-    .option("-o, --output <file>", "Write the draft to a file (default: print to stdout)")
+    .option("-o, --output <file>", "Write the draft to a file (default: triage/<api>/<run>/case-study-<ts>.md)")
+    .option("--stdout", "Also print the draft to stdout (so it can be piped into pbcopy / gh issue create --body-file -)")
     .option("--db <path>", "Path to SQLite database file")
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
+    .option("--body-cap <n>", "Truncate response body to N bytes (default 8192). Set 0 / use --no-body-cap to disable.", parsePositiveInt("--body-cap"))
+    .option("--no-body-cap", "Keep full response body (overrides --body-cap)")
     .action(async (failureId: string, opts, cmd: Command) => {
+      const bodyCapBytes = opts.bodyCap === false ? 0 : (typeof opts.bodyCap === "number" ? opts.bodyCap : undefined);
       process.exitCode = await reportCaseStudyCommand({
         failureId,
         output: opts.output,
         dbPath: opts.db,
-        stdout: !opts.output,
+        stdout: opts.stdout === true,
         overwrite: opts.overwrite === true,
+        bodyCapBytes,
         json: globalJson(cmd),
       });
     });

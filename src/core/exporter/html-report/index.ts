@@ -19,6 +19,10 @@ export interface RenderOptions {
   /** Optional spec-aware coverage matrix with reason codes (TASK-109).
    *  When supplied, replaces the URL-only coverage map. */
   coverageMatrix?: CoverageMatrix;
+  /** TASK-164 (m-9 P8): truncate request/response bodies to N bytes
+   *  before rendering. Set to 0 (or omit) to keep full bodies. The
+   *  default in the CLI wrapper is 8 KB. */
+  bodyCapBytes?: number;
 }
 
 const REASON_LABEL: Record<ReasonCode, string> = {
@@ -178,11 +182,26 @@ function renderHeaders(rawJson: string | null): string {
   return `<pre class="code" data-lang="json">${escapeHtml(tryPrettyJson(rawJson))}</pre>`;
 }
 
-function renderBody(label: string, content: string | null): string {
+/**
+ * TASK-164 (m-9 P8): truncate body to N bytes when a positive cap is
+ * supplied. Returns the original string when cap ≤ 0 or content fits.
+ * Marker mirrors the existing DB-truncation marker so users see one
+ * consistent format.
+ */
+export function capBody(content: string | null, capBytes: number | undefined): string | null {
+  if (!content) return content;
+  if (!capBytes || capBytes <= 0 || content.length <= capBytes) return content;
+  const head = content.slice(0, capBytes);
+  const dropped = content.length - capBytes;
+  return `${head}\n[truncated ${dropped} bytes; first ${capBytes} shown; full body in run DB]`;
+}
+
+function renderBody(label: string, content: string | null, capBytes?: number): string {
   if (!content) return `<div class="code-label">${label}</div><div class="empty" style="padding:12px;font-size:11px">empty</div>`;
-  const isJson = (() => { try { JSON.parse(content); return true; } catch { return false; } })();
+  const capped = capBody(content, capBytes) ?? content;
+  const isJson = (() => { try { JSON.parse(capped); return true; } catch { return false; } })();
   const lang = isJson ? "json" : "text";
-  const display = isJson ? tryPrettyJson(content) : content;
+  const display = isJson ? tryPrettyJson(capped) : capped;
   return `<div class="code-label">${label}</div><pre class="code" data-lang="${lang}">${escapeHtml(display)}</pre>`;
 }
 
@@ -227,7 +246,7 @@ function buildIssueMarkdown(step: StoredStepResult, run: RunRecord): string {
   return lines.join("\n");
 }
 
-function renderFailureCard(step: StoredStepResult, run: RunRecord): string {
+function renderFailureCard(step: StoredStepResult, run: RunRecord, capBytes?: number): string {
   const method = (step.request_method ?? "—").toUpperCase();
   const fcKey = step.failure_class ?? "unclassified";
   const curl = buildCurl(step);
@@ -262,14 +281,14 @@ function renderFailureCard(step: StoredStepResult, run: RunRecord): string {
           ${step.error_message ? `<dt>Error</dt><dd style="color:var(--fail)">${escapeHtml(step.error_message)}</dd>` : ""}
         </dl>
         <div class="code-label">Headers</div>${renderHeaders(step.response_headers)}
-        ${renderBody("Body", step.response_body)}
+        ${renderBody("Body", step.response_body, capBytes)}
       </div>
       <div class="panel" data-tab="request">
         <dl class="kv">
           <dt>Method</dt><dd class="mono">${escapeHtml(method)}</dd>
           <dt>URL</dt><dd class="mono">${escapeHtml(step.request_url ?? "—")}</dd>
         </dl>
-        ${renderBody("Body", step.request_body)}
+        ${renderBody("Body", step.request_body, capBytes)}
       </div>
       <div class="panel" data-tab="assertions">${renderAssertions(step.assertions)}</div>
       <div class="panel" data-tab="source">
@@ -407,7 +426,7 @@ export function renderHtmlReport(opts: RenderOptions): string {
         <h2>Failures <span class="count">${failures.length} of ${total} step${total === 1 ? "" : "s"}</span></h2>
         ${fcKeys.length > 0 ? filterButtons : ""}
         <ul class="cards">
-          ${failures.map((f) => renderFailureCard(f, run)).join("")}
+          ${failures.map((f) => renderFailureCard(f, run, opts.bodyCapBytes)).join("")}
         </ul>
       </section>`;
 
