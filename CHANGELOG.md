@@ -26,6 +26,10 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- **TASK-180: collapse `docs/INDEX.md` and `docs/project-backlog.md`.**
+  Both duplicated content already in README + ZOND.md + AGENTS.md.
+  Removed; AGENTS.md and README.md updated to point straight at
+  `backlog/` and `backlog/decisions/`.
 - **TASK-177: remove `.mcp.example.json`.** Leftover from the
   pre-decision-2 MCP integration. MCP support was dropped entirely; the
   example config no longer documents anything.
