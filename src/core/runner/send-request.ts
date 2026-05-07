@@ -3,7 +3,7 @@ import { loadEnvironment, substituteString, substituteDeep } from "../parser/var
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
 
-function extractByPath(obj: unknown, path: string): unknown {
+export function extractByPath(obj: unknown, path: string): unknown {
   const segments = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
   let current: unknown = obj;
   for (const seg of segments) {
