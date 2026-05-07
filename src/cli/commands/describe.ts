@@ -37,7 +37,13 @@ export async function describeCommand(options: DescribeOptions): Promise<number>
       return 0;
     }
 
-    if (options.compact) {
+    // No flags = compact listing. Erroring out (exit 2) on `zond describe`
+    // breaks scripts that pipe the listing; the listing IS the only useful
+    // default since the spec is the only required arg. Single-endpoint detail
+    // remains opt-in via --method/--path.
+    const useCompact = options.compact || (!options.method && !options.path);
+
+    if (useCompact) {
       const endpoints = await describeCompact(options.specPath);
 
       if (options.json) {
@@ -55,8 +61,10 @@ export async function describeCommand(options: DescribeOptions): Promise<number>
       return 0;
     }
 
+    // We get here only when one of --method/--path is set but not both —
+    // single-endpoint detail needs both halves of the address.
     if (!options.method || !options.path) {
-      const msg = "Missing --method and --path. Use --compact for all endpoints, or specify --method and --path for one.";
+      const msg = "--method and --path must be used together for single-endpoint detail. Drop both for the compact listing.";
       if (options.json) {
         printJson(jsonError("describe", [msg]));
       } else {

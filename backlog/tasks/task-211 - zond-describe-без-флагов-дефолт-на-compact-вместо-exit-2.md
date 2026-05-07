@@ -1,9 +1,10 @@
 ---
 id: TASK-211
 title: 'zond describe без флагов: дефолт на --compact вместо exit 2'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 14:08'
+updated_date: '2026-05-07 15:37'
 labels:
   - feedback-loop
   - api-resend

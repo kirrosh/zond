@@ -34,10 +34,22 @@ describe("describeCommand", () => {
     expect(Array.isArray(envelope.data.endpoints)).toBe(true);
   });
 
-  test("returns 2 without --method/--path and not --compact", async () => {
+  test("TASK-211 — no flags defaults to compact listing (was: exit 2)", async () => {
     output = captureOutput({ console: true });
     const code = await describeCommand({
       specPath: `${FIXTURES}/petstore-simple.json`,
+    });
+    expect(code).toBe(0);
+    const text = output.out;
+    expect(text).toContain("GET");
+    expect(text).toContain("/pets");
+  });
+
+  test("--method without --path errors with exit 2", async () => {
+    output = captureOutput({ console: true });
+    const code = await describeCommand({
+      specPath: `${FIXTURES}/petstore-simple.json`,
+      method: "GET",
     });
     expect(code).toBe(2);
   });
