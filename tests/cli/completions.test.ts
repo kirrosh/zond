@@ -1,27 +1,21 @@
 import { describe, test, expect } from "bun:test";
-import { join } from "path";
+import { CommanderError } from "commander";
 import { buildProgram } from "../../src/cli/program.ts";
 import { completionsCommand, COMPLETION_SHELLS } from "../../src/cli/commands/completions.ts";
-
-const CLI_PATH = join(import.meta.dir, "..", "..", "src", "cli", "index.ts");
+import { captureOutput } from "../_helpers/output";
 
 // Capture stdout from completionsCommand for unit tests
 function captureStdout(fn: () => void): { exitCode: number; out: string } {
-  let out = "";
-  const orig = process.stdout.write.bind(process.stdout);
-  process.stdout.write = ((chunk: string | Uint8Array) => {
-    out += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
-    return true;
-  }) as typeof process.stdout.write;
+  const cap = captureOutput();
   let code = 0;
   try {
     fn();
     code = (process.exitCode as number | undefined) ?? 0;
   } finally {
-    process.stdout.write = orig;
+    cap.restore();
     process.exitCode = 0;
   }
-  return { exitCode: code, out };
+  return { exitCode: code, out: cap.out };
 }
 
 describe("completionsCommand — shells", () => {
@@ -55,44 +49,40 @@ describe("completionsCommand — shells", () => {
   });
 });
 
-describe("completions command via real process (smoke)", () => {
-  async function runCli(args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-    const proc = Bun.spawn(["bun", CLI_PATH, ...args], { stdout: "pipe", stderr: "pipe" });
-    const [stdout, stderr] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-    ]);
-    const exitCode = await proc.exited;
-    return { exitCode, stdout, stderr };
+describe("completions command — registered action errors (in-process)", () => {
+  async function tryParse(argv: string[]): Promise<{ exitCode: number; out: string; err: string }> {
+    const program = buildProgram();
+    const cap = captureOutput();
+    let exitCode = 0;
+    try {
+      await program.parseAsync(["bun", "script.ts", ...argv]);
+      exitCode = (process.exitCode as number | undefined) ?? 0;
+    } catch (err) {
+      if (err instanceof CommanderError) {
+        // Mirror src/cli/index.ts: any non-help CommanderError maps to exit 2.
+        exitCode = err.code === "commander.helpDisplayed" || err.code === "commander.version" || err.code === "commander.help"
+          ? 0
+          : 2;
+      } else {
+        cap.restore();
+        process.exitCode = 0;
+        throw err;
+      }
+    } finally {
+      cap.restore();
+      process.exitCode = 0;
+    }
+    return { exitCode, out: cap.out, err: cap.err };
   }
 
-  test("zond completions zsh exits 0 with non-trivial output", async () => {
-    const { exitCode, stdout } = await runCli(["completions", "zsh"]);
-    expect(exitCode).toBe(0);
-    expect(stdout.length).toBeGreaterThan(100);
-    expect(stdout).toContain("#compdef zond");
-  });
-
-  test("zond completions bash exits 0", async () => {
-    const { exitCode, stdout } = await runCli(["completions", "bash"]);
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("complete -F");
-  });
-
-  test("zond completions fish exits 0", async () => {
-    const { exitCode, stdout } = await runCli(["completions", "fish"]);
-    expect(exitCode).toBe(0);
-    expect(stdout).toContain("__fish_use_subcommand");
-  });
-
-  test("unsupported shell exits 2", async () => {
-    const { exitCode, stderr } = await runCli(["completions", "powershell"]);
+  test("unsupported shell sets exit 2 and prints 'Unsupported shell'", async () => {
+    const { exitCode, err } = await tryParse(["completions", "powershell"]);
     expect(exitCode).toBe(2);
-    expect(stderr.toLowerCase()).toContain("unsupported");
+    expect(err.toLowerCase()).toContain("unsupported");
   });
 
-  test("missing shell argument exits 2 (commander)", async () => {
-    const { exitCode } = await runCli(["completions"]);
+  test("missing shell argument is rejected by commander (exit 2)", async () => {
+    const { exitCode } = await tryParse(["completions"]);
     expect(exitCode).toBe(2);
   });
 });

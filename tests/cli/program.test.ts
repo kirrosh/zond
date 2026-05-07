@@ -283,6 +283,28 @@ describe("buildProgram — unknown command", () => {
   });
 });
 
+describe("TASK-89: usage errors do not emit [zond:internal] noise", () => {
+  test("unknown subcommand stderr stays clean of [zond:internal]", async () => {
+    const program = buildProgram();
+    const cap = captureOutput();
+    try {
+      await program.parseAsync(["bun", "script.ts", "this-command-does-not-exist"]);
+    } catch { /* CommanderError */ }
+    cap.restore();
+    expect(cap.err).not.toContain("[zond:internal]");
+  });
+
+  test("invalid run path (usage error) stderr stays clean of [zond:internal]", async () => {
+    const program = buildProgram();
+    const cap = captureOutput();
+    try {
+      await program.parseAsync(["bun", "script.ts", "run", "/definitely/not/a/path-zztest"]);
+    } catch { /* expected */ }
+    cap.restore();
+    expect(cap.err).not.toContain("[zond:internal]");
+  });
+});
+
 describe("T15: zond use → zond run resolves --api from .zond-current", () => {
   let cwd: string;
   let originalCwd: string;
