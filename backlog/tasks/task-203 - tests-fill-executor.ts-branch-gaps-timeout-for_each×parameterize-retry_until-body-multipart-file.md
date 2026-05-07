@@ -3,9 +3,10 @@ id: TASK-203
 title: >-
   tests: fill executor.ts branch gaps (timeout, for_each×parameterize,
   retry_until body, multipart file)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:12'
+updated_date: '2026-05-07 12:03'
 labels:
   - tests
   - runner
@@ -23,10 +24,10 @@ tests/runner/executor.test.ts покрывает базовый flow-control. Mi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ≥6 новых тестов в tests/runner/executor.test.ts
-- [ ] #2 timeout-abort surfaces step как 'error', не abort'ит suite
-- [ ] #3 for_each + captured list in: первый шаг capture'ит, второй iterate'ит
-- [ ] #4 for_each × parameterize: N×M результатов, изоляция per-iteration state
-- [ ] #5 retry_until body-condition (не status); delay_ms>0 actually waits
-- [ ] #6 multipart с file: '@path' читает фикстурный файл и постит Blob
+- [x] #1 ≥6 новых тестов в tests/runner/executor.test.ts
+- [x] #2 timeout-abort surfaces step как 'error', не abort'ит suite
+- [x] #3 for_each + captured list in: первый шаг capture'ит, второй iterate'ит
+- [x] #4 for_each × parameterize: N×M результатов, изоляция per-iteration state
+- [x] #5 retry_until body-condition (не status); delay_ms>0 actually waits
+- [x] #6 multipart с file: '@path' читает фикстурный файл и постит Blob
 <!-- AC:END -->
