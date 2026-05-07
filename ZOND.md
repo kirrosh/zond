@@ -28,18 +28,23 @@ zond run <tests-dir> --safe           # --safe enforces GET-only
 ```
 Stop here if the user hasn't explicitly confirmed a staging/test environment.
 
-For each tag the generator emits up to **three** smoke suites:
+For each tag the generator emits up to **four** smoke suites:
 
 - `<tag>-smoke` — paramless GETs (list/health endpoints), runs unconditionally.
 - `<tag>-smoke-negative` — single-resource GETs (`/users/{id}` shape) called with a guaranteed-bad ID. Expects `[400, 404, 422]`. Verifies routing, auth, and base URL are wired up.
 - `<tag>-smoke-positive` — same endpoints called with `{{param}}` from `.env.yaml`. Tagged `[smoke, positive, needs-id]`. Each step has `skip_if: "{{param}} =="` — auto-skips while the env var is empty (default after `zond generate`), runs once you fill it in.
+- `<tag>-smoke-unsafe` — non-GET endpoints (POST/PUT/PATCH/DELETE) under the same tag. Tagged `[smoke, unsafe]`. **Mutates remote state** — included in `--tag smoke` by default, excluded by `--safe`. Use `--exclude-tag unsafe` (or `--safe`) for read-only smoke runs. `/reset`-style system endpoints are split out into a separate `<tag>-system` suite tagged `[system, reset]` and never run as part of smoke.
+
+The `unsafe` tag marks any suite whose steps are known to mutate state (writes without an idempotency guard). It is orthogonal to `crud` (which groups multi-step CRUD flows): `unsafe` is the per-step write marker, `crud` is the workflow marker.
 
 Filtering recipes:
 
 ```bash
-zond run apis/x/tests --tag smoke                     # all three (positive auto-skips until IDs set)
-zond run apis/x/tests --tag smoke --exclude-tag needs-id  # only suites that work without real IDs
+zond run apis/x/tests --tag smoke                     # all four (positive auto-skips until IDs set, unsafe mutates)
+zond run apis/x/tests --tag smoke --safe              # GET-only smoke — drops smoke-unsafe and any non-GET step
+zond run apis/x/tests --tag smoke --exclude-tag unsafe,needs-id   # paramless smoke + negative only
 zond run apis/x/tests --tag positive                  # opt-in: requires real IDs in env
+zond run apis/x/tests --tag unsafe                    # opt-in: only the write-side smoke suites
 ```
 
 **Phase 2 — CRUD tests (only with explicit user confirmation + staging env)**
@@ -78,8 +83,9 @@ zond ci init
 - Legitimate error expects: 404 missing, 400/422 bad input, 401 no auth
 
 **Key safety rules:**
-- `--safe` on `zond run` → only GET requests execute, write ops are skipped
+- `--safe` on `zond run` → only GET requests execute, write ops are skipped (also drops every step in `[smoke, unsafe]` suites)
 - `--dry-run` on `zond run` → shows all requests without sending any
+- `unsafe` tag → marks individual steps that mutate state; pair it with `--safe` (skip) or `--tag unsafe` (opt-in)
 - Always use `tags: [smoke]` for GET-only suites, `tags: [crud]` for write operations
 - Never run CRUD tests unless user confirmed environment is safe (staging/test)
 

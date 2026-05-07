@@ -1,9 +1,10 @@
 ---
 id: TASK-212
 title: 'ZOND.md: задокументировать тег unsafe и --safe фильтр'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 14:09'
+updated_date: '2026-05-07 14:19'
 labels:
   - feedback-loop
   - api-resend
