@@ -1,10 +1,22 @@
-# zond installer for Windows - downloads the latest release binary
+# zond installer for Windows — downloads the latest release binary
 # Usage: iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 
 $REPO = "kirrosh/zond"
-$TARGET = "win-x64"
+
+# Detect architecture. PROCESSOR_ARCHITECTURE reflects the current shell;
+# on x64 Windows running an ARM64 build of PowerShell it'll say ARM64, etc.
+switch ($env:PROCESSOR_ARCHITECTURE) {
+    "AMD64" { $ARCH_SUFFIX = "x64" }
+    "ARM64" { $ARCH_SUFFIX = "arm64" }
+    default {
+        Write-Host "Error: Unsupported architecture: $env:PROCESSOR_ARCHITECTURE" -ForegroundColor Red
+        exit 1
+    }
+}
+
+$TARGET = "win-$ARCH_SUFFIX"
 $ARTIFACT = "zond-$TARGET.zip"
 
 Write-Host "Detected platform: $TARGET" -ForegroundColor Cyan
@@ -12,7 +24,12 @@ Write-Host "Detected platform: $TARGET" -ForegroundColor Cyan
 # Get latest release tag
 Write-Host "Fetching latest release..." -ForegroundColor Yellow
 $RELEASE_URL = "https://api.github.com/repos/$REPO/releases/latest"
-$TAG = (Invoke-RestMethod $RELEASE_URL).tag_name
+try {
+    $TAG = (Invoke-RestMethod $RELEASE_URL).tag_name
+} catch {
+    Write-Host "Error: Could not fetch latest release ($($_.Exception.Message))" -ForegroundColor Red
+    exit 1
+}
 
 if (-not $TAG) {
     Write-Host "Error: Could not determine latest release tag" -ForegroundColor Red
@@ -51,7 +68,8 @@ if (-not (Test-Path $BINARY)) {
     exit 1
 }
 
-# Install binary
+# Install binary — user-local install dir mirrors the .sh fallback to
+# `~/.local/bin`; no admin elevation required.
 $INSTALL_DIR = "$env:LOCALAPPDATA\zond"
 if (-not (Test-Path $INSTALL_DIR)) {
     New-Item -ItemType Directory -Path $INSTALL_DIR -Force | Out-Null
@@ -63,18 +81,16 @@ $FINAL_PATH = Join-Path $INSTALL_DIR "zond.exe"
 Write-Host "Installed to $FINAL_PATH" -ForegroundColor Green
 
 # Add to PATH if not already there
-$PATH_ENTRY = $INSTALL_DIR
 $currentPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
 
-if ($currentPath -notlike "*$PATH_ENTRY*") {
-    [System.Environment]::SetEnvironmentVariable("Path", "$currentPath;$PATH_ENTRY", "User")
-    Write-Host "Added $PATH_ENTRY to User PATH" -ForegroundColor Green
+if ($currentPath -notlike "*$INSTALL_DIR*") {
+    [System.Environment]::SetEnvironmentVariable("Path", "$currentPath;$INSTALL_DIR", "User")
+    Write-Host "Added $INSTALL_DIR to User PATH" -ForegroundColor Green
     Write-Host "Note: You may need to restart your terminal for changes to take effect" -ForegroundColor Yellow
 } else {
-    Write-Host "$PATH_ENTRY already in PATH" -ForegroundColor Cyan
+    Write-Host "$INSTALL_DIR already in PATH" -ForegroundColor Cyan
 }
 
 # Verify
 & $FINAL_PATH --version
-Write-Host "Done!" -ForegroundColor Green
-Write-Host "Run 'zond init' to set up a new project." -ForegroundColor Cyan
+Write-Host "Done! Run 'zond init' to set up a new project." -ForegroundColor Cyan

@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **TASK-181: sync `install.ps1` ↔ `install.sh`.** PowerShell installer
+  now detects ARM64 alongside x64 (was hard-coded to `win-x64`), wraps
+  the release-tag fetch in try/catch with a useful error message, and
+  matches the .sh installer's tone. The two scripts diverged in late
+  April when `install.sh` gained codesign/xattr / fallback-to-local
+  logic; this brings them in line for the cross-platform behaviour
+  that's actually shared (detection + download + verify).
 - **TASK-179: knip cleanup.** Deleted three unused barrel modules
   (`src/core/diagnostics/render-md.ts`, `src/core/parser/index.ts`,
   `src/core/runner/index.ts`), trimmed the `tailwindcss` direct
