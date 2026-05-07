@@ -131,3 +131,38 @@ export async function sessionStatusCommand(opts: SessionStatusOptions): Promise<
   );
   return 0;
 }
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+
+export function registerSession(program: Command): void {
+  // Group multiple `zond run` calls under one session_id without juggling env
+  // vars. `start` writes a UUID to .zond/current-session; subsequent `run`
+  // calls auto-pick it up (priority: --session-id flag > ZOND_SESSION_ID env
+  // > current-session file).
+  const session = program.command("session").description("Manage run grouping (campaigns)");
+  session
+    .command("start")
+    .description("Begin a session — group all subsequent 'zond run' calls under one session_id (.zond/current-session)")
+    .option("--label <text>", "Optional human-readable label shown alongside the session in the UI")
+    .option("--id <uuid>", "Reuse a specific UUID instead of generating one (useful for CI)")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await sessionStartCommand({
+        label: opts.label,
+        id: opts.id,
+        json: globalJson(cmd),
+      });
+    });
+  session
+    .command("end")
+    .description("End the current session — remove .zond/current-session")
+    .action(async (_opts, cmd: Command) => {
+      process.exitCode = await sessionEndCommand({ json: globalJson(cmd) });
+    });
+  session
+    .command("status")
+    .description("Show the active session (if any)")
+    .action(async (_opts, cmd: Command) => {
+      process.exitCode = await sessionStatusCommand({ json: globalJson(cmd) });
+    });
+}

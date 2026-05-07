@@ -135,3 +135,88 @@ export async function dbCommand(options: DbOptions): Promise<number> {
     return 2;
   }
 }
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+import { parseInteger, parsePositiveInt } from "../argv.ts";
+
+export function registerDb(program: Command): void {
+  const db = program.command("db").description("Query the test database");
+
+  db
+    .command("collections")
+    .description("List all API collections")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await dbCommand({
+        subcommand: "collections",
+        positional: [],
+        dbPath: opts.db,
+        json: globalJson(cmd),
+      });
+    });
+
+  db
+    .command("runs")
+    .description("List recent test runs")
+    .option("--limit <N>", "Maximum number of runs to display", parsePositiveInt("--limit"))
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await dbCommand({
+        subcommand: "runs",
+        positional: [],
+        limit: opts.limit,
+        dbPath: opts.db,
+        json: globalJson(cmd),
+      });
+    });
+
+  db
+    .command("run <id>")
+    .description("Show run details")
+    .option("--verbose", "Show all results")
+    .option("--method <method>", "Filter by HTTP method")
+    .option("--status <code>", "Filter by HTTP status code", parseInteger("--status"))
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (id: string, opts, cmd: Command) => {
+      process.exitCode = await dbCommand({
+        subcommand: "run",
+        positional: [id],
+        verbose: opts.verbose === true,
+        method: opts.method,
+        status: opts.status,
+        dbPath: opts.db,
+        json: globalJson(cmd),
+      });
+    });
+
+  db
+    .command("diagnose <id>")
+    .description("Diagnose run failures")
+    .option("--limit <N>", "Examples per failure group", parsePositiveInt("--limit"))
+    .option("--verbose", "Show all examples (not grouped)")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (id: string, opts, cmd: Command) => {
+      process.exitCode = await dbCommand({
+        subcommand: "diagnose",
+        positional: [id],
+        limit: opts.limit,
+        verbose: opts.verbose === true,
+        dbPath: opts.db,
+        json: globalJson(cmd),
+      });
+    });
+
+  db
+    .command("compare <idA> <idB>")
+    .description("Compare two runs")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (idA: string, idB: string, opts, cmd: Command) => {
+      process.exitCode = await dbCommand({
+        subcommand: "compare",
+        positional: [idA, idB],
+        dbPath: opts.db,
+        json: globalJson(cmd),
+      });
+    });
+}

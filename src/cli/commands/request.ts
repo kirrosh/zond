@@ -55,3 +55,37 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
     return 1;
   }
 }
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+import { collect, parsePositiveInt } from "../argv.ts";
+import { readCurrentApi } from "../../core/context/current.ts";
+
+export function registerRequest(program: Command): void {
+  program
+    .command("request <method> <url>")
+    .description("Send an ad-hoc HTTP request")
+    .option("--header <H>", `Request header "Name: Value" (repeatable)`, collect, [])
+    .option("--body <json>", "Request body (JSON string)")
+    .option("--timeout <ms>", "Request timeout", parsePositiveInt("--timeout"))
+    .option("--env <name>", "Environment for variable interpolation")
+    .option("--api <name>", "Collection name (loads env from its directory)")
+    .option("--json-path <path>", "Extract value from response (dot notation)")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (method: string, url: string, opts, cmd: Command) => {
+      const headers = (opts.header as string[] | undefined)?.length ? (opts.header as string[]) : undefined;
+      const api = (opts.api as string | undefined) ?? readCurrentApi() ?? undefined;
+      process.exitCode = await requestCommand({
+        method,
+        url,
+        headers,
+        body: opts.body,
+        timeout: opts.timeout,
+        env: opts.env,
+        api,
+        jsonPath: opts.jsonPath,
+        dbPath: opts.db,
+        json: globalJson(cmd),
+      });
+    });
+}

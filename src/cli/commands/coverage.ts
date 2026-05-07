@@ -179,3 +179,53 @@ export async function coverageCommand(options: CoverageOptions): Promise<number>
     return 2;
   }
 }
+
+import type { Command } from "commander";
+import { globalJson, resolveApiCollection } from "../resolve.ts";
+import { parseInteger, parsePercentage } from "../argv.ts";
+import { readCurrentApi } from "../../core/context/current.ts";
+
+export function registerCoverage(program: Command): void {
+  program
+    .command("coverage")
+    .description("Analyze API test coverage")
+    .option("--api <name>", "Use API collection (auto-resolves spec and tests dir)")
+    .option("--spec <path>", "Path to OpenAPI spec (required unless --api used)")
+    .option("--tests <dir>", "Path to test files directory (required unless --api used)")
+    .option("--fail-on-coverage <N>", "Exit 1 when coverage percentage is below N (0–100)", parsePercentage)
+    .option("--run-id <number>", "Cross-reference with a test run for pass/fail/5xx breakdown", parseInteger("--run-id"))
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (opts, cmd: Command) => {
+      let spec: string | undefined = opts.spec;
+      let tests: string | undefined = opts.tests;
+      const apiFlag = (opts.api as string | undefined) ?? (spec || tests ? undefined : readCurrentApi() ?? undefined);
+
+      if (apiFlag) {
+        const resolved = resolveApiCollection(apiFlag, opts.db);
+        if ("error" in resolved) {
+          printError(resolved.error);
+          process.exitCode = resolved.error.startsWith("Failed") ? 2 : 1;
+          return;
+        }
+        if (!spec && resolved.spec) spec = resolved.spec;
+        if (!tests && resolved.testPath) tests = resolved.testPath;
+      }
+      if (!spec) {
+        printError("Missing --spec <path>. Usage: zond coverage --spec <path> --tests <dir>");
+        process.exitCode = 2;
+        return;
+      }
+      if (!tests) {
+        printError("Missing --tests <dir>. Usage: zond coverage --spec <path> --tests <dir>");
+        process.exitCode = 2;
+        return;
+      }
+      process.exitCode = await coverageCommand({
+        spec,
+        tests,
+        failOnCoverage: opts.failOnCoverage,
+        runId: opts.runId,
+        json: globalJson(cmd),
+      });
+    });
+}
