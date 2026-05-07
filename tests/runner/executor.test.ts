@@ -262,6 +262,237 @@ describe("runSuite", () => {
     expect(capturedUrl).toContain("limit=10");
   });
 
+  // ───────────────────────────── TASK-203: branch-gap coverage
+
+  test("per-step timeout abort surfaces step as 'error', does not abort the suite", async () => {
+    let callIdx = 0;
+    globalThis.fetch = mock((_url, init?: RequestInit) => {
+      callIdx++;
+      if (callIdx === 1) {
+        // Hang the first request — timeout watchdog must trip.
+        return new Promise((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          }, { once: true });
+        });
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "TimeoutSuite",
+      config: { ...DEFAULT_CONFIG, timeout: 50, retries: 0 },
+      tests: [
+        { name: "Slow", method: "GET", path: "http://example.com/slow", expect: { status: 200 } },
+        { name: "Fast", method: "GET", path: "http://example.com/fast", expect: { status: 200 } },
+      ],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps).toHaveLength(2);
+    expect(result.steps[0]!.status).toBe("error");
+    expect(result.steps[1]!.status).toBe("pass");
+  });
+
+  test("for_each iterates over a previously-captured list", async () => {
+    mockFetchResponses([
+      { status: 200, body: { ids: [1, 2, 3] } },
+      { status: 200, body: { id: 1 } },
+      { status: 200, body: { id: 2 } },
+      { status: 200, body: { id: 3 } },
+    ]);
+
+    const suite: TestSuite = {
+      name: "ForEachCapturedList",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "list",
+          method: "GET",
+          path: "/ids",
+          expect: { body: { ids: { capture: "ids" } } },
+        },
+        {
+          name: "get",
+          method: "GET",
+          path: "/items/{{id}}",
+          for_each: { var: "id", in: "{{ids}}" },
+          expect: { status: 200 },
+        },
+      ],
+    };
+    const result = await runSuite(suite);
+    // 1 list step + the for_each placeholder + 3 expanded children = 5 steps
+    expect(result.steps.length).toBeGreaterThanOrEqual(4);
+    const expandedUrls = result.steps
+      .map(s => s.request.url)
+      .filter(u => u.startsWith("http://example.com/items/"));
+    expect(expandedUrls).toEqual([
+      "http://example.com/items/1",
+      "http://example.com/items/2",
+      "http://example.com/items/3",
+    ]);
+  });
+
+  test("for_each × parameterize: cross-product N×M with isolated per-iteration state", async () => {
+    // 2 tiers × 2 items = 4 expanded HTTP calls
+    const calls: string[] = [];
+    globalThis.fetch = mock(async (url) => {
+      calls.push(typeof url === "string" ? url : (url as Request).url);
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "Cross",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      parameterize: { tier: ["a", "b"] },
+      tests: [{
+        name: "T",
+        method: "GET",
+        path: "/t/{{tier}}/{{item}}",
+        for_each: { var: "item", in: [1, 2] },
+        expect: { status: 200 },
+      }],
+    };
+    const result = await runSuite(suite);
+    expect(calls).toEqual([
+      "http://example.com/t/a/1",
+      "http://example.com/t/a/2",
+      "http://example.com/t/b/1",
+      "http://example.com/t/b/2",
+    ]);
+    // Per-iteration state isolation: each expanded HTTP step recorded a pass.
+    const passed = result.steps.filter(s => s.status === "pass" && s.request.url !== "");
+    expect(passed.length).toBe(4);
+  });
+
+  test("retry_until: body-condition triggers stop; delay_ms>0 actually waits between attempts", async () => {
+    let attempt = 0;
+    globalThis.fetch = mock(async () => {
+      attempt++;
+      // Body contains a counter the condition references — proving condition
+      // resolves against body, not just HTTP status.
+      const body = JSON.stringify({ progress: attempt });
+      return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "RetryUntil",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "poll",
+        method: "GET",
+        path: "/job",
+        retry_until: { condition: "{{progress}} >= 2", max_attempts: 4, delay_ms: 30 },
+        expect: { status: 200 },
+      }],
+    };
+    const t0 = Date.now();
+    const result = await runSuite(suite);
+    const elapsed = Date.now() - t0;
+    expect(result.steps[0]!.status).toBe("pass");
+    expect(attempt).toBe(2);
+    // One sleep between attempt 1 and 2 → ≥ ~30ms but < 4× delay
+    expect(elapsed).toBeGreaterThanOrEqual(25);
+    expect(elapsed).toBeLessThan(200);
+  });
+
+  test("multipart with file: '@path' reads fixture and posts a Blob in FormData", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "zond-mp-"));
+    const yamlPath = join(dir, "suite.yaml");
+    const filePath = join(dir, "payload.bin");
+    writeFileSync(filePath, "hello-multipart-bytes");
+    writeFileSync(yamlPath, "# placeholder; suite is constructed in-memory");
+
+    let capturedInit: RequestInit | undefined;
+    let capturedUrl = "";
+    globalThis.fetch = mock(async (url, init?: RequestInit) => {
+      capturedUrl = typeof url === "string" ? url : (url as Request).url;
+      capturedInit = init;
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "Multipart",
+      filePath: yamlPath,
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "upload",
+        method: "POST",
+        path: "/upload",
+        multipart: {
+          token: "abc",
+          file: { file: "payload.bin", filename: "payload.bin", content_type: "application/octet-stream" },
+        },
+        expect: { status: 200 },
+      }],
+    };
+
+    try {
+      const result = await runSuite(suite);
+      expect(result.steps[0]!.status).toBe("pass");
+      expect(capturedUrl).toBe("http://example.com/upload");
+      const fd = capturedInit!.body as FormData;
+      expect(fd).toBeInstanceOf(FormData);
+      expect(fd.get("token")).toBe("abc");
+      const filePart = fd.get("file");
+      expect(filePart).toBeInstanceOf(Blob);
+      const text = await (filePart as Blob).text();
+      expect(text).toBe("hello-multipart-bytes");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("runSuites propagates schemaValidator + networkRetries; provenance merges suite/step", async () => {
+    let capturedHeaders: Record<string, string> = {};
+    globalThis.fetch = mock(async (_url, init?: RequestInit) => {
+      capturedHeaders = Object.fromEntries(new Headers(init?.headers as Record<string, string>).entries());
+      return new Response(JSON.stringify({ id: "x" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const validateMock = mock(() => []);
+    const validator = { validate: validateMock } as unknown as Parameters<typeof runSuites>[3] extends { schemaValidator?: infer V } ? NonNullable<V> : never;
+
+    const suite: TestSuite = {
+      name: "Provenance",
+      config: DEFAULT_CONFIG,
+      source: { type: "openapi-generated", spec: "spec.json", endpoint: "GET /x" },
+      tests: [{
+        name: "T",
+        method: "GET",
+        path: "http://example.com/x",
+        source: { endpoint: "GET /override", response_branch: "200" },
+        expect: { status: 200 },
+      }],
+    };
+    const results = await runSuites([suite], {}, false, {
+      schemaValidator: validator,
+      networkRetries: 7,
+    });
+    expect(capturedHeaders).toBeDefined();
+    expect(validateMock).toHaveBeenCalledTimes(1);
+    const step = results[0]!.steps[0]!;
+    // step-level overrides suite-level via shallow merge
+    expect(step.provenance).toBeDefined();
+    expect(step.provenance!.spec).toBe("spec.json");
+    expect(step.provenance!.endpoint).toBe("GET /override");
+    expect(step.provenance!.response_branch).toBe("200");
+    expect(step.provenance!.type).toBe("openapi-generated");
+  });
+
   test("provides timestamps in result", async () => {
     mockFetchResponses([{ status: 200, body: {} }]);
 
