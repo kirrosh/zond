@@ -1,15 +1,26 @@
 import { Database } from "bun:sqlite";
-import { resolve } from "path";
-import { existsSync } from "fs";
+import { dirname, resolve } from "path";
+import { existsSync, mkdirSync } from "fs";
 import { findWorkspaceRoot } from "../core/workspace/root.ts";
 
 let _db: Database | null = null;
 let _dbPath: string | null = null;
 
+/**
+ * Default DB path lives under `<workspace>/.zond/zond.db` to keep runtime
+ * artifacts out of the project root. For back-compat we still recognise a
+ * legacy `<workspace>/zond.db` if it exists — old workspaces keep working
+ * without migration.
+ */
+function defaultDbPath(): string {
+  const root = findWorkspaceRoot().root;
+  const legacy = resolve(root, "zond.db");
+  if (existsSync(legacy)) return legacy;
+  return resolve(root, ".zond", "zond.db");
+}
+
 export function getDb(dbPath?: string): Database {
-  const path = dbPath
-    ? resolve(dbPath)
-    : (_dbPath ?? resolve(findWorkspaceRoot().root, "zond.db"));
+  const path = dbPath ? resolve(dbPath) : (_dbPath ?? defaultDbPath());
 
   // If cached connection exists, verify the file still exists
   if (_db && _dbPath === path && existsSync(path)) return _db;
@@ -20,6 +31,11 @@ export function getDb(dbPath?: string): Database {
     _db = null;
     _dbPath = null;
   }
+  // SQLite won't auto-create parent dirs; ensure `.zond/` (or any custom
+  // path's parent) exists before opening the file.
+  const parent = dirname(path);
+  if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
+
   const db = new Database(path, { create: true });
 
   // Performance and integrity settings

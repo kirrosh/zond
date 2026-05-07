@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **TASK-178: build artefacts out of repo root.** `bun run build` now
+  emits the compiled binary to `dist/zond` (was `./zond`); the
+  codesign-darwin script's default arg follows. The default SQLite path
+  is now `<workspace>/.zond/zond.db` (next to `.zond/manifest.json`)
+  rather than `<workspace>/zond.db`. Legacy `<workspace>/zond.db` is
+  still honoured if present, so existing workspaces keep working without
+  a migration step.
+
 ### Removed
 
 - **TASK-177: remove `.mcp.example.json`.** Leftover from the
