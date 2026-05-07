@@ -25,8 +25,6 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
-import { generateFromSchema } from "../generator/data-factory.ts";
-import { substituteDeep, substituteString } from "../parser/variables.ts";
 import { executeRequest } from "../runner/http-client.ts";
 import type { HttpRequest } from "../runner/types.ts";
 import {
@@ -38,6 +36,11 @@ import {
   hasJsonBody,
   liveAuthHeaders,
 } from "./shared.ts";
+import {
+  buildProbeUrl,
+  buildJsonAuthHeaders,
+  buildBaselineFromSpec,
+} from "./probe-harness.ts";
 import {
   createDiscoveryCache,
   discoverPathParams,
@@ -231,18 +234,6 @@ function suspectedExtras(ep: EndpointInfo): Record<string, unknown> {
 // URL building / auth
 // ──────────────────────────────────────────────
 
-function buildUrl(
-  ep: EndpointInfo,
-  vars: Record<string, string>,
-): { url: string; unresolved: string[] } {
-  const baseUrl = vars["base_url"]?.replace(/\/+$/, "") ?? "";
-  const templated = `${baseUrl}${convertPath(ep.path)}`;
-  const substituted = substituteString(templated, vars);
-  const url = typeof substituted === "string" ? substituted : String(substituted);
-  const unresolved = Array.from(url.matchAll(/\{\{([^}]+)\}\}/g)).map(m => m[1]!);
-  return { url, unresolved };
-}
-
 // ──────────────────────────────────────────────
 // Live probe execution
 // ──────────────────────────────────────────────
@@ -271,7 +262,7 @@ export async function runMassAssignmentProbes(
     // Resolve path placeholders, attempting auto-discovery when env doesn't
     // supply them and the spec has a sibling list endpoint (TASK-92).
     let effectiveVars = vars;
-    const probe = buildUrl(ep, vars);
+    const probe = buildProbeUrl(ep, vars);
     if (probe.unresolved.length > 0) {
       if (!discover) {
         const reason =
@@ -388,11 +379,8 @@ async function probeEndpoint(
   const strict = isStrictContract(ep.requestBodySchema);
 
   // Build baseline payload from spec then substitute generators ({{$uuid}}, …).
-  const rawBaseline = ep.requestBodySchema
-    ? generateFromSchema(ep.requestBodySchema)
-    : {};
-  const baseline = substituteDeep(rawBaseline, vars) as Record<string, unknown>;
-  if (typeof baseline !== "object" || baseline === null || Array.isArray(baseline)) {
+  const baseline = buildBaselineFromSpec(ep, vars);
+  if (baseline === null) {
     return skipped(ep, "request body not a JSON object");
   }
   // TASK-137: overlay discovered FK values directly by field name so the
@@ -416,7 +404,7 @@ async function probeEndpoint(
   }
 
   const body = { ...baseline, ...injectedSet };
-  const { url, unresolved } = buildUrl(ep, vars);
+  const { url, unresolved } = buildProbeUrl(ep, vars);
   if (unresolved.length > 0) {
     return skipped(
       ep,
@@ -424,11 +412,7 @@ async function probeEndpoint(
     );
   }
 
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    accept: "application/json",
-    ...liveAuthHeaders(ep, schemes, vars),
-  };
+  const headers = buildJsonAuthHeaders(ep, schemes, vars);
 
   const verdict: EndpointVerdict = {
     method: m,
@@ -549,7 +533,7 @@ async function probeEndpoint(
     const getEp = findGetByIdCounterpart(ep, allEndpoints);
     if (id !== undefined && getEp) {
       const getVars = { ...vars, [findIdParam(getEp)]: String(id), id: String(id) };
-      const getUrl = buildUrl(getEp, getVars);
+      const getUrl = buildProbeUrl(getEp, getVars);
       if (getUrl.unresolved.length === 0) {
         try {
           const getResp = await executeRequest(
@@ -587,7 +571,7 @@ async function probeEndpoint(
       const delEp = findDeleteCounterpart(ep, allEndpoints);
       if (delEp) {
         const delVars = { ...vars, [findIdParam(delEp)]: String(id), id: String(id) };
-        const delUrl = buildUrl(delEp, delVars);
+        const delUrl = buildProbeUrl(delEp, delVars);
         if (delUrl.unresolved.length === 0) {
           try {
             const delResp = await executeRequest(
@@ -642,7 +626,7 @@ async function tryCleanupBaseline(
   const delEp = findDeleteCounterpart(ep, allEndpoints);
   if (!delEp) return;
   const delVars = { ...vars, [findIdParam(delEp)]: String(id), id: String(id) };
-  const delUrl = buildUrl(delEp, delVars);
+  const delUrl = buildProbeUrl(delEp, delVars);
   if (delUrl.unresolved.length > 0) return;
   try {
     await executeRequest(
