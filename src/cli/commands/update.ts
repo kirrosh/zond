@@ -186,3 +186,20 @@ export async function updateCommand(options: UpdateOptions): Promise<number> {
     return 2;
   }
 }
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+
+export function registerUpdate(program: Command): void {
+  program
+    .command("update")
+    .alias("self-update")
+    .description("Check for updates and self-update the binary")
+    .option("--check", "Only check for updates, do not download")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await updateCommand({
+        check: opts.check === true,
+        json: globalJson(cmd),
+      });
+    });
+}

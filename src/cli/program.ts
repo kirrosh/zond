@@ -1,11 +1,11 @@
 import { Command, Option } from "commander";
 
 import { runCommand } from "./commands/run.ts";
-import { validateCommand } from "./commands/validate.ts";
+import { registerValidate } from "./commands/validate.ts";
 import { serveCommand } from "./commands/serve.ts";
 import { coverageCommand } from "./commands/coverage.ts";
 import { ciInitCommand } from "./commands/ci-init.ts";
-import { cleanCommand } from "./commands/clean.ts";
+import { registerClean } from "./commands/clean.ts";
 import { getSecretRegistry } from "../core/secrets/registry.ts";
 import { initCommand } from "./commands/init/index.ts";
 import { describeCommand } from "./commands/describe.ts";
@@ -20,17 +20,17 @@ import { probeMassAssignmentCommand } from "./commands/probe-mass-assignment.ts"
 import { probeSecurityCommand } from "./commands/probe-security.ts";
 import { exportCommand } from "./commands/export.ts";
 import { reportExportHtmlCommand, reportCaseStudyCommand } from "./commands/report.ts";
-import { updateCommand } from "./commands/update.ts";
+import { registerUpdate } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
-import { completionsCommand, COMPLETION_SHELLS, type CompletionShell } from "./commands/completions.ts";
-import { useCommand } from "./commands/use.ts";
+import { registerCompletions } from "./commands/completions.ts";
+import { registerUse } from "./commands/use.ts";
 import {
   sessionStartCommand,
   sessionEndCommand,
   sessionStatusCommand,
 } from "./commands/session.ts";
-import { doctorCommand } from "./commands/doctor.ts";
-import { refreshApiCommand } from "./commands/refresh-api.ts";
+import { registerDoctor } from "./commands/doctor.ts";
+import { registerRefreshApi } from "./commands/refresh-api.ts";
 import { addApiCommand } from "./commands/add-api.ts";
 import { resolveSessionId } from "../core/context/session.ts";
 
@@ -172,13 +172,7 @@ export function buildProgram(): Command {
       });
     });
 
-  // ── validate ──
-  program
-    .command("validate <path>")
-    .description("Validate test files without running")
-    .action(async (path: string, _opts, cmd: Command) => {
-      process.exitCode = await validateCommand({ path, json: globalJson(cmd) });
-    });
+  registerValidate(program);
 
   // ── serve ──
   program
@@ -222,49 +216,9 @@ export function buildProgram(): Command {
       });
     });
 
-  // ── use ──
-  program
-    .command("use [api]")
-    .description("Set or show the current API for this workspace (.zond-current)")
-    .option("--clear", "Remove .zond-current from the current directory")
-    .action(async (api: string | undefined, opts, cmd: Command) => {
-      process.exitCode = await useCommand({
-        api,
-        clear: opts.clear === true,
-        json: globalJson(cmd),
-      });
-    });
-
-  // ── refresh-api ──
-  program
-    .command("refresh-api <name>")
-    .description("Re-snapshot the OpenAPI spec into apis/<name>/spec.json and regenerate the 3 artifacts (catalog/resources/fixtures)")
-    .option("--spec <path>", "Pull fresh from this path or URL (overrides registered source)")
-    .option("--insecure", "Allow self-signed TLS when --spec is an https URL")
-    .option("--db <path>", "Path to SQLite database file")
-    .action(async (name: string, opts, cmd: Command) => {
-      process.exitCode = await refreshApiCommand({
-        api: name,
-        spec: opts.spec,
-        insecure: opts.insecure === true,
-        dbPath: typeof opts.db === "string" ? opts.db : undefined,
-        json: globalJson(cmd),
-      });
-    });
-
-  // ── doctor ──
-  program
-    .command("doctor")
-    .description("Diagnose registered API: fixture gaps in .env.yaml + artifact freshness vs spec.json")
-    .option("--api <name>", "API collection name (defaults to the only registered one)")
-    .option("--db <path>", "Path to SQLite database file")
-    .action(async (opts, cmd: Command) => {
-      process.exitCode = await doctorCommand({
-        api: opts.api,
-        dbPath: typeof opts.db === "string" ? opts.db : undefined,
-        json: globalJson(cmd),
-      });
-    });
+  registerUse(program);
+  registerRefreshApi(program);
+  registerDoctor(program);
 
   // ── session ──
   //
@@ -546,23 +500,7 @@ export function buildProgram(): Command {
       });
     });
 
-  // ── clean ──
-  program
-    .command("clean")
-    .description("Remove auto-generated files tracked in .zond/manifest.json (TASK-156, m-9)")
-    .option("--api <name>", "Limit to a single API (apis/<name>/)")
-    .option("--probes", "Limit to probe-suite files only")
-    .option("--all", "Remove every tracked auto-generated file in the workspace")
-    .option("--force", "Actually delete files (default is dry-run)")
-    .action(async (opts, cmd: Command) => {
-      process.exitCode = await cleanCommand({
-        api: opts.api,
-        probes: opts.probes === true,
-        all: opts.all === true,
-        force: opts.force === true,
-        json: globalJson(cmd),
-      });
-    });
+  registerClean(program);
 
   // ── generate ──
   program
@@ -891,31 +829,8 @@ export function buildProgram(): Command {
       });
     });
 
-  // ── update / self-update ──
-  program
-    .command("update")
-    .alias("self-update")
-    .description("Check for updates and self-update the binary")
-    .option("--check", "Only check for updates, do not download")
-    .action(async (opts, cmd: Command) => {
-      process.exitCode = await updateCommand({
-        check: opts.check === true,
-        json: globalJson(cmd),
-      });
-    });
-
-  // ── completions ──
-  program
-    .command("completions <shell>")
-    .description(`Generate shell completion script (${COMPLETION_SHELLS.join(", ")})`)
-    .action((shell: string) => {
-      if (!(COMPLETION_SHELLS as readonly string[]).includes(shell)) {
-        printError(`Unsupported shell: ${shell}. Supported: ${COMPLETION_SHELLS.join(", ")}`);
-        process.exitCode = 2;
-        return;
-      }
-      process.exitCode = completionsCommand({ shell: shell as CompletionShell, program });
-    });
+  registerUpdate(program);
+  registerCompletions(program);
 
   // TASK-73: previously `--json` was a top-level/global option that propagated
   // to every subcommand, which collided with `run --report json` (and broke

@@ -55,3 +55,20 @@ export async function useCommand(opts: UseOptions): Promise<number> {
   }
   return 0;
 }
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+
+export function registerUse(program: Command): void {
+  program
+    .command("use [api]")
+    .description("Set or show the current API for this workspace (.zond-current)")
+    .option("--clear", "Remove .zond-current from the current directory")
+    .action(async (api: string | undefined, opts, cmd: Command) => {
+      process.exitCode = await useCommand({
+        api,
+        clear: opts.clear === true,
+        json: globalJson(cmd),
+      });
+    });
+}

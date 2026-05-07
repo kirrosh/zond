@@ -424,3 +424,21 @@ function printRunOnlyHuman(r: DoctorRunOnlyReport): void {
   }
   out.write(`\n${r.recommendation}\n`);
 }
+
+import type { Command } from "commander";
+import { globalJson as globalJsonResolver } from "../resolve.ts";
+
+export function registerDoctor(program: Command): void {
+  program
+    .command("doctor")
+    .description("Diagnose registered API: fixture gaps in .env.yaml + artifact freshness vs spec.json")
+    .option("--api <name>", "API collection name (defaults to the only registered one)")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await doctorCommand({
+        api: opts.api,
+        dbPath: typeof opts.db === "string" ? opts.db : undefined,
+        json: globalJsonResolver(cmd),
+      });
+    });
+}
