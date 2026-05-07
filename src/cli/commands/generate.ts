@@ -57,6 +57,10 @@ export interface GenerateOptions {
   output: string;
   tag?: string;
   uncoveredOnly?: boolean;
+  /** When true, deprecated endpoints are included in generation. Default
+   *  (false) filters them out and surfaces the count as a warning so users
+   *  can distinguish "deprecated by design" from "accidentally dropped". */
+  includeDeprecated?: boolean;
   /** TASK-139: dry-run that prints per-resource CRUD detection verdict and
    *  exits — no files written. Use to debug "why didn't generate emit a
    *  CRUD chain for resource X?" on real specs. */
@@ -140,8 +144,28 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       return 0;
     }
 
+    // Count deprecated endpoints before generateSuites filters them — we
+    // surface the count as a warning so deprecated-by-design and
+    // accidentally-dropped look different in stdout.
+    const deprecatedSkipped = options.includeDeprecated
+      ? []
+      : endpoints.filter(ep => ep.deprecated).map(ep => `${ep.method} ${ep.path}`);
+
     // Generate suites
-    const suites = generateSuites({ endpoints, securitySchemes, specPath: options.specPath });
+    const suites = generateSuites({
+      endpoints,
+      securitySchemes,
+      specPath: options.specPath,
+      includeDeprecated: options.includeDeprecated,
+    });
+
+    if (deprecatedSkipped.length > 0) {
+      const head = deprecatedSkipped.slice(0, 3).join(", ");
+      const more = deprecatedSkipped.length > 3 ? `, +${deprecatedSkipped.length - 3} more` : "";
+      warnings.push(
+        `Skipped ${deprecatedSkipped.length} deprecated endpoint(s): ${head}${more} — pass --include-deprecated to include`,
+      );
+    }
 
     // Ensure output directory exists
     await mkdir(options.output, { recursive: true });
@@ -291,6 +315,7 @@ export function registerGenerate(program: Command): void {
     .option("--output <dir>", "Output directory for generated test files (required unless --explain)")
     .option("--tag <tag>", "Generate only for endpoints with this tag")
     .option("--uncovered-only", "Skip endpoints already covered by existing tests")
+    .option("--include-deprecated", "Generate suites for deprecated endpoints too (filtered out by default)")
     .option("--explain", "Print the CRUD detection table (which resources became chain candidates and why) without writing files (TASK-139)")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
@@ -305,6 +330,7 @@ export function registerGenerate(program: Command): void {
         output: opts.output ?? "",
         tag: opts.tag,
         uncoveredOnly: opts.uncoveredOnly === true,
+        includeDeprecated: opts.includeDeprecated === true,
         explain: opts.explain === true,
         json: globalJson(cmd),
       });
