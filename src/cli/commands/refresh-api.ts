@@ -146,3 +146,24 @@ function readEndpointCount(specPath: string): number {
     return 0;
   }
 }
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+
+export function registerRefreshApi(program: Command): void {
+  program
+    .command("refresh-api <name>")
+    .description("Re-snapshot the OpenAPI spec into apis/<name>/spec.json and regenerate the 3 artifacts (catalog/resources/fixtures)")
+    .option("--spec <path>", "Pull fresh from this path or URL (overrides registered source)")
+    .option("--insecure", "Allow self-signed TLS when --spec is an https URL")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (name: string, opts, cmd: Command) => {
+      process.exitCode = await refreshApiCommand({
+        api: name,
+        spec: opts.spec,
+        insecure: opts.insecure === true,
+        dbPath: typeof opts.db === "string" ? opts.db : undefined,
+        json: globalJson(cmd),
+      });
+    });
+}

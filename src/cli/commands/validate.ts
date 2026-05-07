@@ -32,3 +32,15 @@ export async function validateCommand(options: ValidateOptions): Promise<number>
     return 2;
   }
 }
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+
+export function registerValidate(program: Command): void {
+  program
+    .command("validate <path>")
+    .description("Validate test files without running")
+    .action(async (path: string, _opts, cmd: Command) => {
+      process.exitCode = await validateCommand({ path, json: globalJson(cmd) });
+    });
+}

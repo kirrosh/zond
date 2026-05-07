@@ -18,8 +18,10 @@ import {
   type CleanItem,
   type ManifestCategory,
 } from "../../core/workspace/manifest.ts";
+import type { Command } from "commander";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
+import { globalJson } from "../resolve.ts";
 
 export interface CleanOptions {
   api?: string;
@@ -165,4 +167,23 @@ function pruneEmptyDirs(workspaceRoot: string, items: CleanItem[]): void {
   }
   // Keep `resolve` reachable for type-only imports.
   void resolve;
+}
+
+export function registerClean(program: Command): void {
+  program
+    .command("clean")
+    .description("Remove auto-generated files tracked in .zond/manifest.json (TASK-156, m-9)")
+    .option("--api <name>", "Limit to a single API (apis/<name>/)")
+    .option("--probes", "Limit to probe-suite files only")
+    .option("--all", "Remove every tracked auto-generated file in the workspace")
+    .option("--force", "Actually delete files (default is dry-run)")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await cleanCommand({
+        api: opts.api,
+        probes: opts.probes === true,
+        all: opts.all === true,
+        force: opts.force === true,
+        json: globalJson(cmd),
+      });
+    });
 }
