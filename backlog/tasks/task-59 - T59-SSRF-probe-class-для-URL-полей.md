@@ -1,9 +1,10 @@
 ---
 id: TASK-59
 title: 'T59: SSRF probe class для URL-полей'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:34'
+updated_date: '2026-05-07'
 labels:
   - bug-hunting
   - security

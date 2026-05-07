@@ -1,8 +1,9 @@
 ---
 id: TASK-141
 title: 'zond report case-study --body-cap: truncate large response bodies'
-status: To Do
+status: Done
 assignee: []
+updated_date: '2026-05-07'
 labels:
   - report
   - case-study
@@ -11,6 +12,11 @@ milestone: m-8
 dependencies: []
 priority: medium
 ---
+
+> **Note (2026-05-07):** scope сокращён до AC#1/#3 — флаг `--body-cap N` /
+> `--no-body-cap` реализован в `src/cli/commands/report.ts:369-394`.
+> Smart-mode (AC#2: сохранение полей assertions/captures из обрезаемого
+> body) **не сделан** — выделить отдельным таском при появлении сигнала.
 
 ## Description
 

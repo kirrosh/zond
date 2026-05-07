@@ -1,8 +1,9 @@
 ---
 id: TASK-149
 title: 'skill: baseline-OK pattern в security-probe шаблонах'
-status: To Do
+status: Done
 assignee: []
+updated_date: '2026-05-07'
 labels:
   - skill
   - docs

@@ -3,10 +3,10 @@ id: TASK-130
 title: >-
   UX cleanup — убрать spike live-strip / упростить runs toggle / избыточные
   колонки
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-03'
-updated_date: '2026-05-03 16:38'
+updated_date: '2026-05-07'
 labels:
   - ui
   - ux-polish
@@ -41,6 +41,8 @@ priority: low
 
 <!-- SECTION:NOTES:BEGIN -->
 AC#1 закрыт полностью: удалены LiveProgressStrip из run-detail, useRunProgress hook, ProgressFrame interface, GET /api/runs/:id/stream endpoint, idleTimeout: 255 в Bun.serve, упоминания SSE-стрима в src/ui/README.md. Spike-strip больше не превращается даже в timestamp pill — целиком удалён, потому что сейчас ему нечем замениться (TASK-118 не реализован). AC#2-5 — отдельные подзадачи, не делал в этом коммите.
+
+**Closed 2026-05-07.** Scope сокращён до AC#1. Остальные пункты (AC#2 toggle, AC#3 stacked bar, AC#4 session id, AC#5 e2e) ждут TASK-118 (real live-progress) — заводить отдельными тасками, когда дойдём до live-progress.
 <!-- SECTION:NOTES:END -->
 
 ## Notes
