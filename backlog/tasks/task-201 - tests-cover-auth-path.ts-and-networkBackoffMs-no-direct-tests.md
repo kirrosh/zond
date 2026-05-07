@@ -1,9 +1,10 @@
 ---
 id: TASK-201
 title: 'tests: cover auth-path.ts and networkBackoffMs (no direct tests)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:12'
+updated_date: '2026-05-07 12:01'
 labels:
   - tests
   - runner
@@ -21,6 +22,6 @@ src/core/runner/auth-path.ts (AUTH_PATH_RE) и exported networkBackoffMs из ht
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 tests/runner/auth-path.test.ts: 6 кейсов — positive (each keyword: auth/login/signin/token/oauth), nested-segment, case-insensitive, false-positive ruled out (/authors не match), empty path
-- [ ] #2 tests/runner/http-client.test.ts расширен: stub Math.random, проверка [0, min(cap, base*2^attempt)) на edge 0/0.999, cap clamping, integer result — 5 кейсов
+- [x] #1 tests/runner/auth-path.test.ts: 6 кейсов — positive (each keyword: auth/login/signin/token/oauth), nested-segment, case-insensitive, false-positive ruled out (/authors не match), empty path
+- [x] #2 tests/runner/http-client.test.ts расширен: stub Math.random, проверка [0, min(cap, base*2^attempt)) на edge 0/0.999, cap clamping, integer result — 5 кейсов
 <!-- AC:END -->

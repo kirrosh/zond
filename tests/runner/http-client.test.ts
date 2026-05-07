@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { executeRequest, isTransientNetworkError } from "../../src/core/runner/http-client.ts";
+import { executeRequest, isTransientNetworkError, networkBackoffMs } from "../../src/core/runner/http-client.ts";
 import { createAdaptiveRateLimiter } from "../../src/core/runner/rate-limiter.ts";
 
 describe("executeRequest", () => {
@@ -359,6 +359,40 @@ describe("executeRequest", () => {
         ),
       ).rejects.toThrow(/fetch failed/);
       expect(callCount).toBe(1);
+    });
+  });
+
+  describe("networkBackoffMs (full-jitter exponential)", () => {
+    const origRandom = Math.random;
+    afterEach(() => { Math.random = origRandom; });
+
+    test("attempt 0, random=0 → returns 0 (lower bound)", () => {
+      Math.random = () => 0;
+      expect(networkBackoffMs(0, 250, 8000)).toBe(0);
+    });
+
+    test("attempt 0, random→1 → returns base-1 (upper bound, integer)", () => {
+      Math.random = () => 0.999999;
+      // base * 2^0 = 250; floor(0.999999 * 250) = 249
+      expect(networkBackoffMs(0, 250, 8000)).toBe(249);
+    });
+
+    test("attempt 3 with random=0.5 → midpoint of [0, base*2^3)", () => {
+      Math.random = () => 0.5;
+      // base * 2^3 = 250 * 8 = 2000; floor(0.5 * 2000) = 1000
+      expect(networkBackoffMs(3, 250, 8000)).toBe(1000);
+    });
+
+    test("cap clamps the exp window — attempt 10 stays at floor(random*cap)", () => {
+      Math.random = () => 0.5;
+      // base*2^10 = 256_000, but cap=8000 → floor(0.5*8000)=4000
+      expect(networkBackoffMs(10, 250, 8000)).toBe(4000);
+    });
+
+    test("returned value is always an integer", () => {
+      Math.random = () => 0.7777;
+      const v = networkBackoffMs(5, 250, 8000);
+      expect(Number.isInteger(v)).toBe(true);
     });
   });
 
