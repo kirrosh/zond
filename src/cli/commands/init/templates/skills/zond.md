@@ -100,8 +100,19 @@ base_url: "${SENTRY_BASE_URL:-https://us.sentry.io}"  # from shell env
 ```
 
 Iron rule: do not `cat` `.secrets.yaml`. `zond doctor --api <name> --json`
-returns `{ key, scope: "secret"|"identity"|"env", set: bool, length }` —
-that is enough to tell the user which placeholders to fill.
+exposes the canonical envelope `{ ok, command, data, ... }` with the
+fixture rows under `.data.fixtures.required[]` /
+`.data.fixtures.optional[]`. Each row has `{ name, set, length, source,
+description, secret?, identity?, value? }` — `value` is omitted for
+secrets, present for plain env / identity. To pull just the missing
+required slots:
+
+```
+zond doctor --api <name> --missing-only --json
+zond doctor --api <name> --query fixtures.required          # raw subtree, no jq
+```
+
+That is enough to tell the user which placeholders to fill.
 
 Before sharing artifacts outbound (case-study, HTML report) pass
 `--redact-identity` so org/member/project values become `<identity:...>`

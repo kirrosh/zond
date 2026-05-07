@@ -75,6 +75,16 @@ export function parseRateLimit(raw: string): number | "auto" {
   return n;
 }
 
+export function parseNonNegativeInt(name: string): (raw: string) => number {
+  return (raw: string) => {
+    const n = Number.parseInt(raw, 10);
+    if (Number.isNaN(n) || n < 0 || String(n) !== raw.trim()) {
+      throw new InvalidArgumentError(`Invalid ${name} value: ${raw} (expected a non-negative integer)`);
+    }
+    return n;
+  };
+}
+
 export function parseInteger(name: string): (raw: string) => number {
   return (raw: string) => {
     const n = Number.parseInt(raw, 10);

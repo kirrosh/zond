@@ -109,7 +109,14 @@ export function getResultsByRunId(runId: number): StoredStepResult[] {
   }));
 }
 
-export function getFilteredResults(runId: number, filters: { method?: string; status?: number }): StoredStepResult[] {
+export function getFilteredResults(
+  runId: number,
+  filters: {
+    method?: string;
+    /** Compiled SQL fragment for the `--status` filter (TASK-140). */
+    statusSql?: { sql: string; params: number[] };
+  },
+): StoredStepResult[] {
   const db = getDb();
   const conditions = ["run_id = ?"];
   const params: (string | number)[] = [runId];
@@ -118,9 +125,9 @@ export function getFilteredResults(runId: number, filters: { method?: string; st
     conditions.push("request_method = ?");
     params.push(filters.method.toUpperCase());
   }
-  if (filters.status !== undefined) {
-    conditions.push("response_status = ?");
-    params.push(filters.status);
+  if (filters.statusSql) {
+    conditions.push(filters.statusSql.sql);
+    params.push(...filters.statusSql.params);
   }
 
   const rows = db.query(`SELECT * FROM results WHERE ${conditions.join(" AND ")} ORDER BY id`).all(...params) as Array<

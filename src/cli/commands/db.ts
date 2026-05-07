@@ -3,6 +3,7 @@ import { getFilteredResults } from "../../db/queries.ts";
 import { getDb } from "../../db/schema.ts";
 import { printError } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
+import { parseStatusFilter, compileStatusFilterToSql, type StatusMatcher } from "../status-filter.ts";
 
 export interface DbOptions {
   subcommand: string;
@@ -12,7 +13,9 @@ export interface DbOptions {
   dbPath?: string;
   json?: boolean;
   method?: string;
-  status?: number;
+  /** Raw `--status` argument (TASK-140). Parsed lazily so help text can show
+   *  the literal user input in error messages. */
+  status?: string;
 }
 
 export async function dbCommand(options: DbOptions): Promise<number> {
@@ -66,7 +69,21 @@ export async function dbCommand(options: DbOptions): Promise<number> {
         // If filtering by method/status, show filtered results instead of full detail
         if (options.method || options.status !== undefined) {
           getDb(options.dbPath);
-          const results = getFilteredResults(id, { method: options.method, status: options.status });
+          let statusSql: { sql: string; params: number[] } | undefined;
+          if (options.status !== undefined) {
+            let matcher: StatusMatcher;
+            try {
+              matcher = parseStatusFilter(options.status);
+            } catch (err) {
+              const msg = `Invalid --status: ${(err as Error).message}`;
+              if (json) printJson(jsonError("db run", [msg]));
+              else printError(msg);
+              return 2;
+            }
+            const compiled = compileStatusFilterToSql(matcher, "response_status");
+            if (compiled) statusSql = compiled;
+          }
+          const results = getFilteredResults(id, { method: options.method, statusSql });
           if (json) {
             printJson(jsonOk("db run", { run_id: id, count: results.length, results }));
           } else {
@@ -138,7 +155,7 @@ export async function dbCommand(options: DbOptions): Promise<number> {
 
 import type { Command } from "commander";
 import { globalJson } from "../resolve.ts";
-import { parseInteger, parsePositiveInt } from "../argv.ts";
+import { parsePositiveInt } from "../argv.ts";
 
 export function registerDb(program: Command): void {
   const db = program.command("db").description("Query the test database");
@@ -176,7 +193,10 @@ export function registerDb(program: Command): void {
     .description("Show run details")
     .option("--verbose", "Show all results")
     .option("--method <method>", "Filter by HTTP method")
-    .option("--status <code>", "Filter by HTTP status code", parseInteger("--status"))
+    .option(
+      "--status <expr>",
+      "Filter by HTTP status. Accepts: exact code (502), class (5xx), range (500-599), comparison (>=500, <400), or comma-separated mix (5xx,429).",
+    )
     .option("--db <path>", "Path to SQLite database file")
     .action(async (id: string, opts, cmd: Command) => {
       process.exitCode = await dbCommand({

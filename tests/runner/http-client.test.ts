@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { executeRequest } from "../../src/core/runner/http-client.ts";
+import { executeRequest, isTransientNetworkError } from "../../src/core/runner/http-client.ts";
 import { createAdaptiveRateLimiter } from "../../src/core/runner/rate-limiter.ts";
 
 describe("executeRequest", () => {
@@ -272,4 +272,115 @@ describe("executeRequest", () => {
       globalThis.fetch = originalFetch;
     }
   }, 10_000);
+
+  describe("TASK-144: --retry-on-network", () => {
+    test("retries on ECONNRESET and reports network_retry_count", async () => {
+      let callCount = 0;
+      globalThis.fetch = mock(async () => {
+        callCount++;
+        if (callCount === 1) {
+          const err = new Error("read ECONNRESET") as Error & { code?: string };
+          err.code = "ECONNRESET";
+          throw err;
+        }
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+      }) as unknown as typeof fetch;
+
+      const response = await executeRequest(
+        { method: "GET", url: "http://example.com", headers: {} },
+        { network_retries: 1, network_retry_base_ms: 1, network_retry_max_delay_ms: 5 },
+      );
+      expect(response.status).toBe(200);
+      expect(callCount).toBe(2);
+      expect(response.network_retry_count).toBe(1);
+    });
+
+    test("retries on `socket hang up` message", async () => {
+      let callCount = 0;
+      globalThis.fetch = mock(async () => {
+        callCount++;
+        if (callCount < 2) throw new Error("socket hang up");
+        return new Response("{}", { status: 200, headers: {} });
+      }) as unknown as typeof fetch;
+      const response = await executeRequest(
+        { method: "GET", url: "http://example.com", headers: {} },
+        { network_retries: 2, network_retry_base_ms: 1, network_retry_max_delay_ms: 5 },
+      );
+      expect(response.status).toBe(200);
+      expect(callCount).toBe(2);
+      expect(response.network_retry_count).toBe(1);
+    });
+
+    test("does NOT retry on HTTP 502", async () => {
+      let callCount = 0;
+      globalThis.fetch = mock(async () => {
+        callCount++;
+        return new Response("Bad Gateway", { status: 502, headers: {} });
+      }) as unknown as typeof fetch;
+
+      const response = await executeRequest(
+        { method: "GET", url: "http://example.com", headers: {} },
+        { network_retries: 3, network_retry_base_ms: 1 },
+      );
+      expect(response.status).toBe(502);
+      expect(callCount).toBe(1);
+      expect(response.network_retry_count).toBe(0);
+    });
+
+    test("rethrows after exhausting network_retries budget", async () => {
+      let callCount = 0;
+      globalThis.fetch = mock(async () => {
+        callCount++;
+        const err = new Error("ECONNRESET") as Error & { code?: string };
+        err.code = "ECONNRESET";
+        throw err;
+      }) as unknown as typeof fetch;
+
+      await expect(
+        executeRequest(
+          { method: "GET", url: "http://example.com", headers: {} },
+          { network_retries: 2, network_retry_base_ms: 1, network_retry_max_delay_ms: 5 },
+        ),
+      ).rejects.toThrow(/ECONNRESET/);
+      expect(callCount).toBe(3); // initial + 2 retries
+    });
+
+    test("network_retries: 0 disables the retry path", async () => {
+      let callCount = 0;
+      globalThis.fetch = mock(async () => {
+        callCount++;
+        throw new Error("fetch failed");
+      }) as unknown as typeof fetch;
+
+      await expect(
+        executeRequest(
+          { method: "GET", url: "http://example.com", headers: {} },
+          { network_retries: 0 },
+        ),
+      ).rejects.toThrow(/fetch failed/);
+      expect(callCount).toBe(1);
+    });
+  });
+
+  describe("isTransientNetworkError", () => {
+    test("matches typical network error codes", () => {
+      const e1 = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+      expect(isTransientNetworkError(e1)).toBe(true);
+      const e2 = Object.assign(new Error("connect EPIPE"), { code: "EPIPE" });
+      expect(isTransientNetworkError(e2)).toBe(true);
+      expect(isTransientNetworkError(new Error("socket hang up"))).toBe(true);
+      expect(isTransientNetworkError(new Error("fetch failed"))).toBe(true);
+    });
+
+    test("does not match generic non-network errors", () => {
+      expect(isTransientNetworkError(new Error("Boom"))).toBe(false);
+      expect(isTransientNetworkError(new Error("Assertion failed"))).toBe(false);
+      expect(isTransientNetworkError(undefined)).toBe(false);
+    });
+
+    test("matches AbortError (timeout)", () => {
+      const e = Object.assign(new Error("operation aborted"), { name: "AbortError" });
+      expect(isTransientNetworkError(e)).toBe(true);
+    });
+  });
 });

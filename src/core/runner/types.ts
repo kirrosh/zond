@@ -14,6 +14,9 @@ export interface HttpResponse {
   body: string;
   body_parsed?: unknown;
   duration_ms: number;
+  /** TASK-144: number of network-level retries that preceded this response.
+   *  0 when the request succeeded on the first attempt. */
+  network_retry_count?: number;
 }
 
 /**
@@ -52,6 +55,10 @@ export interface StepResult {
    *  rewrite history. `null` for manual YAML or when spec isn't available. */
   spec_pointer?: string | null;
   spec_excerpt?: string | null;
+  /** TASK-144: how many network-level retries the http-client performed
+   *  before this step settled. Omitted (or 0) when no retry was needed.
+   *  Surfaced in the JSON report so flaky-network steps are visible. */
+  network_retry?: number;
 }
 
 export interface TestRunResult {

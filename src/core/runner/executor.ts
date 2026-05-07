@@ -91,6 +91,11 @@ export interface RunSuiteOptions {
    *  parsed JSON body is validated against the matching schema; failures are
    *  appended to the step's `assertions`. */
   schemaValidator?: SchemaValidator;
+  /** TASK-144: per-step network-retry budget used by http-client for
+   *  ECONNRESET / EPIPE / `socket hang up` / `fetch failed` / abort cases.
+   *  Set by `zond run --retry-on-network <N>`. HTTP statuses are not retried
+   *  by this path. */
+  networkRetries?: number;
 }
 
 export async function runSuite(
@@ -120,6 +125,7 @@ export async function runSuite(
     retry_delay: suite.config.retry_delay,
     follow_redirects: suite.config.follow_redirects,
     rate_limiter: options.rateLimiter,
+    ...(options.networkRetries !== undefined ? { network_retries: options.networkRetries } : {}),
   };
 
   // parameterize cross-product → N iterations of the suite body.
@@ -354,6 +360,9 @@ export async function runSuite(
             response,
             assertions,
             captures,
+            ...(response.network_retry_count && response.network_retry_count > 0
+              ? { network_retry: response.network_retry_count }
+              : {}),
           };
 
           // Evaluate condition with response context
@@ -419,6 +428,9 @@ export async function runSuite(
         response,
         assertions,
         captures,
+        ...(response.network_retry_count && response.network_retry_count > 0
+          ? { network_retry: response.network_retry_count }
+          : {}),
       }, step);
 
       // If step failed, captures that did extract are tainted (value is real

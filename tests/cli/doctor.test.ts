@@ -110,4 +110,81 @@ describe("zond doctor", () => {
     expect(r.stdout).toMatch(/"mode":\s*"run-only"/);
     expect(r.stdout).toMatch(/refresh-api runonly/);
   });
+
+  test("TASK-145: --json data shape pins canonical paths", async () => {
+    const r = await runCli(workspace, ["doctor", "--api", "tiny", "--json"]);
+    expect(r.exitCode).toBe(0);
+    const env = JSON.parse(r.stdout) as {
+      ok: boolean;
+      command: string;
+      data: {
+        api: string;
+        spec: { exists: boolean; sha: string | null };
+        fixtures: { required: unknown[]; optional: unknown[]; extraInEnv: string[] };
+        staleArtifacts: unknown[];
+        blockedRequired: number;
+        warnings: string[];
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.command).toBe("doctor");
+    expect(env.data.api).toBe("tiny");
+    expect(Array.isArray(env.data.fixtures.required)).toBe(true);
+    expect(Array.isArray(env.data.fixtures.optional)).toBe(true);
+    expect(Array.isArray(env.data.fixtures.extraInEnv)).toBe(true);
+    expect(Array.isArray(env.data.staleArtifacts)).toBe(true);
+    expect(typeof env.data.blockedRequired).toBe("number");
+    // No legacy `.diagnostics` key — canonical lives under `.data`.
+    expect((env as Record<string, unknown>).diagnostics).toBeUndefined();
+  });
+
+  test("TASK-145: --missing-only hides healthy rows in --json", async () => {
+    // Force a required fixture to be unset so there IS a missing item.
+    writeFileSync(join(workspace, "apis", "tiny", ".env.yaml"), "_unused: 1\n", "utf-8");
+    const r = await runCli(workspace, ["doctor", "--api", "tiny", "--json", "--missing-only"]);
+    expect(r.exitCode).toBe(1);
+    const env = JSON.parse(r.stdout) as {
+      data: {
+        fixtures: { required: Array<{ set: boolean }>; optional: unknown[]; extraInEnv: string[] };
+        staleArtifacts: Array<{ fresh: boolean }>;
+      };
+    };
+    // Optional list is dropped wholesale.
+    expect(env.data.fixtures.optional).toEqual([]);
+    expect(env.data.fixtures.extraInEnv).toEqual([]);
+    // Every required row is unset.
+    for (const f of env.data.fixtures.required) {
+      expect(f.set).toBe(false);
+    }
+    // Stale artifacts list never contains a fresh entry.
+    for (const s of env.data.staleArtifacts) {
+      expect(s.fresh).toBe(false);
+    }
+  });
+
+  test("TASK-145: --missing-only on a healthy workspace returns empty groups (text)", async () => {
+    const r = await runCli(workspace, ["doctor", "--api", "tiny", "--missing-only"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/No missing items/);
+    // Optional fixtures section should not appear.
+    expect(r.stdout).not.toMatch(/Optional fixtures/);
+  });
+
+  test("TASK-145: --query fixtures.required emits raw JSON subtree", async () => {
+    writeFileSync(join(workspace, "apis", "tiny", ".env.yaml"), "_unused: 1\n", "utf-8");
+    const r = await runCli(workspace, ["doctor", "--api", "tiny", "--query", "fixtures.required"]);
+    // Exit 1 because there's a missing required fixture, but the subtree should still be on stdout.
+    expect(r.exitCode).toBe(1);
+    const arr = JSON.parse(r.stdout) as Array<{ name: string; set: boolean }>;
+    expect(Array.isArray(arr)).toBe(true);
+    expect(arr.length).toBeGreaterThan(0);
+    expect(arr[0]).toHaveProperty("name");
+    expect(arr[0]).toHaveProperty("set");
+  });
+
+  test("TASK-145: --query rejects unknown dot-path", async () => {
+    const r = await runCli(workspace, ["doctor", "--api", "tiny", "--query", "diagnostics.fixtures"]);
+    expect(r.exitCode).toBe(2);
+    expect(r.stderr + r.stdout).toMatch(/did not resolve/);
+  });
 });

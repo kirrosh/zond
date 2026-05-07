@@ -810,6 +810,29 @@ fixtures, stale artifacts (specHash mismatch), and missing snapshots in
 one report. JSON envelope mode (`--json`) is the integration point for
 agents.
 
+**Canonical `--json` shape (TASK-145).** Everything diagnostic lives under
+`.data` — there is no `.diagnostics` wrapper. The schema:
+
+```
+.data.api                       string
+.data.spec.{path,exists,sha}    OpenAPI snapshot info
+.data.fixtures.required[]       FixtureMetaRow (each has `set: boolean`)
+.data.fixtures.optional[]       same shape
+.data.fixtures.extraInEnv[]     keys present in .env.yaml only
+.data.staleArtifacts[]          { file, expected, actual, fresh }
+.data.blockedRequired           number of unset required fixtures
+.data.warnings[]                advisory strings
+```
+
+Two pipe-friendly conveniences avoid an extra `jq`:
+
+- `zond doctor --missing-only` — drop rows already healthy. Required
+  fixtures with values, fresh artifacts, optional fixtures and
+  `extraInEnv` disappear from both text and JSON output; `warnings` stay.
+- `zond doctor --query <dotpath>` — resolve `fixtures.required`,
+  `staleArtifacts`, `spec.sha`, etc., and emit just that subtree as raw
+  JSON to stdout (no envelope). Unknown paths fail with exit 2.
+
 ### `.env.yaml` interpolation and secrets
 
 `.env.yaml` is the API-level fixture file. Two indirection mechanisms keep
