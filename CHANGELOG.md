@@ -17,6 +17,11 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **TASK-183: merge `init.ts` and `init/`.** The `init` command had two
+  files that looked like entry points: `src/cli/commands/init.ts`
+  (handler) and `src/cli/commands/init/` (helpers). Moved the handler
+  into `src/cli/commands/init/index.ts` so the directory is the
+  command's only home; behaviour unchanged.
 - **TASK-181: sync `install.ps1` ↔ `install.sh`.** PowerShell installer
   now detects ARM64 alongside x64 (was hard-coded to `win-x64`), wraps
   the release-tag fetch in try/catch with a useful error message, and

@@ -1,9 +1,10 @@
 ---
 id: TASK-183
 title: 'refactor: merge src/cli/commands/init.ts and init/'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 06:49'
+updated_date: '2026-05-07 07:12'
 labels:
   - refactor
   - cli
@@ -20,7 +21,7 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 src/cli/commands/init.ts удалён, его логика в src/cli/commands/init/index.ts
-- [ ] #2 program.ts импортирует ./commands/init
-- [ ] #3 tests/cli/init/* зелёные без правок поведения
+- [x] #1 src/cli/commands/init.ts удалён, его логика в src/cli/commands/init/index.ts
+- [x] #2 program.ts импортирует ./commands/init
+- [x] #3 tests/cli/init/* зелёные без правок поведения
 <!-- AC:END -->

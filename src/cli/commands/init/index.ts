@@ -1,7 +1,7 @@
-import { setupApi, type SetupApiResult } from "../../core/setup-api.ts";
-import { printError, printSuccess } from "../output.ts";
-import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
-import { bootstrapWorkspace, type BootstrapResult } from "./init/bootstrap.ts";
+import { setupApi, type SetupApiResult } from "../../../core/setup-api.ts";
+import { printError, printSuccess } from "../../output.ts";
+import { jsonOk, jsonError, printJson } from "../../json-envelope.ts";
+import { bootstrapWorkspace, type BootstrapResult } from "./bootstrap.ts";
 
 export interface InitOptions {
   // register-an-API options (existing)
