@@ -58,6 +58,14 @@ describe("zond doctor", () => {
     savedCwd = process.cwd();
     process.chdir(workspace);
     await setupApi({ name: "tiny", spec: specPath, dbPath });
+    // Path-param defaults are seeded as empty (TASK-210) so `skip_if` auto-skips
+    // until the user fills them. Doctor treats empty fixtures as UNSET, so for
+    // the "healthy workspace" baseline we backfill `id` explicitly.
+    writeFileSync(
+      join(workspace, "apis", "tiny", ".env.yaml"),
+      "base_url: https://example.com\nid: u-1\n",
+      "utf-8",
+    );
     closeDb();
   });
 

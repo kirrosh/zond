@@ -13,6 +13,8 @@ import {
   buildApiFixtureManifest,
   serializeApiFixtureManifest,
 } from "./generator/index.ts";
+import { schemeVarName } from "./generator/suite-generator.ts";
+import type { SecuritySchemeInfo } from "./generator/types.ts";
 import { decycleSchema } from "./generator/schema-utils.ts";
 import { hashSpec } from "./meta/meta-store.ts";
 import { findWorkspaceRoot } from "./workspace/root.ts";
@@ -170,7 +172,30 @@ export interface SetupApiResult {
   baseUrl: string;
   specEndpoints: number;
   pathParams?: Record<string, string>;
+  /** Auth-related env-var names auto-seeded as `@secret:<name>` (TASK-209). */
+  authVars?: string[];
   warnings?: string[];
+}
+
+/**
+ * Walk the security schemes and derive the env-var names that
+ * `@readme/openapi-parser`-derived suites/probes will reference for auth
+ * tokens. Mirrors `getAuthHeaders` in src/core/probe/shared.ts:
+ *   - HTTP bearer/basic/empty-scheme → schemeVarName(...) (default "auth_token")
+ *   - apiKey in header named "Authorization" → schemeVarName(...)
+ *   - apiKey in header (other name) → "api_key"
+ */
+function deriveAuthVarNames(schemes: SecuritySchemeInfo[]): string[] {
+  const vars = new Set<string>();
+  for (const s of schemes) {
+    if (s.type === "http" && (s.scheme === "bearer" || s.scheme === "basic" || !s.scheme)) {
+      vars.add(schemeVarName(s, schemes));
+    } else if (s.type === "apiKey" && s.in === "header" && s.apiKeyName) {
+      if (s.apiKeyName === "Authorization") vars.add(schemeVarName(s, schemes));
+      else vars.add("api_key");
+    }
+  }
+  return [...vars];
 }
 
 export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult> {
@@ -190,6 +215,7 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   // *dereferenced* form so all consumers (probe-*, generate, describe) read
   // a self-contained file — no external $ref resolution at runtime.
   let dereferencedDoc: unknown = null;
+  let authVarNames: string[] = [];
   if (spec) {
     const doc = await readOpenApiSpec(spec, { insecure: options.insecure });
     dereferencedDoc = doc;
@@ -203,16 +229,19 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     specTitle = (doc as any).info?.title;
     const endpoints = extractEndpoints(doc);
     endpointCount = endpoints.length;
+    authVarNames = deriveAuthVarNames(extractSecuritySchemes(doc));
 
-    // Collect unique path parameters with default values
+    // Collect unique path parameters. The default is empty string so that
+    // generated `skip_if: "{{<id>}} =="` checks auto-skip until the user
+    // fills the value in .env.yaml (TASK-210). Spec-provided examples are
+    // kept verbatim so they are still useful as concrete fixtures.
     for (const ep of endpoints) {
       for (const param of (ep.parameters ?? []).filter(p => p.in === "path")) {
         if (pathParams.has(param.name)) continue;
         const schema = param.schema as any;
         if (param.example !== undefined) pathParams.set(param.name, String(param.example));
         else if (schema?.example !== undefined) pathParams.set(param.name, String(schema.example));
-        else if (schema?.type === "integer" || schema?.type === "number") pathParams.set(param.name, "1");
-        else pathParams.set(param.name, "example");
+        else pathParams.set(param.name, "");
       }
     }
   }
@@ -249,6 +278,13 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   // Add path parameter defaults (before user overrides)
   for (const [k, v] of pathParams) {
     if (!(k in envVars)) envVars[k] = v;
+  }
+  // Auto-wire auth env-vars to .secrets.yaml so generated suites and probes
+  // resolve `{{auth_token}}` (etc.) without manual editing of .env.yaml
+  // (TASK-209). The matching `<var>: ""` placeholder is seeded into
+  // .secrets.yaml below — the user only fills the secret value.
+  for (const v of authVarNames) {
+    if (!(v in envVars)) envVars[v] = `@secret:${v}`;
   }
   if (options.envVars) {
     Object.assign(envVars, options.envVars);
@@ -298,18 +334,16 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   // the SecretRegistry on load and never appear in artifacts.
   const secretsPath = join(baseDir, ".secrets.yaml");
   if (!existsSync(secretsPath)) {
-    writeFileSync(
-      secretsPath,
-      [
-        "# .secrets.yaml — gitignored, holds raw secret values.",
-        "# Reference these in .env.yaml as @secret:<key>.",
-        "# Values here are auto-registered for redaction in DB writes,",
-        "# HTML/JSON/JUnit reports, case-studies, and probe digests.",
-        "auth_token: \"\"  # required for live probes",
-        "",
-      ].join("\n"),
-      "utf-8",
-    );
+    const seedKeys = authVarNames.length > 0 ? authVarNames : ["auth_token"];
+    const lines = [
+      "# .secrets.yaml — gitignored, holds raw secret values.",
+      "# Reference these in .env.yaml as @secret:<key>.",
+      "# Values here are auto-registered for redaction in DB writes,",
+      "# HTML/JSON/JUnit reports, case-studies, and probe digests.",
+    ];
+    for (const k of seedKeys) lines.push(`${k}: ""  # required for live probes`);
+    lines.push("");
+    writeFileSync(secretsPath, lines.join("\n"), "utf-8");
   }
 
   // TASK-174 (m-10): seed `.identity.yaml` with placeholders for any
@@ -387,6 +421,7 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     baseUrl,
     specEndpoints: endpointCount,
     ...(pathParamsObj ? { pathParams: pathParamsObj } : {}),
+    ...(authVarNames.length > 0 ? { authVars: authVarNames } : {}),
     ...(warnings.length > 0 ? { warnings } : {}),
   };
 }
