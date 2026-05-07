@@ -12,7 +12,8 @@ import {
 import { loadSpecForProbe, writeProbeSuites } from "../../core/probe/runner.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
-import { getSecretRegistry, redact } from "../../core/secrets/registry.ts";
+import { getSecretRegistry } from "../../core/secrets/registry.ts";
+import { applySanitizer } from "../../core/exporter/exporter.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 
 export interface ProbeSecurityOptions {
@@ -111,7 +112,7 @@ export async function probeSecurityCommand(
     // TASK-168 (m-10): register env vars + redact the digest before
     // either writing to disk or echoing to stdout.
     getSecretRegistry().registerAll(vars);
-    const md = redact(formatSecurityDigest(result, options.specPath));
+    const md = applySanitizer(formatSecurityDigest(result, options.specPath));
     if (options.output) {
       await mkdir(join(options.output, "..").replace(/\/\.$/, ""), { recursive: true }).catch(() => {});
       rotateOutputTarget(options.output, { overwrite: options.overwrite });

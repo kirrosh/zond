@@ -1,5 +1,5 @@
 import type { TestRunResult, StepResult } from "../runner/types.ts";
-import { redact } from "../secrets/registry.ts";
+import { type Exporter, runExporter } from "../exporter/exporter.ts";
 import type { Reporter, ReporterOptions } from "./types.ts";
 
 function escapeXml(str: string): string {
@@ -56,21 +56,34 @@ function renderTestsuite(result: TestRunResult): string {
   return `  <testsuite name="${name}" tests="${tests}" failures="${failures}" errors="${errors}" skipped="${skipped}" time="${time}">\n${testcases}\n  </testsuite>`;
 }
 
+const junitExporter: Exporter<TestRunResult[]> = {
+  name: "junit",
+  mime: "application/xml",
+  render(results: TestRunResult[]): string {
+    const totalTests = results.reduce((s, r) => s + r.total, 0);
+    const totalFailures = results.reduce((s, r) => s + r.failed, 0);
+    const totalErrors = results.reduce(
+      (s, r) => s + r.steps.filter((s) => s.status === "error").length,
+      0,
+    );
+    const totalTime = formatTime(
+      results.reduce((s, r) => s + r.steps.reduce((ss, step) => ss + step.duration_ms, 0), 0),
+    );
+
+    const suites = results.map(renderTestsuite).join("\n");
+
+    return [
+      `<?xml version="1.0" encoding="UTF-8"?>`,
+      `<testsuites tests="${totalTests}" failures="${totalFailures}" errors="${totalErrors}" time="${totalTime}">`,
+      suites,
+      `</testsuites>`,
+    ].join("\n");
+  },
+};
+
+/** TASK-186: pure render → sanitizer pipeline; redaction lives in runExporter. */
 export function generateJunitXml(results: TestRunResult[]): string {
-  const totalTests = results.reduce((s, r) => s + r.total, 0);
-  const totalFailures = results.reduce((s, r) => s + r.failed, 0);
-  const totalErrors = results.reduce((s, r) => s + r.steps.filter((s) => s.status === "error").length, 0);
-  const totalTime = formatTime(results.reduce((s, r) => s + r.steps.reduce((ss, step) => ss + step.duration_ms, 0), 0));
-
-  const suites = results.map(renderTestsuite).join("\n");
-
-  // TASK-168 (m-10): redact registered secret values before returning.
-  return redact([
-    `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<testsuites tests="${totalTests}" failures="${totalFailures}" errors="${totalErrors}" time="${totalTime}">`,
-    suites,
-    `</testsuites>`,
-  ].join("\n"));
+  return runExporter(junitExporter, results);
 }
 
 export const junitReporter: Reporter = {
