@@ -109,7 +109,7 @@ selected via `zond use`.
 | `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--session-id <id>`, `--report json\|junit`, `--report-out <file>` |
 | `session start\|end\|status` | Group multiple `zond run` calls into one campaign in `/runs` Sessions view | `--label <text>`, `--id <uuid>` |
 | `validate <path>` | Validate YAML tests | |
-| `coverage` | API test coverage | `--spec`, `--tests`, `--api`, `--fail-on-coverage <N>` |
+| `coverage` | API test coverage. Exit 0 = full coverage (or ≥ `--fail-on-coverage`); 1 = uncovered endpoints (or below threshold); 2 = bad input/read error. Warnings (e.g. `required_params_no_examples`) never affect the exit code. | `--spec`, `--tests`, `--api`, `--fail-on-coverage <N>` |
 | `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
 | `probe validation [spec]` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup`, `--no-real-parents` |
