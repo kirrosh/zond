@@ -532,13 +532,33 @@ Skip semantics with `always: true`:
 
 ### Assertions
 
-`equals`, `type`, `capture`, `contains`, `matches`, `gt`, `lt`, `exists` (boolean). Nested: `category.name: { equals: "Dogs" }`. Root body: `_body: { type: "array" }`.
+Полный набор правил (источник истины — `src/core/runner/assertions.ts`):
 
-**Type values:** `string | integer | number | boolean | array | object | null`. Use `type: "null"` to assert a field is explicitly null.
+| Rule | Example | Semantics |
+|---|---|---|
+| `equals` | `{ equals: "Dogs" }` | deep-equality (loose number↔numeric-string at top level) |
+| `not_equals` | `{ not_equals: null }` | отрицание `equals` |
+| `exists` | `{ exists: true }` | ключ присутствует в ответе (включая `null`) |
+| `type` | `{ type: "string" }` | `string \| integer \| number \| boolean \| array \| object \| null` |
+| `contains` | `{ contains: "@" }` | substring (только для string) |
+| `not_contains` | `{ not_contains: "error" }` | string не содержит подстроку |
+| `matches` | `{ matches: "^[A-Z]" }` | regex (string only) |
+| `gt` / `gte` / `lt` / `lte` | `{ gt: 0 }` | сравнение чисел |
+| `length` | `{ length: 3 }` | точная длина (array или string) |
+| `length_gt` / `length_gte` / `length_lt` / `length_lte` | `{ length_gt: 0 }` | сравнения длины |
+| `each` | `{ each: { id: { type: "string" } } }` | каждый элемент массива удовлетворяет sub-rules |
+| `contains_item` | `{ contains_item: { status: { equals: "active" } } }` | хотя бы один элемент массива удовлетворяет sub-rules |
+| `set_equals` | `{ set_equals: ["a", "b", "c"] }` | массивы как множества (порядок и дубликаты игнорируются) |
+| `capture` | `{ capture: created_id }` | сохранить значение в переменную для следующих шагов |
 
-**Exists semantics:** `exists: true` means *key is present in the response*, including when the value is `null`. To assert "present and not null", combine: `{ exists: true, not_equals: null }` or use `type: "string"` (or whichever non-null type you expect).
+**Status:** `status: 200` или `status: [200, 204]` (массив = «один из»).
 
-**Field name conflicts with assertion keys:** if your response has a field literally named `type`, `equals`, `length`, etc. — use **quoted dot-notation** so the parser treats it as a path, not a rule:
+**Nested paths:** `category.name: { equals: "Dogs" }`. Точка — разделитель.
+Корневой body: `_body: { type: "array" }`.
+
+**Field name conflicts:** если в ответе есть поле буквально с именем `type`,
+`equals`, `length` и т.п. — используй кавычки в dotted-path, чтобы парсер
+не принял за rule:
 
 ```yaml
 expect:
@@ -547,7 +567,39 @@ expect:
     "data.length": { gt: 0 }           # asserts data.length > 0
 ```
 
-`status` accepts a single integer (`200`) or an array of allowed codes (`[200, 204]`).
+**Combinable rules.** Несколько правил на один путь работают как AND:
+`{ exists: true, not_equals: null, type: "string" }`.
+
+**Exists semantics.** `exists: true` означает «ключ присутствует», включая
+случай когда значение `null`. Чтобы потребовать «present и не null»:
+`{ exists: true, not_equals: null }` или `{ type: "string" }`.
+
+**Capture для chained suites.** Captures видны только внутри одного suite.
+Для передачи между suites используй `setup: true` сьют (его captures вливаются
+в env regular suites).
+
+#### Полный пример
+
+```yaml
+- name: list users — shape contract + capture id
+  GET: /users
+  expect:
+    status: [200, 304]
+    body:
+      object:    { equals: "list" }
+      data:      { type: "array", length_gt: 0 }
+      data[0].id:
+        exists: true
+        not_equals: null
+        type: "string"
+        capture: first_user_id
+      data[0].email: { matches: "^[^@]+@[^@]+\\..+$" }
+      data:
+        each:
+          id:    { type: "string" }
+          email: { type: "string" }
+      meta.has_more: { type: "boolean" }
+```
 
 ### Suite Variable Isolation
 

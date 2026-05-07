@@ -95,7 +95,7 @@ describe("zond run — cwd .env.yaml fallback (TASK-HIGH.3)", () => {
 
   test("loads ./.env.yaml from cwd when --env not given and searchDir has none", async () => {
     const code = await runCommand({
-      path: testFile,
+      paths: [testFile],
       env: undefined,
       report: "json",
       bail: false,
@@ -127,7 +127,7 @@ describe("zond run — cwd .env.yaml fallback (TASK-HIGH.3)", () => {
     );
 
     const code = await runCommand({
-      path: testFile,
+      paths: [testFile],
       env: undefined,
       report: "json",
       bail: false,

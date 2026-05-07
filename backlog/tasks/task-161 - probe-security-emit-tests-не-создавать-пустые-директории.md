@@ -1,9 +1,10 @@
 ---
 id: TASK-161
 title: 'probe-security --emit-tests: не создавать пустые директории'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 06:39'
+updated_date: '2026-05-07'
 labels:
   - lifecycle
   - probe-security

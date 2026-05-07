@@ -74,7 +74,7 @@ describe("zond run --sequential (TASK-39)", () => {
     }) as unknown as typeof fetch;
 
     const code = await runCommand({
-      path: workDir,
+      paths: [workDir],
       report: "json",
       bail: false,
       sequential: true,

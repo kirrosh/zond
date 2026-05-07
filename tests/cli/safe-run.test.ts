@@ -56,7 +56,7 @@ describe("--safe mode", () => {
     ]);
 
     const code = await runCommand({
-      path: `${FIXTURES}/crud.yaml`,
+      paths: [`${FIXTURES}/crud.yaml`],
       env: undefined,
       report: "json",
       bail: false,
@@ -76,7 +76,7 @@ describe("--safe mode", () => {
     ]);
 
     const code = await runCommand({
-      path: `${FIXTURES}/simple.yaml`,
+      paths: [`${FIXTURES}/simple.yaml`],
       report: "json",
       bail: false,
       noDb: true,
@@ -90,7 +90,7 @@ describe("--safe mode", () => {
 
   test("safe mode returns 0 when no GET tests found", async () => {
     const code = await runCommand({
-      path: `${FIXTURES}/post-only.yaml`,
+      paths: [`${FIXTURES}/post-only.yaml`],
       report: "console",
       bail: false,
       noDb: true,

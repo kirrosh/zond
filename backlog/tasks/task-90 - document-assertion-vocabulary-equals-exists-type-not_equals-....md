@@ -1,9 +1,10 @@
 ---
 id: TASK-90
 title: document assertion vocabulary (equals/exists/type/not_equals/...)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 11:39'
+updated_date: '2026-05-07'
 labels:
   - docs
   - dx

@@ -47,7 +47,7 @@ describe("TASK-75: pre-flight var check + --strict-vars", () => {
       join(dir, "t.yaml"),
       "name: T\nbase_url: http://localhost\ntests:\n  - name: r\n    GET: /x?email={{nonexistent_var}}\n    expect: {}\n",
     );
-    const code = await runCommand({ path: dir, report: "json", bail: false, noDb: true });
+    const code = await runCommand({ paths: [dir], report: "json", bail: false, noDb: true });
     expect(code).toBe(0);
     expect(s.errs.join("")).toMatch(/Undefined variable \{\{nonexistent_var\}\}/);
   });
@@ -57,7 +57,7 @@ describe("TASK-75: pre-flight var check + --strict-vars", () => {
       join(dir, "t.yaml"),
       "name: T\nbase_url: http://localhost\ntests:\n  - name: r\n    GET: /x?email={{nonexistent_var}}\n    expect: {}\n",
     );
-    const code = await runCommand({ path: dir, report: "json", bail: false, noDb: true, strictVars: true });
+    const code = await runCommand({ paths: [dir], report: "json", bail: false, noDb: true, strictVars: true });
     expect(code).toBe(2);
     expect(s.errs.join("")).toMatch(/strict-vars/);
   });
@@ -67,7 +67,7 @@ describe("TASK-75: pre-flight var check + --strict-vars", () => {
       join(dir, "t.yaml"),
       "name: T\nbase_url: http://localhost\ntests:\n  - name: create\n    POST: /u\n    expect:\n      body:\n        id: { capture: user_id }\n  - name: get\n    GET: /u/{{user_id}}\n    expect: {}\n",
     );
-    const code = await runCommand({ path: dir, report: "json", bail: false, noDb: true, strictVars: true });
+    const code = await runCommand({ paths: [dir], report: "json", bail: false, noDb: true, strictVars: true });
     expect(code).toBe(0);
     expect(s.errs.join("")).not.toMatch(/Undefined variable/);
   });
