@@ -271,15 +271,19 @@ When `recommended_action: fix_test_logic` and the body is rejected on format
 Run on a passing API to surface latent bugs.
 
 ```bash
-zond probe-validation apis/<name>/spec.json --output apis/<name>/probes/validation
-zond probe-methods    apis/<name>/spec.json --output apis/<name>/probes/methods
-zond probe-mass-assignment apis/<name>/spec.json --env apis/<name>/.env.yaml \
+zond probe validation apis/<name>/spec.json --output apis/<name>/probes/validation
+zond probe methods    apis/<name>/spec.json --output apis/<name>/probes/methods
+zond probe mass-assignment apis/<name>/spec.json --env apis/<name>/.env.yaml \
   --output apis/<name>/probes/mass-assignment-digest.md \
   --emit-tests apis/<name>/probes/mass-assignment
 
 zond run apis/<name>/probes/<class> --json
 zond db diagnose <run-id> --json
 ```
+
+> Старые имена `zond probe-validation` / `probe-methods` / `probe-mass-assignment` /
+> `probe-security` оставлены как алиасы на 1 релиз и пишут deprecation warning
+> в stderr. Используйте `zond probe <class>`.
 
 Findings to flag: 5xx on null/empty/wrong-type body (missing validation /
 unguarded coercion), 2xx on undeclared method (contract drift), `is_admin: true`
@@ -362,7 +366,7 @@ If `is_admin: true` survives the round-trip GET → **HIGH**. File via
 ### Phase 5.2 — Security probes (SSRF, CRLF, open-redirect)
 
 ```bash
-zond probe-security ssrf,crlf --api <name> --env apis/<name>/.env.yaml \
+zond probe security ssrf,crlf --api <name> --env apis/<name>/.env.yaml \
   --output apis/<name>/probes/security-digest.md \
   --emit-tests apis/<name>/probes/security
 ```
