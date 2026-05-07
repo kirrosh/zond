@@ -92,6 +92,22 @@ export interface FixtureMetaRow {
   /** Resolved value — present for env / identity entries, omitted for
    *  secrets so doctor never echoes a token. */
   value?: string;
+  /** True when the value looks like a synthetic placeholder ("example",
+   *  "string", "1") rather than a real fixture. Doctor still treats the
+   *  fixture as `set` (it has a value) but flags it as suspicious so the
+   *  user knows positive/CRUD suites will hit fake IDs (TASK-216). */
+  placeholder?: true;
+}
+
+/** Synthetic stub values that cannot identify a real resource. Path-source
+ *  fixtures sitting on these strings would route to non-existent IDs and
+ *  return 404/422, so doctor treats them as "needs filling" rather than OK. */
+const PLACEHOLDER_VALUES = new Set(["example", "string", "1", "0"]);
+
+function looksLikePlaceholder(source: string, value: string | undefined): boolean {
+  if (source !== "path") return false;
+  if (typeof value !== "string") return false;
+  return PLACEHOLDER_VALUES.has(value.trim().toLowerCase());
 }
 
 interface DoctorReport {
@@ -282,6 +298,7 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
       const set = typeof value === "string" && value.length > 0;
       const isSecret = secretKeys.has(f.name);
       const isIdentity = identityKeys.has(f.name);
+      const placeholder = !isSecret && looksLikePlaceholder(f.source, value);
       const row: FixtureMetaRow = {
         name: f.name,
         set,
@@ -295,6 +312,7 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
         // locally-triagable but personally-identifying data; `--redact-
         // identity` swaps it for placeholders only at outbound time).
         ...(!isSecret && set ? { value } : {}),
+        ...(placeholder ? { placeholder: true as const } : {}),
       };
       if (f.required) requiredOut.push(row);
       else optionalOut.push(row);
@@ -307,6 +325,12 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   const warnings: string[] = [];
   if (!specExists) warnings.push(`spec.json not found at ${specAbsPath}`);
   if (!manifest) warnings.push(`.api-fixtures.yaml missing — run \`zond refresh-api ${apiName}\``);
+  const placeholderRows = [...requiredOut, ...optionalOut].filter(r => r.placeholder);
+  if (placeholderRows.length > 0) {
+    warnings.push(
+      `${placeholderRows.length} path fixture${placeholderRows.length === 1 ? "" : "s"} hold placeholder values (${placeholderRows.map(r => r.name).join(", ")}); positive/CRUD suites will hit fake ids — replace with real values in .env.yaml`,
+    );
+  }
 
   const report: DoctorReport = {
     api: apiName,
@@ -441,7 +465,7 @@ function printHuman(
     out.write(`  (none)\n`);
   } else {
     for (const f of r.fixtures.required) {
-      const icon = f.set ? "✓" : "✗";
+      const icon = !f.set ? "✗" : f.placeholder ? "⚠" : "✓";
       // TASK-172 (m-10): secrets show metadata only (set + length); identity
       // is visible because the user owns those values; plain env shows raw.
       const value = !f.set
@@ -450,7 +474,9 @@ function printHuman(
           ? `set (${f.length} chars, secret)`
           : f.identity
             ? `${envVars[f.name]} (identity)`
-            : envVars[f.name];
+            : f.placeholder
+              ? `${envVars[f.name]} (placeholder — fill with a real id)`
+              : envVars[f.name];
       const detail = f.set ? "" : ` (${f.affectedEndpoints.length === 1 && f.affectedEndpoints[0] === "*" ? "all endpoints" : `blocks ${f.affectedEndpoints.length} endpoint${f.affectedEndpoints.length === 1 ? "" : "s"}`})`;
       out.write(`  ${icon} ${f.name.padEnd(20)} ${String(value).padEnd(40)} [${f.source}]${detail}\n`);
     }
