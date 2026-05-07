@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- **TASK-177: remove `.mcp.example.json`.** Leftover from the
+  pre-decision-2 MCP integration. MCP support was dropped entirely; the
+  example config no longer documents anything.
 - **TASK-176: drop `CLAUDE.md`.** The file was a 13-line wrapper that
   pointed Claude Code at `AGENTS.md`. Modern Claude Code reads
   `AGENTS.md` directly, so the redirect is unnecessary. AGENTS.md
