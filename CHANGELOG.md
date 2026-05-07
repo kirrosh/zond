@@ -17,6 +17,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-186: unified `Exporter` interface + sanitizer pipeline.**
+  `src/core/exporter/exporter.ts` now defines `Exporter<I, O>` plus a
+  `runExporter()` pipeline; `applySanitizer()` is the one place
+  sanitization happens. `generateJsonReport` and `generateJunitXml` are
+  pure renderers that hand off to `runExporter`. The cli sites that
+  used to call `redact()` directly (HTML report, case-study draft,
+  probe-mass-assignment digest, probe-security digest) now call
+  `applySanitizer()`, signalling the single sanitization seam. New
+  exporters get sanitization for free; `redact()` is no longer imported
+  from cli/exporter code.
 - **TASK-184: typed `--json` envelope helpers (closes TASK-73 / TASK-74).**
   `src/cli/json-envelope.ts` now exports a discriminated-union
   `EnvelopeResult<T>` plus two new entry points: `writeEnvelope(cmd, result)`

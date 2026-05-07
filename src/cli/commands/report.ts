@@ -13,7 +13,7 @@ import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { loadCoverage } from "../../core/coverage/loader.ts";
 import type { CoverageMatrix } from "../../core/coverage/reasons.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
-import { redact } from "../../core/secrets/registry.ts";
+import { applySanitizer } from "../../core/exporter/exporter.ts";
 import { loadIdentityFromAncestor, redactIdentityIn } from "../../core/identity/identity-file.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 import { resolveTriageOutput } from "../../core/workspace/triage-path.ts";
@@ -119,7 +119,7 @@ export async function reportExportHtmlCommand(
     // is already redacted at DB-write time (TASK-167), but if the user
     // re-ran the same session they may have just registered a new value
     // — wrap the export so it can never out-pace the registry.
-    let payload = redact(html);
+    let payload = applySanitizer(html);
     if (options.redactIdentity && collection?.base_dir) {
       const id = loadIdentityFromAncestor(collection.base_dir);
       if (id) payload = redactIdentityIn(payload, id.values);
@@ -255,7 +255,7 @@ export async function reportCaseStudyCommand(
   }
 
   // TASK-168 (m-10): defensive redact on the rendered draft.
-  let md = redact(renderCaseStudy({
+  let md = applySanitizer(renderCaseStudy({
     result,
     run,
     specTitle,

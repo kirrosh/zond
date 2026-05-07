@@ -1,9 +1,10 @@
 ---
 id: TASK-186
 title: 'refactor: unified Exporter interface with sanitizer pipeline'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 06:49'
+updated_date: '2026-05-07 07:24'
 labels:
   - refactor
   - exporter
@@ -21,8 +22,8 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 src/core/exporter/exporter.ts — общий интерфейс + Pipeline
-- [ ] #2 Все 5 exporter'ов реализуют интерфейс
-- [ ] #3 Sanitizer вызывается ровно один раз в Pipeline
-- [ ] #4 tests на каждый exporter подтверждают: redacted markers в выводе для секрет-fixture
+- [x] #1 src/core/exporter/exporter.ts — общий интерфейс + Pipeline
+- [x] #2 Все 5 exporter'ов реализуют интерфейс
+- [x] #3 Sanitizer вызывается ровно один раз в Pipeline
+- [x] #4 tests на каждый exporter подтверждают: redacted markers в выводе для секрет-fixture
 <!-- AC:END -->

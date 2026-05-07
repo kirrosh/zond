@@ -9,7 +9,8 @@ import {
 import { loadSpecForProbe, writeProbeSuites } from "../../core/probe/runner.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
-import { getSecretRegistry, redact } from "../../core/secrets/registry.ts";
+import { getSecretRegistry } from "../../core/secrets/registry.ts";
+import { applySanitizer } from "../../core/exporter/exporter.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 
 export interface ProbeMassAssignmentOptions {
@@ -91,7 +92,7 @@ export async function probeMassAssignmentCommand(
     // TASK-168 (m-10): vars came from .env.yaml — register them so any
     // echoed token (URL, body, header) gets redacted in the digest.
     getSecretRegistry().registerAll(vars);
-    const md = redact(formatDigestMarkdown(result, options.specPath));
+    const md = applySanitizer(formatDigestMarkdown(result, options.specPath));
     if (options.output) {
       await mkdir(join(options.output, "..").replace(/\/\.$/, ""), { recursive: true }).catch(() => {});
       // TASK-162 (m-9 P6): rotate previous digest to <stem>-vN.md instead
