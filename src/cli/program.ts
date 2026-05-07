@@ -7,7 +7,7 @@ import { coverageCommand } from "./commands/coverage.ts";
 import { ciInitCommand } from "./commands/ci-init.ts";
 import { cleanCommand } from "./commands/clean.ts";
 import { getSecretRegistry } from "../core/secrets/registry.ts";
-import { initCommand } from "./commands/init.ts";
+import { initCommand } from "./commands/init/index.ts";
 import { describeCommand } from "./commands/describe.ts";
 import { dbCommand } from "./commands/db.ts";
 import { requestCommand } from "./commands/request.ts";

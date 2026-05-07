@@ -2,7 +2,7 @@ import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
 import { tmpdir } from "os";
 import { join } from "path";
 import { existsSync, mkdtempSync, unlinkSync, rmSync } from "fs";
-import { initCommand } from "../../src/cli/commands/init.ts";
+import { initCommand } from "../../src/cli/commands/init/index.ts";
 import { closeDb } from "../../src/db/schema.ts";
 
 function tryUnlink(path: string): void {
