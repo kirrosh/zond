@@ -67,7 +67,15 @@ async function pickAvailablePort(start: number, count: number, host: string): Pr
   return null;
 }
 
-export async function serveCommand(options: ServeOptions): Promise<number> {
+export interface ServeResult {
+  code: number;
+  /** Set when a real Bun.Server was bound (code === 0). Tests must call
+   *  `server.stop(true)` to release the port; production CLI exits the
+   *  process and lets the OS reclaim it. */
+  server?: ReturnType<typeof Bun.serve>;
+}
+
+export async function serveCommand(options: ServeOptions): Promise<ServeResult> {
   const requested = options.port ?? 8080;
   const host = options.host ?? "0.0.0.0";
 
@@ -82,7 +90,7 @@ export async function serveCommand(options: ServeOptions): Promise<number> {
         `All ports ${requested}..${requested + PORT_SCAN_LENGTH - 1} are in use. ` +
         `Use --port <n> to pick another, or --kill-existing to free :${requested}.`,
       );
-      return 1;
+      return { code: 1 };
     }
     if (picked !== requested) {
       process.stderr.write(`[zond] port ${requested} busy, using ${picked}\n`);
@@ -90,7 +98,7 @@ export async function serveCommand(options: ServeOptions): Promise<number> {
     port = picked;
   }
 
-  await startServer({
+  const server = await startServer({
     port,
     host: options.host,
     dbPath: options.dbPath,
@@ -110,8 +118,11 @@ export async function serveCommand(options: ServeOptions): Promise<number> {
     }
   }
 
-  return 0;
+  return { code: 0, server };
 }
+
+/** Picks a free port in `[start, start+count)` on `host`, or null if none. */
+export { pickAvailablePort };
 
 import type { Command } from "commander";
 import { parsePositiveInt } from "../argv.ts";
@@ -127,7 +138,7 @@ export function registerServe(program: Command): void {
     .option("--watch", "Enable dev mode with hot reload (auto-refresh on file changes)")
     .option("--kill-existing", "Kill any process holding the requested port (DANGEROUS — can terminate your dev server)")
     .action(async (opts) => {
-      process.exitCode = await serveCommand({
+      const result = await serveCommand({
         port: opts.port,
         host: opts.host,
         dbPath: opts.db,
@@ -135,5 +146,6 @@ export function registerServe(program: Command): void {
         open: opts.open === true,
         killExisting: opts.killExisting === true,
       });
+      process.exitCode = result.code;
     });
 }
