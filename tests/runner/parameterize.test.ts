@@ -4,8 +4,8 @@ import type { TestSuite } from "../../src/core/parser/types.ts";
 import { DEFAULT_CONFIG } from "../../src/core/parser/schema.ts";
 import { validateSuite } from "../../src/core/parser/schema.ts";
 
-const originalFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = originalFetch; });
+import { restoreFetch } from "../_helpers/fetch-mock";
+afterEach(restoreFetch);
 
 function recordedFetch() {
   const urls: string[] = [];

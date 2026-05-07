@@ -1,37 +1,19 @@
-import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { describe, test, expect, mock, afterEach } from "bun:test";
 import { join } from "node:path";
 import { requestCommand } from "../../src/cli/commands/request.ts";
 import { setupApi } from "../../src/core/setup-api.ts";
 import { closeDb } from "../../src/db/schema.ts";
 
-const originalFetch = globalThis.fetch;
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  const origLog = console.log;
-  let captured = "";
-  process.stdout.write = mock((data: any) => { captured += String(data); return true; }) as typeof process.stdout.write;
-  process.stderr.write = mock(() => true) as typeof process.stderr.write;
-  console.log = mock((...args: unknown[]) => { captured += args.map(String).join(" ") + "\n"; });
-  return {
-    restore() {
-      process.stdout.write = origOut;
-      process.stderr.write = origErr;
-      console.log = origLog;
-    },
-    getCaptured() { return captured; },
-  };
-}
+import { captureOutput } from "../_helpers/output";
+import { restoreFetch } from "../_helpers/fetch-mock";
+import { makeWorkspace } from "../_helpers/workspace";
 
 describe("requestCommand", () => {
-  let output: ReturnType<typeof suppressOutput>;
+  let output: ReturnType<typeof captureOutput>;
 
   afterEach(() => {
     output?.restore();
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   });
 
   test("sends GET request and returns JSON envelope", async () => {
@@ -42,7 +24,7 @@ describe("requestCommand", () => {
       })
     ) as unknown as typeof fetch;
 
-    output = suppressOutput();
+    output = captureOutput({ console: true });
 
     const code = await requestCommand({
       method: "GET",
@@ -51,7 +33,7 @@ describe("requestCommand", () => {
     });
 
     expect(code).toBe(0);
-    const envelope = JSON.parse(output.getCaptured());
+    const envelope = JSON.parse(output.out);
     expect(envelope.ok).toBe(true);
     expect(envelope.data.status).toBe(200);
     expect(envelope.data.body.hello).toBe("world");
@@ -67,7 +49,7 @@ describe("requestCommand", () => {
       });
     }) as unknown as typeof fetch;
 
-    output = suppressOutput();
+    output = captureOutput({ console: true });
 
     const code = await requestCommand({
       method: "POST",
@@ -81,10 +63,8 @@ describe("requestCommand", () => {
   });
 
   test("--api with relative path auto-prefixes base_url from .env.yaml", async () => {
-    const workspace = realpathSync(mkdtempSync(join(tmpdir(), "zond-req-")));
-    writeFileSync(join(workspace, "zond.config.yml"), "version: 1\n", "utf-8");
-    const savedCwd = process.cwd();
-    process.chdir(workspace);
+    const ws = makeWorkspace({ prefix: "zond-req-", marker: "config", chdir: true });
+    const workspace = ws.path;
     try {
       await setupApi({
         name: "jp",
@@ -99,7 +79,7 @@ describe("requestCommand", () => {
         return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
       }) as unknown as typeof fetch;
 
-      output = suppressOutput();
+      output = captureOutput({ console: true });
 
       const code = await requestCommand({
         method: "GET",
@@ -113,18 +93,15 @@ describe("requestCommand", () => {
       expect(calledUrl).toBe("https://example.com/users/1");
     } finally {
       closeDb();
-      process.chdir(savedCwd);
-      rmSync(workspace, { recursive: true, force: true });
+      ws.cleanup();
     }
   });
 
   test("--api unknown gives actionable error", async () => {
-    const workspace = realpathSync(mkdtempSync(join(tmpdir(), "zond-req-")));
-    writeFileSync(join(workspace, "zond.config.yml"), "version: 1\n", "utf-8");
-    const savedCwd = process.cwd();
-    process.chdir(workspace);
+    const ws = makeWorkspace({ prefix: "zond-req-", marker: "config", chdir: true });
+    const workspace = ws.path;
     try {
-      output = suppressOutput();
+      output = captureOutput({ console: true });
       const code = await requestCommand({
         method: "GET",
         url: "/users/1",
@@ -133,14 +110,13 @@ describe("requestCommand", () => {
         json: true,
       });
       expect(code).toBe(1);
-      const envelope = JSON.parse(output.getCaptured());
+      const envelope = JSON.parse(output.out);
       expect(envelope.ok).toBe(false);
       expect(envelope.errors[0]).toMatch(/not registered/);
       expect(envelope.errors[0]).toMatch(/zond add api/);
     } finally {
       closeDb();
-      process.chdir(savedCwd);
-      rmSync(workspace, { recursive: true, force: true });
+      ws.cleanup();
     }
   });
 
@@ -154,7 +130,7 @@ describe("requestCommand", () => {
       });
     }) as unknown as typeof fetch;
 
-    output = suppressOutput();
+    output = captureOutput({ console: true });
 
     const code = await requestCommand({
       method: "GET",

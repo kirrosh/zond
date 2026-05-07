@@ -1,19 +1,7 @@
 import { describe, test, expect, afterEach } from "bun:test";
-import { tmpdir } from "os";
-import { join } from "path";
-import { existsSync, unlinkSync } from "fs";
+import { existsSync } from "fs";
 import { getDb, closeDb } from "../../src/db/schema.ts";
-
-function tmpDb(): string {
-  return join(tmpdir(), `zond-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-}
-
-function tryUnlink(path: string): void {
-  // WAL mode creates -wal and -shm sidecar files; cleanup is best-effort on Windows
-  for (const suffix of ["", "-wal", "-shm"]) {
-    try { unlinkSync(path + suffix); } catch { /* ignore */ }
-  }
-}
+import { tmpDb, unlinkDb as tryUnlink } from "../_helpers/tmp-db";
 
 describe("getDb / schema", () => {
   let dbPath: string | undefined;

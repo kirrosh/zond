@@ -1,8 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { tmpdir } from "os";
-import { join } from "path";
-import { unlinkSync } from "fs";
 import { getDb, closeDb } from "../../src/db/schema.ts";
+import { tmpDb, unlinkDb as tryUnlink } from "../_helpers/tmp-db";
 import {
   createRun,
   finalizeRun,
@@ -22,16 +20,6 @@ import type { TestRunResult } from "../../src/core/runner/types.ts";
 // ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
-
-function tmpDb(): string {
-  return join(tmpdir(), `zond-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-}
-
-function tryUnlink(path: string): void {
-  for (const suffix of ["", "-wal", "-shm"]) {
-    try { unlinkSync(path + suffix); } catch { /* ignore on Windows */ }
-  }
-}
 
 function makeSuiteResult(overrides?: Partial<TestRunResult>): TestRunResult {
   return {

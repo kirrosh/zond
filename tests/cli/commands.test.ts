@@ -1,51 +1,14 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
-import { tmpdir } from "os";
-import { join } from "path";
-import { existsSync, unlinkSync } from "fs";
+import { existsSync } from "fs";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { validateCommand } from "../../src/cli/commands/validate.ts";
 import { closeDb } from "../../src/db/schema.ts";
-
-function tryUnlink(path: string): void {
-  for (const suffix of ["", "-wal", "-shm"]) {
-    try { unlinkSync(path + suffix); } catch { /* ignore on Windows */ }
-  }
-}
+import { tmpDb, unlinkDb as tryUnlink } from "../_helpers/tmp-db";
+import { captureOutput } from "../_helpers/output";
+import { mockFetchSequence as mockFetchResponses, restoreFetch } from "../_helpers/fetch-mock";
 
 const FIXTURES = `${import.meta.dir}/../fixtures`;
-const originalFetch = globalThis.fetch;
 
-// Helper to mock fetch responses
-function mockFetchResponses(responses: Array<{ status: number; body: unknown; headers?: Record<string, string> }>) {
-  let callIndex = 0;
-  globalThis.fetch = mock(async () => {
-    const resp = responses[callIndex++] ?? { status: 500, body: { error: "unexpected call" } };
-    return new Response(JSON.stringify(resp.body), {
-      status: resp.status,
-      headers: { "Content-Type": "application/json", ...resp.headers },
-    });
-  }) as unknown as typeof fetch;
-}
-
-function restoreFetch() {
-  globalThis.fetch = originalFetch;
-}
-
-// Suppress stdout/stderr during tests
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  process.stdout.write = mock(() => true) as typeof process.stdout.write;
-  process.stderr.write = mock(() => true) as typeof process.stderr.write;
-  return () => {
-    process.stdout.write = origOut;
-    process.stderr.write = origErr;
-  };
-}
-
-function tmpDb(): string {
-  return join(tmpdir(), `zond-cmd-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-}
 
 describe("runCommand", () => {
   let restore: () => void;
@@ -58,7 +21,7 @@ describe("runCommand", () => {
 
   test("returns 0 when all tests pass", async () => {
     mockFetchResponses([{ status: 200, body: { id: 1 } }]);
-    restore = suppressOutput();
+    restore = captureOutput().restore;
 
     const code = await runCommand({
       paths: [`${FIXTURES}/simple.yaml`],
@@ -72,7 +35,7 @@ describe("runCommand", () => {
   test("returns 1 when a test fails", async () => {
     // simple.yaml expects status 200, we return 500
     mockFetchResponses([{ status: 500, body: { error: "fail" } }]);
-    restore = suppressOutput();
+    restore = captureOutput().restore;
 
     const code = await runCommand({
       paths: [`${FIXTURES}/simple.yaml`],
@@ -84,7 +47,7 @@ describe("runCommand", () => {
   });
 
   test("returns 2 for invalid path", async () => {
-    restore = suppressOutput();
+    restore = captureOutput().restore;
 
     const code = await runCommand({
       paths: [`${FIXTURES}/nonexistent.yaml`],
@@ -97,7 +60,7 @@ describe("runCommand", () => {
 
   test("--timeout overrides suite config", async () => {
     mockFetchResponses([{ status: 200, body: {} }]);
-    restore = suppressOutput();
+    restore = captureOutput().restore;
 
     const code = await runCommand({
       paths: [`${FIXTURES}/simple.yaml`],
@@ -177,7 +140,7 @@ describe("runCommand", () => {
       });
     }) as unknown as typeof fetch;
 
-    restore = suppressOutput();
+    restore = captureOutput().restore;
 
     const code = await runCommand({
       paths: [`${FIXTURES}/bail`],
@@ -194,7 +157,7 @@ describe("runCommand", () => {
   test("saves results to DB when noDb is false", async () => {
     mockFetchResponses([{ status: 200, body: {} }]);
     const db = tmpDb();
-    restore = suppressOutput();
+    restore = captureOutput().restore;
 
     try {
       const code = await runCommand({
@@ -219,7 +182,7 @@ describe("runCommand", () => {
   test("--no-db skips DB creation", async () => {
     mockFetchResponses([{ status: 200, body: {} }]);
     const db = tmpDb();
-    restore = suppressOutput();
+    restore = captureOutput().restore;
 
     const code = await runCommand({
       paths: [`${FIXTURES}/simple.yaml`],
@@ -242,25 +205,25 @@ describe("validateCommand", () => {
   });
 
   test("returns 0 for valid YAML", async () => {
-    restore = suppressOutput();
+    restore = captureOutput().restore;
     const code = await validateCommand({ path: `${FIXTURES}/simple.yaml` });
     expect(code).toBe(0);
   });
 
   test("returns 2 for invalid YAML", async () => {
-    restore = suppressOutput();
+    restore = captureOutput().restore;
     const code = await validateCommand({ path: `${FIXTURES}/invalid-missing-name.yaml` });
     expect(code).toBe(2);
   });
 
   test("returns 0 for valid directory", async () => {
-    restore = suppressOutput();
+    restore = captureOutput().restore;
     const code = await validateCommand({ path: `${FIXTURES}/valid` });
     expect(code).toBe(0);
   });
 
   test("returns 2 for nonexistent path", async () => {
-    restore = suppressOutput();
+    restore = captureOutput().restore;
     const code = await validateCommand({ path: `${FIXTURES}/nonexistent.yaml` });
     expect(code).toBe(2);
   });
@@ -284,7 +247,7 @@ describe("runCommand with --auth-token", () => {
         headers: { "Content-Type": "application/json" },
       });
     }) as unknown as typeof fetch;
-    restore = suppressOutput();
+    restore = captureOutput().restore;
 
     const code = await runCommand({
       paths: [`${FIXTURES}/auth-token-test.yaml`],

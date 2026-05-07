@@ -1,36 +1,7 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
 import { jsonReporter } from "../../src/core/reporter/json.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
-
-function makeResult(overrides?: Partial<TestRunResult>): TestRunResult {
-  return {
-    suite_name: "Test Suite",
-    started_at: "2024-01-01T00:00:00.000Z",
-    finished_at: "2024-01-01T00:00:01.000Z",
-    total: 1,
-    passed: 1,
-    failed: 0,
-    skipped: 0,
-    steps: [
-      {
-        name: "Step 1",
-        status: "pass",
-        duration_ms: 100,
-        request: { method: "GET", url: "http://localhost/test", headers: {} },
-        response: {
-          status: 200,
-          headers: { "content-type": "application/json" },
-          body: '{"ok":true}',
-          body_parsed: { ok: true },
-          duration_ms: 100,
-        },
-        assertions: [{ field: "status", rule: "equals 200", passed: true, actual: 200, expected: 200 }],
-        captures: {},
-      },
-    ],
-    ...overrides,
-  };
-}
+import { makeResult } from "../_helpers/reporter-fixtures";
 
 function captureConsoleLog() {
   const origLog = console.log;

@@ -1,42 +1,29 @@
 import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
-import { tmpdir } from "os";
 import { join } from "path";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { writeFileSync } from "fs";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { closeDb } from "../../src/db/schema.ts";
-
-const originalFetch = globalThis.fetch;
-const originalCwd = process.cwd();
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  process.stdout.write = mock(() => true) as typeof process.stdout.write;
-  process.stderr.write = mock(() => true) as typeof process.stderr.write;
-  return {
-    restore: () => {
-      process.stdout.write = origOut;
-      process.stderr.write = origErr;
-    },
-  };
-}
+import { captureOutput } from "../_helpers/output";
+import { restoreFetch } from "../_helpers/fetch-mock";
+import { makeWorkspace } from "../_helpers/workspace";
 
 describe("zond run --sequential (TASK-39)", () => {
   let workDir: string;
-  let suppress: ReturnType<typeof suppressOutput>;
+  let cleanupWs: () => void;
+  let suppress: ReturnType<typeof captureOutput>;
 
   beforeEach(() => {
-    workDir = mkdtempSync(join(tmpdir(), "zond-seq-"));
-    process.chdir(workDir);
-    suppress = suppressOutput();
+    const ws = makeWorkspace({ prefix: "zond-seq-", chdir: true });
+    workDir = ws.path;
+    cleanupWs = ws.cleanup;
+    suppress = captureOutput();
   });
 
   afterEach(() => {
     suppress.restore();
-    globalThis.fetch = originalFetch;
+    restoreFetch();
     closeDb();
-    process.chdir(originalCwd);
-    try { rmSync(workDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    cleanupWs();
   });
 
   test("runs regular suites one at a time when --sequential is set", async () => {

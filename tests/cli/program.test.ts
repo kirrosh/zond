@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { buildProgram, preprocessArgv } from "../../src/cli/program.ts";
+import { captureOutput } from "../_helpers/output";
 
 afterEach(() => {
   // CLI handlers set process.exitCode = 2 on failures; leaking that to the
@@ -12,23 +13,11 @@ afterEach(() => {
   process.exitCode = 0;
 });
 
-// Suppress commander stdout/stderr (--help, errors)
-function suppressOutput(): () => void {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  process.stdout.write = mock(() => true) as typeof process.stdout.write;
-  process.stderr.write = mock(() => true) as typeof process.stderr.write;
-  return () => {
-    process.stdout.write = origOut;
-    process.stderr.write = origErr;
-  };
-}
-
 // Parse argv synchronously by extracting the action call. We don't actually invoke action;
 // instead we read the command tree and parsed options. parseAsync would call the real handlers.
 async function tryParse(argv: string[]): Promise<{ ok: true } | { ok: false; code: string; message: string }> {
   const program = buildProgram();
-  const restore = suppressOutput();
+  const { restore } = captureOutput();
   try {
     await program.parseAsync(["bun", "script.ts", ...argv]);
     return { ok: true };
@@ -140,7 +129,7 @@ describe("buildProgram — registration", () => {
 describe("buildProgram — repeatable flags", () => {
   // The run action fires (with no path) and prints to stderr — suppress it for cleaner output.
   test("collects multiple --tag values", () => {
-    const restore = suppressOutput();
+    const { restore } = captureOutput();
     const program = buildProgram();
     const runCmd = program.commands.find((c) => c.name() === "run")!;
     runCmd.parse(["--tag", "a", "--tag", "b"], { from: "user" });
@@ -149,7 +138,7 @@ describe("buildProgram — repeatable flags", () => {
   });
 
   test("collects --exclude-tag values", () => {
-    const restore = suppressOutput();
+    const { restore } = captureOutput();
     const program = buildProgram();
     const runCmd = program.commands.find((c) => c.name() === "run")!;
     runCmd.parse(["--exclude-tag", "x", "--exclude-tag", "y"], { from: "user" });
@@ -158,7 +147,7 @@ describe("buildProgram — repeatable flags", () => {
   });
 
   test("collects --env-var values", () => {
-    const restore = suppressOutput();
+    const { restore } = captureOutput();
     const program = buildProgram();
     const runCmd = program.commands.find((c) => c.name() === "run")!;
     runCmd.parse(["--env-var", "K1=V1", "--env-var", "K2=V2"], { from: "user" });
@@ -176,7 +165,7 @@ describe("buildProgram — repeatable flags", () => {
     globalThis.fetch = mock(async () =>
       new Response(JSON.stringify({}), { status: 200, headers: { "Content-Type": "application/json" } }),
     ) as unknown as typeof fetch;
-    const restore = suppressOutput();
+    const { restore } = captureOutput();
     try {
       await reqCmd.parseAsync(
         ["GET", "http://test.invalid", "--header", "A: 1", "--header", "B: 2"],
@@ -191,7 +180,7 @@ describe("buildProgram — repeatable flags", () => {
   test("--tag accepts comma-separated form (split happens in action via flatSplit)", () => {
     // Commander itself doesn't split — we test that the raw value is preserved as one entry.
     // The splitting is handled by flatSplit in the action; we cover that via end-to-end below.
-    const restore = suppressOutput();
+    const { restore } = captureOutput();
     const program = buildProgram();
     const runCmd = program.commands.find((c) => c.name() === "run")!;
     runCmd.parse(["--tag=a,b"], { from: "user" });

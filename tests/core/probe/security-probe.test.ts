@@ -7,25 +7,7 @@ import {
 } from "../../../src/core/probe/security-probe.ts";
 import type { EndpointInfo } from "../../../src/core/generator/types.ts";
 import type { OpenAPIV3 } from "openapi-types";
-
-function ep(partial: Partial<EndpointInfo>): EndpointInfo {
-  return {
-    path: "/x",
-    method: "POST",
-    operationId: undefined,
-    summary: undefined,
-    tags: [],
-    parameters: [],
-    requestBodySchema: undefined,
-    requestBodyContentType: "application/json",
-    responseContentTypes: ["application/json"],
-    responses: [{ statusCode: 201, description: "created" }],
-    security: [],
-    deprecated: false,
-    requiresEtag: false,
-    ...partial,
-  };
-}
+import { postEp as ep } from "../../_helpers/endpoints";
 
 const webhookSchema: OpenAPIV3.SchemaObject = {
   type: "object",

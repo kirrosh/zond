@@ -1,9 +1,10 @@
 ---
 id: TASK-194
 title: 'test-helpers: extract tmp-db, fetch-mock, workspace, reporter-fixtures helpers'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:10'
+updated_date: '2026-05-07 10:38'
 labels:
   - refactor
   - tests

@@ -4,23 +4,10 @@ import { createSchemaValidator } from "../../src/core/runner/schema-validator.ts
 import type { TestSuite } from "../../src/core/parser/types.ts";
 import { DEFAULT_CONFIG } from "../../src/core/parser/schema.ts";
 import type { OpenAPIV3 } from "openapi-types";
+import { mockFetchSequence as mockFetchResponses, restoreFetch } from "../_helpers/fetch-mock";
 
 const originalFetch = globalThis.fetch;
-
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-});
-
-function mockFetchResponses(responses: Array<{ status: number; body: unknown; headers?: Record<string, string> }>) {
-  let callIndex = 0;
-  globalThis.fetch = mock(async () => {
-    const resp = responses[callIndex++] ?? { status: 500, body: { error: "unexpected call" } };
-    return new Response(JSON.stringify(resp.body), {
-      status: resp.status,
-      headers: { "Content-Type": "application/json", ...resp.headers },
-    });
-  }) as unknown as typeof fetch;
-}
+afterEach(restoreFetch);
 
 describe("runSuite", () => {
   test("runs single passing step", async () => {

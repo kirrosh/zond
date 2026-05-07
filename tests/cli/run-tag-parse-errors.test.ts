@@ -1,40 +1,26 @@
-import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { tmpdir } from "os";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { writeFileSync } from "fs";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { closeDb } from "../../src/db/schema.ts";
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  const errChunks: string[] = [];
-  process.stdout.write = mock(() => true) as typeof process.stdout.write;
-  process.stderr.write = mock((chunk: unknown) => {
-    errChunks.push(typeof chunk === "string" ? chunk : String(chunk));
-    return true;
-  }) as typeof process.stderr.write;
-  return {
-    restore: () => {
-      process.stdout.write = origOut;
-      process.stderr.write = origErr;
-    },
-    errChunks,
-  };
-}
+import { captureOutput } from "../_helpers/output";
+import { makeWorkspace } from "../_helpers/workspace";
 
 describe("TASK-72: tag filter does not silently swallow parse errors", () => {
   let workDir: string;
-  let suppress: ReturnType<typeof suppressOutput>;
+  let cleanupWs: () => void;
+  let suppress: ReturnType<typeof captureOutput>;
 
   beforeEach(() => {
-    workDir = mkdtempSync(join(tmpdir(), "zond-task72-"));
-    suppress = suppressOutput();
+    const ws = makeWorkspace({ prefix: "zond-task72-" });
+    workDir = ws.path;
+    cleanupWs = ws.cleanup;
+    suppress = captureOutput();
   });
 
   afterEach(() => {
     suppress.restore();
-    rmSync(workDir, { recursive: true, force: true });
+    cleanupWs();
     closeDb();
   });
 

@@ -1,18 +1,7 @@
 import { describe, it, expect } from "bun:test";
 import { buildCoverageMatrix, type BuildMatrixInput } from "../../src/core/coverage/reasons.ts";
-import type { EndpointInfo } from "../../src/core/generator/types.ts";
 import type { StoredStepResult } from "../../src/db/queries.ts";
-
-function ep(over: Partial<EndpointInfo> & Pick<EndpointInfo, "method" | "path">): EndpointInfo {
-  return {
-    tags: [],
-    parameters: [],
-    responseContentTypes: [],
-    responses: [{ statusCode: 200, description: "ok" }],
-    security: [],
-    ...over,
-  } as EndpointInfo;
-}
+import { ep } from "../_helpers/endpoints";
 
 function step(over: Partial<StoredStepResult>): StoredStepResult {
   return {

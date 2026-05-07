@@ -1,20 +1,9 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { tmpdir } from "os";
-import { join } from "path";
-import { unlinkSync } from "fs";
 import { getDb, closeDb } from "../../src/db/schema.ts";
 import { createRun, finalizeRun, saveResults } from "../../src/db/queries.ts";
 import { diagnoseRun } from "../../src/core/diagnostics/db-analysis.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
-
-function tmpDb(): string {
-  return join(tmpdir(), `zond-task70-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-}
-function unlink(p: string) {
-  for (const s of ["", "-wal", "-shm"]) {
-    try { unlinkSync(p + s); } catch { /* ignore */ }
-  }
-}
+import { tmpDb, unlinkDb as unlink } from "../_helpers/tmp-db";
 
 describe("TASK-70: env_issue overrides per-failure recommended_action", () => {
   let dbPath: string;

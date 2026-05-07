@@ -1,51 +1,22 @@
-import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
-import { tmpdir } from "os";
-import { join } from "path";
-import { unlinkSync } from "fs";
+import { describe, test, expect, afterEach, beforeEach } from "bun:test";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { closeDb } from "../../src/db/schema.ts";
+import { captureOutput } from "../_helpers/output";
+import { unlinkDb as tryUnlink } from "../_helpers/tmp-db";
+import { mockFetchSequence as mockFetchResponses, restoreFetch } from "../_helpers/fetch-mock";
 
 const FIXTURES = `${import.meta.dir}/../fixtures`;
-const originalFetch = globalThis.fetch;
-
-function tryUnlink(path: string): void {
-  for (const suffix of ["", "-wal", "-shm"]) {
-    try { unlinkSync(path + suffix); } catch { /* ignore */ }
-  }
-}
-
-function mockFetchResponses(responses: Array<{ status: number; body: unknown }>) {
-  let callIndex = 0;
-  globalThis.fetch = mock(async () => {
-    const resp = responses[callIndex++] ?? { status: 500, body: { error: "unexpected call" } };
-    return new Response(JSON.stringify(resp.body), {
-      status: resp.status,
-      headers: { "Content-Type": "application/json" },
-    });
-  }) as unknown as typeof fetch;
-}
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  process.stdout.write = mock(() => true) as typeof process.stdout.write;
-  process.stderr.write = mock(() => true) as typeof process.stderr.write;
-  return () => {
-    process.stdout.write = origOut;
-    process.stderr.write = origErr;
-  };
-}
 
 describe("--safe mode", () => {
   let restore: () => void;
 
   beforeEach(() => {
-    restore = suppressOutput();
+    restore = captureOutput().restore;
   });
 
   afterEach(() => {
     restore();
-    globalThis.fetch = originalFetch;
+    restoreFetch();
     closeDb();
   });
 

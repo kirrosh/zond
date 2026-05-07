@@ -1,46 +1,19 @@
-import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
-import { tmpdir } from "os";
+import { describe, test, expect, afterEach, beforeEach } from "bun:test";
 import { join } from "path";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { closeDb } from "../../src/db/schema.ts";
-
-const originalFetch = globalThis.fetch;
-const originalCwd = process.cwd();
-
-function mockFetchOk() {
-  globalThis.fetch = mock(async (input: Request | string | URL) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    return new Response(JSON.stringify({ ok: true, url }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }) as unknown as typeof fetch;
-}
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  const errChunks: string[] = [];
-  process.stdout.write = mock(() => true) as typeof process.stdout.write;
-  process.stderr.write = mock((chunk: unknown) => {
-    errChunks.push(typeof chunk === "string" ? chunk : String(chunk));
-    return true;
-  }) as typeof process.stderr.write;
-  return {
-    restore: () => {
-      process.stdout.write = origOut;
-      process.stderr.write = origErr;
-    },
-    errChunks,
-  };
-}
+import { captureOutput } from "../_helpers/output";
+import { mockFetchOk, restoreFetch } from "../_helpers/fetch-mock";
+import { makeWorkspace } from "../_helpers/workspace";
 
 describe("zond run — cwd .env.yaml fallback (TASK-HIGH.3)", () => {
+  const originalCwd = process.cwd();
   let workDir: string;
   let testFile: string;
   let cwdDir: string;
-  let suppress: ReturnType<typeof suppressOutput>;
+  let cleanupWs: () => void;
+  let suppress: ReturnType<typeof captureOutput>;
 
   beforeEach(() => {
     // Layout:
@@ -49,11 +22,12 @@ describe("zond run — cwd .env.yaml fallback (TASK-HIGH.3)", () => {
     // Run with cwd = <cwd>, path = absolute /…/tests/api.yaml — neither
     // searchDir nor its parent contains an env file, so the cwd fallback
     // must kick in.
-    const root = mkdtempSync(join(tmpdir(), "zond-cwd-env-"));
-    workDir = join(root, "suites", "tests");
-    cwdDir = join(root, "collection");
-    require("fs").mkdirSync(workDir, { recursive: true });
-    require("fs").mkdirSync(cwdDir, { recursive: true });
+    const ws = makeWorkspace({ prefix: "zond-cwd-env-" });
+    cleanupWs = ws.cleanup;
+    workDir = join(ws.path, "suites", "tests");
+    cwdDir = join(ws.path, "collection");
+    mkdirSync(workDir, { recursive: true });
+    mkdirSync(cwdDir, { recursive: true });
 
     testFile = join(workDir, "api.yaml");
     writeFileSync(
@@ -78,19 +52,16 @@ describe("zond run — cwd .env.yaml fallback (TASK-HIGH.3)", () => {
     );
 
     process.chdir(cwdDir);
-    suppress = suppressOutput();
+    suppress = captureOutput();
     mockFetchOk();
   });
 
   afterEach(() => {
     suppress.restore();
-    globalThis.fetch = originalFetch;
+    restoreFetch();
     closeDb();
     process.chdir(originalCwd);
-    try {
-      rmSync(workDir, { recursive: true, force: true });
-      rmSync(cwdDir, { recursive: true, force: true });
-    } catch { /* ignore */ }
+    cleanupWs();
   });
 
   test("loads ./.env.yaml from cwd when --env not given and searchDir has none", async () => {

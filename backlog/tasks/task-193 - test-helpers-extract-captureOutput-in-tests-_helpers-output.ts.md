@@ -1,9 +1,10 @@
 ---
 id: TASK-193
 title: 'test-helpers: extract captureOutput() in tests/_helpers/output.ts'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:10'
+updated_date: '2026-05-07 10:38'
 labels:
   - refactor
   - tests

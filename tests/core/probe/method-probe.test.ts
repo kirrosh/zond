@@ -1,25 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { generateMethodProbes } from "../../../src/core/probe/method-probe.ts";
-import type { EndpointInfo } from "../../../src/core/generator/types.ts";
-
-function ep(partial: Partial<EndpointInfo>): EndpointInfo {
-  return {
-    path: "/x",
-    method: "GET",
-    operationId: undefined,
-    summary: undefined,
-    tags: [],
-    parameters: [],
-    requestBodySchema: undefined,
-    requestBodyContentType: undefined,
-    responseContentTypes: ["application/json"],
-    responses: [{ statusCode: 200, description: "ok" }],
-    security: [],
-    deprecated: false,
-    requiresEtag: false,
-    ...partial,
-  };
-}
+import { ep } from "../../_helpers/endpoints";
 
 describe("generateMethodProbes", () => {
   it("emits one suite per path with only the missing methods", () => {
