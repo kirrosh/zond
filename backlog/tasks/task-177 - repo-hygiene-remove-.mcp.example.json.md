@@ -1,9 +1,10 @@
 ---
 id: TASK-177
 title: 'repo-hygiene: remove .mcp.example.json'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 06:48'
+updated_date: '2026-05-07 06:53'
 labels:
   - cleanup
   - mcp-drop
@@ -20,6 +21,6 @@ priority: low
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 .mcp.example.json удалён
-- [ ] #2 Нет упоминаний .mcp.example.json в README/ZOND.md/docs/skills
+- [x] #1 .mcp.example.json удалён
+- [x] #2 Нет упоминаний .mcp.example.json в README/ZOND.md/docs/skills
 <!-- AC:END -->
