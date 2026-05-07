@@ -1,7 +1,7 @@
 ---
 id: TASK-197
 title: 'tests: fix serve.test.ts handle leak — serveCommand returns Bun.Server'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:10'
 labels:
@@ -21,8 +21,8 @@ tests/cli/serve.test.ts L29-42 и L44-62 запускают реальный Bun
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 src/cli/commands/serve.ts: serveCommand возвращает { code, server } или есть serveCommandWithHandle, не ломая существующий CLI-контракт
-- [ ] #2 tests/cli/serve.test.ts: оба happy-path теста регистрируют server.stop в stopAll
-- [ ] #3 Замена pickFreePort на pickAvailablePort с retry (или экспорт уже существующего хелпера из server.ts)
-- [ ] #4 Прогон tests/cli/serve.test.ts дважды подряд без 'address in use'
+- [x] #1 src/cli/commands/serve.ts: serveCommand возвращает { code, server } или есть serveCommandWithHandle, не ломая существующий CLI-контракт
+- [x] #2 tests/cli/serve.test.ts: оба happy-path теста регистрируют server.stop в stopAll
+- [x] #3 Замена pickFreePort на pickAvailablePort с retry (или экспорт уже существующего хелпера из server.ts)
+- [x] #4 Прогон tests/cli/serve.test.ts дважды подряд без 'address in use'
 <!-- AC:END -->
