@@ -60,3 +60,24 @@ export async function catalogCommand(options: CatalogOptions): Promise<number> {
     return 2;
   }
 }
+
+import type { Command } from "commander";
+import { globalJson, resolveSpecArg } from "../resolve.ts";
+
+export function registerCatalog(program: Command): void {
+  program
+    .command("catalog [spec]")
+    .description("Generate API catalog (compact endpoint reference). For registered APIs prefer --api <name>; the artifact is also available at apis/<name>/.api-catalog.yaml.")
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
+    .option("--output <dir>", "Output directory (default: current directory)")
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      process.exitCode = await catalogCommand({
+        specPath: resolved.spec,
+        output: opts.output,
+        json: globalJson(cmd),
+      });
+    });
+}

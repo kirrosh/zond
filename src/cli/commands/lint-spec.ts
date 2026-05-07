@@ -87,3 +87,37 @@ export async function lintSpecCommand(opts: LintSpecOptions): Promise<number> {
   if (opts.strict && result.stats.low > 0) return 2;
   return 0;
 }
+
+import type { Command } from "commander";
+import { globalJson, resolveSpecArg } from "../resolve.ts";
+import { parsePositiveInt } from "../argv.ts";
+
+export function registerLintSpec(program: Command): void {
+  program
+    .command("lint-spec [spec]")
+    .description("Static-analyse an OpenAPI spec for internal-consistency and strictness gaps (catches bugs before any HTTP)")
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--strict", "Exit non-zero even on LOW-severity issues")
+    .option("--ndjson", "Stream issues as one JSON per line (NDJSON), instead of the wrapped envelope")
+    .option("--rule <list>", "Comma-separated rule overrides: R1, !R2, R3=high|medium|low")
+    .option("--config <path>", "Path to .zond-lint.json")
+    .option("--include-path <glob...>", "Only lint endpoints whose path matches glob (repeatable)")
+    .option("--max-issues <N>", "Stop after N issues", parsePositiveInt("--max-issues"))
+    .option("--no-db", "Don't write to lint_runs SQLite history")
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const dbPath = typeof opts.db === "string" ? opts.db : undefined;
+      const resolved = resolveSpecArg(specPos, opts.api, dbPath);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      process.exitCode = await lintSpecCommand({
+        specPath: resolved.spec,
+        json: globalJson(cmd),
+        ndjson: opts.ndjson === true,
+        strict: opts.strict === true,
+        rule: opts.rule,
+        config: opts.config,
+        includePath: opts.includePath,
+        maxIssues: opts.maxIssues,
+        noDb: opts.db === false,
+      });
+    });
+}
