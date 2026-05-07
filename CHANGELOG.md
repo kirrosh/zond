@@ -28,6 +28,15 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **TASK-185: extract shared probe scaffolding into `core/probe/runner.ts`.**
+  The four probe cli commands (`validation`, `methods`, `mass-assignment`,
+  `security`) used to each repeat: `readOpenApiSpec` → `extractEndpoints`
+  → tag-filter / list-tags → mkdir output → write each suite with
+  `autoGenHeader` → record in manifest. That scaffolding now lives in
+  two helpers, `loadSpecForProbe` and `writeProbeSuites`, so each cli
+  command shrinks to ~100 lines and the suite-emit path is identical
+  across them. Live HTTP orchestration in `mass-assignment-probe.ts` /
+  `security-probe.ts` is untouched.
 - **TASK-183: merge `init.ts` and `init/`.** The `init` command had two
   files that looked like entry points: `src/cli/commands/init.ts`
   (handler) and `src/cli/commands/init/` (helpers). Moved the handler

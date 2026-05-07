@@ -1,9 +1,10 @@
 ---
 id: TASK-185
 title: 'refactor: src/core/probe/runner.ts — extract shared probe runner'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 06:49'
+updated_date: '2026-05-07 07:19'
 labels:
   - refactor
   - probe
@@ -20,8 +21,8 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 src/core/probe/runner.ts реализует ProbeRunner и интерфейс Probe
-- [ ] #2 Каждая из 4 probe-* команд переписана на ProbeRunner
+- [x] #1 src/core/probe/runner.ts реализует ProbeRunner и интерфейс Probe
+- [x] #2 Каждая из 4 probe-* команд переписана на ProbeRunner
 - [ ] #3 Дублирующийся код удалён (грубо: -300..-500 строк суммарно)
-- [ ] #4 tests/integration probe-* зелёные без изменений в expected-output
+- [x] #4 tests/integration probe-* зелёные без изменений в expected-output
 <!-- AC:END -->

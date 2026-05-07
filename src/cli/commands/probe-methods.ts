@@ -1,17 +1,7 @@
-import { join } from "path";
-import { mkdir } from "fs/promises";
-import {
-  readOpenApiSpec,
-  extractEndpoints,
-  extractSecuritySchemes,
-  serializeSuite,
-} from "../../core/generator/index.ts";
-import { filterByTag } from "../../core/generator/chunker.ts";
 import { generateMethodProbes } from "../../core/probe/method-probe.ts";
+import { loadSpecForProbe, writeProbeSuites } from "../../core/probe/runner.ts";
 import { printError, printSuccess } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
-import { findWorkspaceRoot } from "../../core/workspace/root.ts";
-import { recordGeneratedFiles, inferApiName, autoGenHeader, type RecordInput } from "../../core/workspace/manifest.ts";
 
 export interface ProbeMethodsOptions {
   specPath: string;
@@ -24,26 +14,28 @@ export async function probeMethodsCommand(
   options: ProbeMethodsOptions,
 ): Promise<number> {
   try {
-    const doc = await readOpenApiSpec(options.specPath);
-    let endpoints = extractEndpoints(doc);
-    const securitySchemes = extractSecuritySchemes(doc);
-
-    if (options.tag) endpoints = filterByTag(endpoints, options.tag);
-
-    if (endpoints.length === 0) {
-      const message = "No endpoints to probe.";
-      if (options.json) {
-        printJson(jsonOk("probe-methods", { files: [], message }));
-      } else {
-        console.log(message);
-      }
+    const loaded = await loadSpecForProbe({ specPath: options.specPath, tag: options.tag });
+    if (loaded.kind === "tag-not-found") {
+      const msg = `No endpoints tagged "${loaded.tag}". Available tags: ${loaded.available.length ? loaded.available.join(", ") : "(none)"}`;
+      if (options.json) printJson(jsonError("probe-methods", [msg]));
+      else printError(msg);
+      return 2;
+    }
+    if (loaded.kind === "tags") {
+      if (options.json) printJson(jsonOk("probe-methods", { tags: loaded.tags }));
+      else for (const t of loaded.tags) console.log(`  - ${t}`);
       return 0;
     }
 
-    const result = generateMethodProbes({
-      endpoints,
-      securitySchemes,
-    });
+    const { endpoints, securitySchemes } = loaded;
+    if (endpoints.length === 0) {
+      const message = "No endpoints to probe.";
+      if (options.json) printJson(jsonOk("probe-methods", { files: [], message }));
+      else console.log(message);
+      return 0;
+    }
+
+    const result = generateMethodProbes({ endpoints, securitySchemes });
 
     if (result.suites.length === 0) {
       const message =
@@ -64,34 +56,17 @@ export async function probeMethodsCommand(
       return 0;
     }
 
-    await mkdir(options.output, { recursive: true });
-
-    const created: Array<{ file: string; suite: string; tests: number }> = [];
-    const manifestEntries: RecordInput[] = [];
-    const inferredApi = inferApiName(options.output);
-    for (const suite of result.suites) {
-      const fileName = `${suite.fileStem ?? suite.name}.yaml`;
-      const filePath = join(options.output, fileName);
-      await Bun.write(filePath, autoGenHeader("zond probe-methods --emit", `zond probe-methods --api <name> --output ${options.output}`) + serializeSuite(suite));
-      created.push({ file: filePath, suite: suite.name, tests: suite.tests.length });
-      manifestEntries.push({
-        path: filePath,
-        by: "zond probe-methods --emit",
-        api: inferredApi,
-        category: "probes",
-      });
-    }
-    try {
-      const ws = findWorkspaceRoot();
-      if (!ws.fromFallback && manifestEntries.length > 0) {
-        recordGeneratedFiles(ws.root, manifestEntries);
-      }
-    } catch { /* best-effort */ }
+    const written = await writeProbeSuites({
+      output: options.output,
+      suites: result.suites,
+      command: "zond probe-methods --emit",
+      headerExample: `zond probe-methods --api <name> --output ${options.output}`,
+    });
 
     if (options.json) {
       printJson(
         jsonOk("probe-methods", {
-          files: created,
+          files: written.files,
           probedPaths: result.probedPaths,
           skippedPaths: result.skippedPaths,
           totalProbes: result.totalProbes,
@@ -114,11 +89,8 @@ export async function probeMethodsCommand(
     return 0;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (options.json) {
-      printJson(jsonError("probe-methods", [message]));
-    } else {
-      printError(message);
-    }
+    if (options.json) printJson(jsonError("probe-methods", [message]));
+    else printError(message);
     return 2;
   }
 }

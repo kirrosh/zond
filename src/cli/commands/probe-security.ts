@@ -1,12 +1,5 @@
 import { join } from "path";
 import { mkdir, writeFile } from "fs/promises";
-import {
-  readOpenApiSpec,
-  extractEndpoints,
-  extractSecuritySchemes,
-  serializeSuite,
-} from "../../core/generator/index.ts";
-import { filterByTag, collectTags } from "../../core/generator/chunker.ts";
 import { loadEnvironment, loadEnvFile } from "../../core/parser/variables.ts";
 import {
   runSecurityProbes,
@@ -16,10 +9,9 @@ import {
   type SecurityClass,
   type SecuritySeverity,
 } from "../../core/probe/security-probe.ts";
+import { loadSpecForProbe, writeProbeSuites } from "../../core/probe/runner.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
-import { findWorkspaceRoot } from "../../core/workspace/root.ts";
-import { recordGeneratedFiles, inferApiName, autoGenHeader, type RecordInput } from "../../core/workspace/manifest.ts";
 import { getSecretRegistry, redact } from "../../core/secrets/registry.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 
@@ -62,34 +54,28 @@ export async function probeSecurityCommand(
       return 2;
     }
 
-    const doc = await readOpenApiSpec(options.specPath);
-    const allEndpoints = extractEndpoints(doc);
-    const securitySchemes = extractSecuritySchemes(doc);
+    const loaded = await loadSpecForProbe({
+      specPath: options.specPath,
+      tag: options.tag,
+      listTags: options.listTags,
+    });
 
-    if (options.listTags) {
-      const tags = collectTags(allEndpoints);
-      if (options.json) printJson(jsonOk("probe-security", { tags }));
+    if (loaded.kind === "tags") {
+      if (options.json) printJson(jsonOk("probe-security", { tags: loaded.tags }));
+      else if (loaded.tags.length === 0) console.log("No tags found in spec.");
       else {
-        if (tags.length === 0) console.log("No tags found in spec.");
-        else {
-          console.log("Available tags:");
-          for (const t of tags) console.log(`  - ${t}`);
-        }
+        console.log("Available tags:");
+        for (const t of loaded.tags) console.log(`  - ${t}`);
       }
       return 0;
     }
-
-    let endpoints = allEndpoints;
-    if (options.tag) {
-      endpoints = filterByTag(allEndpoints, options.tag);
-      if (endpoints.length === 0) {
-        const available = collectTags(allEndpoints);
-        const msg = `No endpoints tagged "${options.tag}". Available tags: ${available.length ? available.join(", ") : "(none)"}`;
-        if (options.json) printJson(jsonError("probe-security", [msg]));
-        else printWarning(msg);
-        return 2;
-      }
+    if (loaded.kind === "tag-not-found") {
+      const msg = `No endpoints tagged "${loaded.tag}". Available tags: ${loaded.available.length ? loaded.available.join(", ") : "(none)"}`;
+      if (options.json) printJson(jsonError("probe-security", [msg]));
+      else printWarning(msg);
+      return 2;
     }
+    const { endpoints, securitySchemes } = loaded;
 
     let vars: Record<string, string> = {};
     if (options.env) {
@@ -135,27 +121,13 @@ export async function probeSecurityCommand(
     let emittedSuites: Array<{ file: string; suite: string; tests: number }> = [];
     if (options.emitTests && !options.dryRun) {
       const suites = emitSecurityRegressionSuites(result, endpoints, securitySchemes);
-      const manifestEntries: RecordInput[] = [];
-      const inferredApi = inferApiName(options.emitTests);
-      // m-9 P5: do not create empty --emit-tests/ directories.
-      if (suites.length > 0) await mkdir(options.emitTests, { recursive: true });
-      for (const suite of suites) {
-        const file = join(options.emitTests, `${suite.fileStem ?? suite.name}.yaml`);
-        await Bun.write(file, autoGenHeader("zond probe-security --emit-tests", `zond probe-security --api <name> --emit-tests ${options.emitTests}`) + serializeSuite(suite));
-        emittedSuites.push({ file, suite: suite.name, tests: suite.tests.length });
-        manifestEntries.push({
-          path: file,
-          by: "zond probe-security --emit-tests",
-          api: inferredApi,
-          category: "probes",
-        });
-      }
-      try {
-        const ws = findWorkspaceRoot();
-        if (!ws.fromFallback && manifestEntries.length > 0) {
-          recordGeneratedFiles(ws.root, manifestEntries);
-        }
-      } catch { /* best-effort */ }
+      const written = await writeProbeSuites({
+        output: options.emitTests,
+        suites,
+        command: "zond probe-security --emit-tests",
+        headerExample: `zond probe-security --api <name> --emit-tests ${options.emitTests}`,
+      });
+      emittedSuites = written.files;
     }
 
     const counts = countBuckets(result.verdicts);
