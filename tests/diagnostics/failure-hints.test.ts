@@ -60,7 +60,7 @@ describe("recommendedAction", () => {
   });
 });
 
-describe("classifyFailure", () => {
+describe("classifyFailure (string label, from failure-hints)", () => {
   test("network_error when status is error and no response", () => {
     expect(classifyFailure("error", null)).toBe("network_error");
   });

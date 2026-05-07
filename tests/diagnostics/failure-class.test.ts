@@ -15,7 +15,7 @@ function baseResult(overrides: Partial<StepResult> = {}): StepResult {
   };
 }
 
-describe("classifyFailure", () => {
+describe("classifyFailure (FailureClassDescriptor, from failure-class)", () => {
   test("pass → null", () => {
     expect(classifyFailure(baseResult({ status: "pass" }))).toBeNull();
   });

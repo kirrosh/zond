@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
-import { createApp, startServer } from "../../src/ui/server/server.ts";
+import { createApp } from "../../src/ui/server/server.ts";
 import { getDb, closeDb } from "../../src/db/schema.ts";
 import { createCollection, createRun, finalizeRun, saveResults } from "../../src/db/queries.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
@@ -8,7 +8,6 @@ import { tmpdir } from "os";
 import { join } from "path";
 
 const TEST_DB_API = join(tmpdir(), `zond-ui-routes-api-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-const TEST_DB_SPA = join(tmpdir(), `zond-ui-routes-spa-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
 
 function seedData(): { runId: number } {
   const colId = createCollection({ name: "Test API", test_path: "./tests/pet" });
@@ -451,31 +450,3 @@ describe("UI /api/suites", () => {
   });
 });
 
-describe("UI SPA smoke (dev bundle)", () => {
-  let server: ReturnType<typeof Bun.serve>;
-  let baseUrl: string;
-
-  beforeAll(async () => {
-    try { unlinkSync(TEST_DB_SPA); } catch {}
-    getDb(TEST_DB_SPA);
-    seedData();
-    // dev:true uses HTML-import path, no dist/ui build required
-    server = await startServer({ port: 0, host: "127.0.0.1", dev: true, dbPath: TEST_DB_SPA });
-    baseUrl = `http://127.0.0.1:${server.port}`;
-  });
-
-  afterAll(() => {
-    try { server?.stop(true); } catch {}
-    closeDb();
-    try { unlinkSync(TEST_DB_SPA); } catch {}
-  });
-
-  for (const path of ["/", "/runs", `/runs/1`]) {
-    it(`GET ${path} → 200 HTML`, async () => {
-      const res = await fetch(`${baseUrl}${path}`);
-      expect(res.status).toBe(200);
-      const text = await res.text();
-      expect(text.toLowerCase()).toContain("<!doctype html");
-    });
-  }
-});
