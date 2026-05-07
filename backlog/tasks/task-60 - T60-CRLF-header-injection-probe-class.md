@@ -1,9 +1,10 @@
 ---
 id: TASK-60
 title: 'T60: CRLF / header-injection probe class'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:34'
+updated_date: '2026-05-07'
 labels:
   - bug-hunting
   - security

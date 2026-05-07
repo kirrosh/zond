@@ -1,8 +1,9 @@
 ---
 id: TASK-148
 title: 'skill: явно прописать `zond db compare` в Phase 4 (regression diff)'
-status: To Do
+status: Done
 assignee: []
+updated_date: '2026-05-07'
 labels:
   - skill
   - docs

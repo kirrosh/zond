@@ -1,9 +1,10 @@
 ---
 id: TASK-85
 title: 'T85: zond db compare — diff response bodies между runs'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:41'
+updated_date: '2026-05-07'
 labels:
   - regression
   - bug-hunting
