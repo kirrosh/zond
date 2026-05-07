@@ -240,6 +240,46 @@ describe("buildProgram — numeric validations (exit 2 via CommanderError)", () 
   });
 });
 
+describe("TASK-182: zond probe umbrella + back-compat aliases", () => {
+  test("`zond probe --help` lists the four classes", async () => {
+    const program = buildProgram();
+    const probeCmd = program.commands.find((c) => c.name() === "probe");
+    expect(probeCmd).toBeDefined();
+    const subs = probeCmd!.commands.map((c) => c.name()).sort();
+    expect(subs).toEqual(["mass-assignment", "methods", "security", "validation"]);
+  });
+
+  test("legacy probe-* names are still registered as top-level aliases", () => {
+    const program = buildProgram();
+    const top = program.commands.map((c) => c.name());
+    for (const name of ["probe-validation", "probe-methods", "probe-mass-assignment", "probe-security"]) {
+      expect(top).toContain(name);
+    }
+  });
+
+  test("legacy probe-methods alias prints deprecation warning to stderr", async () => {
+    const program = buildProgram();
+    let stderrCapture = "";
+    const origErr = process.stderr.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrCapture += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+      return true;
+    }) as typeof process.stderr.write;
+    const origExitCode = process.exitCode;
+    try {
+      // missing --output triggers exit 2, but the deprecation warning fires
+      // first inside the action handler.
+      await program.parseAsync(["bun", "script.ts", "probe-methods", "spec.json", "--output", "/tmp/zond-deprec-test"])
+        .catch(() => {});
+    } finally {
+      process.stderr.write = origErr;
+      process.exitCode = origExitCode;
+    }
+    expect(stderrCapture).toContain("'probe-methods' is deprecated");
+    expect(stderrCapture).toContain("zond probe methods");
+  });
+});
+
 describe("buildProgram — unknown command", () => {
   test("foobar surfaces commander.unknownCommand", async () => {
     const result = await tryParse(["foobar"]);
