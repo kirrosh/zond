@@ -17,7 +17,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 
-const BINARY = process.argv[2] ?? "./zond";
+const BINARY = process.argv[2] ?? "./dist/zond";
 
 if (process.platform !== "darwin") {
   process.exit(0);

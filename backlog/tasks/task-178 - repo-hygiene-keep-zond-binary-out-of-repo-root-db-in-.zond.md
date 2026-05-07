@@ -1,9 +1,10 @@
 ---
 id: TASK-178
 title: 'repo-hygiene: keep zond binary out of repo root, db in .zond/'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 06:48'
+updated_date: '2026-05-07 06:57'
 labels:
   - cleanup
   - workspace
@@ -20,9 +21,9 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 package.json build → outfile dist/zond
-- [ ] #2 scripts/codesign-darwin.ts работает с dist/zond
-- [ ] #3 default DB path → <workspace>/.zond/zond.db (как .zond/manifest.json)
-- [ ] #4 feedback memory 'install global zond after build' обновлён под dist/
-- [ ] #5 install.sh + install.ps1 не ломаются (они качают release-tarball, не корневой)
+- [x] #1 package.json build → outfile dist/zond
+- [x] #2 scripts/codesign-darwin.ts работает с dist/zond
+- [x] #3 default DB path → <workspace>/.zond/zond.db (как .zond/manifest.json)
+- [x] #4 feedback memory 'install global zond after build' обновлён под dist/
+- [x] #5 install.sh + install.ps1 не ломаются (они качают release-tarball, не корневой)
 <!-- AC:END -->

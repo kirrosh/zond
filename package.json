@@ -33,7 +33,7 @@
     "check": "tsc --noEmit --project tsconfig.json",
     "lint:dead": "knip --reporter compact",
     "build:ui": "bun run scripts/build-ui.ts",
-    "build": "bun run build:ui && bun build --compile src/cli/index.ts --outfile zond && bun run scripts/codesign-darwin.ts ./zond",
+    "build": "bun run build:ui && bun build --compile src/cli/index.ts --outfile dist/zond && bun run scripts/codesign-darwin.ts ./dist/zond",
     "dev:ui": "bun --hot src/ui/server/server.ts",
     "bench:api": "bun benchmarks/api/server.ts"
   },
