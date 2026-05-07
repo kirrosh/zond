@@ -20,7 +20,7 @@ function buildUrl(baseUrl: string | undefined, path: string, query?: Record<stri
 }
 
 /** Shallow-merge suite-level и step-level provenance. Step перекрывает suite. */
-export function mergeProvenance(
+function mergeProvenance(
   suiteSrc?: SourceMetadata,
   stepSrc?: SourceMetadata,
 ): SourceMetadata | null {

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, clusterEnvIssues, buildEnvIssue, recommendedAction, softDeleteHint, type RecommendedAction, type EnvIssue } from "./failure-hints.ts";
 import { AUTH_PATH_RE } from "../runner/execute-run.ts";
 
-export function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
+function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
   if (!raw) return undefined;
   if (verbose || raw.length < 500) return raw;
   const lines = raw.split(/\r?\n/);
@@ -24,7 +24,7 @@ export function truncateErrorMessage(raw: string | null | undefined, verbose?: b
   return msgLines.join("\n");
 }
 
-export function parseBodySafe(raw: string | null | undefined): unknown {
+function parseBodySafe(raw: string | null | undefined): unknown {
   if (!raw) return undefined;
   const truncated = raw.length > 2000 ? raw.slice(0, 2000) + "\u2026[truncated]" : raw;
   try {
@@ -40,7 +40,7 @@ const USEFUL_HEADERS = new Set([
 ]);
 const USEFUL_PREFIXES = ["x-", "ratelimit"];
 
-export function filterHeaders(raw: string | null | undefined): Record<string, string> | undefined {
+function filterHeaders(raw: string | null | undefined): Record<string, string> | undefined {
   if (!raw) return undefined;
   try {
     const h = JSON.parse(raw) as Record<string, string>;

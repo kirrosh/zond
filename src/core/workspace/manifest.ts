@@ -10,8 +10,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "no
 import { createHash } from "node:crypto";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-export const MANIFEST_VERSION = 1;
-export const MANIFEST_RELPATH = ".zond/manifest.json";
+const MANIFEST_VERSION = 1;
+const MANIFEST_RELPATH = ".zond/manifest.json";
 
 export type ManifestCategory =
   | "spec"
@@ -43,7 +43,7 @@ export interface Manifest {
   generated: ManifestEntry[];
 }
 
-export function getManifestPath(workspaceRoot: string): string {
+function getManifestPath(workspaceRoot: string): string {
   return join(workspaceRoot, MANIFEST_RELPATH);
 }
 
@@ -88,7 +88,7 @@ export function sha256OfFile(filePath: string): string | null {
   }
 }
 
-export function sha256OfString(content: string): string {
+function sha256OfString(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
@@ -246,7 +246,7 @@ export function inferApiName(outputDir: string): string | undefined {
 }
 
 /** Cheap sanity check used by zond doctor — true when path lives in workspace. */
-export function isWithinWorkspace(workspaceRoot: string, candidate: string): boolean {
+function isWithinWorkspace(workspaceRoot: string, candidate: string): boolean {
   const abs = isAbsolute(candidate) ? candidate : resolve(workspaceRoot, candidate);
   try {
     statSync(abs);

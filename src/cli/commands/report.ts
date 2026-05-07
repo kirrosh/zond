@@ -41,7 +41,7 @@ export interface ReportExportOptions {
 
 /** TASK-164: shared default cap. ≤ 8 KB per body keeps Sentry-class
  *  exports under ~150 KB while preserving the first page of every body. */
-export const DEFAULT_BODY_CAP_BYTES = 8192;
+const DEFAULT_BODY_CAP_BYTES = 8192;
 
 function parseRunId(raw: string): number | null {
   const n = Number.parseInt(raw, 10);

@@ -11,7 +11,7 @@ export interface FetchOptions {
   rate_limit_max_delay_ms: number;
 }
 
-export const DEFAULT_FETCH_OPTIONS: FetchOptions = {
+const DEFAULT_FETCH_OPTIONS: FetchOptions = {
   timeout: 30000,
   retries: 0,
   retry_delay: 1000,

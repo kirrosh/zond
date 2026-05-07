@@ -787,7 +787,7 @@ function generateConsistentAuthSuite(
 }
 
 /** Generate 1-2 minimal tests for quick connectivity and auth validation */
-export function generateSanitySuite(opts: {
+function generateSanitySuite(opts: {
   authEndpoints: EndpointInfo[];
   nonAuthGetEndpoints: EndpointInfo[];
   securitySchemes: SecuritySchemeInfo[];

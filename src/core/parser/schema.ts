@@ -244,4 +244,3 @@ export function validateSuite(raw: unknown): TestSuite {
   return TestSuiteSchema.parse(raw) as TestSuite;
 }
 
-export { TestSuiteSchema, TestStepSchema, AssertionRuleSchema, ASSERTION_KEYS };

@@ -8,7 +8,7 @@ export function convertPath(path: string): string {
   return path.replace(/\{([^}]+)\}/g, "{{$1}}");
 }
 
-export function slugify(s: string): string {
+function slugify(s: string): string {
   return s
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -99,7 +99,7 @@ export function getAuthHeaders(
 }
 
 /** Path with placeholders replaced by valid-but-nonexistent IDs. */
-export function pathWithPlaceholders(ep: EndpointInfo, badId: string): string {
+function pathWithPlaceholders(ep: EndpointInfo, badId: string): string {
   return ep.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
     const param = ep.parameters.find((p) => p.name === name && p.in === "path");
     const schema = param?.schema as OpenAPIV3.SchemaObject | undefined;

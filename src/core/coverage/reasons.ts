@@ -20,7 +20,7 @@ import type { EndpointInfo } from "../generator/types.ts";
 import type { StoredStepResult } from "../../db/queries.ts";
 
 export type StatusClass = "2xx" | "4xx" | "5xx";
-export const STATUS_CLASSES: StatusClass[] = ["2xx", "4xx", "5xx"];
+const STATUS_CLASSES: StatusClass[] = ["2xx", "4xx", "5xx"];
 
 export type ReasonCode =
   | "covered"

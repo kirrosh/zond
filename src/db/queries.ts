@@ -531,7 +531,7 @@ export function countRuns(filters?: RunFilters): number {
   return row.cnt;
 }
 
-export function getDistinctEnvironments(): string[] {
+function getDistinctEnvironments(): string[] {
   const db = getDb();
   const rows = db.query("SELECT DISTINCT environment FROM runs WHERE environment IS NOT NULL ORDER BY environment").all() as { environment: string }[];
   return rows.map((r) => r.environment);
@@ -640,7 +640,7 @@ export function findCollectionByNameOrId(nameOrId: string): CollectionRecord | n
   return db.query("SELECT * FROM collections WHERE lower(name) = lower(?)").get(nameOrId) as CollectionRecord | null;
 }
 
-export function listRunsByCollection(collectionId: number, limit = 20, offset = 0): RunSummary[] {
+function listRunsByCollection(collectionId: number, limit = 20, offset = 0): RunSummary[] {
   const db = getDb();
   return db.query(`
     SELECT id, started_at, finished_at, total, passed, failed, skipped, environment, duration_ms, collection_id, session_id
@@ -689,7 +689,7 @@ export function getLatestRunForSuite(suiteFile: string): LastRunForSuite | null 
   };
 }
 
-export function getCollectionPassRateTrend(collectionId: number, limit = 30): PassRateTrendPoint[] {
+function getCollectionPassRateTrend(collectionId: number, limit = 30): PassRateTrendPoint[] {
   const db = getDb();
   return db.query(`
     SELECT id AS run_id, started_at,
@@ -701,13 +701,13 @@ export function getCollectionPassRateTrend(collectionId: number, limit = 30): Pa
   `).all(collectionId, limit) as PassRateTrendPoint[];
 }
 
-export function countRunsByCollection(collectionId: number): number {
+function countRunsByCollection(collectionId: number): number {
   const db = getDb();
   const row = db.query("SELECT COUNT(*) AS cnt FROM runs WHERE collection_id = ?").get(collectionId) as { cnt: number };
   return row.cnt;
 }
 
-export function getCollectionStats(collectionId: number): DashboardStats {
+function getCollectionStats(collectionId: number): DashboardStats {
   const db = getDb();
   const row = db.query(`
     SELECT
@@ -723,7 +723,7 @@ export function getCollectionStats(collectionId: number): DashboardStats {
   return row;
 }
 
-export function linkRunToCollection(runId: number, collectionId: number): void {
+function linkRunToCollection(runId: number, collectionId: number): void {
   const db = getDb();
   db.prepare("UPDATE runs SET collection_id = ? WHERE id = ?").run(collectionId, runId);
 }
@@ -732,13 +732,13 @@ export function linkRunToCollection(runId: number, collectionId: number): void {
 // Settings (generic key-value store)
 // ──────────────────────────────────────────────
 
-export function getSetting(key: string): string | null {
+function getSetting(key: string): string | null {
   const db = getDb();
   const row = db.query("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | null;
   return row?.value ?? null;
 }
 
-export function setSetting(key: string, value: string): void {
+function setSetting(key: string, value: string): void {
   const db = getDb();
   db.prepare(`
     INSERT INTO settings (key, value) VALUES ($key, $value)

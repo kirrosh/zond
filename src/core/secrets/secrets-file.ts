@@ -20,8 +20,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { getSecretRegistry } from "./registry.ts";
 
-export const SECRETS_FILENAME = ".secrets.yaml";
-export const SECRET_REF_RE = /^@secret:([A-Za-z_][A-Za-z0-9_.-]*)$/;
+const SECRETS_FILENAME = ".secrets.yaml";
+const SECRET_REF_RE = /^@secret:([A-Za-z_][A-Za-z0-9_.-]*)$/;
 
 /** Resolved contents of a `.secrets.yaml`. */
 export interface SecretsFile {

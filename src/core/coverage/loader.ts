@@ -118,7 +118,7 @@ export async function loadCoverage(options: CoverageLoadOptions): Promise<Covera
   };
 }
 
-export async function listRegisteredApiNames(): Promise<string[]> {
+async function listRegisteredApiNames(): Promise<string[]> {
   const { listCollections } = await import("../../db/queries.ts");
   return listCollections().map((c) => c.name);
 }

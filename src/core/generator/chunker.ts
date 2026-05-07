@@ -1,6 +1,6 @@
 import type { EndpointInfo } from "./types.ts";
 
-export const CHUNK_THRESHOLD = 30;
+const CHUNK_THRESHOLD = 30;
 
 export interface ChunkPlan {
   totalEndpoints: number;
@@ -24,7 +24,7 @@ export function groupEndpointsByTag(endpoints: EndpointInfo[]): Map<string, Endp
 }
 
 /** Decide whether to chunk, and return the tag breakdown */
-export function planChunks(endpoints: EndpointInfo[]): ChunkPlan {
+function planChunks(endpoints: EndpointInfo[]): ChunkPlan {
   const groups = groupEndpointsByTag(endpoints);
   const chunks = Array.from(groups.entries())
     .map(([tag, eps]) => ({ tag, count: eps.length }))
