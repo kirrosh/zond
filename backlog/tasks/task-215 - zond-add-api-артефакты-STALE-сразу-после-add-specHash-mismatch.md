@@ -1,9 +1,10 @@
 ---
 id: TASK-215
 title: 'zond add api: артефакты STALE сразу после add (specHash mismatch)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 14:21'
+updated_date: '2026-05-07 14:26'
 labels:
   - feedback-loop
   - api-resend

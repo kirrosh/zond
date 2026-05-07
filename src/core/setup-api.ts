@@ -15,7 +15,6 @@ import {
 } from "./generator/index.ts";
 import { schemeVarName } from "./generator/suite-generator.ts";
 import type { SecuritySchemeInfo } from "./generator/types.ts";
-import { decycleSchema } from "./generator/schema-utils.ts";
 import { hashSpec } from "./meta/meta-store.ts";
 import { findWorkspaceRoot } from "./workspace/root.ts";
 import { recordGeneratedFiles, type RecordInput } from "./workspace/manifest.ts";
@@ -52,7 +51,14 @@ export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
 
   const endpoints = extractEndpoints(doc as any);
   const securitySchemes = extractSecuritySchemes(doc as any);
-  const specHash = hashSpec(JSON.stringify(decycleSchema(doc)));
+  // Hash the on-disk file bytes — this is what `zond doctor` re-hashes when
+  // checking artifact freshness. Hashing the in-memory `decycleSchema(doc)`
+  // form here drifted from doctor's reading because `@readme/openapi-parser`
+  // hands back shared object refs for repeated $refs; decycleSchema marks
+  // those as `[Circular]` only on the second visit, while `JSON.stringify(doc)`
+  // expands every occurrence — so doctor saw a hash for the expanded file
+  // and setup-api recorded a hash for the deduped form (TASK-215).
+  const specHash = hashSpec(readFileSync(localSpecAbsPath, "utf-8"));
   const localSpecRelPath = relative(workspaceRoot, localSpecAbsPath).replace(/\\/g, "/");
 
   const catalog = buildCatalog({

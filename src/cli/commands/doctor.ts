@@ -31,7 +31,6 @@ import { loadEnvironment } from "../../core/parser/variables.ts";
 import { loadSecretsFromAncestor } from "../../core/secrets/secrets-file.ts";
 import { loadIdentityFromAncestor } from "../../core/identity/identity-file.ts";
 import { hashSpec } from "../../core/meta/meta-store.ts";
-import { decycleSchema } from "../../core/generator/schema-utils.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError } from "../output.ts";
 
@@ -222,11 +221,13 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
       specExists = existsSync(specAbsPath);
       if (specExists) {
         try {
-          const raw = readFileSync(specAbsPath, "utf-8");
-          const parsed = JSON.parse(raw);
-          specSha = hashSpec(JSON.stringify(decycleSchema(parsed)));
+          // Hash the file bytes directly — matches what setup-api / refresh-api
+          // record in the artifact specHash fields (TASK-215). Re-parsing and
+          // re-stringifying drops shared $ref identity and yields a different
+          // hash than the producer recorded.
+          specSha = hashSpec(readFileSync(specAbsPath, "utf-8"));
         } catch {
-          // unreadable / not JSON — leave sha null
+          // unreadable — leave sha null
         }
       }
     } catch (err) {
