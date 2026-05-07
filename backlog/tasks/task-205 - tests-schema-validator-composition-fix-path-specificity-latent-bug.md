@@ -1,9 +1,10 @@
 ---
 id: TASK-205
 title: 'tests: schema-validator composition + fix path-specificity latent bug'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:12'
+updated_date: '2026-05-07 12:00'
 labels:
   - tests
   - runner
@@ -22,6 +23,6 @@ src/core/runner/schema-validator.ts L58: комментарий обещает '
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Regression test: concrete /users/me найден ДО /users/{id} в spec — текущая impl падает; либо fix iteration (sort by specificity), либо явная документация ограничения и тест на текущее поведение
-- [ ] #2 ≥8 новых кейсов: oneOf/anyOf/allOf, additionalProperties:false, pattern, minLength+minimum, const, multipleOf, compile-error returns single 'schema.compile_error' assertion, missing-path returns []
+- [x] #1 Regression test: concrete /users/me найден ДО /users/{id} в spec — текущая impl падает; либо fix iteration (sort by specificity), либо явная документация ограничения и тест на текущее поведение
+- [x] #2 ≥8 новых кейсов: oneOf/anyOf/allOf, additionalProperties:false, pattern, minLength+minimum, const, multipleOf, compile-error returns single 'schema.compile_error' assertion, missing-path returns []
 <!-- AC:END -->
