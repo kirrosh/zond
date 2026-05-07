@@ -7,7 +7,6 @@ import {
   emitSecurityRegressionSuites,
   SECURITY_CLASSES,
   type SecurityClass,
-  type SecuritySeverity,
 } from "../../core/probe/security-probe.ts";
 import { loadSpecForProbe, writeProbeSuites } from "../../core/probe/runner.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
@@ -15,6 +14,38 @@ import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { getSecretRegistry } from "../../core/secrets/registry.ts";
 import { applySanitizer } from "../../core/exporter/exporter.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
+import { tallyBySeverity, formatSummaryLine } from "../../core/probe/verdict-aggregator.ts";
+
+interface Buckets {
+  high: number;
+  low: number;
+  inconclusive: number;
+  inconclusiveBaseline: number;
+  ok: number;
+  skipped: number;
+}
+
+const SEC_BUCKETS: ReadonlyArray<readonly [string, keyof Buckets & string]> = [
+  ["high", "high"],
+  ["low", "low"],
+  ["inconclusive", "inconclusive"],
+  ["inconclusive-baseline", "inconclusiveBaseline"],
+  ["ok", "ok"],
+  ["skipped", "skipped"],
+];
+
+const SEC_SUMMARY: ReadonlyArray<readonly [string, keyof Buckets & string]> = [
+  ["HIGH", "high"],
+  ["INCONCLUSIVE", "inconclusive"],
+  ["INCONCLUSIVE-BASE", "inconclusiveBaseline"],
+  ["LOW", "low"],
+  ["OK", "ok"],
+  ["SKIPPED", "skipped"],
+];
+
+const SEC_ZERO: Buckets = {
+  high: 0, low: 0, inconclusive: 0, inconclusiveBaseline: 0, ok: 0, skipped: 0,
+};
 
 export interface ProbeSecurityOptions {
   specPath: string;
@@ -131,7 +162,7 @@ export async function probeSecurityCommand(
       emittedSuites = written.files;
     }
 
-    const counts = countBuckets(result.verdicts);
+    const counts = tallyBySeverity(result.verdicts, SEC_BUCKETS, SEC_ZERO);
 
     if (options.json) {
       printJson(
@@ -147,9 +178,7 @@ export async function probeSecurityCommand(
       if (!options.output) console.log(md);
       else printSuccess(`Digest written to ${options.output}`);
       console.log("");
-      console.log(
-        `Summary: HIGH ${counts.high} · INCONCLUSIVE ${counts.inconclusive} · INCONCLUSIVE-BASE ${counts.inconclusiveBaseline} · LOW ${counts.low} · OK ${counts.ok} · SKIPPED ${counts.skipped}`,
-      );
+      console.log(formatSummaryLine(counts, SEC_SUMMARY));
       if (emittedSuites.length > 0) {
         printSuccess(`Emitted ${emittedSuites.length} regression suite(s) in ${options.emitTests}`);
       }
@@ -177,26 +206,3 @@ export async function probeSecurityCommand(
   }
 }
 
-interface Buckets {
-  high: number;
-  low: number;
-  inconclusive: number;
-  inconclusiveBaseline: number;
-  ok: number;
-  skipped: number;
-}
-
-function countBuckets(verdicts: Array<{ severity: SecuritySeverity }>): Buckets {
-  const out: Buckets = { high: 0, low: 0, inconclusive: 0, inconclusiveBaseline: 0, ok: 0, skipped: 0 };
-  for (const v of verdicts) {
-    switch (v.severity) {
-      case "high": out.high++; break;
-      case "low": out.low++; break;
-      case "inconclusive": out.inconclusive++; break;
-      case "inconclusive-baseline": out.inconclusiveBaseline++; break;
-      case "ok": out.ok++; break;
-      case "skipped": out.skipped++; break;
-    }
-  }
-  return out;
-}
