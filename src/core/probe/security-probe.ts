@@ -15,7 +15,6 @@ import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
-import { substituteDeep, substituteString } from "../parser/variables.ts";
 import { executeRequest } from "../runner/http-client.ts";
 import {
   convertPath,
@@ -26,6 +25,11 @@ import {
   hasJsonBody,
   liveAuthHeaders,
 } from "./shared.ts";
+import {
+  buildProbeUrl,
+  buildJsonAuthHeaders,
+  buildBaselineFromSpec,
+} from "./probe-harness.ts";
 
 // ──────────────────────────────────────────────
 // Types
@@ -267,24 +271,17 @@ async function probeOneEndpoint(
   };
 
   // Build baseline body. Same recipe as mass-assignment: spec → generators → vars.
-  const rawBaseline = ep.requestBodySchema
-    ? generateFromSchema(ep.requestBodySchema)
-    : {};
-  const baseline = substituteDeep(rawBaseline, vars) as Record<string, unknown>;
-  if (typeof baseline !== "object" || baseline === null || Array.isArray(baseline)) {
+  const baseline = buildBaselineFromSpec(ep, vars);
+  if (baseline === null) {
     return skipped(ep, "request body not a JSON object");
   }
 
-  const { url, unresolved } = buildUrl(ep, vars);
+  const { url, unresolved } = buildProbeUrl(ep, vars);
   if (unresolved.length > 0) {
     return skipped(ep, `cannot resolve path placeholders: ${unresolved.join(", ")}`);
   }
 
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    accept: "application/json",
-    ...liveAuthHeaders(ep, schemes, vars),
-  };
+  const headers = buildJsonAuthHeaders(ep, schemes, vars);
 
   // ── Snapshot original state (TASK-151) ────────────────────────────────
   // For PUT/PATCH we MUST capture original state before any mutation. The
@@ -505,7 +502,7 @@ async function snapshotOriginal(
 ): Promise<Snapshot | null> {
   const getEp = findGetByIdCounterpart(ep, allEndpoints);
   if (!getEp) return null;
-  const { url, unresolved } = buildUrl(getEp, vars);
+  const { url, unresolved } = buildProbeUrl(getEp, vars);
   if (unresolved.length > 0) return null;
   const reqHeaders: Record<string, string> = {
     accept: "application/json",
@@ -558,7 +555,7 @@ async function restoreOriginal(
   dirtyFields: Iterable<string>,
 ): Promise<void> {
   const m = ep.method.toUpperCase();
-  const { url, unresolved } = buildUrl(ep, vars);
+  const { url, unresolved } = buildProbeUrl(ep, vars);
   if (unresolved.length > 0) return;
   const headers: Record<string, string> = { ...baseHeaders };
   if (snapshot.etag && ep.requiresEtag) {
@@ -789,23 +786,6 @@ function pickId(body: unknown, field: string): string | number | undefined {
     if (typeof v === "string" || typeof v === "number") return v;
   }
   return undefined;
-}
-
-// ──────────────────────────────────────────────
-// URL building (mirrors mass-assignment-probe's `buildUrl`)
-// ──────────────────────────────────────────────
-
-function buildUrl(
-  ep: EndpointInfo,
-  vars: Record<string, string>,
-): { url: string; unresolved: string[] } {
-  const baseUrl = (vars["base_url"] ?? "").replace(/\/+$/, "");
-  const templated = `${baseUrl}${convertPath(ep.path)}`;
-  const substituted = String(substituteString(templated, vars));
-  const unresolved = Array.from(substituted.matchAll(/\{\{([^}]+)\}\}/g)).map(
-    m => m[1]!,
-  );
-  return { url: substituted, unresolved };
 }
 
 function skipped(ep: EndpointInfo, reason: string): SecurityVerdict {
