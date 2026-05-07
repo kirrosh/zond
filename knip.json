@@ -4,11 +4,20 @@
     "src/cli/index.ts",
     "src/ui/server/server.ts",
     "src/ui/client/index.html",
-    "src/ui/client/src/main.tsx"
+    "src/ui/client/src/main.tsx",
+    "scripts/**/*.ts",
+    "tests/**/*.{ts,tsx}",
+    "benchmarks/**/*.ts"
   ],
   "project": ["src/**/*.{ts,tsx}"],
   "ignore": [
     "src/core/exporter/postman.ts",
     "src/cli/commands/init/templates/**"
-  ]
+  ],
+  "ignoreBinaries": ["tsc", "benchmarks/api/server.ts"],
+  "ignoreExportsUsedInFile": true,
+  "rules": {
+    "exports": "warn",
+    "types": "off"
+  }
 }

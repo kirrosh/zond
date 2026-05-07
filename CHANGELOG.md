@@ -6,6 +6,16 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **TASK-179: knip cleanup.** Deleted three unused barrel modules
+  (`src/core/diagnostics/render-md.ts`, `src/core/parser/index.ts`,
+  `src/core/runner/index.ts`), trimmed the `tailwindcss` direct
+  dependency (provided transitively by `bun-plugin-tailwind`), and
+  stripped 25+ unused `export` keywords across `src/core` and `src/db`
+  so symbols become module-private. The historical `executeRun` runner
+  in `src/core/runner/execute-run.ts` (superseded by `run.ts`) was
+  dropped; only `AUTH_PATH_RE` survives. `knip.json` now treats
+  `tests/`, `scripts/`, and `benchmarks/` as entries and silences
+  noise on commander `*Options` types and shadcn `*Variants`.
 - **TASK-178: build artefacts out of repo root.** `bun run build` now
   emits the compiled binary to `dist/zond` (was `./zond`); the
   codesign-darwin script's default arg follows. The default SQLite path

@@ -57,7 +57,7 @@ export function closeDb(): void {
   }
 }
 
-export function resetDb(): void {
+function resetDb(): void {
   if (_db) { try { _db.close(); } catch {} }
   _db = null;
   _dbPath = null;

@@ -1,9 +1,10 @@
 ---
 id: TASK-179
 title: 'repo-hygiene: knip cleanup — unused files, exports, deps'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 06:48'
+updated_date: '2026-05-07 07:04'
 labels:
   - cleanup
   - refactor
@@ -20,8 +21,8 @@ knip --reporter compact даёт: 3 unused files (src/core/diagnostics/render-md
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 bunx knip --reporter compact: 0 unused files
-- [ ] #2 0 unused dependencies
-- [ ] #3 Cписок unused exports сокращён до подписанного списка исключений (или пуст)
-- [ ] #4 bun run check + bun test зелёные
+- [x] #1 bunx knip --reporter compact: 0 unused files
+- [x] #2 0 unused dependencies
+- [x] #3 Cписок unused exports сокращён до подписанного списка исключений (или пуст)
+- [x] #4 bun run check + bun test зелёные
 <!-- AC:END -->

@@ -123,7 +123,7 @@ export function computeSharedEnvIssue(
 // laundering 5xx (real backend bugs) into env_issue.
 export type EnvSymptom = "missing_var" | "base_url" | "url_malformed" | "auth_expired";
 
-export function envSymptomOf(failure: {
+function envSymptomOf(failure: {
   hint?: string;
   failure_type: string;
   response_status: number | null;

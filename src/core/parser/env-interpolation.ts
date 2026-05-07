@@ -101,4 +101,4 @@ export function interpolateEnvObject(
   return out;
 }
 
-export const SUSPICIOUS_ENV_NAME_RE = SUSPICIOUS_NAME_RE;
+const SUSPICIOUS_ENV_NAME_RE = SUSPICIOUS_NAME_RE;

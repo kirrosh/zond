@@ -5,18 +5,18 @@ import type { SourceMetadata } from "../parser/types.ts";
 // Utility functions (moved from skeleton.ts)
 // ──────────────────────────────────────────────
 
-export function isRelativeUrl(url: string): boolean {
+function isRelativeUrl(url: string): boolean {
   return url.startsWith("/") && !url.includes("://");
 }
 
-export function resolveSpecPath(specPath: string): string {
+function resolveSpecPath(specPath: string): string {
   if (specPath.startsWith("http://") || specPath.startsWith("https://")) {
     return specPath;
   }
   return resolve(specPath);
 }
 
-export function sanitizeEnvName(name: string): string {
+function sanitizeEnvName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
 }
 

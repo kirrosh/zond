@@ -27,7 +27,7 @@
 /** Minimum length below which a registered value is silently ignored. */
 export const MIN_SECRET_LENGTH = 8;
 
-export const REDACTED_MARKER_RE = /<redacted:[a-zA-Z0-9_.-]+>/;
+const REDACTED_MARKER_RE = /<redacted:[a-zA-Z0-9_.-]+>/;
 
 export interface SecretEntry {
   name: string;

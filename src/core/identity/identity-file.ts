@@ -25,8 +25,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-export const IDENTITY_FILENAME = ".identity.yaml";
-export const IDENTITY_REF_RE = /^@identity:([A-Za-z_][A-Za-z0-9_.-]*)$/;
+const IDENTITY_FILENAME = ".identity.yaml";
+const IDENTITY_REF_RE = /^@identity:([A-Za-z_][A-Za-z0-9_.-]*)$/;
 
 /** Canonical identity-key vocabulary. The setup-api seeder uses this to
  *  decide which placeholders to put in a fresh `.identity.yaml`. */

@@ -51,7 +51,7 @@ export type Visitor = (ctx: WalkContext) => void;
 /**
  * RFC6901 segment encoder: `~` → `~0`, `/` → `~1`.
  */
-export function escapePointerSegment(s: string | number): string {
+function escapePointerSegment(s: string | number): string {
   return String(s).replace(/~/g, "~0").replace(/\//g, "~1");
 }
 

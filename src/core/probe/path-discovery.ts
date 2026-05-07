@@ -237,7 +237,7 @@ interface BodyFkField {
   preferredField: string;
 }
 
-export function collectBodyFkFields(
+function collectBodyFkFields(
   schema: import("openapi-types").OpenAPIV3.SchemaObject | undefined,
 ): BodyFkField[] {
   if (!schema || !schema.properties) return [];
@@ -392,7 +392,7 @@ function pickFieldFromBody(body: unknown, preferred: string): string | undefined
 }
 
 /** Try several common SaaS list-response shapes. */
-export function extractFirstId(body: unknown, listEp: EndpointInfo): string | undefined {
+function extractFirstId(body: unknown, listEp: EndpointInfo): string | undefined {
   if (Array.isArray(body)) {
     return idFromItem(body[0], listEp);
   }
