@@ -15,6 +15,17 @@ All notable changes to this project will be documented in this file.
   warning to stderr; flags and behaviour are unchanged. The umbrella
   trims top-level `--help` from four lookalike entries to one.
 
+### Added
+
+- **TASK-184: typed `--json` envelope helpers (closes TASK-73 / TASK-74).**
+  `src/cli/json-envelope.ts` now exports a discriminated-union
+  `EnvelopeResult<T>` plus two new entry points: `writeEnvelope(cmd, result)`
+  (writes the envelope and returns the exit code) and `withEnvelope(cmd, produce)`
+  (wraps an async producer, renders thrown errors as `ok: false`).
+  Existing `jsonOk` / `jsonError` / `printJson` keep working — the new
+  helpers are an opt-in convenience layer for new commands. Test suite
+  pins the success/error/meta/warnings shape end-to-end.
+
 ### Changed
 
 - **TASK-183: merge `init.ts` and `init/`.** The `init` command had two
