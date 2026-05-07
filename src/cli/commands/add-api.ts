@@ -75,6 +75,10 @@ export async function addApiCommand(opts: AddApiOptions): Promise<number> {
     if (mode === "spec") {
       printSuccess(`Registered API '${opts.name}' at ${result.baseDir} (${result.specEndpoints} endpoints)`);
       process.stdout.write(`  Artifacts: spec.json + .api-catalog.yaml + .api-resources.yaml + .api-fixtures.yaml\n`);
+      if (result.authVars && result.authVars.length > 0) {
+        const list = result.authVars.map((v) => `\`${v}\``).join(", ");
+        process.stdout.write(`  Auth required: fill ${list} in ${result.baseDir}/.secrets.yaml (already wired via @secret in .env.yaml).\n`);
+      }
       process.stdout.write(`  Next: run \`zond doctor --api ${opts.name}\` to see required fixtures.\n`);
     } else {
       printSuccess(`Registered API '${opts.name}' at ${result.baseDir} (no spec — run-only mode)`);
