@@ -12,6 +12,38 @@ import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { getSecretRegistry } from "../../core/secrets/registry.ts";
 import { applySanitizer } from "../../core/exporter/exporter.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
+import { tallyBySeverity, formatSummaryLine } from "../../core/probe/verdict-aggregator.ts";
+
+interface BucketCounts {
+  high: number;
+  inconclusiveBaseline: number;
+  medium: number;
+  low: number;
+  ok: number;
+  skipped: number;
+}
+
+const MA_BUCKETS: ReadonlyArray<readonly [string, keyof BucketCounts & string]> = [
+  ["high", "high"],
+  ["inconclusive-baseline", "inconclusiveBaseline"],
+  ["medium", "medium"],
+  ["low", "low"],
+  ["ok", "ok"],
+  ["skipped", "skipped"],
+];
+
+const MA_SUMMARY: ReadonlyArray<readonly [string, keyof BucketCounts & string]> = [
+  ["HIGH", "high"],
+  ["INCONCLUSIVE", "inconclusiveBaseline"],
+  ["MED", "medium"],
+  ["LOW", "low"],
+  ["OK", "ok"],
+  ["SKIPPED", "skipped"],
+];
+
+const MA_ZERO: BucketCounts = {
+  high: 0, inconclusiveBaseline: 0, medium: 0, low: 0, ok: 0, skipped: 0,
+};
 
 export interface ProbeMassAssignmentOptions {
   specPath: string;
@@ -113,7 +145,7 @@ export async function probeMassAssignmentCommand(
       emittedSuites = written.files;
     }
 
-    const counts = countBuckets(result.verdicts);
+    const counts = tallyBySeverity(result.verdicts, MA_BUCKETS, MA_ZERO);
 
     if (options.json) {
       printJson(
@@ -130,7 +162,7 @@ export async function probeMassAssignmentCommand(
       if (!options.output) console.log(md);
       else printSuccess(`Digest written to ${options.output}`);
       console.log("");
-      printSeverityLine(counts);
+      console.log(formatSummaryLine(counts, MA_SUMMARY));
       if (emittedSuites.length > 0) {
         printSuccess(`Emitted ${emittedSuites.length} regression suite(s) in ${options.emitTests}`);
         console.log(`  Run them on CI: zond run ${options.emitTests} --env ${options.env ?? ".env.yaml"}`);
@@ -155,39 +187,3 @@ export async function probeMassAssignmentCommand(
   }
 }
 
-interface BucketCounts {
-  high: number;
-  inconclusiveBaseline: number;
-  medium: number;
-  low: number;
-  ok: number;
-  skipped: number;
-}
-
-function countBuckets(verdicts: Array<{ severity: string }>): BucketCounts {
-  const out: BucketCounts = {
-    high: 0,
-    inconclusiveBaseline: 0,
-    medium: 0,
-    low: 0,
-    ok: 0,
-    skipped: 0,
-  };
-  for (const v of verdicts) {
-    switch (v.severity) {
-      case "high": out.high++; break;
-      case "inconclusive-baseline": out.inconclusiveBaseline++; break;
-      case "medium": out.medium++; break;
-      case "low": out.low++; break;
-      case "ok": out.ok++; break;
-      case "skipped": out.skipped++; break;
-    }
-  }
-  return out;
-}
-
-function printSeverityLine(c: BucketCounts): void {
-  console.log(
-    `Summary: HIGH ${c.high} · INCONCLUSIVE ${c.inconclusiveBaseline} · MED ${c.medium} · LOW ${c.low} · OK ${c.ok} · SKIPPED ${c.skipped}`,
-  );
-}
