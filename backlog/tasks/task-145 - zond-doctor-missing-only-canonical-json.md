@@ -1,7 +1,7 @@
 ---
 id: TASK-145
 title: 'zond doctor --missing-only + canonical --json shape'
-status: To Do
+status: Done
 assignee: []
 labels:
   - doctor
@@ -38,11 +38,13 @@ priority: medium
 
 ## Acceptance Criteria
 
-- [ ] `zond doctor --json` имеет одну каноническую схему, описанную в
-      help.
-- [ ] `--missing-only` показывает только missing/issue items в обоих
+- [x] `zond doctor --json` имеет одну каноническую схему, описанную в
+      help (`.data.<group>`, никакого `.diagnostics`-обёрта). `--help`
+      перечисляет все dot-пути.
+- [x] `--missing-only` показывает только missing/issue items в обоих
       форматах (text + json).
-- [ ] `--query <dotpath>` (если включено) корректно резолвит вложенные
-      поля.
-- [ ] Тесты на схему JSON (snapshot) и на --missing-only.
-- [ ] CHANGELOG.
+- [x] `--query <dotpath>` корректно резолвит вложенные поля; неизвестный
+      путь — exit 2 с понятной ошибкой.
+- [x] Тесты на схему JSON (canonical pin) и на `--missing-only` /
+      `--query`.
+- [x] CHANGELOG + ZOND.md.

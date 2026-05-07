@@ -1,7 +1,7 @@
 ---
 id: TASK-144
 title: '--retry-on-network <N>: авто-повтор при ECONNRESET / socket close'
-status: To Do
+status: Done
 assignee: []
 labels:
   - run
@@ -37,9 +37,9 @@ priority: medium
 
 ## Acceptance Criteria
 
-- [ ] Флаг работает, default = 1.
-- [ ] Только сетевые ошибки ретраятся, HTTP-коды не трогаются.
-- [ ] Тест с моком, поднимающим `ECONNRESET` на первом attempt'е.
-- [ ] Тест на отсутствие ретрая для 502.
-- [ ] В run-результатах виден `network_retry` count.
-- [ ] CHANGELOG.
+- [x] Флаг работает, default = 1.
+- [x] Только сетевые ошибки ретраятся, HTTP-коды не трогаются.
+- [x] Тест с моком, поднимающим `ECONNRESET` на первом attempt'е.
+- [x] Тест на отсутствие ретрая для 502.
+- [x] В run-результатах виден `network_retry` count.
+- [x] CHANGELOG.

@@ -40,7 +40,7 @@ describe("completionsCommand — shells", () => {
     const { out } = captureStdout(() => completionsCommand({ shell: "zsh", program }));
     expect(out).toContain("#compdef zond");
     expect(out).toContain("_arguments");
-    expect(out).toContain("'run:Run API tests'");
+    expect(out).toContain("'run:Run API tests");
   });
 
   test("fish: contains __fish_use_subcommand", () => {

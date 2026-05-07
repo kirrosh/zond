@@ -57,6 +57,10 @@ export interface RunOptions {
   specPath?: string;
   /** Group this run under a session id (multi-run campaigns). */
   sessionId?: string;
+  /** TASK-144: per-step retry budget for transient network errors
+   *  (ECONNRESET / EPIPE / socket hang up / fetch failed / abort).
+   *  HTTP statuses are not retried by this path. Default 1, 0 disables. */
+  retryOnNetwork?: number;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -265,7 +269,11 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
-  const runOpts = { rateLimiter, schemaValidator };
+  const runOpts = {
+    rateLimiter,
+    schemaValidator,
+    networkRetries: options.retryOnNetwork,
+  };
 
   // 4. Run suites — setup suites run first (sequentially), their captures flow into regular suites
   const results: TestRunResult[] = [];
@@ -443,6 +451,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
         ...(s.failure_class ? { failure_class: s.failure_class, failure_class_reason: s.failure_class_reason } : {}),
         ...(s.provenance ? { provenance: s.provenance } : {}),
         ...(s.spec_pointer ? { spec_pointer: s.spec_pointer, spec_excerpt: s.spec_excerpt } : {}),
+        ...(s.network_retry ? { network_retry: s.network_retry } : {}),
       }))
     );
     const fiveXx = failures.filter(f => f.is_5xx).length;
@@ -455,7 +464,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
 import type { Command } from "commander";
 import { Option } from "commander";
 import { resolveApiCollection } from "../resolve.ts";
-import { collect, flatSplit, parsePositiveInt, parseRateLimit, parseReporter } from "../argv.ts";
+import { collect, flatSplit, parseNonNegativeInt, parsePositiveInt, parseRateLimit, parseReporter } from "../argv.ts";
 import { resolveSessionId } from "../../core/context/session.ts";
 import { readCurrentApi } from "../../core/context/current.ts";
 
@@ -489,6 +498,12 @@ export function registerRun(program: Command): void {
     .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
     .option("--session-id <id>", "Group this run under a session. Resolution order: --session-id flag > ZOND_SESSION_ID env > .zond/current-session file (set by 'zond session start')")
+    .option(
+      "--retry-on-network <N>",
+      "Auto-retry on transient network errors (ECONNRESET, EPIPE, socket hang up, fetch failed, timeout) — HTTP status codes (incl. 5xx) are NOT retried. Exponential backoff with jitter, base 250ms. Default 1, 0 disables.",
+      parseNonNegativeInt("--retry-on-network"),
+      1,
+    )
     .action(async (pathArgs: string[] | undefined, opts, _cmd: Command) => {
       let paths = pathArgs ?? [];
       const apiFlag = (opts.api as string | undefined) ?? (paths.length > 0 ? undefined : readCurrentApi() ?? undefined);
@@ -544,6 +559,7 @@ export function registerRun(program: Command): void {
           env: process.env.ZOND_SESSION_ID ?? null,
         }) ?? undefined,
         json: false,
+        retryOnNetwork: typeof opts.retryOnNetwork === "number" ? opts.retryOnNetwork : 1,
       });
     });
 }

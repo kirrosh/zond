@@ -39,6 +39,15 @@ export interface DoctorOptions {
   api?: string;
   json?: boolean;
   dbPath?: string;
+  /** TASK-145: hide rows that are already healthy. Required fixtures with
+   *  values, optional fixtures, fresh artifacts disappear from output;
+   *  only the items doctor wants the user to fix remain. Applies to both
+   *  text and `--json` shapes. */
+  missingOnly?: boolean;
+  /** TASK-145: dot-path into the report payload (e.g. `fixtures.required`).
+   *  When set, doctor emits the resolved subtree as JSON to stdout (no
+   *  envelope) — pipe-friendly without `jq`. */
+  query?: string;
 }
 
 interface FixtureRow {
@@ -317,11 +326,33 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
     warnings,
   };
 
+  // TASK-145: --missing-only filters out healthy rows so the report only
+  // contains things the user has to fix. Applies symmetrically to text and
+  // JSON so `--json | jq '.data.fixtures.required'` and the stdout view
+  // agree on what's "noise".
+  const presented = opts.missingOnly ? applyMissingOnly(report) : report;
+
+  // TASK-145: --query <dotpath> short-circuits the envelope and emits the
+  // resolved subtree as raw JSON, no `jq` required.
+  if (opts.query) {
+    const resolved = resolveDotPath(presented, opts.query);
+    if (resolved === undefined) {
+      const message = `--query path '${opts.query}' did not resolve in the doctor report (canonical paths: api, spec, fixtures.required, fixtures.optional, fixtures.extraInEnv, staleArtifacts, warnings)`;
+      if (opts.json) printJson(jsonError("doctor", [message]));
+      else printError(message);
+      return 2;
+    }
+    process.stdout.write(JSON.stringify(resolved, null, 2) + "\n");
+    if (blockedRequired > 0) return 1;
+    if (staleArtifacts.some(s => !s.fresh) || !specExists || !manifest) return 2;
+    return 0;
+  }
+
   // ── Output ──
   if (opts.json) {
-    printJson(jsonOk("doctor", report));
+    printJson(jsonOk("doctor", presented));
   } else {
-    printHuman(report, envVars);
+    printHuman(presented, envVars, { missingOnly: opts.missingOnly === true });
   }
 
   if (blockedRequired > 0) return 1;
@@ -329,7 +360,48 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   return 0;
 }
 
-function printHuman(r: DoctorReport, envVars: Record<string, string>): void {
+/** TASK-145: produce a copy of the doctor report containing only items the
+ *  user still has to address. Filters: required fixtures with `set: false`,
+ *  artifacts where `fresh: false`, missing spec, missing manifest. Optional
+ *  fixtures and `extraInEnv` are dropped wholesale — they're never "missing"
+ *  by definition. `warnings` is kept intact. */
+function applyMissingOnly(r: DoctorReport): DoctorReport {
+  return {
+    ...r,
+    fixtures: {
+      required: r.fixtures.required.filter((f) => !f.set),
+      optional: [],
+      extraInEnv: [],
+    },
+    staleArtifacts: r.staleArtifacts.filter((s) => !s.fresh),
+  };
+}
+
+/** TASK-145: resolve a dot-path like `fixtures.required` against the report.
+ *  Numeric segments index into arrays. Returns `undefined` when any segment
+ *  is missing — the caller surfaces that as a CLI error. */
+function resolveDotPath(value: unknown, path: string): unknown {
+  const parts = path.split(".").filter((p) => p.length > 0);
+  let cur: unknown = value;
+  for (const p of parts) {
+    if (cur === null || cur === undefined) return undefined;
+    if (Array.isArray(cur)) {
+      const idx = Number.parseInt(p, 10);
+      if (Number.isNaN(idx)) return undefined;
+      cur = cur[idx];
+      continue;
+    }
+    if (typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[p];
+  }
+  return cur;
+}
+
+function printHuman(
+  r: DoctorReport,
+  envVars: Record<string, string>,
+  opts: { missingOnly: boolean } = { missingOnly: false },
+): void {
   const out = process.stdout;
   out.write(`API: ${r.api}\n`);
   out.write(`Workspace dir: ${r.baseDir}\n\n`);
@@ -343,6 +415,9 @@ function printHuman(r: DoctorReport, envVars: Record<string, string>): void {
   }
 
   // Artifacts
+  if (opts.missingOnly && r.staleArtifacts.length === 0) {
+    // nothing to report — skip the section
+  } else {
   out.write(`Artifact freshness:\n`);
   for (const s of r.staleArtifacts) {
     if (!s.actual) {
@@ -354,8 +429,12 @@ function printHuman(r: DoctorReport, envVars: Record<string, string>): void {
     }
   }
   out.write("\n");
+  }
 
   // Required fixtures
+  if (opts.missingOnly && r.fixtures.required.length === 0) {
+    // skip — nothing missing
+  } else {
   out.write(`Required fixtures (${r.fixtures.required.length}):\n`);
   if (r.fixtures.required.length === 0) {
     out.write(`  (none)\n`);
@@ -376,8 +455,11 @@ function printHuman(r: DoctorReport, envVars: Record<string, string>): void {
     }
   }
   out.write("\n");
+  }
 
-  // Optional fixtures
+  // Optional fixtures (suppressed entirely under --missing-only — they are
+  // by definition never "missing" in the actionable sense).
+  if (!opts.missingOnly) {
   out.write(`Optional fixtures (${r.fixtures.optional.length}):\n`);
   if (r.fixtures.optional.length === 0) {
     out.write(`  (none)\n`);
@@ -388,15 +470,18 @@ function printHuman(r: DoctorReport, envVars: Record<string, string>): void {
     }
   }
   out.write("\n");
+  }
 
-  if (r.fixtures.extraInEnv.length > 0) {
+  if (!opts.missingOnly && r.fixtures.extraInEnv.length > 0) {
     out.write(`Other variables in .env.yaml (not in manifest, informational):\n`);
     for (const k of r.fixtures.extraInEnv) out.write(`  • ${k}\n`);
     out.write("\n");
   }
 
   // Suggested next
-  if (r.blockedRequired > 0) {
+  if (opts.missingOnly && r.blockedRequired === 0 && r.staleArtifacts.length === 0) {
+    out.write(`No missing items. Workspace is ready.\n`);
+  } else if (r.blockedRequired > 0) {
     out.write(`Next: edit ${r.baseDir}/.env.yaml and fill the ${r.blockedRequired} required value${r.blockedRequired === 1 ? "" : "s"}, then re-run \`zond doctor --api ${r.api}\`.\n`);
   } else if (r.staleArtifacts.some(s => !s.fresh)) {
     out.write(`Next: artifacts are out of sync — run \`zond refresh-api ${r.api}\`.\n`);
@@ -432,13 +517,38 @@ export function registerDoctor(program: Command): void {
   program
     .command("doctor")
     .description("Diagnose registered API: fixture gaps in .env.yaml + artifact freshness vs spec.json")
+    .addHelpText(
+      "after",
+      [
+        "",
+        "JSON shape (canonical, TASK-145):",
+        "  --json envelope is { ok, command, data, warnings, errors }. The",
+        "  doctor payload sits under .data:",
+        "    .data.api                       string",
+        "    .data.spec.{path,exists,sha}    OpenAPI snapshot",
+        "    .data.fixtures.required[]       FixtureMetaRow — each has .set",
+        "    .data.fixtures.optional[]       same shape",
+        "    .data.fixtures.extraInEnv[]     keys present in .env.yaml only",
+        "    .data.staleArtifacts[]          { file, expected, actual, fresh }",
+        "    .data.blockedRequired           number of unset required fixtures",
+        "    .data.warnings[]                advisory strings",
+        "",
+        "Tips:",
+        "  --missing-only             hide healthy rows (text + json)",
+        "  --query fixtures.required  emit one subtree as raw JSON, no jq",
+      ].join("\n"),
+    )
     .option("--api <name>", "API collection name (defaults to the only registered one)")
     .option("--db <path>", "Path to SQLite database file")
+    .option("--missing-only", "Show only missing/stale items (hide rows that are already healthy). Applies to both text and --json output.")
+    .option("--query <dotpath>", "Resolve a dot-path inside the doctor report and emit just that subtree as JSON (e.g. fixtures.required, staleArtifacts, spec.sha).")
     .action(async (opts, cmd: Command) => {
       process.exitCode = await doctorCommand({
         api: opts.api,
         dbPath: typeof opts.db === "string" ? opts.db : undefined,
         json: globalJsonResolver(cmd),
+        missingOnly: opts.missingOnly === true,
+        query: typeof opts.query === "string" ? opts.query : undefined,
       });
     });
 }

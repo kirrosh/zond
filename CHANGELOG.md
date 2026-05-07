@@ -17,6 +17,35 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-145: `zond doctor --missing-only` + `--query` + canonical `--json` shape.**
+  The `--json` envelope is now documented as the canonical contract — all
+  diagnostic data lives under `.data` (no `.diagnostics` wrapper). `--help`
+  spells out every dot-path (`.data.fixtures.required[]`,
+  `.data.staleArtifacts[]`, …) so agents stop guessing. **`--missing-only`**
+  hides rows already healthy in both text and JSON: required fixtures with
+  values, fresh artifacts, optional fixtures, and `extraInEnv` are dropped.
+  **`--query <dotpath>`** resolves a subtree of the report and emits it as
+  raw JSON to stdout (no envelope), so pipelines no longer need `jq` for
+  the common cases (`zond doctor --query fixtures.required`,
+  `--query staleArtifacts`). Unknown paths fail with exit 2 and a list of
+  the canonical entry points.
+- **TASK-140: `zond db run --status` now accepts ranges & classes.**
+  In addition to the existing exact-code form (`--status 502`), the flag
+  parses class wildcards (`5xx`, `4xx`, …), inclusive ranges
+  (`500-599`), open-ended comparisons (`>=500`, `<400`, `>500`, `<=400`),
+  and any comma-separated mix of those (`5xx,429`, `500,502,504`).
+  Triage of large failure runs (e.g. 2000+-step Sentry hunts) no longer
+  needs `jq` over `--json`. Invalid syntax produces a one-line error;
+  the parser is unit-tested in `tests/cli/status-filter.test.ts`.
+- **TASK-144: `zond run --retry-on-network <N>`.** Auto-retry on transient
+  TCP/transport errors (`ECONNRESET`, `EPIPE`, `socket hang up`,
+  `fetch failed`, abort/timeout without HTTP response) with exponential
+  backoff + full jitter (base 250 ms, cap 8 s). Default `1`, set `0` to
+  disable. **HTTP status codes (incl. 5xx) are NOT retried by this path**
+  — 5xx is a real server response, not a flaky socket; rate-limited 429
+  retries continue to flow through the rate-limiter. Retried steps surface
+  `network_retry: <count>` in `--report json` and the `--json` envelope so
+  flaky-network shells stay visible during triage.
 - **TASK-186: unified `Exporter` interface + sanitizer pipeline.**
   `src/core/exporter/exporter.ts` now defines `Exporter<I, O>` plus a
   `runExporter()` pipeline; `applySanitizer()` is the one place
