@@ -1,9 +1,10 @@
 ---
 id: TASK-217
 title: 'zond coverage: документировать exit-коды (warning vs uncovered vs threshold)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 14:21'
+updated_date: '2026-05-07 14:35'
 labels:
   - feedback-loop
   - api-resend

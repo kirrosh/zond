@@ -188,7 +188,13 @@ import { readCurrentApi } from "../../core/context/current.ts";
 export function registerCoverage(program: Command): void {
   program
     .command("coverage")
-    .description("Analyze API test coverage")
+    .description(
+      "Analyze API test coverage. Exit codes: 0 = every endpoint covered " +
+      "(or coverage ≥ --fail-on-coverage when set); 1 = uncovered endpoints " +
+      "remain (or coverage < --fail-on-coverage); 2 = bad input or read error " +
+      "(missing spec, unreadable tests dir, --run-id not found). " +
+      "Warnings (e.g. required_params_no_examples) never affect the exit code.",
+    )
     .option("--api <name>", "Use API collection (auto-resolves spec and tests dir)")
     .option("--spec <path>", "Path to OpenAPI spec (required unless --api used)")
     .option("--tests <dir>", "Path to test files directory (required unless --api used)")
