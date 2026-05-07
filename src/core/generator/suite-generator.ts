@@ -10,6 +10,30 @@ import { getAuthHeaders as sharedGetAuthHeaders } from "../probe/shared.ts";
 // Helpers
 // ──────────────────────────────────────────────
 
+/**
+ * Singularize an English plural noun for use in suite names and capture
+ * variables. Handles the cases that matter for typical OpenAPI resource
+ * names — `properties → property`, `addresses → address`, `boxes → box`,
+ * `users → user`. Words that don't match any rule are returned unchanged
+ * (so already-singular `series`, `news`, `data`, etc. survive).
+ */
+export function singularizeResource(word: string): string {
+  if (word.length > 3 && /ies$/i.test(word)) return word.slice(0, -3) + "y";
+  if (word.length > 3 && /(ch|sh|x|s|z)es$/i.test(word)) return word.slice(0, -2);
+  if (word.length > 1 && /[^s]s$/i.test(word)) return word.slice(0, -1);
+  return word;
+}
+
+/**
+ * Build a `<resource>_id` capture/var name. Strips dashes so the result is
+ * a safe template variable identifier — `contact-properties` becomes
+ * `contact_property_id` rather than `contact-propertie_id` (TASK-214).
+ */
+function resourceVar(resource: string, suffix: string): string {
+  const singular = singularizeResource(resource);
+  return `${singular.replace(/[^a-zA-Z0-9]+/g, "_")}_${suffix}`;
+}
+
 /** Convert OpenAPI path params {param} to test interpolation {{param}} */
 function convertPath(path: string): string {
   return path.replace(/\{([^}]+)\}/g, "{{$1}}");
@@ -463,7 +487,7 @@ export function generateCrudSuite(
   securitySchemes: SecuritySchemeInfo[],
 ): RawSuite {
   const captureField = group.create ? getCaptureField(group.create, group.idParam) : "id";
-  const captureVar = `${group.resource.replace(/s$/, "")}_id`;
+  const captureVar = resourceVar(group.resource, "id");
   const tests: RawStep[] = [];
 
   const allEps = [group.create, group.list, group.read, group.update, group.delete].filter(Boolean) as EndpointInfo[];
@@ -488,7 +512,7 @@ export function generateCrudSuite(
   // 2. Read created
   if (group.read) {
     const step: RawStep = {
-      name: group.read.operationId ?? `Read created ${group.resource.replace(/s$/, "")}`,
+      name: group.read.operationId ?? `Read created ${singularizeResource(group.resource)}`,
       source: buildStepSource(group.read),
       GET: convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`),
       expect: {
@@ -503,12 +527,12 @@ export function generateCrudSuite(
   if (group.update) {
     const method = group.update.method.toUpperCase();
     const itemPath = convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`);
-    const etagVar = `${group.resource.replace(/s$/, "")}_etag`;
+    const etagVar = resourceVar(group.resource, "etag");
 
     // If endpoint requires ETag (optimistic locking), capture it from a GET step first
     if (group.update.requiresEtag && group.read) {
       tests.push({
-        name: `Get ETag before update ${group.resource.replace(/s$/, "")}`,
+        name: `Get ETag before update ${singularizeResource(group.resource)}`,
         source: buildStepSource(group.read),
         GET: itemPath,
         expect: {
@@ -519,7 +543,7 @@ export function generateCrudSuite(
     }
 
     const step: RawStep = {
-      name: group.update.operationId ?? `Update ${group.resource.replace(/s$/, "")}`,
+      name: group.update.operationId ?? `Update ${singularizeResource(group.resource)}`,
       source: buildStepSource(group.update),
       [method]: itemPath,
       expect: {
@@ -538,13 +562,13 @@ export function generateCrudSuite(
   // 4. Delete
   if (group.delete) {
     const itemPath = convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`);
-    const etagVar = `${group.resource.replace(/s$/, "")}_etag`;
+    const etagVar = resourceVar(group.resource, "etag");
 
     // If delete requires ETag and update didn't already capture it, add a GET step
     const updateAlreadyCapturedEtag = group.update?.requiresEtag;
     if (group.delete.requiresEtag && group.read && !updateAlreadyCapturedEtag) {
       tests.push({
-        name: `Get ETag before delete ${group.resource.replace(/s$/, "")}`,
+        name: `Get ETag before delete ${singularizeResource(group.resource)}`,
         source: buildStepSource(group.read),
         GET: itemPath,
         expect: {
@@ -556,7 +580,7 @@ export function generateCrudSuite(
 
     // T44: cleanup must run even if earlier assertions failed (tainted captures)
     const step: RawStep = {
-      name: group.delete.operationId ?? `Delete ${group.resource.replace(/s$/, "")}`,
+      name: group.delete.operationId ?? `Delete ${singularizeResource(group.resource)}`,
       source: buildStepSource(group.delete),
       DELETE: itemPath,
       always: true,
@@ -572,7 +596,7 @@ export function generateCrudSuite(
     // 5. Verify deleted — also always, so we confirm cleanup happened
     if (group.read) {
       tests.push({
-        name: `Verify ${group.resource.replace(/s$/, "")} deleted`,
+        name: `Verify ${singularizeResource(group.resource)} deleted`,
         source: buildStepSource(group.read, 404),
         GET: convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`),
         always: true,
