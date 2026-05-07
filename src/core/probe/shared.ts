@@ -75,22 +75,24 @@ export function endpointStem(ep: EndpointInfo): string {
 export function getAuthHeaders(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
+  tokenVarFor?: (s: SecuritySchemeInfo) => string,
 ): Record<string, string> | undefined {
   if (ep.security.length === 0) return undefined;
+  const tokenVar = (s: SecuritySchemeInfo) => tokenVarFor?.(s) ?? "auth_token";
   for (const secName of ep.security) {
     const scheme = schemes.find((s) => s.name === secName);
     if (!scheme) continue;
     if (scheme.type === "http") {
       if (scheme.scheme === "bearer" || !scheme.scheme) {
-        return { Authorization: "Bearer {{auth_token}}" };
+        return { Authorization: `Bearer {{${tokenVar(scheme)}}}` };
       }
       if (scheme.scheme === "basic") {
-        return { Authorization: "Basic {{auth_token}}" };
+        return { Authorization: `Basic {{${tokenVar(scheme)}}}` };
       }
     }
     if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
       if (scheme.apiKeyName === "Authorization") {
-        return { Authorization: "Bearer {{auth_token}}" };
+        return { Authorization: `Bearer {{${tokenVar(scheme)}}}` };
       }
       return { [scheme.apiKeyName]: "{{api_key}}" };
     }
