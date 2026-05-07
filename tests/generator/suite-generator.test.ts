@@ -575,6 +575,17 @@ describe("generateSuites", () => {
     expect(usersSuite).toBeDefined();
   });
 
+  test("TASK-80 — includeDeprecated: true emits suites for deprecated endpoints", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/pets", method: "GET", deprecated: true, tags: ["pets"] }),
+      makeEndpoint({ path: "/users", method: "GET", tags: ["users"] }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity, includeDeprecated: true });
+
+    const petsSuite = suites.find(s => s.name === "pets-smoke");
+    expect(petsSuite).toBeDefined();
+  });
+
   test("untagged endpoints go to 'untagged' slug", () => {
     const endpoints = [
       makeEndpoint({ path: "/ping", method: "GET" }),

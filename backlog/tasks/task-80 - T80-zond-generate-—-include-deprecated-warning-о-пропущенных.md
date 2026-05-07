@@ -1,10 +1,10 @@
 ---
 id: TASK-80
 title: 'T80: zond generate — --include-deprecated + warning о пропущенных'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-29 08:40'
-updated_date: '2026-05-07 14:21'
+updated_date: '2026-05-07 15:37'
 labels:
   - generator
   - ux
@@ -23,9 +23,9 @@ Coverage показал 4 непокрытых эндпоинта /audiences —
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 По умолчанию deprecated: true пропускаются (как сейчас)
-- [ ] #2 В конце генерации warning: 'Skipped 4 deprecated endpoints: /audiences/{id}, ... — pass --include-deprecated to include'
-- [ ] #3 Флаг --include-deprecated включает их
+- [x] #1 По умолчанию deprecated: true пропускаются (как сейчас)
+- [x] #2 В конце генерации warning: 'Skipped 4 deprecated endpoints: /audiences/{id}, ... — pass --include-deprecated to include'
+- [x] #3 Флаг --include-deprecated включает их
 <!-- AC:END -->
 
 ## Implementation Notes

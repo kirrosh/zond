@@ -829,11 +829,14 @@ export function generateSuites(opts: {
   securitySchemes: SecuritySchemeInfo[];
   /** Path to OpenAPI spec, recorded in suite-level provenance. */
   specPath?: string;
+  /** When true, deprecated endpoints are included instead of filtered out. */
+  includeDeprecated?: boolean;
 }): RawSuite[] {
-  const { endpoints, securitySchemes, specPath } = opts;
+  const { endpoints, securitySchemes, specPath, includeDeprecated } = opts;
 
-  // Filter deprecated
-  const active = endpoints.filter(ep => !ep.deprecated);
+  // Filter deprecated unless caller opted in. The list of skipped paths is
+  // exposed separately via `getSkippedDeprecated` for stdout reporting.
+  const active = includeDeprecated ? endpoints : endpoints.filter(ep => !ep.deprecated);
 
   // Separate auth endpoints
   const authEndpoints = active.filter(isAuthEndpoint);
