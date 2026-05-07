@@ -194,16 +194,24 @@ function serializeValue(value: unknown, indent: number, lines: string[]): void {
         if (entries.length > 0) {
           const [firstKey, firstVal] = entries[0]!;
           if (typeof firstVal === "object" && firstVal !== null) {
-            lines.push(`${prefix}- ${firstKey}:`);
-            serializeValue(firstVal, indent + 1, lines);
+            if (isEmptyContainer(firstVal)) {
+              lines.push(`${prefix}- ${firstKey}: ${Array.isArray(firstVal) ? "[]" : "{}"}`);
+            } else {
+              lines.push(`${prefix}- ${firstKey}:`);
+              serializeValue(firstVal, indent + 1, lines);
+            }
           } else {
             lines.push(`${prefix}- ${firstKey}: ${formatInlineValue(firstVal)}`);
           }
           for (let i = 1; i < entries.length; i++) {
             const [k, v] = entries[i]!;
             if (typeof v === "object" && v !== null) {
-              lines.push(`${prefix}  ${k}:`);
-              serializeValue(v, indent + 1, lines);
+              if (isEmptyContainer(v)) {
+                lines.push(`${prefix}  ${k}: ${Array.isArray(v) ? "[]" : "{}"}`);
+              } else {
+                lines.push(`${prefix}  ${k}:`);
+                serializeValue(v, indent + 1, lines);
+              }
             } else {
               lines.push(`${prefix}  ${k}: ${formatInlineValue(v)}`);
             }
@@ -221,13 +229,26 @@ function serializeValue(value: unknown, indent: number, lines: string[]): void {
   if (typeof value === "object") {
     for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
       if (typeof val === "object" && val !== null) {
-        lines.push(`${prefix}${key}:`);
-        serializeValue(val, indent + 1, lines);
+        if (isEmptyContainer(val)) {
+          lines.push(`${prefix}${key}: ${Array.isArray(val) ? "[]" : "{}"}`);
+        } else {
+          lines.push(`${prefix}${key}:`);
+          serializeValue(val, indent + 1, lines);
+        }
       } else {
         lines.push(`${prefix}${key}: ${formatInlineValue(val)}`);
       }
     }
   }
+}
+
+/** Empty `{}` / `[]` written as a bare `key:` (no value, no children) is
+ *  re-parsed by YAML as `null` — sending `null` for an `object`-typed field
+ *  guarantees 422 against strict APIs. Emit inline flow form to preserve type. */
+function isEmptyContainer(val: unknown): boolean {
+  if (Array.isArray(val)) return val.length === 0;
+  if (typeof val === "object" && val !== null) return Object.keys(val).length === 0;
+  return false;
 }
 
 function formatInlineValue(val: unknown): string {

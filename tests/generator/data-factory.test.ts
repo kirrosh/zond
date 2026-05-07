@@ -356,6 +356,104 @@ describe("guessIntPlaceholder constraints", () => {
   });
 });
 
+describe("TASK-220 / F12 — email-context name heuristics", () => {
+  test.each([
+    ["from", "{{$randomEmail}}"],
+    ["to", "{{$randomEmail}}"],
+    ["cc", "{{$randomEmail}}"],
+    ["bcc", "{{$randomEmail}}"],
+    ["reply_to", "{{$randomEmail}}"],
+    ["replyTo", "{{$randomEmail}}"],
+    ["sender", "{{$randomEmail}}"],
+    ["recipient", "{{$randomEmail}}"],
+  ])("string field named '%s' (no format) -> %s", (name, expected) => {
+    expect(generateFromSchema({ type: "string" } as OA.SchemaObject, name)).toBe(expected);
+  });
+});
+
+describe("TASK-221 / F13 — null example is ignored", () => {
+  test("schema.example: null falls through to type default (object)", () => {
+    const result = generateFromSchema({ type: "object", example: null } as unknown as OA.SchemaObject);
+    expect(result).toEqual({});
+  });
+
+  test("schema.example: null on string field falls back to randomString", () => {
+    const result = generateFromSchema({ type: "string", example: null } as unknown as OA.SchemaObject);
+    expect(result).toBe("{{$randomString}}");
+  });
+
+  test("nested object property with example: null serializes as empty object, not null", () => {
+    const result = generateFromSchema({
+      type: "object",
+      properties: {
+        config: { type: "object", example: null } as unknown as OA.SchemaObject,
+      },
+    } as OA.SchemaObject) as Record<string, unknown>;
+    expect(result.config).toEqual({});
+  });
+});
+
+describe("TASK-222 / F14 — oneOf/anyOf prefer object variant in array context", () => {
+  test("array<oneOf<string|object>> uses object variant", () => {
+    const schema: OA.SchemaObject = {
+      type: "array",
+      items: {
+        oneOf: [
+          { type: "string" } as OA.SchemaObject,
+          { type: "object", properties: { id: { type: "string", format: "uuid" } as OA.SchemaObject } } as OA.SchemaObject,
+        ],
+      } as unknown as OA.SchemaObject,
+    };
+    const result = generateFromSchema(schema) as unknown[];
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({ id: "{{$uuid}}" });
+  });
+
+  test("oneOf with only primitives still picks first non-null", () => {
+    const schema: OA.SchemaObject = {
+      oneOf: [
+        { type: "null" } as unknown as OA.SchemaObject,
+        { type: "string" } as OA.SchemaObject,
+        { type: "integer" } as OA.SchemaObject,
+      ],
+    } as unknown as OA.SchemaObject;
+    expect(generateFromSchema(schema)).toBe("{{$randomString}}");
+  });
+});
+
+describe("TASK-223 / F15 — UUID-shaped FK example replaced with placeholder", () => {
+  test("field name ending in _id with UUID example -> {{$uuid}}", () => {
+    const result = generateFromSchema(
+      { type: "string", example: "78261eea-8f8b-4381-83c6-79fa7120f1cf" } as OA.SchemaObject,
+      "audience_id",
+    );
+    expect(result).toBe("{{$uuid}}");
+  });
+
+  test("format: uuid with UUID example -> {{$uuid}}", () => {
+    const result = generateFromSchema(
+      { type: "string", format: "uuid", example: "78261eea-8f8b-4381-83c6-79fa7120f1cf" } as OA.SchemaObject,
+    );
+    expect(result).toBe("{{$uuid}}");
+  });
+
+  test("non-FK field with UUID-shaped example is still honored", () => {
+    const result = generateFromSchema(
+      { type: "string", example: "78261eea-8f8b-4381-83c6-79fa7120f1cf" } as OA.SchemaObject,
+      "tracking_token",
+    );
+    expect(result).toBe("78261eea-8f8b-4381-83c6-79fa7120f1cf");
+  });
+
+  test("FK field with non-UUID example is honored (e.g. slug)", () => {
+    const result = generateFromSchema(
+      { type: "string", example: "newsletter-2026" } as OA.SchemaObject,
+      "audience_id",
+    );
+    expect(result).toBe("newsletter-2026");
+  });
+});
+
 describe("generateMultipartFromSchema", () => {
   test("binary field becomes file upload object", () => {
     const schema: OA.SchemaObject = {
