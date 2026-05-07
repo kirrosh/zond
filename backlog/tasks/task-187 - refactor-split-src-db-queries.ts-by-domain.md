@@ -1,9 +1,10 @@
 ---
 id: TASK-187
 title: 'refactor: split src/db/queries.ts by domain'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 06:49'
+updated_date: '2026-05-07 07:28'
 labels:
   - refactor
   - db
@@ -20,7 +21,7 @@ queries.ts разрослась после m-6 (sessions, coverage, cascade) и 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 src/db/queries/{runs,sessions,coverage,settings,results}.ts существуют
-- [ ] #2 src/db/queries.ts остался как фасад (re-exports), будет удалён в следующем релизе
-- [ ] #3 bun run check + bun test зелёные
+- [x] #1 src/db/queries/{runs,sessions,coverage,settings,results}.ts существуют
+- [x] #2 src/db/queries.ts остался как фасад (re-exports), будет удалён в следующем релизе
+- [x] #3 bun run check + bun test зелёные
 <!-- AC:END -->

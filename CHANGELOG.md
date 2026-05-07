@@ -38,6 +38,13 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **TASK-187: split `src/db/queries.ts` by domain.** The 750-line module
+  is now split across `src/db/queries/{types,runs,sessions,results,collections,dashboard,settings,coverage}.ts`.
+  `src/db/queries.ts` survives as a façade that re-exports everything,
+  so all 27 callers stay unchanged for one release; the façade will be
+  deleted in the next minor (callers should migrate to the per-domain
+  paths). `coverage.ts` and `settings.ts` are reserved placeholders for
+  future features and ignored by knip.
 - **TASK-185: extract shared probe scaffolding into `core/probe/runner.ts`.**
   The four probe cli commands (`validation`, `methods`, `mass-assignment`,
   `security`) used to each repeat: `readOpenApiSpec` → `extractEndpoints`
