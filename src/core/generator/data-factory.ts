@@ -13,8 +13,17 @@ export function generateFromSchema(
 
   // Highest-priority signal: explicit example from spec.
   // Beats enum, format, heuristics — the spec author told us what to send.
-  if (schema.example !== undefined) {
-    return schema.example;
+  // Two exceptions:
+  //   1. `null` examples are noise (often nullable: true with no real example) —
+  //      skip so we fall through to type/format defaults instead of emitting null.
+  //   2. UUID-shaped examples on FK-context fields (name ends with `_id` or
+  //      schema.format === "uuid") are usually copy-pasted from another tenant's
+  //      spec. Honoring them leaks foreign IDs and guarantees 422 on real APIs;
+  //      `{{$uuid}}` is at least an honest test placeholder.
+  if (schema.example !== undefined && schema.example !== null) {
+    if (!isLikelyForeignFKExample(schema, propertyName)) {
+      return schema.example;
+    }
   }
 
   // allOf: merge all schemas
@@ -29,12 +38,15 @@ export function generateFromSchema(
     return generateFromSchema(merged, propertyName, _depth + 1);
   }
 
-  // oneOf / anyOf: use first variant
+  // oneOf / anyOf: pick the most informative variant. Prefer objects with
+  // properties over loose primitives — APIs that accept `Array<{id}>|Array<string>`
+  // need the object variant, not a string that 422s. Falls back to first
+  // non-null entry.
   if (schema.oneOf) {
-    return generateFromSchema(schema.oneOf[0] as OpenAPIV3.SchemaObject, propertyName, _depth + 1);
+    return generateFromSchema(pickPreferredVariant(schema.oneOf as OpenAPIV3.SchemaObject[]), propertyName, _depth + 1);
   }
   if (schema.anyOf) {
-    return generateFromSchema(schema.anyOf[0] as OpenAPIV3.SchemaObject, propertyName, _depth + 1);
+    return generateFromSchema(pickPreferredVariant(schema.anyOf as OpenAPIV3.SchemaObject[]), propertyName, _depth + 1);
   }
 
   // enum: first value (always valid for the API contract)
@@ -105,6 +117,41 @@ export function generateFromSchema(
   }
 }
 
+/** Prefer the most data-shape-informative variant from a oneOf/anyOf list:
+ *  object-with-properties > non-null > first. Skips `type: "null"` entries
+ *  introduced by 3.1 nullable shorthand. */
+function pickPreferredVariant(variants: OpenAPIV3.SchemaObject[]): OpenAPIV3.SchemaObject {
+  const isNull = (s: OpenAPIV3.SchemaObject) =>
+    (s as { type?: unknown }).type === "null";
+  const nonNull = variants.filter(v => !isNull(v));
+  const pool = nonNull.length > 0 ? nonNull : variants;
+
+  const objectWithProps = pool.find(
+    v => v.type === "object" && v.properties && Object.keys(v.properties).length > 0,
+  );
+  if (objectWithProps) return objectWithProps;
+
+  return pool[0]!;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A string example shaped like a UUID, on a field that looks like a foreign
+ *  key (name ends with `_id` or schema declares `format: uuid`), is almost
+ *  always a tenant-specific value the spec author left in `example:`. Sending
+ *  it verbatim guarantees 422 on a fresh account and leaks foreign IDs. */
+function isLikelyForeignFKExample(
+  schema: OpenAPIV3.SchemaObject,
+  name?: string,
+): boolean {
+  const ex = schema.example;
+  if (typeof ex !== "string") return false;
+  if (!UUID_RE.test(ex)) return false;
+  const fkByName = !!name && name.toLowerCase().endsWith("_id");
+  const fkByFormat = schema.format === "uuid";
+  return fkByName || fkByFormat;
+}
+
 /**
  * Map an OpenAPI `format` value to a zond generator placeholder. Returns
  * undefined when the format is unknown or absent so callers can fall back
@@ -157,7 +204,27 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
   // Name-based heuristics
   if (name) {
     const lower = name.toLowerCase();
-    if (lower === "email" || lower.endsWith("_email") || lower.endsWith("Email")) {
+    // Email-context fields. Email-API specs (Resend, SendGrid, Mailgun) often
+    // omit `format: email` on `from`/`to`/`reply_to`/`cc`/`bcc` — the field
+    // name is the only clue, and `{{$randomString}}` guarantees a 422.
+    if (
+      lower === "email" ||
+      lower === "from" ||
+      lower === "to" ||
+      lower === "cc" ||
+      lower === "bcc" ||
+      lower === "sender" ||
+      lower === "recipient" ||
+      lower === "reply_to" ||
+      lower === "replyto" ||
+      lower.endsWith("_email") ||
+      lower.endsWith("Email") ||
+      lower.endsWith("_reply_to") ||
+      lower.endsWith("_from") ||
+      lower.endsWith("_to") ||
+      lower.endsWith("_cc") ||
+      lower.endsWith("_bcc")
+    ) {
       return "{{$randomEmail}}";
     }
     if (lower === "id" || lower === "uuid" || lower.endsWith("_id") || lower.endsWith("id")) {

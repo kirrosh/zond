@@ -138,6 +138,42 @@ describe("serializeSuite", () => {
     const yaml = serializeSuite(suite);
     expect(yaml).toContain('skip_if: "{{user_id}} =="');
   });
+
+  test("TASK-221 / F13 — empty {} value emits inline `{}` not bare key (which YAML re-parses as null)", () => {
+    const suite: RawSuite = {
+      name: "test-suite",
+      tests: [
+        {
+          name: "create automation",
+          POST: "/automations",
+          json: { steps: [{ kind: "wait", config: {} }] },
+          expect: { status: 201 },
+        },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    expect(yaml).toContain("config: {}");
+    const parsed = yamlToObject(yaml) as { tests: { json: { steps: { config: unknown }[] } }[] };
+    expect(parsed.tests[0]!.json.steps[0]!.config).toEqual({});
+  });
+
+  test("TASK-221 / F13 — empty [] value emits inline `[]` not bare key", () => {
+    const suite: RawSuite = {
+      name: "test-suite",
+      tests: [
+        {
+          name: "create",
+          POST: "/x",
+          json: { tags: [] },
+          expect: { status: 201 },
+        },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    expect(yaml).toContain("tags: []");
+    const parsed = yamlToObject(yaml) as { tests: { json: { tags: unknown } }[] };
+    expect(parsed.tests[0]!.json.tags).toEqual([]);
+  });
 });
 
 function yamlToObject(yaml: string): unknown {
