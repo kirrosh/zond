@@ -548,4 +548,61 @@ describe("new assertion operators", () => {
       expect(results[0]!.passed).toBe(false);
     });
   });
+
+  describe("_body root path", () => {
+    test("type: array for array response → pass", () => {
+      const results = checkAssertions(
+        { status: 200, body: { _body: { type: "array" } } },
+        makeResponse({ status: 200, body_parsed: [1, 2, 3] }),
+      );
+      const bodyResult = results.find(r => r.field === "body._body");
+      expect(bodyResult).toBeDefined();
+      expect(bodyResult!.passed).toBe(true);
+    });
+
+    test("type: object for object response → pass", () => {
+      const results = checkAssertions(
+        { status: 200, body: { _body: { type: "object" } } },
+        makeResponse({ status: 200, body_parsed: { id: 1 } }),
+      );
+      const bodyResult = results.find(r => r.field === "body._body");
+      expect(bodyResult!.passed).toBe(true);
+    });
+
+    test("type: array for object response → fail", () => {
+      const results = checkAssertions(
+        { status: 200, body: { _body: { type: "array" } } },
+        makeResponse({ status: 200, body_parsed: { id: 1 } }),
+      );
+      const bodyResult = results.find(r => r.field === "body._body");
+      expect(bodyResult!.passed).toBe(false);
+    });
+
+    test("exists: true for non-empty body → pass", () => {
+      const results = checkAssertions(
+        { status: 200, body: { _body: { exists: true } } },
+        makeResponse({ status: 200, body_parsed: [] }),
+      );
+      const bodyResult = results.find(r => r.field === "body._body");
+      expect(bodyResult!.passed).toBe(true);
+    });
+
+    test("_body.length checks length property of array", () => {
+      const results = checkAssertions(
+        { status: 200, body: { "_body.length": { gt: 0 } } },
+        makeResponse({ status: 200, body_parsed: [1, 2, 3] }),
+      );
+      const bodyResult = results.find(r => r.field === "body._body.length");
+      expect(bodyResult).toBeDefined();
+      expect(bodyResult!.passed).toBe(true);
+    });
+
+    test("_body capture captures entire body", () => {
+      const captures = extractCaptures(
+        { _body: { capture: "all" } },
+        [1, 2, 3],
+      );
+      expect(captures.all).toEqual([1, 2, 3]);
+    });
+  });
 });
