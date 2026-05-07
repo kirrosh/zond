@@ -3,9 +3,10 @@ id: TASK-199
 title: >-
   tests: strengthen weak CLI assertions (timeout / catalog default / request
   action / update happy-path)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:12'
+updated_date: '2026-05-07 12:00'
 labels:
   - tests
   - cli
@@ -22,10 +23,10 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 commands.test.ts --timeout: actual timeout срабатывает, expect code 1
-- [ ] #2 catalog.test.ts: defaults-test переписан или удалён как дубль
-- [ ] #3 program.test.ts --header test добавляет fetch-have-been-called
-- [ ] #4 program.test.ts --tag test переименован
-- [ ] #5 update.test.ts +4 кейса happy-path; mockGitHubRelease используется; updateCommand принимает runtimeKind для test injection
-- [ ] #6 Зелёное
+- [x] #1 commands.test.ts --timeout: actual timeout срабатывает, expect code 1
+- [x] #2 catalog.test.ts: defaults-test переписан или удалён как дубль
+- [x] #3 program.test.ts --header test добавляет fetch-have-been-called
+- [x] #4 program.test.ts --tag test переименован
+- [x] #5 update.test.ts +4 кейса happy-path; mockGitHubRelease используется; updateCommand принимает runtimeKind для test injection
+- [x] #6 Зелёное
 <!-- AC:END -->

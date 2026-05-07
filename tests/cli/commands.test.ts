@@ -58,18 +58,31 @@ describe("runCommand", () => {
     expect(code).toBe(2);
   });
 
-  test("--timeout overrides suite config", async () => {
-    mockFetchResponses([{ status: 200, body: {} }]);
-    restore = captureOutput().restore;
+  test("--timeout=1ms aborts a slow request and surfaces a failure", async () => {
+    // Fetch hangs longer than the timeout — abort path must fire.
+    globalThis.fetch = mock((_url, init?: RequestInit) => {
+      return new Promise((_, reject) => {
+        const sig = init?.signal;
+        const onAbort = () => {
+          const err = new Error("aborted");
+          err.name = "AbortError";
+          reject(err);
+        };
+        if (sig?.aborted) onAbort();
+        else sig?.addEventListener("abort", onAbort, { once: true });
+      });
+    }) as unknown as typeof fetch;
+    const cap = captureOutput();
+    restore = cap.restore;
 
     const code = await runCommand({
       paths: [`${FIXTURES}/simple.yaml`],
-      report: "json",
-      timeout: 1000,
+      report: "console",
+      timeout: 1,
       bail: false,
       noDb: true,
     });
-    expect(code).toBe(0);
+    expect(code).toBe(1);
   });
 
   test("works with json reporter", async () => {

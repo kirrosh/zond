@@ -6,6 +6,9 @@ import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 export interface UpdateOptions {
   json?: boolean;
   check?: boolean;
+  /** Test-only injection. When set, bypasses the real isCompiledBinary() probe
+   *  so happy-path branches can be exercised without a compiled binary. */
+  runtimeKind?: "standalone" | "bun";
 }
 
 const GITHUB_API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -37,7 +40,10 @@ async function fetchLatestRelease(): Promise<GitHubRelease> {
 
 export async function updateCommand(options: UpdateOptions): Promise<number> {
   try {
-    if (!isCompiledBinary()) {
+    const standalone = options.runtimeKind !== undefined
+      ? options.runtimeKind === "standalone"
+      : isCompiledBinary();
+    if (!standalone) {
       const msg = "Self-update is only available for standalone binaries. Install binary: curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh";
       if (options.json) {
         printJson(jsonOk("update", { action: "skip", reason: "not-standalone", installHint: "curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh" }, [msg]));

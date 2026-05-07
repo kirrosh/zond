@@ -162,9 +162,10 @@ describe("buildProgram — repeatable flags", () => {
     // option parser accepts the run. Mock fetch so the action's HTTP call resolves
     // (otherwise we'd leak an unhandled rejection that fails the suite).
     const origFetch = globalThis.fetch;
-    globalThis.fetch = mock(async () =>
+    const fetchMock = mock(async () =>
       new Response(JSON.stringify({}), { status: 200, headers: { "Content-Type": "application/json" } }),
-    ) as unknown as typeof fetch;
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
     const { restore } = captureOutput();
     try {
       await reqCmd.parseAsync(
@@ -175,9 +176,11 @@ describe("buildProgram — repeatable flags", () => {
     restore();
     globalThis.fetch = origFetch;
     expect(reqCmd.opts().header).toEqual(["A: 1", "B: 2"]);
+    // tryParse swallows action errors silently — assert the action actually ran.
+    expect(fetchMock).toHaveBeenCalled();
   });
 
-  test("--tag accepts comma-separated form (split happens in action via flatSplit)", () => {
+  test("--tag preserves commas (split happens in action)", () => {
     // Commander itself doesn't split — we test that the raw value is preserved as one entry.
     // The splitting is handled by flatSplit in the action; we cover that via end-to-end below.
     const { restore } = captureOutput();

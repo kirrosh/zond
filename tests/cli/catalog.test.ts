@@ -93,17 +93,19 @@ describe("catalogCommand", () => {
     expect(paths).toContain("DELETE /pets/{petId}");
   });
 
-  test("defaults output to current directory", async () => {
+  test("defaults output to current working directory when --output is omitted", async () => {
     output = captureOutput({ console: true });
-    // Use a temp dir as "current" by specifying it as output
     tmpDir = await mkdtemp(join(tmpdir(), "zond-catalog-"));
-
-    const code = await catalogCommand({
-      specPath: `${FIXTURES}/petstore-simple.json`,
-      output: tmpDir,
-    });
-
-    expect(code).toBe(0);
-    expect(await Bun.file(join(tmpDir, ".api-catalog.yaml")).exists()).toBe(true);
+    const originalCwd = process.cwd();
+    process.chdir(tmpDir);
+    try {
+      const code = await catalogCommand({
+        specPath: `${FIXTURES}/petstore-simple.json`,
+      });
+      expect(code).toBe(0);
+      expect(await Bun.file(join(tmpDir, ".api-catalog.yaml")).exists()).toBe(true);
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 });
