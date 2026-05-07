@@ -3,7 +3,7 @@ id: TASK-195
 title: >-
   tests: drop redundant CLI smoke spawns (cli-smoke, internal-error,
   completions)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:10'
 labels:
@@ -23,8 +23,8 @@ tests/cli/cli-smoke.test.ts: 4 spawn'а — все ассерты (--help, --ver
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 tests/cli/cli-smoke.test.ts удалён (или сокращён до ≤1 spawn для --version + runtime tag через ZOND_E2E env-gate)
-- [ ] #2 tests/cli/internal-error.test.ts удалён; '[zond:internal]' assertion добавлен в program.test.ts
-- [ ] #3 tests/cli/completions.test.ts L58-98 удалены; 'unsupported shell' и 'missing shell arg' переведены на tryParse-стиль
-- [ ] #4 Удалено ≥10 spawn-кейсов; bun test зелёное; общее число тестов уменьшено только за счёт удалённых дублей
+- [x] #1 tests/cli/cli-smoke.test.ts удалён (или сокращён до ≤1 spawn для --version + runtime tag через ZOND_E2E env-gate)
+- [x] #2 tests/cli/internal-error.test.ts удалён; '[zond:internal]' assertion добавлен в program.test.ts
+- [x] #3 tests/cli/completions.test.ts L58-98 удалены; 'unsupported shell' и 'missing shell arg' переведены на tryParse-стиль
+- [x] #4 Удалено ≥10 spawn-кейсов; bun test зелёное; общее число тестов уменьшено только за счёт удалённых дублей
 <!-- AC:END -->

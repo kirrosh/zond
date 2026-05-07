@@ -1,7 +1,7 @@
 ---
 id: TASK-196
 title: 'tests: convert doctor.test.ts to in-process doctorCommand calls'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:10'
 labels:
@@ -21,9 +21,9 @@ tests/cli/doctor.test.ts: 8 runCli spawn'ов × ~500ms = ~4s overhead. Все �
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Все 8 runCli заменены на доуenчные вызовы doctorCommand
-- [ ] #2 L85-87 throw new Error заменено на bun-test expect
-- [ ] #3 closeDb() вызывается в afterEach (не вручную в каждом тесте)
-- [ ] #4 Время прогона tests/cli/doctor.test.ts падает >50%
-- [ ] #5 Зелёное
+- [x] #1 Все 8 runCli заменены на доуenчные вызовы doctorCommand
+- [x] #2 L85-87 throw new Error заменено на bun-test expect
+- [x] #3 closeDb() вызывается в afterEach (не вручную в каждом тесте)
+- [x] #4 Время прогона tests/cli/doctor.test.ts падает >50%
+- [x] #5 Зелёное
 <!-- AC:END -->
