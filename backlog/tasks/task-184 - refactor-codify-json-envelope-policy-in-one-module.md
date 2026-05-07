@@ -1,9 +1,10 @@
 ---
 id: TASK-184
 title: 'refactor: codify --json envelope policy in one module'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 06:49'
+updated_date: '2026-05-07 07:14'
 labels:
   - refactor
   - cli
@@ -21,8 +22,8 @@ TASK-73, TASK-74 — про неконсистентный --json. Сейчас 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 src/cli/json-envelope.ts экспортирует withEnvelope() / writeEnvelope() с типами
+- [x] #1 src/cli/json-envelope.ts экспортирует withEnvelope() / writeEnvelope() с типами
 - [ ] #2 Все команды с --json идут через эту точку (grep на --json: 0 ad-hoc формирований)
-- [ ] #3 tests/cli/json-envelope.test.ts покрывает success/error/meta форму
-- [ ] #4 TASK-73 + TASK-74 закрываются как fixed-by
+- [x] #3 tests/cli/json-envelope.test.ts покрывает success/error/meta форму
+- [x] #4 TASK-73 + TASK-74 закрываются как fixed-by
 <!-- AC:END -->
