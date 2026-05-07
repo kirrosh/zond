@@ -148,3 +148,46 @@ function printBootstrapResult(b: BootstrapResult, writeAgents: boolean): void {
 function verb(action: "created" | "updated" | "noop"): string {
   return action === "created" ? "Created" : action === "updated" ? "Updated" : "Up-to-date:";
 }
+
+import type { Command } from "commander";
+import { globalJson } from "../../resolve.ts";
+
+export function registerInit(program: Command): void {
+  program
+    .command("init [spec]")
+    .description("Bootstrap a workspace, or register an API when --spec is given")
+    .option("--name <name>", "API name (auto-detected from spec title if omitted)")
+    .option("--spec <path>", "Path to OpenAPI spec file (registers a single API)")
+    .option("--base-url <url>", "Override base URL")
+    .option("--dir <path>", "Target directory")
+    .option("--force", "Overwrite existing API collection")
+    .option("--insecure", "Skip TLS verification when fetching the spec")
+    .option("--db <path>", "Path to SQLite database file")
+    .option("--workspace", "Bootstrap a zond workspace (zond.config.yml, apis/, AGENTS.md)")
+    .option("--with-spec <path>", "Bootstrap workspace AND register first API from spec")
+    .option("--no-agents-md", "Skip writing AGENTS.md when bootstrapping")
+    .option("--no-skills", "Skip writing Claude Code skills under .claude/skills/")
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const spec = opts.spec ?? specPos;
+      const json = globalJson(cmd);
+      if ((spec || opts.withSpec) && !json) {
+        process.stderr.write(
+          `Warning: 'zond init --spec' / '--with-spec' is deprecated. Use \`zond add api <name> --spec <path>\` (run \`zond init\` separately to bootstrap the workspace).\n`,
+        );
+      }
+      process.exitCode = await initCommand({
+        name: opts.name,
+        spec,
+        baseUrl: opts.baseUrl,
+        dir: opts.dir,
+        force: opts.force === true,
+        insecure: opts.insecure === true,
+        dbPath: opts.db,
+        workspace: opts.workspace === true,
+        withSpec: opts.withSpec,
+        noAgents: opts.agentsMd === false,
+        noSkills: opts.skills === false,
+        json,
+      });
+    });
+}

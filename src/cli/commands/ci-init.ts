@@ -178,3 +178,28 @@ export async function ciInitCommand(options: CiInitOptions): Promise<number> {
 
   return 0;
 }
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+
+export function registerCi(program: Command): void {
+  const ci = program.command("ci").description("CI/CD scaffolding");
+  ci
+    .command("init")
+    .description("Generate CI/CD workflow (GitHub Actions, GitLab CI)")
+    .option("--github", "Generate GitHub Actions workflow")
+    .option("--gitlab", "Generate GitLab CI config")
+    .option("--dir <path>", "Project root directory (default: current directory)")
+    .option("--force", "Overwrite existing CI config")
+    .action(async (opts, cmd: Command) => {
+      let platform: "github" | "gitlab" | undefined;
+      if (opts.github === true) platform = "github";
+      else if (opts.gitlab === true) platform = "gitlab";
+      process.exitCode = await ciInitCommand({
+        platform,
+        force: opts.force === true,
+        dir: opts.dir,
+        json: globalJson(cmd),
+      });
+    });
+}
