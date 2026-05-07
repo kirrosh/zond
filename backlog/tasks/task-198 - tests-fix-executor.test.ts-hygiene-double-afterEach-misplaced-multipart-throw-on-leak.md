@@ -3,7 +3,7 @@ id: TASK-198
 title: >-
   tests: fix executor.test.ts hygiene (double afterEach, misplaced multipart,
   throw-on-leak)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:10'
 labels:
@@ -23,9 +23,9 @@ tests/runner/executor.test.ts: (1) L645-647 второй afterEach внутри 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 L645-647 inner afterEach удалён
-- [ ] #2 Multipart-тест перемещён в свой top-level describe('multipart')
-- [ ] #3 mockFetchResponses бросает 'unexpected fetch call (call N)' вместо 500-fallback
-- [ ] #4 parameterize.test.ts L144-152 'schema accepts parameterize map' перенесён в tests/parser/schema.test.ts
-- [ ] #5 Зелёное
+- [x] #1 L645-647 inner afterEach удалён
+- [x] #2 Multipart-тест перемещён в свой top-level describe('multipart')
+- [x] #3 mockFetchResponses бросает 'unexpected fetch call (call N)' вместо 500-fallback
+- [x] #4 parameterize.test.ts L144-152 'schema accepts parameterize map' перенесён в tests/parser/schema.test.ts
+- [x] #5 Зелёное
 <!-- AC:END -->

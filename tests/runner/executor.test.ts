@@ -629,10 +629,6 @@ describe("URL validation", () => {
 });
 
 describe("setup suite propagation", () => {
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
   test("captures from setup suite propagate to regular suite via env merge", async () => {
     // Simulate the propagation pattern used in execute-run.ts and run.ts:
     //   setupCaptures collected from setup suite results
@@ -692,7 +688,9 @@ describe("setup suite propagation", () => {
     const sentHeader = regularResult.steps[0]!.request.headers["Authorization"];
     expect(sentHeader).toBe("Bearer setup-token-xyz");
   });
+});
 
+describe("multipart", () => {
   test("sends multipart/form-data with text fields", async () => {
     let capturedInit: RequestInit | undefined;
     globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {

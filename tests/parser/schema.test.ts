@@ -260,4 +260,13 @@ describe("validateSuite", () => {
     });
     expect(suite.setup).toBeUndefined();
   });
+
+  test("accepts parameterize map at suite level", () => {
+    const suite = validateSuite({
+      name: "schema-test",
+      parameterize: { endpoint: ["/a", "/b"] },
+      tests: [{ name: "x", GET: "{{endpoint}}", expect: { status: 200 } }],
+    });
+    expect(suite.parameterize).toEqual({ endpoint: ["/a", "/b"] });
+  });
 });
