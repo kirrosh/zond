@@ -63,12 +63,18 @@ function install(handler: (input: Request | string | URL, init?: RequestInit) =>
   };
 }
 
-/** Sequence of canned responses; throws if exhausted. */
+/** Sequence of canned responses; throws on overrun so leaks across tests
+ *  surface immediately instead of being papered over by a 500-fallback. */
 export function mockFetchSequence(responses: FetchMockResponse[]): FetchMockHandle {
   let i = 0;
-  return install(async () => {
+  return install(async (input) => {
     const resp = responses[i++];
-    if (!resp) throw new Error(`mockFetchSequence exhausted after ${responses.length} calls`);
+    if (!resp) {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      throw new Error(
+        `unexpected fetch call (call ${i}, expected only ${responses.length}); url=${url}`,
+      );
+    }
     return makeResponse(resp);
   });
 }
