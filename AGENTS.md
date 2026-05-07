@@ -59,9 +59,8 @@ conventional-commits стиль (`feat:` / `refactor:` / `docs:` / `chore:`),
 
 ## Историческая справка
 
-Источник правды по задачам — `backlog/` (Backlog.md CLI). Краткий обзор
-структуры и активных decisions — `docs/project-backlog.md`. Архитектурные
-принципы — в `backlog/decisions/`.
+Источник правды по задачам — `backlog/` (Backlog.md CLI). Активные
+архитектурные решения лежат в `backlog/decisions/`.
 
 ## Развитие zond
 
