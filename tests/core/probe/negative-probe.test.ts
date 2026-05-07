@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { generateNegativeProbes } from "../../../src/core/probe/negative-probe.ts";
+import { generateNegativeProbes, INVALID_UUID_SENTINELS } from "../../../src/core/probe/negative-probe.ts";
 import { ep } from "../../_helpers/endpoints";
 
 describe("generateNegativeProbes", () => {
@@ -277,5 +277,71 @@ describe("generateNegativeProbes", () => {
       securitySchemes: [],
     });
     expect(result.suites[0]!.base_url).toBe("{{base_url}}");
+  });
+
+  // ───────────────────────────── TASK-207: missed-branch coverage
+
+  it("emits exactly one path-probe step per INVALID_UUID_SENTINELS entry", () => {
+    const result = generateNegativeProbes({
+      endpoints: [ep({
+        method: "GET",
+        path: "/items/{id}",
+        parameters: [
+          { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } } as any,
+        ],
+      })],
+      securitySchemes: [],
+    });
+    const suite = result.suites[0]!;
+    const pathProbes = suite.tests.filter(t => t.name.startsWith("path param id="));
+    // One step per sentinel — proves we don't duplicate or skip values.
+    expect(pathProbes).toHaveLength(INVALID_UUID_SENTINELS.length);
+    expect(INVALID_UUID_SENTINELS.length).toBe(4);
+  });
+
+  it("does NOT emit invalid-uuid probes for params declared in:'header'", () => {
+    const result = generateNegativeProbes({
+      endpoints: [ep({
+        method: "GET",
+        path: "/items",
+        parameters: [
+          { name: "X-Trace", in: "header", required: true, schema: { type: "string", format: "uuid" } } as any,
+        ],
+      })],
+      securitySchemes: [],
+    });
+    expect(result.skippedEndpoints).toBe(1);
+    expect(result.suites).toHaveLength(0);
+  });
+
+  it("does NOT emit invalid-uuid probes for params declared in:'cookie'", () => {
+    const result = generateNegativeProbes({
+      endpoints: [ep({
+        method: "GET",
+        path: "/items",
+        parameters: [
+          { name: "session", in: "cookie", required: true, schema: { type: "string", format: "uuid" } } as any,
+        ],
+      })],
+      securitySchemes: [],
+    });
+    expect(result.skippedEndpoints).toBe(1);
+    expect(result.suites).toHaveLength(0);
+  });
+
+  it("does NOT attach Bearer auth headers for non-bearer security schemes (apiKey)", () => {
+    const result = generateNegativeProbes({
+      endpoints: [ep({
+        method: "GET",
+        path: "/x/{id}",
+        security: ["apiKey"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } } as any],
+      })],
+      securitySchemes: [{ name: "apiKey", type: "apiKey", in: "header", paramName: "X-API-Key" } as any],
+    });
+    const suite = result.suites[0]!;
+    // No Bearer header — only the auth_token Bearer path uses that shape.
+    const auth = suite.headers?.Authorization;
+    expect(auth).not.toBe("Bearer {{auth_token}}");
   });
 });

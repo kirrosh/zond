@@ -116,7 +116,52 @@ describe("runSecurityProbes — TASK-151 snapshot+restore on PUT", () => {
     });
     const v = result.verdicts[0]!;
     expect(v.cleanup?.attempted).toBe(true);
-    expect(v.cleanup?.error).toMatch(/restore\.\w+ failed: 500|restore\.\w+ network error/);
+    // Two distinct error shapes — split into per-shape assertions so a future
+    // accidental swap (e.g. always emitting 'network error') can't pass.
+    expect(v.cleanup?.error).toMatch(/restore\.\w+ failed: 500/);
+  });
+
+  it("logs restore failure as 'network error' when PUT throws (no HTTP response)", async () => {
+    // First PUT returns 200 (snapshot/baseline ok); subsequent PUT throws so
+    // restore hits the network-error branch instead of the HTTP-error branch.
+    const prevFetch = globalThis.fetch;
+    let putCount = 0;
+    globalThis.fetch = (async (input: string | Request | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      void url;
+      if (method === "GET") {
+        return new Response(JSON.stringify({ id: "p1", subjectPrefix: "ok" }), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+      }
+      if (method === "PUT") {
+        putCount++;
+        if (putCount > 1) throw new Error("ECONNRESET");
+        return new Response(JSON.stringify({ id: "p1", subjectPrefix: "ok" }), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("", { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const { put: putEp, get: getEp } = projectPutGetPair({
+        type: "object",
+        properties: { subjectPrefix: { type: "string" } },
+      });
+      const result = await runSecurityProbes({
+        endpoints: [putEp, getEp],
+        securitySchemes: [],
+        vars: { base_url: "https://api.test", id: "p1" },
+        classes: ["crlf"],
+      });
+      const v = result.verdicts[0]!;
+      expect(v.cleanup?.attempted).toBe(true);
+      expect(v.cleanup?.error).toMatch(/restore\.\w+ network error/);
+    } finally {
+      globalThis.fetch = prevFetch;
+    }
   });
 });
 

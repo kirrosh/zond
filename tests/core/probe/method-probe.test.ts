@@ -2,6 +2,8 @@ import { describe, it, expect } from "bun:test";
 import { generateMethodProbes } from "../../../src/core/probe/method-probe.ts";
 import { ep } from "../../_helpers/endpoints";
 
+const KNOWN_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+
 describe("generateMethodProbes", () => {
   it("emits one suite per path with only the missing methods", () => {
     // Path /audiences declares GET and POST → missing PUT, PATCH, DELETE.
@@ -21,10 +23,9 @@ describe("generateMethodProbes", () => {
 
     const methodsUsed = suite.tests.map((t) => {
       // RawStep has the HTTP method as a key whose value is the URL string.
-      const keys = Object.keys(t).filter(
-        (k) => ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(k),
-      );
-      return keys[0];
+      const found = KNOWN_METHODS.find((k) => k in t);
+      if (!found) throw new Error(`step has no recognised HTTP method key: ${JSON.stringify(t)}`);
+      return found;
     });
     expect(new Set(methodsUsed)).toEqual(new Set(["PUT", "PATCH", "DELETE"]));
 
@@ -129,11 +130,32 @@ describe("generateMethodProbes", () => {
     });
     const suite = result.suites[0]!;
     const methods = suite.tests.map(
-      (t) =>
-        Object.keys(t).find((k) =>
-          ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(k),
-        )!,
+      (t) => KNOWN_METHODS.find((k) => k in t)!,
     );
     expect(methods).toContain("POST");
+  });
+
+  it("renders all placeholders in a path with multiple {x} segments", () => {
+    const result = generateMethodProbes({
+      endpoints: [
+        ep({
+          method: "GET",
+          path: "/orgs/{org_id}/projects/{project_id}/keys/{key_id}",
+          parameters: [
+            { name: "org_id", in: "path", required: true, schema: { type: "string", format: "uuid" } } as any,
+            { name: "project_id", in: "path", required: true, schema: { type: "string", format: "uuid" } } as any,
+            { name: "key_id", in: "path", required: true, schema: { type: "string", format: "uuid" } } as any,
+          ],
+        }),
+      ],
+      securitySchemes: [],
+    });
+    const suite = result.suites[0]!;
+    const post = suite.tests.find((t) => "POST" in t)!;
+    const url = (post as Record<string, unknown>).POST as string;
+    expect(url).not.toContain("{");
+    expect(url).not.toContain("}");
+    // All three segments should be substituted with the same valid-shape UUID
+    expect(url.split("00000000-0000-0000-0000-000000000000").length - 1).toBe(3);
   });
 });
