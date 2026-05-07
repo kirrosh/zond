@@ -3,9 +3,10 @@ id: TASK-216
 title: >-
   zond doctor: placeholder-значение example в path-фикстуре должно быть warn, не
   OK
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 14:21'
+updated_date: '2026-05-07 14:34'
 labels:
   - feedback-loop
   - api-resend
