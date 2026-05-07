@@ -83,3 +83,30 @@ export async function describeCommand(options: DescribeOptions): Promise<number>
     return 2;
   }
 }
+
+import type { Command } from "commander";
+import { globalJson, resolveSpecArg } from "../resolve.ts";
+
+export function registerDescribe(program: Command): void {
+  program
+    .command("describe [spec]")
+    .description("Describe endpoints from OpenAPI spec")
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
+    .option("--compact", "List all endpoints briefly")
+    .option("--list-params", "List all unique parameters across all endpoints")
+    .option("--method <method>", "HTTP method for single endpoint detail")
+    .option("--path <path>", "Endpoint path for single endpoint detail")
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      process.exitCode = await describeCommand({
+        specPath: resolved.spec,
+        compact: opts.compact === true,
+        listParams: opts.listParams === true,
+        method: opts.method,
+        path: opts.path,
+        json: globalJson(cmd),
+      });
+    });
+}

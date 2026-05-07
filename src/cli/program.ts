@@ -2,15 +2,15 @@ import { Command, Option } from "commander";
 
 import { runCommand } from "./commands/run.ts";
 import { registerValidate } from "./commands/validate.ts";
-import { serveCommand } from "./commands/serve.ts";
-import { coverageCommand } from "./commands/coverage.ts";
+import { registerServe } from "./commands/serve.ts";
+import { registerCoverage } from "./commands/coverage.ts";
 import { ciInitCommand } from "./commands/ci-init.ts";
 import { registerClean } from "./commands/clean.ts";
 import { getSecretRegistry } from "../core/secrets/registry.ts";
 import { initCommand } from "./commands/init/index.ts";
-import { describeCommand } from "./commands/describe.ts";
-import { dbCommand } from "./commands/db.ts";
-import { requestCommand } from "./commands/request.ts";
+import { registerDescribe } from "./commands/describe.ts";
+import { registerDb } from "./commands/db.ts";
+import { registerRequest } from "./commands/request.ts";
 import { generateCommand } from "./commands/generate.ts";
 import { discoverCommand } from "./commands/discover.ts";
 import { probeValidationCommand } from "./commands/probe-validation.ts";
@@ -24,15 +24,11 @@ import { registerUpdate } from "./commands/update.ts";
 import { catalogCommand } from "./commands/catalog.ts";
 import { registerCompletions } from "./commands/completions.ts";
 import { registerUse } from "./commands/use.ts";
-import {
-  sessionStartCommand,
-  sessionEndCommand,
-  sessionStatusCommand,
-} from "./commands/session.ts";
+import { registerSession } from "./commands/session.ts";
+import { resolveSessionId } from "../core/context/session.ts";
 import { registerDoctor } from "./commands/doctor.ts";
 import { registerRefreshApi } from "./commands/refresh-api.ts";
 import { addApiCommand } from "./commands/add-api.ts";
-import { resolveSessionId } from "../core/context/session.ts";
 
 import { readCurrentApi } from "../core/context/current.ts";
 import { printError } from "./output.ts";
@@ -174,26 +170,7 @@ export function buildProgram(): Command {
 
   registerValidate(program);
 
-  // ── serve ──
-  program
-    .command("serve")
-    .description("Start web dashboard")
-    .option("--port <port>", "Server port (default: 8080)", parsePositiveInt("--port"))
-    .option("--host <host>", "Server host (default: 0.0.0.0)")
-    .option("--db <path>", "Path to SQLite database file (default: .zond/zond.db)")
-    .option("--open", "Open dashboard in browser after starting")
-    .option("--watch", "Enable dev mode with hot reload (auto-refresh on file changes)")
-    .option("--kill-existing", "Kill any process holding the requested port (DANGEROUS — can terminate your dev server)")
-    .action(async (opts) => {
-      process.exitCode = await serveCommand({
-        port: opts.port,
-        host: opts.host,
-        dbPath: opts.db,
-        watch: opts.watch === true,
-        open: opts.open === true,
-        killExisting: opts.killExisting === true,
-      });
-    });
+  registerServe(program);
 
   // ── ci ──
   const ci = program.command("ci").description("CI/CD scaffolding");
@@ -220,81 +197,8 @@ export function buildProgram(): Command {
   registerRefreshApi(program);
   registerDoctor(program);
 
-  // ── session ──
-  //
-  // Group multiple `zond run` calls under one session_id without juggling env
-  // vars. `start` writes a UUID to .zond/current-session; subsequent `run`
-  // calls auto-pick it up (priority: --session-id flag > ZOND_SESSION_ID env
-  // > current-session file).
-  const session = program.command("session").description("Manage run grouping (campaigns)");
-  session
-    .command("start")
-    .description("Begin a session — group all subsequent 'zond run' calls under one session_id (.zond/current-session)")
-    .option("--label <text>", "Optional human-readable label shown alongside the session in the UI")
-    .option("--id <uuid>", "Reuse a specific UUID instead of generating one (useful for CI)")
-    .action(async (opts, cmd: Command) => {
-      process.exitCode = await sessionStartCommand({
-        label: opts.label,
-        id: opts.id,
-        json: globalJson(cmd),
-      });
-    });
-  session
-    .command("end")
-    .description("End the current session — remove .zond/current-session")
-    .action(async (_opts, cmd: Command) => {
-      process.exitCode = await sessionEndCommand({ json: globalJson(cmd) });
-    });
-  session
-    .command("status")
-    .description("Show the active session (if any)")
-    .action(async (_opts, cmd: Command) => {
-      process.exitCode = await sessionStatusCommand({ json: globalJson(cmd) });
-    });
-
-  // ── coverage ──
-  program
-    .command("coverage")
-    .description("Analyze API test coverage")
-    .option("--api <name>", "Use API collection (auto-resolves spec and tests dir)")
-    .option("--spec <path>", "Path to OpenAPI spec (required unless --api used)")
-    .option("--tests <dir>", "Path to test files directory (required unless --api used)")
-    .option("--fail-on-coverage <N>", "Exit 1 when coverage percentage is below N (0–100)", parsePercentage)
-    .option("--run-id <number>", "Cross-reference with a test run for pass/fail/5xx breakdown", parseInteger("--run-id"))
-    .option("--db <path>", "Path to SQLite database file")
-    .action(async (opts, cmd: Command) => {
-      let spec: string | undefined = opts.spec;
-      let tests: string | undefined = opts.tests;
-      const apiFlag = (opts.api as string | undefined) ?? (spec || tests ? undefined : readCurrentApi() ?? undefined);
-
-      if (apiFlag) {
-        const resolved = resolveApiCollection(apiFlag, opts.db);
-        if ("error" in resolved) {
-          printError(resolved.error);
-          process.exitCode = resolved.error.startsWith("Failed") ? 2 : 1;
-          return;
-        }
-        if (!spec && resolved.spec) spec = resolved.spec;
-        if (!tests && resolved.testPath) tests = resolved.testPath;
-      }
-      if (!spec) {
-        printError("Missing --spec <path>. Usage: zond coverage --spec <path> --tests <dir>");
-        process.exitCode = 2;
-        return;
-      }
-      if (!tests) {
-        printError("Missing --tests <dir>. Usage: zond coverage --spec <path> --tests <dir>");
-        process.exitCode = 2;
-        return;
-      }
-      process.exitCode = await coverageCommand({
-        spec,
-        tests,
-        failOnCoverage: opts.failOnCoverage,
-        runId: opts.runId,
-        json: globalJson(cmd),
-      });
-    });
+  registerSession(program);
+  registerCoverage(program);
 
   // ── init ──
   program
@@ -369,136 +273,9 @@ export function buildProgram(): Command {
       });
     });
 
-  // ── describe ──
-  program
-    .command("describe [spec]")
-    .description("Describe endpoints from OpenAPI spec")
-    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
-    .option("--db <path>", "Path to SQLite database file")
-    .option("--compact", "List all endpoints briefly")
-    .option("--list-params", "List all unique parameters across all endpoints")
-    .option("--method <method>", "HTTP method for single endpoint detail")
-    .option("--path <path>", "Endpoint path for single endpoint detail")
-    .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
-      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      process.exitCode = await describeCommand({
-        specPath: resolved.spec,
-        compact: opts.compact === true,
-        listParams: opts.listParams === true,
-        method: opts.method,
-        path: opts.path,
-        json: globalJson(cmd),
-      });
-    });
-
-  // ── db (nested) ──
-  const db = program.command("db").description("Query the test database");
-
-  db
-    .command("collections")
-    .description("List all API collections")
-    .option("--db <path>", "Path to SQLite database file")
-    .action(async (opts, cmd: Command) => {
-      process.exitCode = await dbCommand({
-        subcommand: "collections",
-        positional: [],
-        dbPath: opts.db,
-        json: globalJson(cmd),
-      });
-    });
-
-  db
-    .command("runs")
-    .description("List recent test runs")
-    .option("--limit <N>", "Maximum number of runs to display", parsePositiveInt("--limit"))
-    .option("--db <path>", "Path to SQLite database file")
-    .action(async (opts, cmd: Command) => {
-      process.exitCode = await dbCommand({
-        subcommand: "runs",
-        positional: [],
-        limit: opts.limit,
-        dbPath: opts.db,
-        json: globalJson(cmd),
-      });
-    });
-
-  db
-    .command("run <id>")
-    .description("Show run details")
-    .option("--verbose", "Show all results")
-    .option("--method <method>", "Filter by HTTP method")
-    .option("--status <code>", "Filter by HTTP status code", parseInteger("--status"))
-    .option("--db <path>", "Path to SQLite database file")
-    .action(async (id: string, opts, cmd: Command) => {
-      process.exitCode = await dbCommand({
-        subcommand: "run",
-        positional: [id],
-        verbose: opts.verbose === true,
-        method: opts.method,
-        status: opts.status,
-        dbPath: opts.db,
-        json: globalJson(cmd),
-      });
-    });
-
-  db
-    .command("diagnose <id>")
-    .description("Diagnose run failures")
-    .option("--limit <N>", "Examples per failure group", parsePositiveInt("--limit"))
-    .option("--verbose", "Show all examples (not grouped)")
-    .option("--db <path>", "Path to SQLite database file")
-    .action(async (id: string, opts, cmd: Command) => {
-      process.exitCode = await dbCommand({
-        subcommand: "diagnose",
-        positional: [id],
-        limit: opts.limit,
-        verbose: opts.verbose === true,
-        dbPath: opts.db,
-        json: globalJson(cmd),
-      });
-    });
-
-  db
-    .command("compare <idA> <idB>")
-    .description("Compare two runs")
-    .option("--db <path>", "Path to SQLite database file")
-    .action(async (idA: string, idB: string, opts, cmd: Command) => {
-      process.exitCode = await dbCommand({
-        subcommand: "compare",
-        positional: [idA, idB],
-        dbPath: opts.db,
-        json: globalJson(cmd),
-      });
-    });
-
-  // ── request ──
-  program
-    .command("request <method> <url>")
-    .description("Send an ad-hoc HTTP request")
-    .option("--header <H>", `Request header "Name: Value" (repeatable)`, collect, [])
-    .option("--body <json>", "Request body (JSON string)")
-    .option("--timeout <ms>", "Request timeout", parsePositiveInt("--timeout"))
-    .option("--env <name>", "Environment for variable interpolation")
-    .option("--api <name>", "Collection name (loads env from its directory)")
-    .option("--json-path <path>", "Extract value from response (dot notation)")
-    .option("--db <path>", "Path to SQLite database file")
-    .action(async (method: string, url: string, opts, cmd: Command) => {
-      const headers = (opts.header as string[] | undefined)?.length ? (opts.header as string[]) : undefined;
-      const api = (opts.api as string | undefined) ?? readCurrentApi() ?? undefined;
-      process.exitCode = await requestCommand({
-        method,
-        url,
-        headers,
-        body: opts.body,
-        timeout: opts.timeout,
-        env: opts.env,
-        api,
-        jsonPath: opts.jsonPath,
-        dbPath: opts.db,
-        json: globalJson(cmd),
-      });
-    });
+  registerDescribe(program);
+  registerDb(program);
+  registerRequest(program);
 
   registerClean(program);
 

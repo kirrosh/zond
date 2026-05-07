@@ -112,3 +112,28 @@ export async function serveCommand(options: ServeOptions): Promise<number> {
 
   return 0;
 }
+
+import type { Command } from "commander";
+import { parsePositiveInt } from "../argv.ts";
+
+export function registerServe(program: Command): void {
+  program
+    .command("serve")
+    .description("Start web dashboard")
+    .option("--port <port>", "Server port (default: 8080)", parsePositiveInt("--port"))
+    .option("--host <host>", "Server host (default: 0.0.0.0)")
+    .option("--db <path>", "Path to SQLite database file (default: .zond/zond.db)")
+    .option("--open", "Open dashboard in browser after starting")
+    .option("--watch", "Enable dev mode with hot reload (auto-refresh on file changes)")
+    .option("--kill-existing", "Kill any process holding the requested port (DANGEROUS — can terminate your dev server)")
+    .action(async (opts) => {
+      process.exitCode = await serveCommand({
+        port: opts.port,
+        host: opts.host,
+        dbPath: opts.db,
+        watch: opts.watch === true,
+        open: opts.open === true,
+        killExisting: opts.killExisting === true,
+      });
+    });
+}
