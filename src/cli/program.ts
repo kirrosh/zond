@@ -1,59 +1,38 @@
-import { Command, Option } from "commander";
+import { Command } from "commander";
 
-import { runCommand } from "./commands/run.ts";
+import { registerRun } from "./commands/run.ts";
 import { registerValidate } from "./commands/validate.ts";
 import { registerServe } from "./commands/serve.ts";
 import { registerCoverage } from "./commands/coverage.ts";
 import { registerCi } from "./commands/ci-init.ts";
 import { registerClean } from "./commands/clean.ts";
-import { getSecretRegistry } from "../core/secrets/registry.ts";
 import { registerInit } from "./commands/init/index.ts";
 import { registerDescribe } from "./commands/describe.ts";
 import { registerDb } from "./commands/db.ts";
 import { registerRequest } from "./commands/request.ts";
 import { registerGenerate } from "./commands/generate.ts";
 import { registerDiscover } from "./commands/discover.ts";
-import { probeValidationCommand } from "./commands/probe-validation.ts";
-import { probeMethodsCommand } from "./commands/probe-methods.ts";
-import { lintSpecCommand } from "./commands/lint-spec.ts";
-import { probeMassAssignmentCommand } from "./commands/probe-mass-assignment.ts";
-import { probeSecurityCommand } from "./commands/probe-security.ts";
-import { exportCommand } from "./commands/export.ts";
-import { reportExportHtmlCommand, reportCaseStudyCommand } from "./commands/report.ts";
+import {
+  registerProbes,
+  registerProbeAliasesEarly,
+  registerProbeMethodsAlias,
+} from "./commands/probe.ts";
+import { registerLintSpec } from "./commands/lint-spec.ts";
+import { registerExport } from "./commands/export.ts";
+import { registerReport } from "./commands/report.ts";
 import { registerUpdate } from "./commands/update.ts";
-import { catalogCommand } from "./commands/catalog.ts";
+import { registerCatalog } from "./commands/catalog.ts";
 import { registerCompletions } from "./commands/completions.ts";
 import { registerUse } from "./commands/use.ts";
 import { registerSession } from "./commands/session.ts";
-import { resolveSessionId } from "../core/context/session.ts";
 import { registerDoctor } from "./commands/doctor.ts";
 import { registerRefreshApi } from "./commands/refresh-api.ts";
 import { registerAdd } from "./commands/add-api.ts";
 
-import { readCurrentApi } from "../core/context/current.ts";
-import { printError } from "./output.ts";
-import { jsonError, printJson } from "./json-envelope.ts";
+import { getSecretRegistry } from "../core/secrets/registry.ts";
 import { getRuntimeInfo } from "./runtime.ts";
 import { VERSION } from "./version.ts";
-import { getDb } from "../db/schema.ts";
-import { findCollectionByNameOrId } from "../db/queries.ts";
-import type { ReporterName } from "../core/reporter/types.ts";
-import {
-  preprocessArgv,
-  parsePositiveInt,
-  parseRateLimit,
-  parseInteger,
-  parsePercentage,
-  parseReporter,
-  collect,
-  flatSplit,
-} from "./argv.ts";
-import {
-  globalJson,
-  resolveApiCollection,
-  resolveSpecArg,
-  warnDeprecatedProbe,
-} from "./resolve.ts";
+import { preprocessArgv } from "./argv.ts";
 
 export { preprocessArgv };
 
@@ -79,94 +58,7 @@ export function buildProgram(): Command {
       getSecretRegistry().setEnabled(enabled);
     });
 
-  // ── run ──
-  program
-    .command("run [path]")
-    .description("Run API tests")
-    .option("--env <name>", "Use environment file (.env.<name>.yaml)")
-    .option("--api <name>", "Use API collection (resolves test path automatically)")
-    .addOption(
-      new Option("--report <format>", "Output format")
-        .choices(["console", "json", "junit"])
-        .default("console")
-        .argParser(parseReporter),
-    )
-    .option("--timeout <ms>", "Override request timeout", parsePositiveInt("--timeout"))
-    .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers", parseRateLimit)
-    .option("--bail", "Stop on first suite failure")
-    .option("--sequential", "Run regular suites one after another instead of in parallel (opt-out of Promise.all)")
-    .option("--no-db", "Do not save results to .zond/zond.db")
-    .option("--db <path>", "Path to SQLite database file (default: .zond/zond.db)")
-    .option("--auth-token <token>", "Auth token injected as {{auth_token}} variable")
-    .option("--safe", "Run only GET tests (read-only, safe mode)")
-    .option("--tag <tag>", "Filter suites by tag (repeatable, comma-separated)", collect, [])
-    .option("--exclude-tag <tag>", "Exclude suites by tag (repeatable, comma-separated)", collect, [])
-    .option("--method <method>", "Filter tests by HTTP method (e.g. GET, POST)")
-    .option("--env-var <KEY=VALUE>", "Inject env variable (repeatable, overrides env file)", collect, [])
-    .option("--strict-vars", "Hard-fail (exit 2) when a {{var}} reference has no producer (default: warn and continue)")
-    .option("--dry-run", "Show requests without sending them (exit code always 0)")
-    .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
-    .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
-    .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
-    .option("--session-id <id>", "Group this run under a session. Resolution order: --session-id flag > ZOND_SESSION_ID env > .zond/current-session file (set by 'zond session start')")
-    .action(async (pathArg: string | undefined, opts, cmd: Command) => {
-      let path = pathArg;
-      const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
-      const dbPath = typeof opts.db === "string" ? opts.db : undefined;
-
-      if (!path && apiFlag) {
-        const resolved = resolveApiCollection(apiFlag, dbPath);
-        if ("error" in resolved) {
-          printError(resolved.error);
-          process.exitCode = resolved.error.startsWith("Failed") ? 2 : 1;
-          return;
-        }
-        if (!resolved.testPath) {
-          printError(`API '${apiFlag}' has no test_path`);
-          process.exitCode = 1;
-          return;
-        }
-        path = resolved.testPath;
-      }
-      if (!path) {
-        printError("No path given and .zond-current not set; run `zond use <api>` or pass path explicitly (or use --api <name>)");
-        process.exitCode = 2;
-        return;
-      }
-
-      const tags = flatSplit(opts.tag);
-      const excludeTags = flatSplit(opts.excludeTag);
-      const envVars = (opts.envVar as string[] | undefined)?.length ? (opts.envVar as string[]) : undefined;
-
-      process.exitCode = await runCommand({
-        path,
-        env: opts.env,
-        report: opts.report as ReporterName,
-        timeout: opts.timeout,
-        rateLimit: opts.rateLimit,
-        bail: opts.bail === true,
-        sequential: opts.sequential === true,
-        // Commander's `--no-db` produces { db: false }; keep semantics: when --no-db given → noDb=true
-        noDb: opts.db === false,
-        dbPath: typeof opts.db === "string" ? opts.db : undefined,
-        authToken: opts.authToken,
-        safe: opts.safe === true,
-        tag: tags,
-        excludeTag: excludeTags,
-        method: opts.method,
-        envVars,
-        strictVars: opts.strictVars === true,
-        dryRun: opts.dryRun === true,
-        reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
-        validateSchema: opts.validateSchema === true,
-        specPath: typeof opts.spec === "string" ? opts.spec : undefined,
-        sessionId: resolveSessionId({
-          flag: typeof opts.sessionId === "string" ? opts.sessionId : null,
-          env: process.env.ZOND_SESSION_ID ?? null,
-        }) ?? undefined,
-        json: false,
-      });
-    });
+  registerRun(program);
 
   registerValidate(program);
 
@@ -193,271 +85,14 @@ export function buildProgram(): Command {
   registerGenerate(program);
   registerDiscover(program);
 
-  // ── probe (umbrella) + back-compat aliases ──
-  // TASK-182 (m-11): four standalone probe-* commands collapsed under a
-  // single `zond probe <class>` umbrella to keep the top-level help quiet.
-  // Old names (`probe-validation`, `probe-methods`, `probe-mass-assignment`,
-  // `probe-security`) are kept as aliases for one release and emit a
-  // deprecation warning to stderr.
-  function defineProbeValidation(parent: Command, name: string, deprecated: boolean): void {
-    parent
-      .command(`${name} [spec]`)
-      .description("Generate negative-input probe suites (catches 5xx-on-bad-input bugs)")
-      .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
-      .option("--db <path>", "Path to SQLite database file")
-      .requiredOption("--output <dir>", "Output directory for generated probe files")
-      .option("--tag <tag>", "Probe only endpoints with this tag")
-      .option("--list-tags", "List available tags from spec and exit")
-      .option("--max-per-endpoint <N>", "Cap probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
-      .option("--no-cleanup", "Skip emission of follow-up DELETE cleanup steps for mutating probes (use in namespace-isolated test envs)")
-      .option("--no-real-parents", "Bake synthetic-by-type values into all path params (legacy). By default, non-attacked path params are emitted as {{name}} and resolved from .env.yaml at run time — needed to reach the leaf validator on nested paths (TASK-135).")
-      .action(async (specPos: string | undefined, opts, cmd: Command) => {
-        if (deprecated) warnDeprecatedProbe("probe-validation", "validation");
-        const resolved = resolveSpecArg(specPos, opts.api, opts.db);
-        if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-        process.exitCode = await probeValidationCommand({
-          specPath: resolved.spec,
-          output: opts.output,
-          tag: opts.tag,
-          maxPerEndpoint: opts.maxPerEndpoint,
-          noCleanup: opts.cleanup === false,
-          useRealParents: opts.realParents !== false,
-          json: globalJson(cmd),
-          listTags: opts.listTags,
-        });
-      });
-  }
+  registerProbes(program);
+  registerProbeAliasesEarly(program);
 
-  function defineProbeMassAssignment(parent: Command, name: string, deprecated: boolean): void {
-    parent
-      .command(`${name} [spec]`)
-      .description(
-        "Live probe for mass-assignment / privilege-escalation: classifies POST/PATCH/PUT against suspected extra fields (is_admin, role, account_id, owner_id, user_id, verified, is_system) as rejected (4xx) | accepted-and-applied (HIGH) | accepted-and-ignored (LOW) via follow-up GET",
-      )
-      .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
-      .option("--db <path>", "Path to SQLite database file")
-      .requiredOption("--env <file>", "Env YAML with base_url + auth_token (live calls require this)")
-      .option("--output <file>", "Write markdown digest to file (default: stdout)")
-      .option("--emit-tests <dir>", "Also emit YAML regression suites locking in safe behaviour for CI")
-      .option("--tag <tag>", "Probe only endpoints with this tag")
-      .option("--list-tags", "List available tags from spec and exit")
-      .option("--no-cleanup", "Skip follow-up DELETE for resources accidentally created by 2xx probes")
-      .option("--no-discover", "Disable auto-discovery of path-param fixtures via GET-on-list (TASK-92)")
-      .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
-      .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
-      .action(async (specPos: string | undefined, opts, cmd: Command) => {
-        if (deprecated) warnDeprecatedProbe("probe-mass-assignment", "mass-assignment");
-        const resolved = resolveSpecArg(specPos, opts.api, opts.db);
-        if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-        process.exitCode = await probeMassAssignmentCommand({
-          specPath: resolved.spec,
-          env: opts.env,
-          output: opts.output,
-          emitTests: opts.emitTests,
-          tag: opts.tag,
-          listTags: opts.listTags,
-          noCleanup: opts.cleanup === false,
-          noDiscover: opts.discover === false,
-          timeoutMs: opts.timeout,
-          overwrite: opts.overwrite === true,
-          json: globalJson(cmd),
-        });
-      });
-  }
-
-  function defineProbeSecurity(parent: Command, name: string, deprecated: boolean): void {
-    parent
-      .command(`${name} <classes> [spec]`)
-      .description(
-        "Live security probes (TASK-138): SSRF / CRLF / open-redirect. Detects vulnerable fields by name+format, sends a baseline-OK then per-field payloads, classifies HIGH (5xx or echo) / LOW (2xx no echo) / OK (4xx). <classes> is a comma-separated subset of: ssrf, crlf, open-redirect.",
-      )
-      .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
-      .option("--db <path>", "Path to SQLite database file")
-      .option("--env <file>", "Env YAML with base_url + auth_token (live calls require this; --dry-run can run without)")
-      .option("--output <file>", "Write markdown digest to file (default: stdout)")
-      .option("--emit-tests <dir>", "Also emit YAML regression suites locking in safe behaviour for CI")
-      .option("--tag <tag>", "Probe only endpoints with this tag")
-      .option("--list-tags", "List available tags from spec and exit")
-      .option("--no-cleanup", "Skip follow-up DELETE on resources created by baseline / 2xx attacks")
-      .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests")
-      .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
-      .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
-      .action(async (classes: string, specPos: string | undefined, opts, cmd: Command) => {
-        if (deprecated) warnDeprecatedProbe("probe-security", "security");
-        const resolved = resolveSpecArg(specPos, opts.api, opts.db);
-        if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-        process.exitCode = await probeSecurityCommand({
-          specPath: resolved.spec,
-          classes,
-          env: opts.env,
-          output: opts.output,
-          emitTests: opts.emitTests,
-          tag: opts.tag,
-          listTags: opts.listTags,
-          noCleanup: opts.cleanup === false,
-          dryRun: opts.dryRun === true,
-          timeoutMs: opts.timeout,
-          overwrite: opts.overwrite === true,
-          json: globalJson(cmd),
-        });
-      });
-  }
-
-  function defineProbeMethods(parent: Command, name: string, deprecated: boolean): void {
-    parent
-      .command(`${name} [spec]`)
-      .description("Generate negative-method probe suites (catches 5xx/2xx on undeclared HTTP methods)")
-      .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
-      .option("--db <path>", "Path to SQLite database file")
-      .requiredOption("--output <dir>", "Output directory for generated probe files")
-      .option("--tag <tag>", "Probe only endpoints with this tag")
-      .action(async (specPos: string | undefined, opts, cmd: Command) => {
-        if (deprecated) warnDeprecatedProbe("probe-methods", "methods");
-        const resolved = resolveSpecArg(specPos, opts.api, opts.db);
-        if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-        process.exitCode = await probeMethodsCommand({
-          specPath: resolved.spec,
-          output: opts.output,
-          tag: opts.tag,
-          json: globalJson(cmd),
-        });
-      });
-  }
-
-  const probeCmd = program
-    .command("probe")
-    .description("Run a probe class — pick one of: validation, methods, mass-assignment, security");
-  defineProbeValidation(probeCmd, "validation", false);
-  defineProbeMethods(probeCmd, "methods", false);
-  defineProbeMassAssignment(probeCmd, "mass-assignment", false);
-  defineProbeSecurity(probeCmd, "security", false);
-
-  defineProbeValidation(program, "probe-validation", true);
-  defineProbeMassAssignment(program, "probe-mass-assignment", true);
-  defineProbeSecurity(program, "probe-security", true);
-
-  // ── lint-spec ──
-  program
-    .command("lint-spec [spec]")
-    .description("Static-analyse an OpenAPI spec for internal-consistency and strictness gaps (catches bugs before any HTTP)")
-    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
-    .option("--strict", "Exit non-zero even on LOW-severity issues")
-    .option("--ndjson", "Stream issues as one JSON per line (NDJSON), instead of the wrapped envelope")
-    .option("--rule <list>", "Comma-separated rule overrides: R1, !R2, R3=high|medium|low")
-    .option("--config <path>", "Path to .zond-lint.json")
-    .option("--include-path <glob...>", "Only lint endpoints whose path matches glob (repeatable)")
-    .option("--max-issues <N>", "Stop after N issues", parsePositiveInt("--max-issues"))
-    .option("--no-db", "Don't write to lint_runs SQLite history")
-    .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      // lint-spec already supports --no-db; if user passes a non-default
-      // --db <path>, commander will surface it as opts.db === string.
-      const dbPath = typeof opts.db === "string" ? opts.db : undefined;
-      const resolved = resolveSpecArg(specPos, opts.api, dbPath);
-      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      process.exitCode = await lintSpecCommand({
-        specPath: resolved.spec,
-        json: globalJson(cmd),
-        ndjson: opts.ndjson === true,
-        strict: opts.strict === true,
-        rule: opts.rule,
-        config: opts.config,
-        includePath: opts.includePath,
-        maxIssues: opts.maxIssues,
-        // Commander: --no-db → opts.db === false
-        noDb: opts.db === false,
-      });
-    });
-
-  // ── probe-methods (deprecated alias) ──
-  defineProbeMethods(program, "probe-methods", true);
-
-  // ── catalog ──
-  program
-    .command("catalog [spec]")
-    .description("Generate API catalog (compact endpoint reference). For registered APIs prefer --api <name>; the artifact is also available at apis/<name>/.api-catalog.yaml.")
-    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
-    .option("--db <path>", "Path to SQLite database file")
-    .option("--output <dir>", "Output directory (default: current directory)")
-    .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
-      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      process.exitCode = await catalogCommand({
-        specPath: resolved.spec,
-        output: opts.output,
-        json: globalJson(cmd),
-      });
-    });
-
-
-  // ── export (with subcommand: postman) ──
-  const exportCmd = program.command("export").description("Export tests to other formats");
-  exportCmd
-    .command("postman <path>")
-    .description("Export YAML tests as Postman Collection v2.1")
-    .option("--output <file>", "Output file path", "collection.postman.json")
-    .option("--env <file>", "Also export .env.yaml as Postman environment")
-    .option("--collection-name <name>", "Collection name (default: derived from path)")
-    .action(async (testsPath: string, opts, cmd: Command) => {
-      process.exitCode = await exportCommand({
-        testsPath,
-        output: opts.output,
-        env: opts.env,
-        collectionName: opts.collectionName,
-        json: globalJson(cmd),
-      });
-    });
-
-  // ── report (with subcommand: export) ──
-  const reportCmd = program.command("report").description("Export run reports for sharing");
-  reportCmd
-    .command("export <run-id>")
-    .description("Export a stored run as a single-file HTML report (shareable, openable in any browser)")
-    .option("--html", "Render as HTML (default and currently the only supported format)")
-    .option("-o, --output <file>", "Output file path (default: zond-run-<id>.html)")
-    .option("--api <name>", "Embed coverage map for this registered API (auto-detected from run.collection_id)")
-    .option("--db <path>", "Path to SQLite database file")
-    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
-    .option("--body-cap <n>", "Truncate request/response bodies to N bytes (default 8192). Set 0 / use --no-body-cap to disable.", parsePositiveInt("--body-cap"))
-    .option("--no-body-cap", "Keep full request/response bodies (overrides --body-cap)")
-    .option("--redact-identity", "Replace values from .identity.yaml with <identity:<key>> placeholders (for outbound sharing)")
-    .action(async (runId: string, opts, cmd: Command) => {
-      // Commander: --no-body-cap → opts.bodyCap === false, --body-cap N → opts.bodyCap === N.
-      const bodyCapBytes = opts.bodyCap === false ? 0 : (typeof opts.bodyCap === "number" ? opts.bodyCap : undefined);
-      process.exitCode = await reportExportHtmlCommand({
-        runId,
-        output: opts.output,
-        api: opts.api,
-        dbPath: opts.db,
-        overwrite: opts.overwrite === true,
-        bodyCapBytes,
-        redactIdentity: opts.redactIdentity === true,
-        json: globalJson(cmd),
-      });
-    });
-
-  reportCmd
-    .command("case-study <failure-id>")
-    .description("Generate a markdown case-study draft for a single failure (results.id) — ready to pipe into `gh issue create --body-file -`")
-    .option("-o, --output <file>", "Write the draft to a file (default: triage/<api>/<run>/case-study-<ts>.md)")
-    .option("--stdout", "Also print the draft to stdout (so it can be piped into pbcopy / gh issue create --body-file -)")
-    .option("--db <path>", "Path to SQLite database file")
-    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
-    .option("--body-cap <n>", "Truncate response body to N bytes (default 8192). Set 0 / use --no-body-cap to disable.", parsePositiveInt("--body-cap"))
-    .option("--no-body-cap", "Keep full response body (overrides --body-cap)")
-    .option("--redact-identity", "Replace values from .identity.yaml with <identity:<key>> placeholders (for outbound sharing)")
-    .action(async (failureId: string, opts, cmd: Command) => {
-      const bodyCapBytes = opts.bodyCap === false ? 0 : (typeof opts.bodyCap === "number" ? opts.bodyCap : undefined);
-      process.exitCode = await reportCaseStudyCommand({
-        failureId,
-        output: opts.output,
-        dbPath: opts.db,
-        stdout: opts.stdout === true,
-        overwrite: opts.overwrite === true,
-        bodyCapBytes,
-        redactIdentity: opts.redactIdentity === true,
-        json: globalJson(cmd),
-      });
-    });
+  registerLintSpec(program);
+  registerProbeMethodsAlias(program);
+  registerCatalog(program);
+  registerExport(program);
+  registerReport(program);
 
   registerUpdate(program);
   registerCompletions(program);

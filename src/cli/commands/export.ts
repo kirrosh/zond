@@ -142,3 +142,25 @@ export async function exportCommand(options: ExportOptions): Promise<number> {
 
   return 0;
 }
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+
+export function registerExport(program: Command): void {
+  const exportCmd = program.command("export").description("Export tests to other formats");
+  exportCmd
+    .command("postman <path>")
+    .description("Export YAML tests as Postman Collection v2.1")
+    .option("--output <file>", "Output file path", "collection.postman.json")
+    .option("--env <file>", "Also export .env.yaml as Postman environment")
+    .option("--collection-name <name>", "Collection name (default: derived from path)")
+    .action(async (testsPath: string, opts, cmd: Command) => {
+      process.exitCode = await exportCommand({
+        testsPath,
+        output: opts.output,
+        env: opts.env,
+        collectionName: opts.collectionName,
+        json: globalJson(cmd),
+      });
+    });
+}

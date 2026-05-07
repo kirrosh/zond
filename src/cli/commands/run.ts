@@ -435,3 +435,99 @@ export async function runCommand(options: RunOptions): Promise<number> {
 
   return hasFailures ? 1 : 0;
 }
+
+import type { Command } from "commander";
+import { Option } from "commander";
+import { resolveApiCollection } from "../resolve.ts";
+import { collect, flatSplit, parsePositiveInt, parseRateLimit, parseReporter } from "../argv.ts";
+import { resolveSessionId } from "../../core/context/session.ts";
+import { readCurrentApi } from "../../core/context/current.ts";
+
+export function registerRun(program: Command): void {
+  program
+    .command("run [path]")
+    .description("Run API tests")
+    .option("--env <name>", "Use environment file (.env.<name>.yaml)")
+    .option("--api <name>", "Use API collection (resolves test path automatically)")
+    .addOption(
+      new Option("--report <format>", "Output format")
+        .choices(["console", "json", "junit"])
+        .default("console")
+        .argParser(parseReporter),
+    )
+    .option("--timeout <ms>", "Override request timeout", parsePositiveInt("--timeout"))
+    .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers", parseRateLimit)
+    .option("--bail", "Stop on first suite failure")
+    .option("--sequential", "Run regular suites one after another instead of in parallel (opt-out of Promise.all)")
+    .option("--no-db", "Do not save results to .zond/zond.db")
+    .option("--db <path>", "Path to SQLite database file (default: .zond/zond.db)")
+    .option("--auth-token <token>", "Auth token injected as {{auth_token}} variable")
+    .option("--safe", "Run only GET tests (read-only, safe mode)")
+    .option("--tag <tag>", "Filter suites by tag (repeatable, comma-separated)", collect, [])
+    .option("--exclude-tag <tag>", "Exclude suites by tag (repeatable, comma-separated)", collect, [])
+    .option("--method <method>", "Filter tests by HTTP method (e.g. GET, POST)")
+    .option("--env-var <KEY=VALUE>", "Inject env variable (repeatable, overrides env file)", collect, [])
+    .option("--strict-vars", "Hard-fail (exit 2) when a {{var}} reference has no producer (default: warn and continue)")
+    .option("--dry-run", "Show requests without sending them (exit code always 0)")
+    .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
+    .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
+    .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
+    .option("--session-id <id>", "Group this run under a session. Resolution order: --session-id flag > ZOND_SESSION_ID env > .zond/current-session file (set by 'zond session start')")
+    .action(async (pathArg: string | undefined, opts, _cmd: Command) => {
+      let path = pathArg;
+      const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
+      const dbPath = typeof opts.db === "string" ? opts.db : undefined;
+
+      if (!path && apiFlag) {
+        const resolved = resolveApiCollection(apiFlag, dbPath);
+        if ("error" in resolved) {
+          printError(resolved.error);
+          process.exitCode = resolved.error.startsWith("Failed") ? 2 : 1;
+          return;
+        }
+        if (!resolved.testPath) {
+          printError(`API '${apiFlag}' has no test_path`);
+          process.exitCode = 1;
+          return;
+        }
+        path = resolved.testPath;
+      }
+      if (!path) {
+        printError("No path given and .zond-current not set; run `zond use <api>` or pass path explicitly (or use --api <name>)");
+        process.exitCode = 2;
+        return;
+      }
+
+      const tags = flatSplit(opts.tag);
+      const excludeTags = flatSplit(opts.excludeTag);
+      const envVars = (opts.envVar as string[] | undefined)?.length ? (opts.envVar as string[]) : undefined;
+
+      process.exitCode = await runCommand({
+        path,
+        env: opts.env,
+        report: opts.report as ReporterName,
+        timeout: opts.timeout,
+        rateLimit: opts.rateLimit,
+        bail: opts.bail === true,
+        sequential: opts.sequential === true,
+        noDb: opts.db === false,
+        dbPath: typeof opts.db === "string" ? opts.db : undefined,
+        authToken: opts.authToken,
+        safe: opts.safe === true,
+        tag: tags,
+        excludeTag: excludeTags,
+        method: opts.method,
+        envVars,
+        strictVars: opts.strictVars === true,
+        dryRun: opts.dryRun === true,
+        reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
+        validateSchema: opts.validateSchema === true,
+        specPath: typeof opts.spec === "string" ? opts.spec : undefined,
+        sessionId: resolveSessionId({
+          flag: typeof opts.sessionId === "string" ? opts.sessionId : null,
+          env: process.env.ZOND_SESSION_ID ?? null,
+        }) ?? undefined,
+        json: false,
+      });
+    });
+}
