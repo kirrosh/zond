@@ -61,7 +61,7 @@ describe("runCommand", () => {
     restore = suppressOutput();
 
     const code = await runCommand({
-      path: `${FIXTURES}/simple.yaml`,
+      paths: [`${FIXTURES}/simple.yaml`],
       report: "console",
       bail: false,
       noDb: true,
@@ -75,7 +75,7 @@ describe("runCommand", () => {
     restore = suppressOutput();
 
     const code = await runCommand({
-      path: `${FIXTURES}/simple.yaml`,
+      paths: [`${FIXTURES}/simple.yaml`],
       report: "console",
       bail: false,
       noDb: true,
@@ -87,7 +87,7 @@ describe("runCommand", () => {
     restore = suppressOutput();
 
     const code = await runCommand({
-      path: `${FIXTURES}/nonexistent.yaml`,
+      paths: [`${FIXTURES}/nonexistent.yaml`],
       report: "console",
       bail: false,
       noDb: true,
@@ -100,7 +100,7 @@ describe("runCommand", () => {
     restore = suppressOutput();
 
     const code = await runCommand({
-      path: `${FIXTURES}/simple.yaml`,
+      paths: [`${FIXTURES}/simple.yaml`],
       report: "json",
       timeout: 1000,
       bail: false,
@@ -125,7 +125,7 @@ describe("runCommand", () => {
     };
 
     const code = await runCommand({
-      path: `${FIXTURES}/simple.yaml`,
+      paths: [`${FIXTURES}/simple.yaml`],
       report: "json",
       bail: false,
       noDb: true,
@@ -153,7 +153,7 @@ describe("runCommand", () => {
     };
 
     const code = await runCommand({
-      path: `${FIXTURES}/simple.yaml`,
+      paths: [`${FIXTURES}/simple.yaml`],
       report: "junit",
       bail: false,
       noDb: true,
@@ -180,7 +180,7 @@ describe("runCommand", () => {
     restore = suppressOutput();
 
     const code = await runCommand({
-      path: `${FIXTURES}/bail`,
+      paths: [`${FIXTURES}/bail`],
       report: "console",
       bail: true,
       noDb: true,
@@ -198,7 +198,7 @@ describe("runCommand", () => {
 
     try {
       const code = await runCommand({
-        path: `${FIXTURES}/simple.yaml`,
+        paths: [`${FIXTURES}/simple.yaml`],
         report: "console",
         bail: false,
         noDb: false,
@@ -222,7 +222,7 @@ describe("runCommand", () => {
     restore = suppressOutput();
 
     const code = await runCommand({
-      path: `${FIXTURES}/simple.yaml`,
+      paths: [`${FIXTURES}/simple.yaml`],
       report: "console",
       bail: false,
       noDb: true,
@@ -287,7 +287,7 @@ describe("runCommand with --auth-token", () => {
     restore = suppressOutput();
 
     const code = await runCommand({
-      path: `${FIXTURES}/auth-token-test.yaml`,
+      paths: [`${FIXTURES}/auth-token-test.yaml`],
       report: "console",
       bail: false,
       noDb: true,

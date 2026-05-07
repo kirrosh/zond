@@ -1,8 +1,9 @@
 ---
 id: TASK-147
 title: 'skill: env_issue early-stop когда CRUD весь упал на permission'
-status: To Do
+status: Done
 assignee: []
+updated_date: '2026-05-07'
 labels:
   - skill
   - docs

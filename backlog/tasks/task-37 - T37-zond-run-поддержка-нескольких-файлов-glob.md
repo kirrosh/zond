@@ -1,10 +1,10 @@
 ---
 id: TASK-37
 title: 'T37: zond run поддержка нескольких файлов / glob'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-27 15:28'
-updated_date: '2026-04-29 08:42'
+updated_date: '2026-05-07'
 labels:
   - cli
   - ux

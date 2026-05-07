@@ -23,7 +23,13 @@ import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
 
 export interface RunOptions {
-  path: string;
+  /**
+   * One or more paths to a YAML file or a directory of YAML files.
+   * Multi-path: shell-glob expansion (`zond run tests/*.yaml`) — suites from
+   * every path are merged into a single run. The first path is used as the
+   * anchor for env-file resolution and DB collection lookup.
+   */
+  paths: string[];
   env?: string;
   report: ReporterName;
   timeout?: number;
@@ -54,16 +60,25 @@ export interface RunOptions {
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
-  // 1. Parse test files (collect parse errors instead of silently skipping)
-  let suites: TestSuite[];
-  let parseErrors: { file: string; error: string }[];
-  try {
-    const parsed = await parseSafe(options.path);
-    suites = parsed.suites;
-    parseErrors = parsed.errors;
-  } catch (err) {
-    printError(err instanceof Error ? err.message : String(err));
+  if (options.paths.length === 0) {
+    printError("No path given");
     return 2;
+  }
+  const primaryPath = options.paths[0]!;
+
+  // 1. Parse test files from every input path (collect parse errors instead
+  //    of silently skipping). Suites from all paths are merged into one run.
+  let suites: TestSuite[] = [];
+  const parseErrors: { file: string; error: string }[] = [];
+  for (const p of options.paths) {
+    try {
+      const parsed = await parseSafe(p);
+      suites.push(...parsed.suites);
+      parseErrors.push(...parsed.errors);
+    } catch (err) {
+      printError(err instanceof Error ? err.message : String(err));
+      return 2;
+    }
   }
 
   for (const pe of parseErrors) {
@@ -71,11 +86,12 @@ export async function runCommand(options: RunOptions): Promise<number> {
   }
 
   if (suites.length === 0) {
+    const pathList = options.paths.join(", ");
     if (parseErrors.length > 0) {
-      printError(`All ${parseErrors.length} test file(s) in ${options.path} failed to parse`);
+      printError(`All ${parseErrors.length} test file(s) in ${pathList} failed to parse`);
       return 2;
     }
-    printWarning(`No test files found in ${options.path}`);
+    printWarning(`No test files found in ${pathList}`);
     return 0;
   }
 
@@ -130,13 +146,13 @@ export async function runCommand(options: RunOptions): Promise<number> {
 
   // 2. Load environment (resolve collection for scoped envs)
   // Use path itself as searchDir if it's a directory; dirname() on a dir path gives the parent
-  const pathStat = await stat(options.path).catch(() => null);
-  const searchDir = pathStat?.isDirectory() ? options.path : dirname(options.path);
+  const pathStat = await stat(primaryPath).catch(() => null);
+  const searchDir = pathStat?.isDirectory() ? primaryPath : dirname(primaryPath);
   let collectionForEnv: { id: number } | null = null;
   if (!options.noDb) {
     try {
       getDb(options.dbPath);
-      collectionForEnv = findCollectionByTestPath(options.path);
+      collectionForEnv = findCollectionByTestPath(primaryPath);
     } catch { /* DB not available — OK */ }
   }
 
@@ -224,7 +240,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
     let specPath = options.specPath;
     if (!specPath) {
       try {
-        const collection = findCollectionByTestPath(options.path);
+        const collection = findCollectionByTestPath(primaryPath);
         if (collection?.openapi_spec) specPath = resolveCollectionSpec(collection.openapi_spec);
       } catch { /* DB not available — fall through */ }
     }
@@ -388,7 +404,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
   if (!options.noDb) {
     try {
       getDb(options.dbPath);
-      const collection = findCollectionByTestPath(options.path);
+      const collection = findCollectionByTestPath(primaryPath);
       savedRunId = createRun({
         started_at: results[0]?.started_at ?? new Date().toISOString(),
         environment: options.env,
@@ -445,8 +461,8 @@ import { readCurrentApi } from "../../core/context/current.ts";
 
 export function registerRun(program: Command): void {
   program
-    .command("run [path]")
-    .description("Run API tests")
+    .command("run [paths...]")
+    .description("Run API tests. Accepts one or more file/dir paths (shell-glob friendly: zond run tests/*.yaml).")
     .option("--env <name>", "Use environment file (.env.<name>.yaml)")
     .option("--api <name>", "Use API collection (resolves test path automatically)")
     .addOption(
@@ -473,12 +489,12 @@ export function registerRun(program: Command): void {
     .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
     .option("--session-id <id>", "Group this run under a session. Resolution order: --session-id flag > ZOND_SESSION_ID env > .zond/current-session file (set by 'zond session start')")
-    .action(async (pathArg: string | undefined, opts, _cmd: Command) => {
-      let path = pathArg;
-      const apiFlag = (opts.api as string | undefined) ?? (path ? undefined : readCurrentApi() ?? undefined);
+    .action(async (pathArgs: string[] | undefined, opts, _cmd: Command) => {
+      let paths = pathArgs ?? [];
+      const apiFlag = (opts.api as string | undefined) ?? (paths.length > 0 ? undefined : readCurrentApi() ?? undefined);
       const dbPath = typeof opts.db === "string" ? opts.db : undefined;
 
-      if (!path && apiFlag) {
+      if (paths.length === 0 && apiFlag) {
         const resolved = resolveApiCollection(apiFlag, dbPath);
         if ("error" in resolved) {
           printError(resolved.error);
@@ -490,9 +506,9 @@ export function registerRun(program: Command): void {
           process.exitCode = 1;
           return;
         }
-        path = resolved.testPath;
+        paths = [resolved.testPath];
       }
-      if (!path) {
+      if (paths.length === 0) {
         printError("No path given and .zond-current not set; run `zond use <api>` or pass path explicitly (or use --api <name>)");
         process.exitCode = 2;
         return;
@@ -503,7 +519,7 @@ export function registerRun(program: Command): void {
       const envVars = (opts.envVar as string[] | undefined)?.length ? (opts.envVar as string[]) : undefined;
 
       process.exitCode = await runCommand({
-        path,
+        paths,
         env: opts.env,
         report: opts.report as ReporterName,
         timeout: opts.timeout,

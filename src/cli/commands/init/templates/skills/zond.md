@@ -38,6 +38,13 @@ Run `zond --version` first; if missing:
   redundant.
 - **`recommended_action: report_backend_bug` / any 5xx → STOP.** Surface the
   request/response excerpt to the user; do NOT edit `expect:` to mask it.
+- **CRUD-run сплошь 401/403 / `permission_denied` → `env_issue`, не баг.** Если
+  ≥80% шагов CRUD-сьюта (или весь сьют) свалились на permission/scope errors,
+  это нехватка прав токена, а не баг API. Действия: `zond db diagnose <run-id>
+  --env-only` для подтверждения, проверить scope `auth_token`, попросить
+  владельца API более широкий токен либо пометить сьют SKIPPED. **НЕ-действия:**
+  не генерировать case-studies, не править `expect:`, не делать `report_backend_bug`.
+  Pre-flight тот же кейс ловит `zond doctor --api <name> --missing-only`.
 - `--safe` enforces GET-only — required for first-pass smoke against unknown
   envs.
 - For multi-suite tag filters always include `setup`: `--tag crud,setup`.
@@ -164,6 +171,11 @@ zond validate apis/<name>/tests
 
 `generate` fills bodies with `{{$randomString}}`. Format-strict APIs reject
 many of these — that's a **test-fix**, not a backend bug (Phase 4a).
+
+Assertion vocabulary (`equals`, `type`, `exists`, `matches`, `gt`/`lt`,
+`length*`, `each`, `contains_item`, `set_equals`, `capture`, …) с примерами
+лежит в `ZOND.md` → раздел «Assertions». Туда же — за тем как обращаться
+к вложенным полям и как писать `capture` для chained suites.
 
 If a CRUD chain you expected isn't in the output, run
 `zond generate <spec> --explain` (no `--output` needed). The diagnostic

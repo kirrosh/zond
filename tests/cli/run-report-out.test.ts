@@ -79,7 +79,7 @@ describe("zond run --report-out (TASK-LOW.1)", () => {
   test("writes JSON report to a file and emits no JSON on stdout", async () => {
     const outPath = join(workDir, "out", "results.json");
     const code = await runCommand({
-      path: testFile,
+      paths: [testFile],
       report: "json",
       bail: false,
       noDb: true,
@@ -106,7 +106,7 @@ describe("zond run --report-out (TASK-LOW.1)", () => {
   test("writes JUnit XML report when --report junit is selected", async () => {
     const outPath = join(workDir, "junit.xml");
     const code = await runCommand({
-      path: testFile,
+      paths: [testFile],
       report: "junit",
       bail: false,
       noDb: true,
@@ -123,7 +123,7 @@ describe("zond run --report-out (TASK-LOW.1)", () => {
   test("creates parent directories as needed", async () => {
     const outPath = join(workDir, "deep", "nested", "out", "results.json");
     const code = await runCommand({
-      path: testFile,
+      paths: [testFile],
       report: "json",
       bail: false,
       noDb: true,

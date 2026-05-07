@@ -50,7 +50,7 @@ describe("TASK-72: tag filter does not silently swallow parse errors", () => {
     );
 
     const code = await runCommand({
-      path: workDir,
+      paths: [workDir],
       report: "console",
       bail: false,
       tag: ["crlf"],
@@ -69,7 +69,7 @@ describe("TASK-72: tag filter does not silently swallow parse errors", () => {
     writeFileSync(join(workDir, "b.yaml"), "{{{ not yaml\n");
 
     const code = await runCommand({
-      path: workDir,
+      paths: [workDir],
       report: "console",
       bail: false,
       noDb: true,

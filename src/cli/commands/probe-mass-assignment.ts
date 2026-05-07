@@ -166,6 +166,8 @@ export async function probeMassAssignmentCommand(
       if (emittedSuites.length > 0) {
         printSuccess(`Emitted ${emittedSuites.length} regression suite(s) in ${options.emitTests}`);
         console.log(`  Run them on CI: zond run ${options.emitTests} --env ${options.env ?? ".env.yaml"}`);
+      } else if (options.emitTests) {
+        console.log(`No findings to emit. Directory ${options.emitTests} not created.`);
       }
       if (counts.high > 0) {
         printWarning(`${counts.high} HIGH-severity finding(s) — privilege escalation candidates. Review the digest.`);

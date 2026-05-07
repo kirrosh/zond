@@ -181,6 +181,8 @@ export async function probeSecurityCommand(
       console.log(formatSummaryLine(counts, SEC_SUMMARY));
       if (emittedSuites.length > 0) {
         printSuccess(`Emitted ${emittedSuites.length} regression suite(s) in ${options.emitTests}`);
+      } else if (options.emitTests && !options.dryRun) {
+        console.log(`No 2xx findings to emit. Directory ${options.emitTests} not created.`);
       }
       if (counts.high > 0) {
         printWarning(`${counts.high} HIGH-severity finding(s) — review the digest before deploy.`);
