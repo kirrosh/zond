@@ -2,7 +2,7 @@ import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
 import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, clusterEnvIssues, buildEnvIssue, recommendedAction, softDeleteHint, type RecommendedAction, type EnvIssue } from "./failure-hints.ts";
-import { AUTH_PATH_RE } from "../runner/execute-run.ts";
+import { AUTH_PATH_RE } from "../runner/auth-path.ts";
 
 function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
   if (!raw) return undefined;

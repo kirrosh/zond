@@ -18,7 +18,7 @@ import { printError, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { getDb } from "../../db/schema.ts";
 import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from "../../db/queries.ts";
-import { AUTH_PATH_RE } from "../../core/runner/execute-run.ts";
+import { AUTH_PATH_RE } from "../../core/runner/auth-path.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
 
