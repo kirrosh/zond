@@ -4,15 +4,15 @@ import { runCommand } from "./commands/run.ts";
 import { registerValidate } from "./commands/validate.ts";
 import { registerServe } from "./commands/serve.ts";
 import { registerCoverage } from "./commands/coverage.ts";
-import { ciInitCommand } from "./commands/ci-init.ts";
+import { registerCi } from "./commands/ci-init.ts";
 import { registerClean } from "./commands/clean.ts";
 import { getSecretRegistry } from "../core/secrets/registry.ts";
-import { initCommand } from "./commands/init/index.ts";
+import { registerInit } from "./commands/init/index.ts";
 import { registerDescribe } from "./commands/describe.ts";
 import { registerDb } from "./commands/db.ts";
 import { registerRequest } from "./commands/request.ts";
-import { generateCommand } from "./commands/generate.ts";
-import { discoverCommand } from "./commands/discover.ts";
+import { registerGenerate } from "./commands/generate.ts";
+import { registerDiscover } from "./commands/discover.ts";
 import { probeValidationCommand } from "./commands/probe-validation.ts";
 import { probeMethodsCommand } from "./commands/probe-methods.ts";
 import { lintSpecCommand } from "./commands/lint-spec.ts";
@@ -28,7 +28,7 @@ import { registerSession } from "./commands/session.ts";
 import { resolveSessionId } from "../core/context/session.ts";
 import { registerDoctor } from "./commands/doctor.ts";
 import { registerRefreshApi } from "./commands/refresh-api.ts";
-import { addApiCommand } from "./commands/add-api.ts";
+import { registerAdd } from "./commands/add-api.ts";
 
 import { readCurrentApi } from "../core/context/current.ts";
 import { printError } from "./output.ts";
@@ -172,26 +172,7 @@ export function buildProgram(): Command {
 
   registerServe(program);
 
-  // ── ci ──
-  const ci = program.command("ci").description("CI/CD scaffolding");
-  ci
-    .command("init")
-    .description("Generate CI/CD workflow (GitHub Actions, GitLab CI)")
-    .option("--github", "Generate GitHub Actions workflow")
-    .option("--gitlab", "Generate GitLab CI config")
-    .option("--dir <path>", "Project root directory (default: current directory)")
-    .option("--force", "Overwrite existing CI config")
-    .action(async (opts, cmd: Command) => {
-      let platform: "github" | "gitlab" | undefined;
-      if (opts.github === true) platform = "github";
-      else if (opts.gitlab === true) platform = "gitlab";
-      process.exitCode = await ciInitCommand({
-        platform,
-        force: opts.force === true,
-        dir: opts.dir,
-        json: globalJson(cmd),
-      });
-    });
+  registerCi(program);
 
   registerUse(program);
   registerRefreshApi(program);
@@ -200,78 +181,8 @@ export function buildProgram(): Command {
   registerSession(program);
   registerCoverage(program);
 
-  // ── init ──
-  program
-    .command("init [spec]")
-    .description("Bootstrap a workspace, or register an API when --spec is given")
-    .option("--name <name>", "API name (auto-detected from spec title if omitted)")
-    .option("--spec <path>", "Path to OpenAPI spec file (registers a single API)")
-    .option("--base-url <url>", "Override base URL")
-    .option("--dir <path>", "Target directory")
-    .option("--force", "Overwrite existing API collection")
-    .option("--insecure", "Skip TLS verification when fetching the spec")
-    .option("--db <path>", "Path to SQLite database file")
-    .option("--workspace", "Bootstrap a zond workspace (zond.config.yml, apis/, AGENTS.md)")
-    .option("--with-spec <path>", "Bootstrap workspace AND register first API from spec")
-    .option("--no-agents-md", "Skip writing AGENTS.md when bootstrapping")
-    .option("--no-skills", "Skip writing Claude Code skills under .claude/skills/")
-    .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      const spec = opts.spec ?? specPos;
-      const json = globalJson(cmd);
-      // Deprecation: registering an API via `init` is now `zond add api <name>
-      // --spec X`. Keep init working for one or two releases; just warn so
-      // skill code and scripts migrate.
-      if ((spec || opts.withSpec) && !json) {
-        process.stderr.write(
-          `Warning: 'zond init --spec' / '--with-spec' is deprecated. Use \`zond add api <name> --spec <path>\` (run \`zond init\` separately to bootstrap the workspace).\n`,
-        );
-      }
-      process.exitCode = await initCommand({
-        name: opts.name,
-        spec,
-        baseUrl: opts.baseUrl,
-        dir: opts.dir,
-        force: opts.force === true,
-        insecure: opts.insecure === true,
-        dbPath: opts.db,
-        workspace: opts.workspace === true,
-        withSpec: opts.withSpec,
-        noAgents: opts.agentsMd === false,
-        noSkills: opts.skills === false,
-        json,
-      });
-    });
-
-  // ── add api ──
-  const add = program.command("add").description("Register objects in the workspace");
-  add
-    .command("api <name>")
-    .description("Register an API: from an OpenAPI spec (full toolkit) or just --base-url (run-only mode)")
-    .option("--spec <path>", "Path or URL to OpenAPI spec — enables generate/probe/validate-schema")
-    .option("--base-url <url>", "Base URL recorded in .env.yaml (required if --spec is omitted)")
-    .option("--dir <path>", "Target directory (defaults to apis/<name>/)")
-    .option("--force", "Overwrite an existing API with the same name")
-    .option("--insecure", "Skip TLS verification when fetching the spec from https")
-    .option("--db <path>", "Path to SQLite database file")
-    .action(async (name: string, opts, cmd: Command) => {
-      const json = globalJson(cmd);
-      if (!opts.spec && !opts.baseUrl) {
-        const m = "Provide --spec <path|url> for a full registration, or --base-url <url> for run-only mode.";
-        if (json) printJson(jsonError("add-api", [m])); else printError(m);
-        process.exitCode = 2;
-        return;
-      }
-      process.exitCode = await addApiCommand({
-        name,
-        spec: opts.spec,
-        baseUrl: opts.baseUrl,
-        dir: opts.dir,
-        force: opts.force === true,
-        insecure: opts.insecure === true,
-        dbPath: typeof opts.db === "string" ? opts.db : undefined,
-        json,
-      });
-    });
+  registerInit(program);
+  registerAdd(program);
 
   registerDescribe(program);
   registerDb(program);
@@ -279,66 +190,8 @@ export function buildProgram(): Command {
 
   registerClean(program);
 
-  // ── generate ──
-  program
-    .command("generate [spec]")
-    .description("Generate test suites from OpenAPI spec")
-    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
-    .option("--db <path>", "Path to SQLite database file")
-    .option("--output <dir>", "Output directory for generated test files (required unless --explain)")
-    .option("--tag <tag>", "Generate only for endpoints with this tag")
-    .option("--uncovered-only", "Skip endpoints already covered by existing tests")
-    .option("--explain", "Print the CRUD detection table (which resources became chain candidates and why) without writing files (TASK-139)")
-    .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
-      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      if (!opts.explain && !opts.output) {
-        printError("--output <dir> is required (omit only when running with --explain).");
-        process.exitCode = 2;
-        return;
-      }
-      process.exitCode = await generateCommand({
-        specPath: resolved.spec,
-        output: opts.output ?? "",
-        tag: opts.tag,
-        uncoveredOnly: opts.uncoveredOnly === true,
-        explain: opts.explain === true,
-        json: globalJson(cmd),
-      });
-    });
-
-  // ── discover ──
-  program
-    .command("discover")
-    .description("Auto-fill .env.yaml FK ids by hitting list-endpoints (Phase 2.5 fixture pack — TASK-136)")
-    .requiredOption("--api <name>", "Registered API to discover against (apis/<name>/.env.yaml)")
-    .option("--db <path>", "Path to SQLite database file")
-    .option("--api-dir <path>", "Override apis/<name>/ root (defaults to the collection's base_dir)")
-    .option("--env <path>", "Override .env.yaml path (defaults to <api-dir>/.env.yaml)")
-    .option("--apply", "Write discovered values to .env.yaml (with .env.yaml.bak backup). Default: dry-run.")
-    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
-    .action(async (opts, cmd: Command) => {
-      const resolved = resolveSpecArg(undefined, opts.api, opts.db);
-      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      let apiDir = opts.apiDir as string | undefined;
-      if (!apiDir) {
-        try {
-          getDb(opts.db);
-          const col = findCollectionByNameOrId(opts.api);
-          apiDir = col?.base_dir ?? `apis/${opts.api}`;
-        } catch {
-          apiDir = `apis/${opts.api}`;
-        }
-      }
-      process.exitCode = await discoverCommand({
-        specPath: resolved.spec,
-        apiDir,
-        envPath: opts.env,
-        apply: opts.apply === true,
-        timeoutMs: opts.timeout,
-        json: globalJson(cmd),
-      });
-    });
+  registerGenerate(program);
+  registerDiscover(program);
 
   // ── probe (umbrella) + back-compat aliases ──
   // TASK-182 (m-11): four standalone probe-* commands collapsed under a

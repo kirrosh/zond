@@ -431,3 +431,43 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     return 2;
   }
 }
+
+import type { Command } from "commander";
+import { globalJson, resolveSpecArg } from "../resolve.ts";
+import { parsePositiveInt } from "../argv.ts";
+import { getDb } from "../../db/schema.ts";
+import { findCollectionByNameOrId } from "../../db/queries.ts";
+
+export function registerDiscover(program: Command): void {
+  program
+    .command("discover")
+    .description("Auto-fill .env.yaml FK ids by hitting list-endpoints (Phase 2.5 fixture pack — TASK-136)")
+    .requiredOption("--api <name>", "Registered API to discover against (apis/<name>/.env.yaml)")
+    .option("--db <path>", "Path to SQLite database file")
+    .option("--api-dir <path>", "Override apis/<name>/ root (defaults to the collection's base_dir)")
+    .option("--env <path>", "Override .env.yaml path (defaults to <api-dir>/.env.yaml)")
+    .option("--apply", "Write discovered values to .env.yaml (with .env.yaml.bak backup). Default: dry-run.")
+    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
+    .action(async (opts, cmd: Command) => {
+      const resolved = resolveSpecArg(undefined, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      let apiDir = opts.apiDir as string | undefined;
+      if (!apiDir) {
+        try {
+          getDb(opts.db);
+          const col = findCollectionByNameOrId(opts.api);
+          apiDir = col?.base_dir ?? `apis/${opts.api}`;
+        } catch {
+          apiDir = `apis/${opts.api}`;
+        }
+      }
+      process.exitCode = await discoverCommand({
+        specPath: resolved.spec,
+        apiDir,
+        envPath: opts.env,
+        apply: opts.apply === true,
+        timeoutMs: opts.timeout,
+        json: globalJson(cmd),
+      });
+    });
+}

@@ -86,3 +86,38 @@ export async function addApiCommand(opts: AddApiOptions): Promise<number> {
   }
   return 0;
 }
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+
+export function registerAdd(program: Command): void {
+  const add = program.command("add").description("Register objects in the workspace");
+  add
+    .command("api <name>")
+    .description("Register an API: from an OpenAPI spec (full toolkit) or just --base-url (run-only mode)")
+    .option("--spec <path>", "Path or URL to OpenAPI spec — enables generate/probe/validate-schema")
+    .option("--base-url <url>", "Base URL recorded in .env.yaml (required if --spec is omitted)")
+    .option("--dir <path>", "Target directory (defaults to apis/<name>/)")
+    .option("--force", "Overwrite an existing API with the same name")
+    .option("--insecure", "Skip TLS verification when fetching the spec from https")
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (name: string, opts, cmd: Command) => {
+      const json = globalJson(cmd);
+      if (!opts.spec && !opts.baseUrl) {
+        const m = "Provide --spec <path|url> for a full registration, or --base-url <url> for run-only mode.";
+        if (json) printJson(jsonError("add-api", [m])); else printError(m);
+        process.exitCode = 2;
+        return;
+      }
+      process.exitCode = await addApiCommand({
+        name,
+        spec: opts.spec,
+        baseUrl: opts.baseUrl,
+        dir: opts.dir,
+        force: opts.force === true,
+        insecure: opts.insecure === true,
+        dbPath: typeof opts.db === "string" ? opts.db : undefined,
+        json,
+      });
+    });
+}
