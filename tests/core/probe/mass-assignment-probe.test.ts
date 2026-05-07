@@ -507,23 +507,45 @@ describe("runMassAssignmentProbes", () => {
     expect(calls.filter(c => c.method === "GET" && c.url === "https://api.test/users")).toHaveLength(1);
   });
 
-  it("auth header injected from vars", async () => {
-    responder = (req) => {
-      if (req.method === "POST" && isBaseline(req.body)) {
-        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+  it("auth header injected from vars (header captured via fetch mock)", async () => {
+    // Re-install fetch with header capture — the file-level beforeEach mock
+    // discards init.headers, which let the original assertion drift into a
+    // weaker URL-only check (acknowledged by its own comment).
+    const capturedAuth: string[] = [];
+    const prevFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | Request | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      const headers = new Headers(init?.headers as HeadersInit | undefined);
+      capturedAuth.push(headers.get("authorization") ?? "");
+      let body: unknown;
+      if (init?.body && typeof init.body === "string") {
+        try { body = JSON.parse(init.body); } catch { body = init.body; }
       }
-      return { status: 400 };
-    };
-    await runMassAssignmentProbes({
-      endpoints: [postUsersEndpoint({
-        security: ["bearerAuth"],
-      })],
-      securitySchemes: [{ name: "bearerAuth", type: "http", scheme: "bearer" }],
-      vars: { base_url: "https://api.test", auth_token: "secret-token" },
-    });
-    expect(calls[0]!.url).toBe("https://api.test/users");
-    // Authorization header check requires inspecting init — recompose by looking at what we sent
-    // (mock handler doesn't capture headers; this test is mainly URL+auth shape).
+      const isPostBaseline = method === "POST" && isBaseline(body);
+      const status = isPostBaseline ? 201 : method === "DELETE" ? 204 : 400;
+      const respBody = isPostBaseline ? { id: "baseline-id", name: "alice" } : {};
+      return new Response(JSON.stringify(respBody), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      await runMassAssignmentProbes({
+        endpoints: [postUsersEndpoint({ security: ["bearerAuth"] })],
+        securitySchemes: [{ name: "bearerAuth", type: "http", scheme: "bearer" }],
+        vars: { base_url: "https://api.test", auth_token: "secret-token" },
+      });
+    } finally {
+      globalThis.fetch = prevFetch;
+    }
+
+    expect(capturedAuth.length).toBeGreaterThan(0);
+    // Every outbound request must carry the substituted Bearer token.
+    for (const auth of capturedAuth) {
+      expect(auth).toBe("Bearer secret-token");
+    }
   });
 });
 
@@ -559,6 +581,39 @@ describe("formatDigestMarkdown", () => {
     expect(md).toMatch(/INCONCLUSIVE — baseline body invalid/);
     expect(md).toMatch(/Domain not found/);
     expect(md).toMatch(/set the right fixture/);
+  });
+
+  it("renders a literal HIGH verdict directly without running probes", () => {
+    // Construct the verdict synthetically so the formatter is exercised in
+    // isolation from the probe's classification logic.
+    const md = formatDigestMarkdown(
+      {
+        totalEndpoints: 1,
+        specProbed: 1,
+        verdicts: [
+          {
+            method: "POST",
+            path: "/users",
+            severity: "high",
+            summary: "fields=[is_admin] · applied",
+            request: { injectedFields: ["is_admin", "role"] },
+            baseline: { status: 201 },
+            response: { status: 201 },
+            followUpGet: { status: 200 },
+            fields: [
+              { field: "is_admin", outcome: "applied" },
+              { field: "role", outcome: "applied" },
+            ],
+          } as any,
+        ],
+        warnings: [],
+      } as any,
+      "spec.yaml",
+    );
+    expect(md).toMatch(/# Mass-assignment probe digest/);
+    expect(md).toMatch(/POST \/users/);
+    expect(md).toMatch(/HIGH/i);
+    expect(md).toContain("is_admin");
   });
 });
 

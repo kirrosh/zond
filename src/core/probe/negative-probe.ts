@@ -45,12 +45,13 @@ const LONG_STRING = "a".repeat(10_000);
 const UNICODE_MIX = "Mix🌐مرحبا\u200B";
 
 /** Sentinel non-UUID inputs for path/UUID probes. */
-const INVALID_UUID_VALUES = [
+export const INVALID_UUID_SENTINELS = [
   "not-a-uuid",
   "12345",
   "00000000",
   "../../etc/passwd",
-];
+] as const;
+const INVALID_UUID_VALUES = INVALID_UUID_SENTINELS;
 
 /** Sentinel invalid emails. */
 const INVALID_EMAIL_VALUES = [

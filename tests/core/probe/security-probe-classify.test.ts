@@ -142,6 +142,87 @@ describe("runSecurityProbes — happy path", () => {
     expect(v.summary).toContain("dry-run");
   });
 
+  it("open-redirect: end-to-end run classifies HIGH when redirect payload is echoed", async () => {
+    harness.setResponder((req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      const body = req.body as Record<string, unknown> | undefined;
+      const redirect = body?.redirect;
+      // Echo back — typical stored open-redirect surface.
+      return { status: 201, body: { id: "r_1", redirect } };
+    });
+    const result = await runSecurityProbes({
+      endpoints: [ep({ method: "POST", path: "/r", requestBodySchema: redirectSchema })],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      classes: ["open-redirect"],
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("high");
+    expect(v.detectedFields[0]!.class).toBe("open-redirect");
+  });
+
+  it("open-redirect: rejected payload (4xx) classifies as OK", async () => {
+    harness.setResponder((req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      const body = req.body as Record<string, unknown> | undefined;
+      const r = typeof body?.redirect === "string" ? body.redirect : "";
+      // Reject any external redirect target.
+      const looksLikeAttack = /\/\/|^https?:|javascript:/i.test(r);
+      if (looksLikeAttack && !r.startsWith("https://api.test")) {
+        return { status: 422, body: { error: "redirect target not allowed" } };
+      }
+      return { status: 201, body: { id: "r_1", redirect: r } };
+    });
+    const result = await runSecurityProbes({
+      endpoints: [ep({ method: "POST", path: "/r", requestBodySchema: redirectSchema })],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      classes: ["open-redirect"],
+    });
+    expect(result.verdicts[0]!.severity).toBe("ok");
+  });
+
+  it("inconclusive-baseline rollup: severity bubbles up when baseline 4xx blocks every attack", async () => {
+    harness.setResponder(() => ({ status: 422, body: { error: "baseline locked" } }));
+    const result = await runSecurityProbes({
+      endpoints: [
+        ep({ method: "POST", path: "/a", requestBodySchema: webhookSchema }),
+        ep({ method: "POST", path: "/b", requestBodySchema: redirectSchema }),
+      ],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      classes: ["ssrf", "open-redirect"],
+    });
+    expect(result.verdicts).toHaveLength(2);
+    expect(result.verdicts.every(v => v.severity === "inconclusive-baseline")).toBe(true);
+  });
+
+  it("multi-class: runs ssrf + crlf in one invocation and produces classified verdicts", async () => {
+    harness.setResponder((req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      const body = req.body as Record<string, unknown> | undefined;
+      const url = typeof body?.url === "string" ? body.url : "";
+      const isSsrf = url.includes("127.0.0.1") || url.startsWith("file:") || url.includes("169.254");
+      if (isSsrf) return { status: 422, body: { error: "url not allowed" } };
+      return { status: 201, body: { id: "x", subject: body?.subject } };
+    });
+    const result = await runSecurityProbes({
+      endpoints: [
+        ep({ method: "POST", path: "/webhooks", requestBodySchema: webhookSchema }),
+        ep({ method: "POST", path: "/messages", requestBodySchema: emailSchema }),
+      ],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      classes: ["ssrf", "crlf"],
+    });
+    expect(result.verdicts).toHaveLength(2);
+    const hooks = result.verdicts.find(v => v.path === "/webhooks")!;
+    const msgs = result.verdicts.find(v => v.path === "/messages")!;
+    expect(hooks.severity).toBe("ok");
+    // /messages echoes back subject → HIGH on CRLF.
+    expect(msgs.severity).toBe("high");
+  });
+
   it("skips endpoints with no detected fields", async () => {
     const noBodyEp = ep({
       method: "POST",
@@ -193,6 +274,63 @@ describe("formatSecurityDigest", () => {
     expect(md).toContain("# zond probe-security digest");
     expect(md).toContain("HIGH");
     expect(md).toContain("POST /webhooks");
+  });
+});
+
+describe("formatSecurityDigest — per-severity sections", () => {
+  it("renders LOW + inconclusive + skipped sections together", () => {
+    const md = formatSecurityDigest(
+      {
+        classes: ["ssrf", "crlf"],
+        totalEndpoints: 3,
+        specProbed: 3,
+        verdicts: [
+          {
+            method: "POST",
+            path: "/echo",
+            severity: "low",
+            summary: "fields=[url] · LOW=1",
+            detectedFields: [{ field: "url", class: "ssrf" }],
+            findings: [
+              {
+                field: "url",
+                class: "ssrf",
+                payload: "http://169.254.169.254/latest",
+                status: 200,
+                echoed: true,
+                severity: "low",
+                reason: "echoed-but-not-fetched",
+              },
+            ],
+          },
+          {
+            method: "POST",
+            path: "/locked",
+            severity: "inconclusive-baseline",
+            summary: "baseline failed",
+            detectedFields: [{ field: "subject", class: "crlf" }],
+            findings: [],
+          },
+          {
+            method: "GET",
+            path: "/healthz",
+            severity: "skipped",
+            summary: "no detected fields",
+            detectedFields: [],
+            findings: [],
+          },
+        ],
+        warnings: [],
+      },
+      "spec.json",
+    );
+    expect(md).toContain("LOW");
+    expect(md).toMatch(/INCONCLUSIVE/i);
+    expect(md).toMatch(/SKIPPED|skipped/);
+    // All three endpoint paths surface in the rendered digest.
+    expect(md).toContain("/echo");
+    expect(md).toContain("/locked");
+    expect(md).toContain("/healthz");
   });
 });
 

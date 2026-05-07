@@ -3,9 +3,10 @@ id: TASK-207
 title: >-
   tests: cover security/mass-assignment/negative/method probe missed branches +
   weak fixes
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:12'
+updated_date: '2026-05-07 12:05'
 labels:
   - tests
   - probe
@@ -23,9 +24,9 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 security: open-redirect, inconclusive rollup, multi-class — добавлены
-- [ ] #2 mass-assignment: auth-header переписан через captured headers; restore-failure разделён; formatDigestMarkdown через literal
-- [ ] #3 negative-probe: header/cookie params, non-bearer auth, exact uuid sentinel count
-- [ ] #4 method-probe: keys[0] заменено на KNOWN_METHODS.find; multi-{x} path render
-- [ ] #5 ≥12 новых кейсов суммарно
+- [x] #1 security: open-redirect, inconclusive rollup, multi-class — добавлены
+- [x] #2 mass-assignment: auth-header переписан через captured headers; restore-failure разделён; formatDigestMarkdown через literal
+- [x] #3 negative-probe: header/cookie params, non-bearer auth, exact uuid sentinel count
+- [x] #4 method-probe: keys[0] заменено на KNOWN_METHODS.find; multi-{x} path render
+- [x] #5 ≥12 новых кейсов суммарно
 <!-- AC:END -->
