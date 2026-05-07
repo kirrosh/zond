@@ -39,6 +39,10 @@ export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator 
         endpoints.push({ method: m.toUpperCase(), path: pathTpl, regex, responses: op.responses });
       }
     }
+    // Sort by specificity so concrete paths (e.g. /users/me) win over templated
+    // ones (/users/{id}) regardless of spec declaration order. Tie-breaker is
+    // stable insertion order (Array.sort is stable in modern engines).
+    endpoints.sort((a, b) => paramCount(a.path) - paramCount(b.path));
   }
 
   const compiled = new Map<unknown, ValidateFunction>();
@@ -53,8 +57,8 @@ export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator 
 
   function findResponseSchema(method: string, path: string, status: number): OpenAPIV3.SchemaObject | undefined {
     const upper = method.toUpperCase();
-    // Match path; first match wins. Concrete paths (no {param}) sort before
-    // templated ones so /users/me wins over /users/{id}.
+    // Endpoints are pre-sorted by specificity (concrete paths first), so the
+    // first regex match is the most specific — /users/me beats /users/{id}.
     const match = endpoints.find(e => e.method === upper && e.regex.test(path));
     if (!match) return undefined;
     const responses = match.responses;
@@ -89,6 +93,12 @@ export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator 
       return errors.map(e => ajvErrorToAssertion(e, body));
     },
   };
+}
+
+function paramCount(path: string): number {
+  let n = 0;
+  for (const seg of path.split("/")) if (/^\{[^}]+\}$/.test(seg)) n++;
+  return n;
 }
 
 function ajvErrorToAssertion(err: ErrorObject, body: unknown): AssertionResult {

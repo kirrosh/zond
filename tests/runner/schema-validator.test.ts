@@ -175,6 +175,179 @@ describe("schema-validator", () => {
     expect(v.validate("GET", "/x", 200, { name: 5 })).toHaveLength(1);
   });
 
+  describe("path specificity (TASK-205)", () => {
+    function withSchemas(
+      paths: Array<[string, OpenAPIV3.SchemaObject]>,
+    ): ReturnType<typeof createSchemaValidator> {
+      const obj: OpenAPIV3.PathsObject = {};
+      for (const [p, s] of paths) {
+        obj[p] = {
+          get: {
+            responses: {
+              "200": { description: "ok", content: { "application/json": { schema: s } } },
+            },
+          },
+        };
+      }
+      return createSchemaValidator(spec(obj));
+    }
+
+    test("concrete /users/me wins over /users/{id} when declared after", () => {
+      const v = withSchemas([
+        ["/users/{id}", { type: "object", required: ["id"], properties: { id: { type: "string" } } }],
+        ["/users/me",   { type: "object", required: ["self"], properties: { self: { type: "boolean" } } }],
+      ]);
+      // Body satisfies /users/me schema but not /users/{id} (missing "id").
+      // Pre-fix: endpoints.find returns /users/{id} (declared first) → fails.
+      expect(v.validate("GET", "/users/me", 200, { self: true })).toHaveLength(0);
+    });
+
+    test("concrete /users/me wins over /users/{id} when declared first too", () => {
+      const v = withSchemas([
+        ["/users/me",   { type: "object", required: ["self"], properties: { self: { type: "boolean" } } }],
+        ["/users/{id}", { type: "object", required: ["id"], properties: { id: { type: "string" } } }],
+      ]);
+      expect(v.validate("GET", "/users/me", 200, { self: true })).toHaveLength(0);
+    });
+
+    test("templated path still matched for non-concrete request", () => {
+      const v = withSchemas([
+        ["/users/{id}", { type: "object", required: ["id"], properties: { id: { type: "string" } } }],
+        ["/users/me",   { type: "object", required: ["self"], properties: { self: { type: "boolean" } } }],
+      ]);
+      // /users/123 must hit /users/{id}, not the concrete path.
+      expect(v.validate("GET", "/users/123", 200, { id: "123" })).toHaveLength(0);
+      expect(v.validate("GET", "/users/123", 200, {})).toHaveLength(1);
+    });
+
+    test("fewer params win across multi-segment paths", () => {
+      const v = withSchemas([
+        ["/orgs/{org}/repos/{repo}", { type: "object", required: ["a"], properties: { a: { type: "string" } } }],
+        ["/orgs/acme/repos/{repo}",  { type: "object", required: ["b"], properties: { b: { type: "string" } } }],
+      ]);
+      expect(v.validate("GET", "/orgs/acme/repos/x", 200, { b: "x" })).toHaveLength(0);
+    });
+  });
+
+  describe("composition keywords (TASK-205)", () => {
+    function withResponseSchema(schema: OpenAPIV3.SchemaObject, version = "3.0.0") {
+      return createSchemaValidator(spec({
+        "/x": {
+          get: {
+            responses: {
+              "200": { description: "ok", content: { "application/json": { schema } } },
+            },
+          },
+        },
+      }, version));
+    }
+
+    test("oneOf — exactly one match passes", () => {
+      const v = withResponseSchema({
+        oneOf: [
+          { type: "object", required: ["a"], properties: { a: { type: "string" } } },
+          { type: "object", required: ["b"], properties: { b: { type: "number" } } },
+        ],
+      } as OpenAPIV3.SchemaObject);
+      expect(v.validate("GET", "/x", 200, { a: "ok" })).toHaveLength(0);
+      expect(v.validate("GET", "/x", 200, { c: 1 }).some(f => f.rule === "schema.oneOf")).toBe(true);
+    });
+
+    test("anyOf — any match passes", () => {
+      const v = withResponseSchema({
+        anyOf: [
+          { type: "string", minLength: 3 },
+          { type: "number" },
+        ],
+      } as OpenAPIV3.SchemaObject);
+      expect(v.validate("GET", "/x", 200, 42)).toHaveLength(0);
+      expect(v.validate("GET", "/x", 200, true).length).toBeGreaterThan(0);
+    });
+
+    test("allOf — all branches must pass", () => {
+      const v = withResponseSchema({
+        allOf: [
+          { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+          { type: "object", required: ["age"], properties: { age: { type: "number" } } },
+        ],
+      } as OpenAPIV3.SchemaObject);
+      expect(v.validate("GET", "/x", 200, { id: "u", age: 5 })).toHaveLength(0);
+      expect(v.validate("GET", "/x", 200, { id: "u" }).some(f => f.rule === "schema.required")).toBe(true);
+    });
+
+    test("additionalProperties:false rejects unknown keys", () => {
+      const v = withResponseSchema({
+        type: "object",
+        properties: { id: { type: "string" } },
+        additionalProperties: false,
+      });
+      const fails = v.validate("GET", "/x", 200, { id: "u", surprise: 1 });
+      expect(fails.some(f => f.rule === "schema.additionalProperties")).toBe(true);
+    });
+
+    test("pattern keyword reports schema.pattern", () => {
+      const v = withResponseSchema({
+        type: "object",
+        required: ["sku"],
+        properties: { sku: { type: "string", pattern: "^[A-Z]{3}-\\d{4}$" } },
+      });
+      const fails = v.validate("GET", "/x", 200, { sku: "lower-0001" });
+      expect(fails.some(f => f.rule === "schema.pattern" && f.field.includes("sku"))).toBe(true);
+    });
+
+    test("minLength + minimum produce both failures", () => {
+      const v = withResponseSchema({
+        type: "object",
+        required: ["name", "age"],
+        properties: {
+          name: { type: "string", minLength: 3 },
+          age: { type: "integer", minimum: 18 },
+        },
+      });
+      const fails = v.validate("GET", "/x", 200, { name: "a", age: 10 });
+      expect(fails.some(f => f.rule === "schema.minLength")).toBe(true);
+      expect(fails.some(f => f.rule === "schema.minimum")).toBe(true);
+    });
+
+    test("multipleOf rejects non-multiples", () => {
+      const v = withResponseSchema({
+        type: "object",
+        required: ["amount"],
+        properties: { amount: { type: "integer", multipleOf: 5 } },
+      });
+      expect(v.validate("GET", "/x", 200, { amount: 7 }).some(f => f.rule === "schema.multipleOf")).toBe(true);
+      expect(v.validate("GET", "/x", 200, { amount: 25 })).toHaveLength(0);
+    });
+
+    test("const enforces exact value", () => {
+      const v = withResponseSchema({
+        type: "object",
+        required: ["kind"],
+        properties: { kind: { const: "user" } as OpenAPIV3.SchemaObject },
+      });
+      expect(v.validate("GET", "/x", 200, { kind: "user" })).toHaveLength(0);
+      expect(v.validate("GET", "/x", 200, { kind: "admin" }).some(f => f.rule === "schema.const")).toBe(true);
+    });
+
+    test("malformed schema returns single schema.compile_error assertion", () => {
+      // type:"frobnicator" is not a valid JSON Schema type.
+      const v = withResponseSchema({
+        type: "frobnicator" as unknown as "string",
+      });
+      const fails = v.validate("GET", "/x", 200, { anything: true });
+      expect(fails).toHaveLength(1);
+      expect(fails[0]?.rule).toBe("schema.compile_error");
+      expect(fails[0]?.field).toBe("body");
+    });
+
+    test("missing path → empty result (no spurious failures)", () => {
+      const v = createSchemaValidator(spec({
+        "/known": { get: { responses: { "200": { description: "ok", content: { "application/json": { schema: { type: "object" } } } } } } },
+      }));
+      expect(v.validate("GET", "/unknown", 200, { whatever: 1 })).toHaveLength(0);
+    });
+  });
+
   describe("strict RFC3339 date-time format", () => {
     function timestampValidator() {
       return buildValidator({
