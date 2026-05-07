@@ -35,6 +35,7 @@ import {
   captureFieldFor,
   hasJsonBody,
   liveAuthHeaders,
+  getAuthHeaders,
 } from "./shared.ts";
 import {
   buildProbeUrl,
@@ -898,7 +899,7 @@ export function emitRegressionSuites(
     if (v.severity !== "ok" && v.severity !== "low") continue;
     const ep = endpoints.find(e => e.path === v.path && e.method.toUpperCase() === v.method);
     if (!ep) continue;
-    const suiteHeaders = buildEmittedHeaders(ep, schemes);
+    const suiteHeaders = getAuthHeaders(ep, schemes);
     const probeExpectedStatus = v.severity === "ok" ? ACCEPTABLE_4XX : [200, 201, 202, 204];
     const probeStep: RawStep = {
       name: `mass-assignment: extras must ${v.severity === "ok" ? "be rejected" : "not apply"}`,
@@ -988,28 +989,3 @@ function extrasNotEqualAssertions(v: EndpointVerdict): Record<string, Record<str
   return out;
 }
 
-function buildEmittedHeaders(
-  ep: EndpointInfo,
-  schemes: SecuritySchemeInfo[],
-): Record<string, string> | undefined {
-  if (ep.security.length === 0) return undefined;
-  for (const secName of ep.security) {
-    const scheme = schemes.find(s => s.name === secName);
-    if (!scheme) continue;
-    if (scheme.type === "http") {
-      if (scheme.scheme === "bearer" || !scheme.scheme) {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      if (scheme.scheme === "basic") {
-        return { Authorization: "Basic {{auth_token}}" };
-      }
-    }
-    if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
-      if (scheme.apiKeyName === "Authorization") {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      return { [scheme.apiKeyName]: "{{api_key}}" };
-    }
-  }
-  return undefined;
-}

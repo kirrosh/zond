@@ -4,6 +4,7 @@ import type { RawSuite, RawStep } from "./serializer.ts";
 import type { SourceMetadata } from "../parser/types.ts";
 import { generateFromSchema, generateMultipartFromSchema } from "./data-factory.ts";
 import { groupEndpointsByTag } from "./chunker.ts";
+import { getAuthHeaders as sharedGetAuthHeaders } from "../probe/shared.ts";
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -144,29 +145,7 @@ function getAuthHeaders(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
 ): Record<string, string> | undefined {
-  if (ep.security.length === 0) return undefined;
-
-  for (const secName of ep.security) {
-    const scheme = schemes.find(s => s.name === secName);
-    if (!scheme) continue;
-
-    if (scheme.type === "http") {
-      if (scheme.scheme === "bearer" || !scheme.scheme) {
-        return { Authorization: `Bearer {{${schemeVarName(scheme, schemes)}}}` };
-      }
-      if (scheme.scheme === "basic") {
-        return { Authorization: `Basic {{${schemeVarName(scheme, schemes)}}}` };
-      }
-    }
-    if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
-      if (scheme.apiKeyName === "Authorization") {
-        return { Authorization: `Bearer {{${schemeVarName(scheme, schemes)}}}` };
-      }
-      return { [scheme.apiKeyName]: "{{api_key}}" };
-    }
-  }
-
-  return undefined;
+  return sharedGetAuthHeaders(ep, schemes, s => schemeVarName(s, schemes));
 }
 
 function getRequiredQueryParams(ep: EndpointInfo): Record<string, string> | undefined {

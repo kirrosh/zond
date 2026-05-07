@@ -18,7 +18,7 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
-import { pathWithByAliases } from "./shared.ts";
+import { pathWithByAliases, getAuthHeaders } from "./shared.ts";
 
 // ──────────────────────────────────────────────
 // Constants
@@ -91,31 +91,6 @@ function pathWithPlaceholders(
   });
 }
 
-function getAuthHeaders(
-  ep: EndpointInfo,
-  schemes: SecuritySchemeInfo[],
-): Record<string, string> | undefined {
-  if (ep.security.length === 0) return undefined;
-  for (const secName of ep.security) {
-    const scheme = schemes.find((s) => s.name === secName);
-    if (!scheme) continue;
-    if (scheme.type === "http") {
-      if (scheme.scheme === "bearer" || !scheme.scheme) {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      if (scheme.scheme === "basic") {
-        return { Authorization: "Basic {{auth_token}}" };
-      }
-    }
-    if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
-      if (scheme.apiKeyName === "Authorization") {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      return { [scheme.apiKeyName]: "{{api_key}}" };
-    }
-  }
-  return undefined;
-}
 
 interface PathBucket {
   path: string;

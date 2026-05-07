@@ -24,6 +24,7 @@ import {
   captureFieldFor,
   hasJsonBody,
   liveAuthHeaders,
+  getAuthHeaders,
 } from "./shared.ts";
 import {
   buildProbeUrl,
@@ -880,7 +881,7 @@ export function emitSecurityRegressionSuites(
       e => e.path === v.path && e.method.toUpperCase() === v.method,
     );
     if (!ep) continue;
-    const suiteHeaders = liveAuthHeadersTemplate(ep, schemes);
+    const suiteHeaders = getAuthHeaders(ep, schemes);
     const tests: RawStep[] = [];
     for (const f of v.findings) {
       const expected = f.severity === "ok" ? ATTACK_EXPECTED_STATUS : [200, 201, 202, 204];
@@ -940,22 +941,3 @@ function shortPayload(s: string): string {
   return s.length > 40 ? s.slice(0, 37) + "…" : s;
 }
 
-function liveAuthHeadersTemplate(
-  ep: EndpointInfo,
-  schemes: SecuritySchemeInfo[],
-): Record<string, string> | undefined {
-  if (ep.security.length === 0) return undefined;
-  for (const secName of ep.security) {
-    const scheme = schemes.find(s => s.name === secName);
-    if (!scheme) continue;
-    if (scheme.type === "http" && (scheme.scheme === "bearer" || !scheme.scheme)) {
-      return { Authorization: "Bearer {{auth_token}}" };
-    }
-    if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
-      return scheme.apiKeyName === "Authorization"
-        ? { Authorization: "Bearer {{auth_token}}" }
-        : { [scheme.apiKeyName]: "{{api_key}}" };
-    }
-  }
-  return undefined;
-}
