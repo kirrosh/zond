@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **TASK-176: drop `CLAUDE.md`.** The file was a 13-line wrapper that
+  pointed Claude Code at `AGENTS.md`. Modern Claude Code reads
+  `AGENTS.md` directly, so the redirect is unnecessary. AGENTS.md
+  remains the single source of truth for AI agents.
+
 ### Changed
 
 - **TASK-151 round-5 follow-up: eventual-consistency retry on POST
