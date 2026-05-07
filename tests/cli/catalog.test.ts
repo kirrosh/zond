@@ -1,31 +1,14 @@
-import { describe, test, expect, mock, afterEach } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import { catalogCommand } from "../../src/cli/commands/catalog.ts";
 import { join } from "path";
 import { mkdtemp, rm } from "fs/promises";
 import { tmpdir } from "os";
+import { captureOutput } from "../_helpers/output";
 
 const FIXTURES = `${import.meta.dir}/../fixtures`;
 
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  const origLog = console.log;
-  let captured = "";
-  process.stdout.write = mock((data: any) => { captured += String(data); return true; }) as typeof process.stdout.write;
-  process.stderr.write = mock(() => true) as typeof process.stderr.write;
-  console.log = mock((...args: unknown[]) => { captured += args.map(String).join(" ") + "\n"; });
-  return {
-    restore() {
-      process.stdout.write = origOut;
-      process.stderr.write = origErr;
-      console.log = origLog;
-    },
-    getCaptured() { return captured; },
-  };
-}
-
 describe("catalogCommand", () => {
-  let output: ReturnType<typeof suppressOutput>;
+  let output: ReturnType<typeof captureOutput>;
   let tmpDir: string;
 
   afterEach(async () => {
@@ -36,7 +19,7 @@ describe("catalogCommand", () => {
   });
 
   test("generates .api-catalog.yaml from spec", async () => {
-    output = suppressOutput();
+    output = captureOutput({ console: true });
     tmpDir = await mkdtemp(join(tmpdir(), "zond-catalog-"));
 
     const code = await catalogCommand({
@@ -57,7 +40,7 @@ describe("catalogCommand", () => {
   });
 
   test("--json returns envelope with ok: true", async () => {
-    output = suppressOutput();
+    output = captureOutput({ console: true });
     tmpDir = await mkdtemp(join(tmpdir(), "zond-catalog-"));
 
     const code = await catalogCommand({
@@ -67,7 +50,7 @@ describe("catalogCommand", () => {
     });
 
     expect(code).toBe(0);
-    const envelope = JSON.parse(output.getCaptured());
+    const envelope = JSON.parse(output.out);
     expect(envelope.ok).toBe(true);
     expect(envelope.command).toBe("catalog");
     expect(envelope.data.endpointCount).toBeGreaterThan(0);
@@ -75,19 +58,19 @@ describe("catalogCommand", () => {
   });
 
   test("returns error for invalid spec path", async () => {
-    output = suppressOutput();
+    output = captureOutput({ console: true });
     const code = await catalogCommand({
       specPath: "/nonexistent/spec.json",
       json: true,
     });
 
     expect(code).toBe(2);
-    const envelope = JSON.parse(output.getCaptured());
+    const envelope = JSON.parse(output.out);
     expect(envelope.ok).toBe(false);
   });
 
   test("generated YAML is parseable and contains expected endpoints", async () => {
-    output = suppressOutput();
+    output = captureOutput({ console: true });
     tmpDir = await mkdtemp(join(tmpdir(), "zond-catalog-"));
 
     await catalogCommand({
@@ -111,7 +94,7 @@ describe("catalogCommand", () => {
   });
 
   test("defaults output to current directory", async () => {
-    output = suppressOutput();
+    output = captureOutput({ console: true });
     // Use a temp dir as "current" by specifying it as output
     tmpDir = await mkdtemp(join(tmpdir(), "zond-catalog-"));
 

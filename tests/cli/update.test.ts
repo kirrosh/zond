@@ -1,18 +1,8 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
 import { VERSION } from "../../src/cli/version.ts";
+import { captureOutput } from "../_helpers/output";
 
-const originalFetch = globalThis.fetch;
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  process.stdout.write = mock(() => true) as typeof process.stdout.write;
-  process.stderr.write = mock(() => true) as typeof process.stderr.write;
-  return () => {
-    process.stdout.write = origOut;
-    process.stderr.write = origErr;
-  };
-}
+import { restoreFetch } from "../_helpers/fetch-mock";
 
 function mockGitHubRelease(tagName: string, assets: { name: string; browser_download_url: string }[] = []) {
   globalThis.fetch = mock(async () => {
@@ -26,15 +16,13 @@ function mockGitHubRelease(tagName: string, assets: { name: string; browser_down
   }) as unknown as typeof fetch;
 }
 
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-});
+afterEach(restoreFetch);
 
 describe("update command", () => {
   test("non-compiled binary returns exit code 3 with install hint", async () => {
     // When running via bun test, isCompiledBinary() returns false
     const { updateCommand } = await import("../../src/cli/commands/update.ts");
-    const restore = suppressOutput();
+    const { restore } = captureOutput();
     const code = await updateCommand({ json: false });
     restore();
     expect(code).toBe(3);
@@ -62,7 +50,7 @@ describe("update command", () => {
 
   test("check flag returns exit code 3 for non-compiled", async () => {
     const { updateCommand } = await import("../../src/cli/commands/update.ts");
-    const restore = suppressOutput();
+    const { restore } = captureOutput();
     // check flag should still work — but since non-compiled, it returns "skip"
     const code = await updateCommand({ json: false, check: true });
     restore();

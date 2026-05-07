@@ -6,33 +6,7 @@ import {
   formatSuiteResult,
   formatGrandTotal,
 } from "../../src/core/reporter/console.ts";
-import type { TestRunResult, StepResult } from "../../src/core/runner/types.ts";
-
-function makeStep(overrides?: Partial<StepResult>): StepResult {
-  return {
-    name: "step",
-    status: "pass",
-    duration_ms: 10,
-    request: { method: "GET", url: "http://x/", headers: {} },
-    response: { status: 200, headers: {}, body: "{}", duration_ms: 10 },
-    assertions: [],
-    captures: {},
-    ...overrides,
-  };
-}
-
-function makeResult(steps: StepResult[]): TestRunResult {
-  return {
-    suite_name: "S",
-    started_at: "2024-01-01T00:00:00.000Z",
-    finished_at: "2024-01-01T00:00:01.000Z",
-    total: steps.length,
-    passed: steps.filter(s => s.status === "pass").length,
-    failed: steps.filter(s => s.status === "fail").length,
-    skipped: steps.filter(s => s.status === "skip").length,
-    steps,
-  };
-}
+import { makeStep, makeResult } from "../_helpers/reporter-fixtures";
 
 describe("is5xx / count5xx", () => {
   test("is5xx detects 500-599 status on response", () => {

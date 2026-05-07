@@ -4,22 +4,10 @@ import { runSuite } from "../../src/core/runner/executor.ts";
 import { validateSuite } from "../../src/core/parser/schema.ts";
 import { serializeSuite } from "../../src/core/generator/serializer.ts";
 import { parse as parseYaml } from "yaml";
-import type { EndpointInfo } from "../../src/core/generator/types.ts";
+import { ep } from "../_helpers/endpoints";
 
-const originalFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = originalFetch; });
-
-function ep(partial: Partial<EndpointInfo>): EndpointInfo {
-  return {
-    path: "/x", method: "POST",
-    operationId: undefined, summary: undefined, tags: [],
-    parameters: [], requestBodySchema: undefined, requestBodyContentType: undefined,
-    responseContentTypes: ["application/json"],
-    responses: [{ statusCode: 200, description: "ok" }],
-    security: [], deprecated: false, requiresEtag: false,
-    ...partial,
-  };
-}
+import { restoreFetch } from "../_helpers/fetch-mock";
+afterEach(restoreFetch);
 
 describe("probe-validation cleanup integration (TASK-79 AC#4)", () => {
   test("leaky POST: probe creates resource → cleanup-DELETE removes it; net count == 0", async () => {

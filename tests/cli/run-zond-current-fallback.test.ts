@@ -1,53 +1,28 @@
-import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
+import { describe, test, expect, afterEach, beforeEach } from "bun:test";
+import { writeFileSync } from "fs";
 import { join } from "path";
 import { buildProgram } from "../../src/cli/program.ts";
 import { closeDb } from "../../src/db/schema.ts";
-
-const originalCwd = process.cwd();
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  const errChunks: string[] = [];
-  const outChunks: string[] = [];
-  process.stdout.write = mock((chunk: unknown) => {
-    outChunks.push(typeof chunk === "string" ? chunk : String(chunk));
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = mock((chunk: unknown) => {
-    errChunks.push(typeof chunk === "string" ? chunk : String(chunk));
-    return true;
-  }) as typeof process.stderr.write;
-  return {
-    restore: () => {
-      process.stdout.write = origOut;
-      process.stderr.write = origErr;
-    },
-    errChunks,
-    outChunks,
-  };
-}
+import { captureOutput } from "../_helpers/output";
+import { makeWorkspace } from "../_helpers/workspace";
 
 describe("zond run — .zond-current fallback (TASK-68)", () => {
   let workRoot: string;
-  let suppress: ReturnType<typeof suppressOutput>;
+  let cleanupWs: () => void;
+  let suppress: ReturnType<typeof captureOutput>;
 
   beforeEach(() => {
-    workRoot = mkdtempSync(join(tmpdir(), "zond-task68-"));
-    // Workspace marker so findWorkspaceRoot anchors here.
-    mkdirSync(join(workRoot, "apis"));
-    process.chdir(workRoot);
-    suppress = suppressOutput();
+    const ws = makeWorkspace({ prefix: "zond-task68-", marker: "apis", chdir: true });
+    workRoot = ws.path;
+    cleanupWs = ws.cleanup;
+    suppress = captureOutput();
   });
 
   afterEach(() => {
     suppress.restore();
     closeDb();
     process.exitCode = 0;
-    process.chdir(originalCwd);
-    try { rmSync(workRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+    cleanupWs();
   });
 
   test("no path + no .zond-current → clear error mentioning .zond-current (not 'got boolean')", async () => {

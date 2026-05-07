@@ -1,9 +1,10 @@
 ---
 id: TASK-192
 title: 'test-helpers: extract tests/_helpers/endpoints.ts (ep + postEp)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:09'
+updated_date: '2026-05-07 10:38'
 labels:
   - refactor
   - tests

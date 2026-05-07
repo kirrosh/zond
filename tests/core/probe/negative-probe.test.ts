@@ -1,25 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { generateNegativeProbes } from "../../../src/core/probe/negative-probe.ts";
-import type { EndpointInfo } from "../../../src/core/generator/types.ts";
-
-function ep(partial: Partial<EndpointInfo>): EndpointInfo {
-  return {
-    path: "/x",
-    method: "POST",
-    operationId: undefined,
-    summary: undefined,
-    tags: [],
-    parameters: [],
-    requestBodySchema: undefined,
-    requestBodyContentType: undefined,
-    responseContentTypes: ["application/json"],
-    responses: [{ statusCode: 200, description: "ok" }],
-    security: [],
-    deprecated: false,
-    requiresEtag: false,
-    ...partial,
-  };
-}
+import { ep } from "../../_helpers/endpoints";
 
 describe("generateNegativeProbes", () => {
   it("produces no suite for endpoints with no probable surface", () => {

@@ -4,26 +4,7 @@ import {
   discoverPathParams,
   parentCollectionPath,
 } from "../../../src/core/probe/path-discovery.ts";
-import type { EndpointInfo } from "../../../src/core/generator/types.ts";
-
-function ep(partial: Partial<EndpointInfo>): EndpointInfo {
-  return {
-    path: "/x",
-    method: "GET",
-    operationId: undefined,
-    summary: undefined,
-    tags: [],
-    parameters: [],
-    requestBodySchema: undefined,
-    requestBodyContentType: undefined,
-    responseContentTypes: ["application/json"],
-    responses: [{ statusCode: 200, description: "ok" }],
-    security: [],
-    deprecated: false,
-    requiresEtag: false,
-    ...partial,
-  };
-}
+import { ep } from "../../_helpers/endpoints";
 
 interface FetchCall { url: string; method: string }
 let originalFetch: typeof fetch;

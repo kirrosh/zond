@@ -7,40 +7,7 @@ import {
   formatGrandTotal,
   consoleReporter,
 } from "../../src/core/reporter/console.ts";
-import type { TestRunResult, StepResult } from "../../src/core/runner/types.ts";
-
-function makeStep(overrides?: Partial<StepResult>): StepResult {
-  return {
-    name: "Test step",
-    status: "pass",
-    duration_ms: 100,
-    request: { method: "GET", url: "http://localhost/test", headers: {} },
-    response: {
-      status: 200,
-      headers: {},
-      body: "{}",
-      body_parsed: {},
-      duration_ms: 100,
-    },
-    assertions: [],
-    captures: {},
-    ...overrides,
-  };
-}
-
-function makeResult(overrides?: Partial<TestRunResult>): TestRunResult {
-  return {
-    suite_name: "Test Suite",
-    started_at: "2024-01-01T00:00:00.000Z",
-    finished_at: "2024-01-01T00:00:01.000Z",
-    total: 1,
-    passed: 1,
-    failed: 0,
-    skipped: 0,
-    steps: [makeStep()],
-    ...overrides,
-  };
-}
+import { makeStep, makeResult } from "../_helpers/reporter-fixtures";
 
 // --- formatDuration ---
 

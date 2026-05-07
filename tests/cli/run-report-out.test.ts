@@ -1,53 +1,22 @@
-import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
-import { tmpdir } from "os";
+import { describe, test, expect, afterEach, beforeEach } from "bun:test";
 import { join } from "path";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "fs";
+import { writeFileSync, readFileSync, existsSync } from "fs";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { closeDb } from "../../src/db/schema.ts";
-
-const originalFetch = globalThis.fetch;
-const originalCwd = process.cwd();
-
-function mockFetchOk() {
-  globalThis.fetch = mock(async (input: Request | string | URL) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    return new Response(JSON.stringify({ ok: true, url }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }) as unknown as typeof fetch;
-}
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  const outChunks: string[] = [];
-  const errChunks: string[] = [];
-  process.stdout.write = mock((chunk: unknown) => {
-    outChunks.push(typeof chunk === "string" ? chunk : String(chunk));
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = mock((chunk: unknown) => {
-    errChunks.push(typeof chunk === "string" ? chunk : String(chunk));
-    return true;
-  }) as typeof process.stderr.write;
-  return {
-    restore: () => {
-      process.stdout.write = origOut;
-      process.stderr.write = origErr;
-    },
-    outChunks,
-    errChunks,
-  };
-}
+import { captureOutput } from "../_helpers/output";
+import { mockFetchOk, restoreFetch } from "../_helpers/fetch-mock";
+import { makeWorkspace } from "../_helpers/workspace";
 
 describe("zond run --report-out (TASK-LOW.1)", () => {
   let workDir: string;
+  let cleanupWs: () => void;
   let testFile: string;
-  let suppress: ReturnType<typeof suppressOutput>;
+  let suppress: ReturnType<typeof captureOutput>;
 
   beforeEach(() => {
-    workDir = mkdtempSync(join(tmpdir(), "zond-report-out-"));
+    const ws = makeWorkspace({ prefix: "zond-report-out-", chdir: true });
+    workDir = ws.path;
+    cleanupWs = ws.cleanup;
     testFile = join(workDir, "api.yaml");
     writeFileSync(
       testFile,
@@ -63,17 +32,15 @@ describe("zond run --report-out (TASK-LOW.1)", () => {
       ].join("\n"),
       "utf-8",
     );
-    process.chdir(workDir);
-    suppress = suppressOutput();
+    suppress = captureOutput();
     mockFetchOk();
   });
 
   afterEach(() => {
     suppress.restore();
-    globalThis.fetch = originalFetch;
+    restoreFetch();
     closeDb();
-    process.chdir(originalCwd);
-    try { rmSync(workDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    cleanupWs();
   });
 
   test("writes JSON report to a file and emits no JSON on stdout", async () => {
