@@ -162,11 +162,11 @@ shows a single row in `/runs`:
 
 ```bash
 zond session start --label "<short reason>"
-zond run apis/<name>/scenarios/<flow>.yaml --json
+zond run apis/<name>/scenarios/<flow>.yaml --report json
 zond session end
 ```
 
-**Pass `--json`** so you can parse the result. Look at:
+**Pass `--report json`** so you can parse the result. Look at:
 
 - `summary.passed / failed / skipped` — top-level outcome.
 - For each step: `status`, `assertions[]` (which checks failed), `captures` (what was extracted), `request` and `response` (full evidence).

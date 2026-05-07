@@ -246,9 +246,9 @@ sweep — fixture-pack pass, probe burst, post-deploy check.
 
 ```bash
 zond session start --label "smoke + probes"                          # group runs
-zond run apis/<name>/tests --tag sanity --json                       # 3.1 sanity gate
-zond run apis/<name>/tests --safe --json                             # 3.2 smoke (GET-only)
-zond run apis/<name>/tests --tag crud,setup --validate-schema --json  # 3.3 full CRUD
+zond run apis/<name>/tests --tag sanity --report json                       # 3.1 sanity gate
+zond run apis/<name>/tests --safe --report json                             # 3.2 smoke (GET-only)
+zond run apis/<name>/tests --tag crud,setup --validate-schema --report json  # 3.3 full CRUD
 zond session end
 ```
 
@@ -300,7 +300,7 @@ zond probe mass-assignment apis/<name>/spec.json --env apis/<name>/.env.yaml \
   --output apis/<name>/probes/mass-assignment-digest.md \
   --emit-tests apis/<name>/probes/mass-assignment
 
-zond run apis/<name>/probes/<class> --json
+zond run apis/<name>/probes/<class> --report json
 zond db diagnose <run-id> --json
 ```
 

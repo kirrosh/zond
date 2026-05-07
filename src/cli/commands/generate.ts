@@ -262,8 +262,8 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       console.log("Next steps:");
       console.log("  1. Fill apis/<name>/.env.yaml with auth_token, real FK ids, verified emails, valid enums");
       console.log("     (the fixture pack — without it, {{$randomString}} loses 5+ iterations to format-validation)");
-      console.log("  2. zond run <output> --safe --json                              # smoke (GET-only)");
-      console.log(`  3. zond run <output> --tag crud,setup --validate-schema --spec ${options.specPath} --json`);
+      console.log("  2. zond run <output> --safe --report json                       # smoke (GET-only)");
+      console.log(`  3. zond run <output> --tag crud,setup --validate-schema --spec ${options.specPath} --report json`);
       console.log("     (--validate-schema catches contract drift; recommended for every CRUD run)");
     }
 
