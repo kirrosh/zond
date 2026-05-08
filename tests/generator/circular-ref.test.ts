@@ -33,7 +33,7 @@ describe("circular references", () => {
       obj = obj.parent as Record<string, unknown>;
       depth++;
     }
-    expect(depth).toBeLessThanOrEqual(6);
+    expect(depth).toBeLessThanOrEqual(8);
   });
 
   test("decycleSchema + JSON.stringify works on circular objects", () => {

@@ -86,7 +86,8 @@ describe("generateFromSchema", () => {
         { type: "object", properties: { name: { type: "string" } as OpenAPIV3.SchemaObject } } as OpenAPIV3.SchemaObject,
       ],
     };
-    const result = generateFromSchema(schema) as Record<string, unknown>;
+    // forRequest:false to keep server-assigned `id` in the merged shape
+    const result = generateFromSchema(schema, undefined, { forRequest: false }) as Record<string, unknown>;
     expect(result.id).toBe("{{$randomInt}}");
     expect(result.name).toBe("{{$randomName}}");
   });
@@ -404,7 +405,9 @@ describe("TASK-222 / F14 — oneOf/anyOf prefer object variant in array context"
         ],
       } as unknown as OA.SchemaObject,
     };
-    const result = generateFromSchema(schema) as unknown[];
+    // forRequest:false — array element `id` is part of the data shape under test,
+    // not a server-assigned identifier we want stripped.
+    const result = generateFromSchema(schema, undefined, { forRequest: false }) as unknown[];
     expect(result).toHaveLength(1);
     expect(result[0]).toEqual({ id: "{{$uuid}}" });
   });
