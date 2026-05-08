@@ -1,9 +1,10 @@
 ---
 id: TASK-116
 title: zond run --all + единый CI run всех сгенерированных сьютов
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 14:19'
+updated_date: '2026-05-08 16:12'
 labels:
   - cli
   - ci
@@ -39,3 +40,9 @@ priority: medium
 - TASK-37 (zond run multi-file/glob) — этот таск его расширяет до workspace-wide.
 - TASK-113 (session_id) — probe-сессия и CI run — два разных типа группировки, не путать: probe = много run'ов под одним `session_id`, CI = один run целиком.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+zond run --all: discover apis/*/tests/ → один runs.id. CI env autodetection (GitHub Actions / GitLab / CircleCI / Buildkite / Jenkins / generic) → trigger=ci, commit_sha, branch на runs row. ZOND_* overrides. RunFilters.trigger для DB-фильтра. 8 unit-тестов на ci-context, 2 на DB filter. Скилл Phase 3-CI добавлен. UI client filter и ci-init template — отдельная задача (low priority).
+<!-- SECTION:NOTES:END -->

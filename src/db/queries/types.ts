@@ -132,6 +132,10 @@ export interface RunFilters {
   date_from?: string;
   date_to?: string;
   test_name?: string;
+  /** TASK-116: filter by run origin — "ci" (CI runs only) or "manual"
+   *  (interactive / probe / ad-hoc). Also accepts arbitrary trigger
+   *  strings if the workspace introduces custom ones. */
+  trigger?: string;
 }
 
 export interface DashboardStats {

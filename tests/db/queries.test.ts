@@ -115,6 +115,39 @@ describe("createRun", () => {
     const row = getRunById(id);
     expect(row?.tags).toBeNull();
   });
+
+  // TASK-116: trigger filter — listRuns({ trigger: "ci" }) restricts to CI runs.
+  test("listRuns filters by trigger (TASK-116)", () => {
+    const ciId = createRun({
+      started_at: "2024-02-01T00:00:00.000Z",
+      trigger: "ci",
+      commit_sha: "deadbeef",
+      branch: "main",
+    });
+    const manualId = createRun({ started_at: "2024-02-02T00:00:00.000Z", trigger: "manual" });
+
+    const { listRuns } = require("../../src/db/queries.ts") as typeof import("../../src/db/queries.ts");
+    const ciRuns = listRuns(50, 0, { trigger: "ci" });
+    const manualRuns = listRuns(50, 0, { trigger: "manual" });
+
+    expect(ciRuns.some(r => r.id === ciId)).toBe(true);
+    expect(ciRuns.some(r => r.id === manualId)).toBe(false);
+    expect(manualRuns.some(r => r.id === manualId)).toBe(true);
+    expect(manualRuns.some(r => r.id === ciId)).toBe(false);
+  });
+
+  test("createRun stores commit_sha and branch (TASK-116)", () => {
+    const id = createRun({
+      started_at: "2024-02-03T00:00:00.000Z",
+      trigger: "ci",
+      commit_sha: "abc123",
+      branch: "release/2",
+    });
+    const row = getRunById(id);
+    expect(row?.trigger).toBe("ci");
+    expect(row?.commit_sha).toBe("abc123");
+    expect(row?.branch).toBe("release/2");
+  });
 });
 
 // ──────────────────────────────────────────────

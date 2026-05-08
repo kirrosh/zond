@@ -296,6 +296,27 @@ enum drift, extra/missing fields) is invisible without it. Schema violations
 land as `schema_violation` root_cause in `zond db diagnose` and are real
 backend bugs — treat them like 5xx, do not edit the expectation away.
 
+### Phase 3-CI — Single run per build (TASK-116)
+
+For CI, use `zond run --all` to fold every `apis/<name>/tests/` directory
+into one `runs.id` per invocation — comparing builds across commits is
+otherwise impossible (each suite would land on its own row). CI context
+is auto-detected from env vars (GitHub Actions / GitLab CI / CircleCI /
+Buildkite / Jenkins, or `CI=true` for generic providers): `commit_sha`,
+`branch`, and `trigger=ci` are stamped on the row, and `zond db runs
+--trigger ci` filters the dashboard to just CI runs.
+
+```bash
+# CI shape — one run per commit, HTML report + JSON for the gate
+zond run --all --report json --report-out results.json
+echo "exit=$?"  # 0 green, 1 failures, 2 config error
+zond report export $(jq -r .data.runId results.json) -o report.html
+```
+
+Override autodetection with `ZOND_TRIGGER=ci|manual`,
+`ZOND_COMMIT_SHA=<sha>`, `ZOND_BRANCH=<name>` — useful when the build
+shells out from a wrapper that strips the native CI vars.
+
 ## Phase 4 — Diagnose failures
 
 ```bash

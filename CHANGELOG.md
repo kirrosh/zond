@@ -17,6 +17,21 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-116: `zond run --all` + CI context autodetection.** `--all`
+  discovers every `apis/<name>/tests/` directory in the workspace and
+  merges them into a single `runs.id` — one run row per CI invocation,
+  even with multiple registered APIs (without it, each `zond run` lands
+  on its own row, so cross-build comparison is impossible). On every
+  `zond run` the CLI now also stamps the run row with CI context
+  auto-detected from env vars (GitHub Actions, GitLab CI, CircleCI,
+  Buildkite, Jenkins, or generic `CI=true`): `trigger=ci`, `commit_sha`,
+  `branch`. Manual runs still default to `trigger=manual` with no
+  commit/branch. `ZOND_TRIGGER` / `ZOND_COMMIT_SHA` / `ZOND_BRANCH`
+  override autodetection for wrappers that strip the native vars.
+  `RunFilters` gained `trigger`, so `listRuns({ trigger: "ci" })` /
+  `zond db runs --trigger ci` (UI/CLI filter) limits the dashboard to
+  CI rows.
+
 - **TASK-142: `zond request --validate-schema` and `--validate-against "METHOD:/path"`.**
   One-off ad-hoc requests can now check the response body against the
   OpenAPI response schema without wrapping the call in YAML. Auto-resolves
