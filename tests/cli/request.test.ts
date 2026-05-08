@@ -185,4 +185,207 @@ describe("requestCommand", () => {
     expect(code).toBe(0);
     expect(capturedHeaders["Authorization"]).toBe("Bearer token123");
   });
+
+  // ──────────────────────────────────────────────
+  // TASK-142: --validate-schema / --validate-against
+  // ──────────────────────────────────────────────
+
+  function writeSpec(dir: string, name = "spec.json"): string {
+    const fs = require("fs") as typeof import("fs");
+    const p = join(dir, name);
+    const spec = {
+      openapi: "3.0.3",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/users/{id}": {
+          get: {
+            parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      required: ["id", "name"],
+                      properties: { id: { type: "string" }, name: { type: "string" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    fs.writeFileSync(p, JSON.stringify(spec));
+    return p;
+  }
+
+  test("--validate-schema PASS via auto-resolved templated path /users/{id}", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-vs-", marker: "config", chdir: true });
+    try {
+      const specPath = writeSpec(ws.path);
+      await setupApi({
+        name: "vs",
+        spec: specPath,
+        envVars: { base_url: "https://example.com" },
+        dbPath: join(ws.path, "zond.db"),
+      });
+      closeDb();
+
+      globalThis.fetch = mock(async () =>
+        new Response(JSON.stringify({ id: "abc", name: "Alice" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      const code = await requestCommand({
+        method: "GET",
+        url: "/users/abc",
+        api: "vs",
+        dbPath: join(ws.path, "zond.db"),
+        validateSchema: true,
+        json: true,
+      });
+      expect(code).toBe(0);
+      const env = JSON.parse(output.out);
+      expect(env.data.schema_validation.status).toBe("PASS");
+      expect(env.data.schema_validation.matchedEndpoint.path).toBe("/users/{id}");
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--validate-schema FAIL when body misses required field", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-vs-", marker: "config", chdir: true });
+    try {
+      const specPath = writeSpec(ws.path);
+      await setupApi({
+        name: "vs",
+        spec: specPath,
+        envVars: { base_url: "https://example.com" },
+        dbPath: join(ws.path, "zond.db"),
+      });
+      closeDb();
+
+      globalThis.fetch = mock(async () =>
+        new Response(JSON.stringify({ id: "abc" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      const code = await requestCommand({
+        method: "GET",
+        url: "/users/abc",
+        api: "vs",
+        dbPath: join(ws.path, "zond.db"),
+        validateSchema: true,
+        json: true,
+      });
+      expect(code).toBe(1);
+      const env = JSON.parse(output.out);
+      expect(env.data.schema_validation.status).toBe("FAIL");
+      expect(env.data.schema_validation.errors[0].rule).toContain("schema.required");
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--validate-against overrides auto-resolution", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-vs-", marker: "config", chdir: true });
+    try {
+      const specPath = writeSpec(ws.path);
+      await setupApi({
+        name: "vs",
+        spec: specPath,
+        envVars: { base_url: "https://example.com" },
+        dbPath: join(ws.path, "zond.db"),
+      });
+      closeDb();
+
+      globalThis.fetch = mock(async () =>
+        new Response(JSON.stringify({ id: "x", name: "y" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      const code = await requestCommand({
+        method: "GET",
+        url: "/anything-else", // would not auto-resolve
+        api: "vs",
+        dbPath: join(ws.path, "zond.db"),
+        validateAgainst: "GET:/users/{id}",
+        json: true,
+      });
+      expect(code).toBe(0);
+      const env = JSON.parse(output.out);
+      expect(env.data.schema_validation.status).toBe("PASS");
+      expect(env.data.schema_validation.matchedEndpoint.path).toBe("/users/{id}");
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--validate-schema with no matching endpoint returns no-endpoint with hint", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-vs-", marker: "config", chdir: true });
+    try {
+      const specPath = writeSpec(ws.path);
+      await setupApi({
+        name: "vs",
+        spec: specPath,
+        envVars: { base_url: "https://example.com" },
+        dbPath: join(ws.path, "zond.db"),
+      });
+      closeDb();
+
+      globalThis.fetch = mock(async () =>
+        new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      const code = await requestCommand({
+        method: "GET",
+        url: "/widgets/1",
+        api: "vs",
+        dbPath: join(ws.path, "zond.db"),
+        validateSchema: true,
+        json: true,
+      });
+      expect(code).toBe(0); // not a FAIL — validation is a soft no-op when nothing matches
+      const env = JSON.parse(output.out);
+      expect(env.data.schema_validation.status).toBe("no-endpoint");
+      expect(env.data.schema_validation.message).toMatch(/--validate-against/);
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--validate-schema without --api returns no-spec with hint", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    const code = await requestCommand({
+      method: "GET",
+      url: "http://localhost/x",
+      validateSchema: true,
+      json: true,
+    });
+    expect(code).toBe(0);
+    const env = JSON.parse(output.out);
+    expect(env.data.schema_validation.status).toBe("no-spec");
+    expect(env.data.schema_validation.message).toMatch(/requires --api/);
+  });
 });
