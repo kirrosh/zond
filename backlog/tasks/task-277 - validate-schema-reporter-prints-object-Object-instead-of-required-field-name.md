@@ -1,9 +1,11 @@
 ---
 id: TASK-277
 title: 'validate-schema reporter: [object Object] вместо имени required-поля'
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@me'
 created_date: '2026-05-08 19:00'
+updated_date: '2026-05-08 13:07'
 labels:
   - feedback-loop
   - api-sentry

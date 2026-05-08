@@ -66,6 +66,16 @@ describe("schema-validator", () => {
     expect(String(fails[0]!.expected)).toContain("has_more");
   });
 
+  test("required-failure message names the missing field and the full required-set (TASK-277)", () => {
+    const v = buildValidator(emailListSchema);
+    const fails = v.validate("GET", "/emails", 200, { data: [] });
+    expect(fails).toHaveLength(1);
+    const expected = String(fails[0]!.expected);
+    expect(expected).toContain('missing required field "has_more"');
+    expect(expected).toContain("expected required: [data, has_more]");
+    expect(expected).not.toContain("[object Object]");
+  });
+
   test("flags type mismatch", () => {
     const v = buildValidator(emailListSchema);
     const fails = v.validate("GET", "/emails", 200, {

@@ -22,9 +22,11 @@ const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"
 export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator {
   const isV31 = typeof doc.openapi === "string" && doc.openapi.startsWith("3.1");
   // OpenAPI 3.1 → JSON Schema Draft 2020-12; 3.0 → Draft 4/7-ish.
+  // verbose:true exposes parentSchema on each error so humanize() can render
+  // the full required-set alongside the missing field name (TASK-277).
   const ajv = isV31
-    ? new (Ajv2020 as unknown as typeof Ajv)({ strict: false, allErrors: true })
-    : new Ajv({ strict: false, allErrors: true });
+    ? new (Ajv2020 as unknown as typeof Ajv)({ strict: false, allErrors: true, verbose: true })
+    : new Ajv({ strict: false, allErrors: true, verbose: true });
   addFormats(ajv);
   applyStrictFormats(ajv);
 
@@ -118,8 +120,19 @@ function ajvErrorToAssertion(err: ErrorObject, body: unknown): AssertionResult {
 
 function humanize(err: ErrorObject): string {
   switch (err.keyword) {
-    case "required":
-      return `required: "${(err.params as { missingProperty: string }).missingProperty}"`;
+    case "required": {
+      const missing = (err.params as { missingProperty: string }).missingProperty;
+      // verbose:true gives us the parent schema; surface the full required-set
+      // so the user can see drift at a glance instead of decoding the message
+      // one missing-field-error at a time (TASK-277).
+      const parent = (err as ErrorObject & { parentSchema?: unknown }).parentSchema;
+      const required =
+        parent && typeof parent === "object" && Array.isArray((parent as { required?: unknown }).required)
+          ? ((parent as { required: string[] }).required)
+          : undefined;
+      const tail = required ? `; expected required: [${required.join(", ")}]` : "";
+      return `missing required field "${missing}"${tail}`;
+    }
     case "type":
       return `type ${(err.params as { type: string | string[] }).type}`;
     case "enum":
