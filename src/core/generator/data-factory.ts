@@ -33,9 +33,15 @@ export function generateFromSchema(
   //      schema.format === "uuid") are usually copy-pasted from another tenant's
   //      spec. Honoring them leaks foreign IDs and guarantees 422 on real APIs;
   //      `{{$uuid}}` is at least an honest test placeholder.
-  if (schema.example !== undefined && schema.example !== null) {
-    if (!isLikelyForeignFKExample(schema, propertyName)) {
-      return schema.example;
+  //
+  // OpenAPI 3.1 / JSON Schema also allows `examples: [...]` (plural array). When
+  // both are present `example` wins; otherwise pick the first non-null entry
+  // from `examples` and apply the same FK-UUID guard. `example` (singular) is
+  // still the OpenAPI 3.0 form and remains supported.
+  const exampleValue = pickExampleValue(schema);
+  if (exampleValue !== undefined) {
+    if (!isLikelyForeignFKExample(schema, propertyName, exampleValue)) {
+      return exampleValue;
     }
   }
 
@@ -199,13 +205,32 @@ function isLowercaseOnlyPattern(pattern: string | undefined): boolean {
 function isLikelyForeignFKExample(
   schema: OpenAPIV3.SchemaObject,
   name?: string,
+  value?: unknown,
 ): boolean {
-  const ex = schema.example;
+  const ex = value !== undefined ? value : schema.example;
   if (typeof ex !== "string") return false;
   if (!UUID_RE.test(ex)) return false;
   const fkByName = !!name && name.toLowerCase().endsWith("_id");
   const fkByFormat = schema.format === "uuid";
   return fkByName || fkByFormat;
+}
+
+/** Resolve the effective example value from a schema, supporting both
+ *  OpenAPI 3.0 `example` (singular) and OpenAPI 3.1 / JSON Schema `examples`
+ *  (plural array). `example` wins when both are set — it's the more
+ *  intentional, single-source signal. `null` is treated as "no example"
+ *  (see TASK-221). For `examples`, we pick the first non-null entry. */
+function pickExampleValue(schema: OpenAPIV3.SchemaObject): unknown {
+  if (schema.example !== undefined && schema.example !== null) {
+    return schema.example;
+  }
+  const examples = (schema as { examples?: unknown }).examples;
+  if (Array.isArray(examples)) {
+    for (const ex of examples) {
+      if (ex !== null && ex !== undefined) return ex;
+    }
+  }
+  return undefined;
 }
 
 /**

@@ -356,6 +356,59 @@ describe("generateFromSchema", () => {
     });
   });
 
+  // TASK-263: OpenAPI 3.1 / JSON Schema `examples: [...]` (plural)
+  describe("TASK-263 — examples (plural array) support", () => {
+    test("examples[0] is used when example (singular) is absent", () => {
+      const result = generateFromSchema(
+        { type: "string", format: "uri", examples: ["https://hooks.example.com/abc"] } as unknown as OpenAPIV3.SchemaObject,
+      );
+      expect(result).toBe("https://hooks.example.com/abc");
+    });
+
+    test("first non-null entry from examples is picked", () => {
+      const result = generateFromSchema(
+        { type: "string", examples: [null, "real-value", "other"] } as unknown as OpenAPIV3.SchemaObject,
+      );
+      expect(result).toBe("real-value");
+    });
+
+    test("singular example wins over examples plural when both set", () => {
+      const result = generateFromSchema(
+        { type: "string", example: "single", examples: ["plural-1", "plural-2"] } as unknown as OpenAPIV3.SchemaObject,
+      );
+      expect(result).toBe("single");
+    });
+
+    test("examples plural with all null falls through to format placeholder", () => {
+      const result = generateFromSchema(
+        { type: "string", format: "email", examples: [null] } as unknown as OpenAPIV3.SchemaObject,
+      );
+      expect(result).toBe("{{$randomEmail}}");
+    });
+
+    test("empty examples array falls through to format placeholder", () => {
+      const result = generateFromSchema(
+        { type: "string", format: "uuid", examples: [] } as unknown as OpenAPIV3.SchemaObject,
+      );
+      expect(result).toBe("{{$uuid}}");
+    });
+
+    test("FK-UUID guard applies to plural examples too", () => {
+      const result = generateFromSchema(
+        { type: "string", examples: ["78261eea-8f8b-4381-83c6-79fa7120f1cf"] } as unknown as OpenAPIV3.SchemaObject,
+        "audience_id",
+      );
+      expect(result).toBe("{{$uuid}}");
+    });
+
+    test("examples plural on integer field", () => {
+      const result = generateFromSchema(
+        { type: "integer", examples: [7, 8] } as unknown as OpenAPIV3.SchemaObject,
+      );
+      expect(result).toBe(7);
+    });
+  });
+
   test("nested object", () => {
     const schema: OpenAPIV3.SchemaObject = {
       type: "object",
