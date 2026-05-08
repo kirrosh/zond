@@ -5,11 +5,12 @@ import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 export interface ValidateOptions {
   path: string;
   json?: boolean;
+  verbose?: boolean;
 }
 
 export async function validateCommand(options: ValidateOptions): Promise<number> {
   try {
-    const suites = await parse(options.path);
+    const suites = await parse(options.path, { verbose: options.verbose });
     const totalSteps = suites.reduce((sum, s) => sum + s.tests.length, 0);
     if (options.json) {
       printJson(jsonOk("validate", {
@@ -40,7 +41,12 @@ export function registerValidate(program: Command): void {
   program
     .command("validate <path>")
     .description("Validate test files without running")
-    .action(async (path: string, _opts, cmd: Command) => {
-      process.exitCode = await validateCommand({ path, json: globalJson(cmd) });
+    .option("--verbose", "Show full zod issue stack instead of human-friendly summary")
+    .action(async (path: string, opts: { verbose?: boolean }, cmd: Command) => {
+      process.exitCode = await validateCommand({
+        path,
+        json: globalJson(cmd),
+        verbose: opts.verbose === true,
+      });
     });
 }

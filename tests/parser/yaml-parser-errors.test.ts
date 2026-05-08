@@ -63,3 +63,47 @@ describe("YAML parse errors — TASK-71 (file:line:col diagnostics)", () => {
     expect(formatted.message).toMatch(/Invalid YAML in \/some\/path\/x\.yaml:\d+:\d+:/);
   });
 });
+
+describe("Validation error formatting — TASK-249 (human-friendly zod output)", () => {
+  test("default output: human-friendly path + message, no JSON dump / _def / ZodIssue", async () => {
+    // missing top-level `name`, plus a wrong-type field deep in tests.
+    const file = tmpFile("invalid.yaml", [
+      "tests:",
+      "  - GET: /x",
+      "    name: hello",
+      "    expect:",
+      "      duration: \"fast\"",
+      "",
+    ].join("\n"));
+
+    const err = await parseFile(file).then(() => null, (e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    const msg = err!.message;
+
+    expect(msg).toMatch(/^Validation error in .+invalid\.yaml:/);
+    expect(msg).toMatch(/\d+ validation issues?:/);
+    // Readable path with bracket-index for arrays.
+    expect(msg).toContain("tests[0].expect.duration");
+    // No raw JSON envelope, no zod internals leaking through.
+    expect(msg).not.toContain('"code":');
+    expect(msg).not.toContain("_def");
+    expect(msg).not.toContain("ZodIssue");
+  });
+
+  test("--verbose surfaces the raw zod issue stack (JSON-formatted)", async () => {
+    const file = tmpFile("invalid-verbose.yaml", [
+      "tests:",
+      "  - GET: /x",
+      "    name: hello",
+      "    expect:",
+      "      duration: \"fast\"",
+      "",
+    ].join("\n"));
+
+    const err = await parseFile(file, { verbose: true }).then(() => null, (e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    // Raw zod message is a JSON dump; check for its hallmark fields.
+    expect(err!.message).toContain('"code":');
+    expect(err!.message).toContain('"path":');
+  });
+});

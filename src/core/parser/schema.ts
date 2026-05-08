@@ -316,3 +316,40 @@ export function validateSuite(raw: unknown): TestSuite {
   return TestSuiteSchema.parse(raw) as TestSuite;
 }
 
+/** Render a zod path array (`["tests", 0, "expect", "status"]`) as
+ * `tests[0].expect.status`. Numeric segments become bracket-indices, string
+ * segments dot-join. */
+function pathToHuman(path: ReadonlyArray<string | number>): string {
+  let out = "";
+  for (const seg of path) {
+    if (typeof seg === "number") out += `[${seg}]`;
+    else out += out ? `.${seg}` : seg;
+  }
+  return out || "(root)";
+}
+
+/**
+ * Format a {@link z.ZodError} as a compact, multi-line, human-readable list:
+ *
+ *   N validation issue(s):
+ *     <path>: <message>
+ *     ...
+ *
+ * The default `ZodError.message` is a JSON dump of the full issue list with
+ * internal field names (`_def`, deeply numeric paths, "Invalid input" prefix).
+ * The wrapper that callers used to surface ("Validation error in <file>:
+ * [{...}]") was unreadable for tester users — they had to mentally parse the
+ * stack to find the real path. (TASK-249)
+ */
+export function formatZodError(err: z.ZodError): string {
+  const lines = err.issues.map((i) => {
+    const path = pathToHuman(i.path as ReadonlyArray<string | number>);
+    // zod v4 messages are already readable; strip the redundant "Invalid input: "
+    // prefix that adds noise without info.
+    const msg = i.message.replace(/^Invalid input:\s*/, "");
+    return `  ${path}: ${msg}`;
+  });
+  const header = `${err.issues.length} validation issue${err.issues.length === 1 ? "" : "s"}:`;
+  return `${header}\n${lines.join("\n")}`;
+}
+
