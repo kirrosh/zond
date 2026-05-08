@@ -1,8 +1,16 @@
 import { Glob } from "bun";
 import { resolve } from "node:path";
 import YAML from "yaml";
-import { validateSuite } from "./schema.ts";
+import { z } from "zod";
+import { validateSuite, formatZodError } from "./schema.ts";
 import type { TestSuite } from "./types.ts";
+
+export interface ParseOptions {
+  /** Surface raw `ZodError.message` (the JSON-formatted issue stack) instead
+   * of the human-friendly summary. Useful for filing zod bugs / debugging the
+   * schema itself; default output is human-readable. (TASK-249) */
+  verbose?: boolean;
+}
 
 /** Convert a 0-based byte offset into a 1-based (line, col) position. */
 function offsetToLineCol(text: string, offset: number): { line: number; col: number } {
@@ -41,7 +49,7 @@ export function formatYamlParseError(filePath: string, text: string, primary: Er
   return new Error(`Invalid YAML in ${filePath}: ${primary.message}`);
 }
 
-export async function parseFile(filePath: string): Promise<TestSuite> {
+export async function parseFile(filePath: string, opts: ParseOptions = {}): Promise<TestSuite> {
   let text: string;
   try {
     text = await Bun.file(filePath).text();
@@ -72,6 +80,9 @@ export async function parseFile(filePath: string): Promise<TestSuite> {
     suite.filePath = resolve(filePath);
     return suite;
   } catch (err) {
+    if (err instanceof z.ZodError && !opts.verbose) {
+      throw new Error(`Validation error in ${filePath}:\n${formatZodError(err)}`);
+    }
     throw new Error(`Validation error in ${filePath}: ${(err as Error).message}`);
   }
 }
@@ -92,7 +103,7 @@ function isNonSuiteYaml(file: string): boolean {
   return false;
 }
 
-export async function parseDirectory(dirPath: string): Promise<TestSuite[]> {
+export async function parseDirectory(dirPath: string, opts: ParseOptions = {}): Promise<TestSuite[]> {
   const glob = new Glob("**/*.{yaml,yml}");
   const suites: TestSuite[] = [];
 
@@ -102,7 +113,7 @@ export async function parseDirectory(dirPath: string): Promise<TestSuite[]> {
     }
     const fullPath = `${dirPath}/${file}`;
     try {
-      suites.push(await parseFile(fullPath));
+      suites.push(await parseFile(fullPath, opts));
     } catch {
       // Skip files that fail to parse (e.g. invalid AI-generated YAML)
       // so one bad file doesn't block the entire directory
@@ -117,7 +128,7 @@ export interface ParseDirectoryResult {
   errors: { file: string; error: string }[];
 }
 
-export async function parseDirectorySafe(dirPath: string): Promise<ParseDirectoryResult> {
+export async function parseDirectorySafe(dirPath: string, opts: ParseOptions = {}): Promise<ParseDirectoryResult> {
   const glob = new Glob("**/*.{yaml,yml}");
   const suites: TestSuite[] = [];
   const errors: { file: string; error: string }[] = [];
@@ -128,7 +139,7 @@ export async function parseDirectorySafe(dirPath: string): Promise<ParseDirector
     }
     const fullPath = `${dirPath}/${file}`;
     try {
-      suites.push(await parseFile(fullPath));
+      suites.push(await parseFile(fullPath, opts));
     } catch (err) {
       errors.push({ file, error: (err as Error).message });
     }
@@ -137,16 +148,16 @@ export async function parseDirectorySafe(dirPath: string): Promise<ParseDirector
   return { suites, errors };
 }
 
-export async function parse(path: string): Promise<TestSuite[]> {
+export async function parse(path: string, opts: ParseOptions = {}): Promise<TestSuite[]> {
   const file = Bun.file(path);
   const exists = await file.exists();
 
   if (exists) {
-    return [await parseFile(path)];
+    return [await parseFile(path, opts)];
   }
 
   // Not a file, try as directory
-  return parseDirectory(path);
+  return parseDirectory(path, opts);
 }
 
 /**
@@ -154,17 +165,17 @@ export async function parse(path: string): Promise<TestSuite[]> {
  * parsed suites and per-file parse errors so callers (run, validate, tag-filter)
  * can surface failures instead of pretending the file did not exist.
  */
-export async function parseSafe(path: string): Promise<ParseDirectoryResult> {
+export async function parseSafe(path: string, opts: ParseOptions = {}): Promise<ParseDirectoryResult> {
   const file = Bun.file(path);
   const exists = await file.exists();
 
   if (exists) {
     try {
-      return { suites: [await parseFile(path)], errors: [] };
+      return { suites: [await parseFile(path, opts)], errors: [] };
     } catch (err) {
       return { suites: [], errors: [{ file: path, error: (err as Error).message }] };
     }
   }
 
-  return parseDirectorySafe(path);
+  return parseDirectorySafe(path, opts);
 }
