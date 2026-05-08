@@ -1,7 +1,7 @@
 ---
 id: TASK-252
 title: 'generator: {{$randomString}} игнорирует pattern: — slug-поля сыпят 400 (Sentry slug regex)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 14:00'
 labels:
