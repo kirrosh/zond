@@ -413,11 +413,21 @@ export async function runCommand(options: RunOptions): Promise<number> {
     try {
       getDb(options.dbPath);
       const collection = findCollectionByTestPath(primaryPath);
+      // TASK-274: capture suite-level tags executed in this run (plus any
+      // explicit --tag filter). Stored on the run row so
+      // `coverage --union tag:<x>` can later select runs by tag.
+      const tagSet = new Set<string>();
+      for (const s of suites) {
+        for (const t of s.tags ?? []) tagSet.add(t);
+      }
+      for (const t of options.tag ?? []) tagSet.add(t);
+      const tags = [...tagSet].sort();
       savedRunId = createRun({
         started_at: results[0]?.started_at ?? new Date().toISOString(),
         environment: options.env,
         collection_id: collection?.id,
         session_id: options.sessionId,
+        ...(tags.length > 0 ? { tags } : {}),
       });
       finalizeRun(savedRunId, results);
       saveResults(savedRunId, results);

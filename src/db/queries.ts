@@ -41,6 +41,7 @@ export {
   listRuns,
   deleteRun,
   countRuns,
+  listRunsByCollectionFiltered,
 } from "./queries/runs.ts";
 
 export { listSessions, countSessions, listRunsBySession } from "./queries/sessions.ts";

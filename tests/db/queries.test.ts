@@ -14,6 +14,8 @@ import {
   getSlowestTests,
   getFlakyTests,
   countRuns,
+  createCollection,
+  listRunsByCollectionFiltered,
 } from "../../src/db/queries.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
 
@@ -94,6 +96,81 @@ describe("createRun", () => {
     const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
     const row = getRunById(id);
     expect(row?.trigger).toBe("manual");
+  });
+
+  // TASK-274: tags persist as a JSON-encoded array and decode back to a
+  // string[] on read. Empty/missing tags collapse to null so legacy rows
+  // and tagless runs share a representation.
+  test("persists tags as a string array (TASK-274)", () => {
+    const id = createRun({
+      started_at: "2024-01-01T00:00:00.000Z",
+      tags: ["smoke", "negative"],
+    });
+    const row = getRunById(id);
+    expect(row?.tags).toEqual(["smoke", "negative"]);
+  });
+
+  test("missing tags decode to null", () => {
+    const id = createRun({ started_at: "2024-01-01T00:00:00.000Z" });
+    const row = getRunById(id);
+    expect(row?.tags).toBeNull();
+  });
+});
+
+// ──────────────────────────────────────────────
+// listRunsByCollectionFiltered (TASK-274)
+// ──────────────────────────────────────────────
+
+describe("listRunsByCollectionFiltered", () => {
+  test("filters by since (ISO lower bound) and orders ASC", () => {
+    const colId = createCollection({ name: "x", test_path: "/tmp/x" });
+    const a = createRun({ started_at: "2024-01-01T00:00:00.000Z", collection_id: colId });
+    finalizeRun(a, [makeSuiteResult({ started_at: "2024-01-01T00:00:00.000Z", finished_at: "2024-01-01T00:00:01.000Z" })]);
+    const b = createRun({ started_at: "2024-02-01T00:00:00.000Z", collection_id: colId });
+    finalizeRun(b, [makeSuiteResult({ started_at: "2024-02-01T00:00:00.000Z", finished_at: "2024-02-01T00:00:01.000Z" })]);
+    const c = createRun({ started_at: "2024-03-01T00:00:00.000Z", collection_id: colId });
+    finalizeRun(c, [makeSuiteResult({ started_at: "2024-03-01T00:00:00.000Z", finished_at: "2024-03-01T00:00:01.000Z" })]);
+
+    const got = listRunsByCollectionFiltered(colId, { since: "2024-02-01T00:00:00.000Z" });
+    expect(got.map((r) => r.id)).toEqual([b, c]);
+  });
+
+  test("filters by tag exact membership", () => {
+    const colId = createCollection({ name: "y", test_path: "/tmp/y" });
+    const a = createRun({ started_at: "2024-01-01T00:00:00.000Z", collection_id: colId, tags: ["smoke", "auth"] });
+    finalizeRun(a, [makeSuiteResult()]);
+    const b = createRun({ started_at: "2024-01-02T00:00:00.000Z", collection_id: colId, tags: ["negative"] });
+    finalizeRun(b, [makeSuiteResult()]);
+    const c = createRun({ started_at: "2024-01-03T00:00:00.000Z", collection_id: colId, tags: ["smoke"] });
+    finalizeRun(c, [makeSuiteResult()]);
+
+    const smoke = listRunsByCollectionFiltered(colId, { tag: "smoke" });
+    expect(smoke.map((r) => r.id).sort()).toEqual([a, c].sort());
+
+    const neg = listRunsByCollectionFiltered(colId, { tag: "negative" });
+    expect(neg.map((r) => r.id)).toEqual([b]);
+
+    const none = listRunsByCollectionFiltered(colId, { tag: "ghost" });
+    expect(none).toEqual([]);
+  });
+
+  test("excludes unfinalized runs", () => {
+    const colId = createCollection({ name: "z", test_path: "/tmp/z" });
+    const a = createRun({ started_at: "2024-01-01T00:00:00.000Z", collection_id: colId });
+    finalizeRun(a, [makeSuiteResult()]);
+    createRun({ started_at: "2024-01-02T00:00:00.000Z", collection_id: colId }); // never finalized
+
+    const got = listRunsByCollectionFiltered(colId, { since: "2024-01-01T00:00:00.000Z" });
+    expect(got.map((r) => r.id)).toEqual([a]);
+  });
+
+  test("tag substring 'smo' does not match 'smoke' (exact JSON element match)", () => {
+    const colId = createCollection({ name: "exact", test_path: "/tmp/exact" });
+    const a = createRun({ started_at: "2024-01-01T00:00:00.000Z", collection_id: colId, tags: ["smoke"] });
+    finalizeRun(a, [makeSuiteResult()]);
+
+    const got = listRunsByCollectionFiltered(colId, { tag: "smo" });
+    expect(got).toEqual([]);
   });
 });
 

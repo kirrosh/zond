@@ -18,6 +18,10 @@ export interface CreateRunOpts {
   branch?: string;
   collection_id?: number;
   session_id?: string;
+  /** TASK-274: union of suite-level tags actually executed in the run, plus
+   *  any explicit `--tag <x>` filters from the CLI. Persisted as a JSON
+   *  array string so `coverage --union tag:<name>` can filter run-rows. */
+  tags?: string[];
 }
 
 export interface RunRecord {
@@ -35,6 +39,9 @@ export interface RunRecord {
   duration_ms: number | null;
   collection_id: number | null;
   session_id: string | null;
+  /** TASK-274: tag list captured at run time (JSON-encoded in DB). null
+   *  on legacy rows persisted before migration v9. */
+  tags: string[] | null;
 }
 
 export interface RunSummary {
