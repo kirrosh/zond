@@ -13,6 +13,7 @@ import { getSecretRegistry } from "../../core/secrets/registry.ts";
 import { applySanitizer } from "../../core/exporter/exporter.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 import { tallyBySeverity, formatSummaryLine } from "../../core/probe/verdict-aggregator.ts";
+import { printMutationBanner, countCleanupFailures } from "../../core/probe/shared.ts";
 
 interface BucketCounts {
   high: number;
@@ -112,6 +113,11 @@ export async function probeMassAssignmentCommand(
       return 2;
     }
 
+    // TASK-259: tell the user *before* we mutate anything. Suppressed in
+    // --json mode (warnings already in envelope) and when --no-cleanup
+    // is off — this banner is about the cleanup-pass, too.
+    printMutationBanner("probe-mass-assignment", vars, { quiet: options.json === true });
+
     const result = await runMassAssignmentProbes({
       endpoints,
       securitySchemes,
@@ -146,6 +152,7 @@ export async function probeMassAssignmentCommand(
     }
 
     const counts = tallyBySeverity(result.verdicts, MA_BUCKETS, MA_ZERO);
+    const orphans = countCleanupFailures(result.verdicts);
 
     if (options.json) {
       printJson(
@@ -154,6 +161,7 @@ export async function probeMassAssignmentCommand(
           totalEndpoints: result.totalEndpoints,
           probed: result.specProbed,
           severity: counts,
+          orphans,
           warnings: result.warnings,
           emittedTests: emittedSuites,
         }),
@@ -175,6 +183,23 @@ export async function probeMassAssignmentCommand(
       if (counts.inconclusiveBaseline > 0) {
         printWarning(
           `${counts.inconclusiveBaseline} endpoint(s) had baseline POST failures — fix env fixtures (FK ids / path-params) and re-run. These are excluded from --emit-tests on purpose.`,
+        );
+      }
+      // TASK-259: cleanup-failure surfaces as "orphans" in summary. 404 was
+      // already filtered out (resource gone is success). Prompt for manual
+      // cleanup so the user doesn't discover the leak only via 5xx in CI.
+      if (orphans > 0) {
+        printWarning(
+          `${orphans} orphan resource(s): cleanup DELETE failed (non-404). Manual cleanup may be needed — see digest "Cleanup DELETE: …" lines.`,
+        );
+      }
+      // Stale-fixture hint when probes successfully cleaned up at least one
+      // resource: that means we POSTed (and re-DELETEd) — `.env.yaml` slug/id
+      // values for that resource type may now point at a tombstone.
+      const cleanedCount = result.verdicts.filter(v => v.cleanup?.attempted && v.cleanup.status != null && v.cleanup.status < 400).length;
+      if (cleanedCount > 0) {
+        printWarning(
+          `${cleanedCount} resource(s) created and deleted by probes. FK fixtures in .env.yaml may be stale — re-run \`zond discover --api <name>\` before next CRUD run.`,
         );
       }
     }
