@@ -1,9 +1,12 @@
 ---
 id: TASK-270
-title: 'coverage: терминологическая путаница — одно слово, две метрики (hit-coverage vs pass-coverage)'
-status: To Do
+title: >-
+  coverage: терминологическая путаница — одно слово, две метрики (hit-coverage
+  vs pass-coverage)
+status: Done
 assignee: []
 created_date: '2026-05-08 18:00'
+updated_date: '2026-05-08 14:53'
 labels:
   - feedback-loop
   - api-sentry
@@ -35,10 +38,11 @@ Actual: одно число, одна семантика на 2 контекст
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] `zond coverage` печатает обе метрики раздельно либо явно лейблит активный режим (`hit-coverage` / `pass-coverage`).
-- [ ] `zond coverage --help` объясняет разницу одной строкой на каждый режим.
-- [ ] JSON envelope несёт `hit_coverage`/`pass_coverage` отдельными полями (или `mode` enum), чтобы CI-агрегаторы не путались.
-- [ ] Regression: одиночный run и `--union session` на одном датасете не дают противоречивых `uncovered` без explanation.
+- [ ] #1 `zond coverage` печатает обе метрики раздельно либо явно лейблит активный режим (`hit-coverage` / `pass-coverage`).
+- [ ] #2 `zond coverage --help` объясняет разницу одной строкой на каждый режим.
+- [ ] #3 JSON envelope несёт `hit_coverage`/`pass_coverage` отдельными полями (или `mode` enum), чтобы CI-агрегаторы не путались.
+- [ ] #4 Regression: одиночный run и `--union session` на одном датасете не дают противоречивых `uncovered` без explanation.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->

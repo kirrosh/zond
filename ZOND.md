@@ -415,6 +415,25 @@ needs a GET-by-id to check.
 
 ---
 
+### `coverage` — pass-coverage vs hit-coverage
+
+`zond coverage` reports two metrics on every run (TASK-270):
+
+- **pass-coverage** — endpoint had at least one passing 2xx response.
+  This is the strict metric and what `--fail-on-coverage` gates against.
+- **hit-coverage** — endpoint received any response at all (5xx, 4xx,
+  network error, assertion failure). Loose metric, useful for breadth
+  audits — "did we even reach this corner?"
+
+```
+$ zond coverage --api sentry --union session
+Pass-coverage (passing 2xx): 67/219 endpoints (31%) — union session of 4 runs (#42, #43, #44, #45)
+Hit-coverage  (any response): 200/219 endpoints (91%)
+```
+
+The single-run output and `--union` output now use the same labels, so the
+old «91% in union, 31% standalone, both called coverage» trap is gone.
+
 ### `coverage` — three-bucket JSON breakdown
 
 `zond coverage --api <name> --json` returns the same split that the text
@@ -424,6 +443,8 @@ to re-derive it from the matrix:
 ```jsonc
 {
   "totals":   { "all": 219, "covered2xx": 67, "coveredButNon2xx": 152, "unhit": 0 },
+  "pass_coverage": { "covered": 67,  "total": 219, "ratio": 0.3059 },
+  "hit_coverage":  { "covered": 219, "total": 219, "ratio": 1.0 },
   "covered2xxEndpoints":      [{ "endpoint": "GET /a",  "method": "GET",  "path": "/a",  "lastStatus": 200 }, …],
   "coveredButNon2xxEndpoints":[{ "endpoint": "PUT /b",  "method": "PUT",  "path": "/b",  "lastStatus": 502 }, …],
   "unhitEndpoints":           [{ "endpoint": "GET /c",  "method": "GET",  "path": "/c",  "lastStatus": null }, …]

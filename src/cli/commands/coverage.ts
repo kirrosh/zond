@@ -148,6 +148,17 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
   const coveredCount = coveredRows.length;
   const percentage = Math.round((coveredCount / total) * 100);
 
+  // TASK-270: two metrics, two intents:
+  //   pass_coverage = endpoints with at least one passing 2xx (strict — what
+  //                   single-run output has always meant)
+  //   hit_coverage  = endpoints we touched at all (loose — what `--union`
+  //                   used to silently mean)
+  // Show both so the reader doesn't have to re-derive the difference.
+  const passCount = coveredRows.length;
+  const hitCount = coveredRows.length + partialRows.length;
+  const passPct = Math.round((passCount / total) * 100);
+  const hitPct = Math.round((hitCount / total) * 100);
+
   let passing = 0;
   let apiError = 0;
   let testFailed = 0;
@@ -178,7 +189,10 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
       const modeLabel = cov.unionMode ? ` ${cov.unionMode}` : "";
       runLabel = ` — union${modeLabel} of ${cov.runs.length} runs (#${cov.runs.map(r => r.id).join(", #")})`;
     }
-    console.log(`Coverage: ${coveredCount}/${total} endpoints (${percentage}%)${runLabel}`);
+    // TASK-270: show both metrics on separate lines so CI/triage scripts
+    // and humans can pick the one they care about.
+    console.log(`Pass-coverage (passing 2xx): ${passCount}/${total} endpoints (${passPct}%)${runLabel}`);
+    console.log(`Hit-coverage  (any response): ${hitCount}/${total} endpoints (${hitPct}%)`);
     console.log("");
 
     if (passing > 0) {
@@ -234,6 +248,12 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
         coveredButNon2xx: buckets.coveredButNon2xx.length,
         unhit: buckets.unhit.length,
       },
+      // TASK-270: explicit twin metrics — pass_coverage is the strict
+      // "does the test land a 2xx", hit_coverage is the loose "did we
+      // touch the endpoint at all". Both expressed as endpoint-count and
+      // 0..1 ratio so CI scripts don't re-derive them from the buckets.
+      pass_coverage: { covered: passCount, total, ratio: total === 0 ? 0 : Number((passCount / total).toFixed(4)) },
+      hit_coverage:  { covered: hitCount,  total, ratio: total === 0 ? 0 : Number((hitCount / total).toFixed(4)) },
       covered2xxEndpoints: buckets.covered2xx,
       coveredButNon2xxEndpoints: buckets.coveredButNon2xx,
       unhitEndpoints: buckets.unhit,
@@ -302,6 +322,10 @@ async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
       covered2xxEndpoints: [],
       coveredButNon2xxEndpoints: [],
       unhitEndpoints: unhit,
+      // TASK-270: the spec-only path has no run results, so both metrics
+      // are zero. Surface them anyway for shape-stable JSON.
+      pass_coverage: { covered: 0, total, ratio: 0 },
+      hit_coverage: { covered: 0, total, ratio: 0 },
     }));
   }
 
@@ -394,9 +418,12 @@ export function registerCoverage(program: Command): void {
   program
     .command("coverage")
     .description(
-      "Analyze API test coverage from stored run results. An endpoint is " +
-      "counted as covered when at least one passing test produced a 2xx on " +
-      "it. Defaults to the latest stored run for the resolved API; pass " +
+      "Analyze API test coverage from stored run results. zond reports two " +
+      "metrics side-by-side (TASK-270):\n" +
+      "  pass-coverage  — endpoint had at least one passing 2xx response (strict; what CI usually wants)\n" +
+      "  hit-coverage   — endpoint received any response at all, including 5xx and assertion failures (loose; for breadth audits)\n" +
+      "\n" +
+      "Defaults to the latest stored run for the resolved API; pass " +
       "--run-id to pin a specific run, or --union <selector> to combine " +
       "multiple runs.\n" +
       "\n" +
@@ -421,9 +448,10 @@ export function registerCoverage(program: Command): void {
       "  zond run apis/<api>/probes\n" +
       "  zond coverage --api <api> --union session\n" +
       "\n" +
-      "Exit codes: 0 = every endpoint covered (or coverage ≥ " +
+      "Exit codes: 0 = every endpoint covered (or pass-coverage ≥ " +
       "--fail-on-coverage when set); 1 = uncovered endpoints remain (or " +
-      "coverage < --fail-on-coverage); 2 = bad input or read error.",
+      "pass-coverage < --fail-on-coverage); 2 = bad input or read error. " +
+      "--fail-on-coverage gates pass-coverage, not hit-coverage.",
     )
     .option("--api <name>", "Use API collection (auto-resolves spec; reads stored runs)")
     .option("--spec <path>", "Spec-only fallback when no API is registered (no run results)")
