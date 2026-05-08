@@ -14,7 +14,7 @@ import type { Command } from "commander";
 
 import { probeValidationCommand } from "./probe-validation.ts";
 import { probeMethodsCommand } from "./probe-methods.ts";
-import { probeMassAssignmentCommand } from "./probe-mass-assignment.ts";
+import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from "./probe-mass-assignment.ts";
 import { probeSecurityCommand } from "./probe-security.ts";
 import { probeByBogusIdCommand } from "./probe-by-bogus-id.ts";
 import { globalJson, resolveSpecArg, resolveApiEnv, warnDeprecatedProbe } from "../resolve.ts";
@@ -96,10 +96,23 @@ function defineProbeMassAssignment(parent: Command, name: string, deprecated: bo
     .option("--no-discover", "Disable auto-discovery of path-param fixtures via GET-on-list (TASK-92)")
     .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
+    .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       if (deprecated) warnDeprecatedProbe("probe-mass-assignment", "mass-assignment");
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+
+      // --emit-template short-circuits the live probe.
+      if (opts.emitTemplate) {
+        process.exitCode = await emitMassAssignmentTemplateCommand({
+          specPath: resolved.spec,
+          methodPath: opts.emitTemplate,
+          output: opts.output,
+          json: globalJson(cmd),
+        });
+        return;
+      }
+
       const envFile = resolveProbeEnv(opts.env, opts.api, opts.db);
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
       process.exitCode = await probeMassAssignmentCommand({

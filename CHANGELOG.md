@@ -17,6 +17,21 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-146: `probe mass-assignment --emit-template "METHOD:/path"`.**
+  Generates a ready-to-edit YAML probe template for one endpoint, so the
+  user doesn't have to copy-paste the boilerplate from the skill (Phase
+  5.1) when the auto-prober marked a verdict INCONCLUSIVE / INCONCLUSIVE-5XX.
+  For POST endpoints with discoverable item path (GET-by-id / DELETE
+  counterpart) the emitter produces a full `create → verify → cleanup`
+  chain with `always: true` cleanup. Privileged-field injection is the
+  union of (a) classic mass-assignment vectors (`is_admin`, `role`,
+  `owner_id`, …) and (b) `readOnly: true` / `x-zond-protected` properties
+  lifted from the request body schema. Output to stdout by default, or
+  `--output <file>` to write a YAML file directly. Note: the body
+  serializer was tightened so `not_equals: true` (boolean) no longer
+  silently emits as `not_equals: "true"` (string) — assertions against
+  real boolean fields now compare correctly.
+
 - **TASK-153: `probe security` fuzzy-echo classifier for CRLF.** The echo
   detector previously used verbatim substring match, which missed real
   stored-CRLF bugs when the backend stripped `\r`, URL-decoded `%0d%0a`

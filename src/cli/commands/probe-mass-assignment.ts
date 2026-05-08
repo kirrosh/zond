@@ -217,3 +217,87 @@ export async function probeMassAssignmentCommand(
   }
 }
 
+// ──────────────────────────────────────────────
+// TASK-146: --emit-template short-circuit
+// ──────────────────────────────────────────────
+
+import { buildMassAssignmentTemplate } from "../../core/probe/mass-assignment-template.ts";
+
+export interface EmitTemplateCliOptions {
+  specPath: string;
+  /** "METHOD:/path", e.g. "POST:/users" or "POST /users". */
+  methodPath: string;
+  output?: string;
+  json?: boolean;
+}
+
+export async function emitMassAssignmentTemplateCommand(
+  options: EmitTemplateCliOptions,
+): Promise<number> {
+  const parsed = parseMethodPath(options.methodPath);
+  if (!parsed) {
+    const msg = `--emit-template expects "METHOD:/path" (e.g. "POST:/users"), got: ${options.methodPath}`;
+    if (options.json) printJson(jsonError("probe-mass-assignment", [msg]));
+    else printError(msg);
+    return 2;
+  }
+
+  try {
+    const result = await buildMassAssignmentTemplate({
+      specPath: options.specPath,
+      method: parsed.method,
+      path: parsed.path,
+    });
+
+    if (result.kind === "endpoint-not-found") {
+      const lines = [`endpoint not found: ${parsed.method} ${parsed.path}`];
+      if (result.nearest.length > 0) {
+        lines.push(`nearest paths with method ${parsed.method}: ${result.nearest.join(", ")}`);
+      }
+      const msg = lines.join("\n");
+      if (options.json) printJson(jsonError("probe-mass-assignment", [msg]));
+      else printError(msg);
+      return 2;
+    }
+
+    if (options.output) {
+      await mkdir(join(options.output, "..").replace(/[^/]+$/, ""), { recursive: true }).catch(() => {});
+      await writeFile(options.output, result.yaml, "utf-8");
+      if (options.json) {
+        printJson(
+          jsonOk("probe-mass-assignment", {
+            template: { file: options.output, chain: result.chain, protectedFields: result.protectedFields },
+          }),
+        );
+      } else {
+        printSuccess(`Template written to ${options.output} (chain=${result.chain})`);
+        if (result.protectedFields.length > 0) {
+          console.log(`  readOnly/x-zond-protected fields injected: ${result.protectedFields.join(", ")}`);
+        }
+      }
+    } else {
+      if (options.json) {
+        printJson(
+          jsonOk("probe-mass-assignment", {
+            template: { yaml: result.yaml, chain: result.chain, protectedFields: result.protectedFields },
+          }),
+        );
+      } else {
+        process.stdout.write(result.yaml);
+      }
+    }
+    return 0;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (options.json) printJson(jsonError("probe-mass-assignment", [message]));
+    else printError(message);
+    return 2;
+  }
+}
+
+function parseMethodPath(s: string): { method: string; path: string } | null {
+  const m = s.match(/^\s*([A-Za-z]+)\s*[: ]\s*(\/.*?)\s*$/);
+  if (!m) return null;
+  return { method: m[1].toUpperCase(), path: m[2] };
+}
+
