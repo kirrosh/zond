@@ -9,6 +9,7 @@ import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 
 export interface CatalogOptions {
   specPath: string;
+  /** Output directory. Defaults to the API's base dir when --api is given, otherwise cwd. */
   output?: string;
   json?: boolean;
 }
@@ -62,7 +63,7 @@ export async function catalogCommand(options: CatalogOptions): Promise<number> {
 }
 
 import type { Command } from "commander";
-import { globalJson, resolveSpecArg } from "../resolve.ts";
+import { globalJson, resolveSpecArg, resolveApiCollection } from "../resolve.ts";
 
 export function registerCatalog(program: Command): void {
   program
@@ -70,13 +71,26 @@ export function registerCatalog(program: Command): void {
     .description("Generate API catalog (compact endpoint reference). For registered APIs prefer --api <name>; the artifact is also available at apis/<name>/.api-catalog.yaml.")
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
-    .option("--output <dir>", "Output directory (default: current directory)")
+    .option("--output <dir>", "Output directory (default: apis/<name>/ when --api is given, else cwd)")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+
+      // When --api is given and no explicit --output, default to the API's base dir so
+      // the artifact lands alongside spec.json / .api-resources.yaml / .api-fixtures.yaml.
+      let outputDir: string | undefined = opts.output;
+      if (!outputDir && opts.api) {
+        const col = resolveApiCollection(opts.api, opts.db);
+        if (!("error" in col) && col.testPath) {
+          // testPath is apis/<name>/tests — go up one level to get apis/<name>/
+          const { dirname } = await import("path");
+          outputDir = dirname(col.testPath);
+        }
+      }
+
       process.exitCode = await catalogCommand({
         specPath: resolved.spec,
-        output: opts.output,
+        output: outputDir,
         json: globalJson(cmd),
       });
     });
