@@ -4,14 +4,13 @@ title: UI — failure classification badges + reason tooltips
 status: Done
 assignee: []
 created_date: '2026-04-30 09:37'
-updated_date: '2026-04-30 11:12'
+updated_date: '2026-05-08 13:10'
 labels:
   - trust-loop
   - decision-5
   - ui
 dependencies:
   - TASK-101
-  - TASK-103
 priority: high
 ---
 

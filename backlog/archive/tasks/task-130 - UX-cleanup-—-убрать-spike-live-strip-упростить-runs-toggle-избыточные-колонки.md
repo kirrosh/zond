@@ -6,14 +6,13 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-05-03'
-updated_date: '2026-05-07'
+updated_date: '2026-05-08 13:10'
 labels:
   - ui
   - ux-polish
   - cleanup
 milestone: m-7
-dependencies:
-  - TASK-118
+dependencies: []
 priority: low
 ---
 
