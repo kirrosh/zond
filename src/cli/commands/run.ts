@@ -22,6 +22,7 @@ import { AUTH_PATH_RE } from "../../core/runner/auth-path.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
 import { detectStatusDrifts, formatDriftPlan, applyDriftsToTests, appendToleratedDrifts } from "../../core/runner/learn-drift.ts";
+import { detectCiContext } from "../../core/runner/ci-context.ts";
 
 export interface RunOptions {
   /**
@@ -479,11 +480,19 @@ export async function runCommand(options: RunOptions): Promise<number> {
       }
       for (const t of options.tag ?? []) tagSet.add(t);
       const tags = [...tagSet].sort();
+      // TASK-116: stamp CI context on the run row when running under a
+      // detected CI environment (or when the user passed an explicit
+      // `--trigger ci`). Manual runs default to trigger=manual with no
+      // commit/branch — preserving prior behaviour.
+      const ci = detectCiContext();
       savedRunId = createRun({
         started_at: results[0]?.started_at ?? new Date().toISOString(),
         environment: options.env,
         collection_id: collection?.id,
         session_id: options.sessionId,
+        trigger: ci.trigger,
+        commit_sha: ci.commit_sha ?? undefined,
+        branch: ci.branch ?? undefined,
         ...(tags.length > 0 ? { tags } : {}),
       });
       finalizeRun(savedRunId, results);
@@ -534,6 +543,42 @@ import { resolveApiCollection } from "../resolve.ts";
 import { collect, flatSplit, parseNonNegativeInt, parsePositiveInt, parseRateLimit, parseReporter } from "../argv.ts";
 import { resolveSessionId } from "../../core/context/session.ts";
 import { readCurrentApi } from "../../core/context/current.ts";
+import { findWorkspaceRoot } from "../../core/workspace/root.ts";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+
+/**
+ * TASK-116: discover every `apis/<name>/tests/` directory in the workspace
+ * for `zond run --all`. Skips entries without a tests/ subdir (some APIs
+ * may have probes only). Returns absolute paths so the run command resolves
+ * env files correctly even when invoked from a subdirectory.
+ */
+function discoverWorkspaceTestPaths(): { paths: string[] } | { error: string } {
+  let root: string;
+  try {
+    const ws = findWorkspaceRoot();
+    if (ws.fromFallback) {
+      return { error: "--all requires a workspace marker (zond.config.yml). Run `zond init` first." };
+    }
+    root = ws.root;
+  } catch (err) {
+    return { error: `Failed to locate workspace root: ${(err as Error).message}` };
+  }
+
+  const apisDir = join(root, "apis");
+  if (!existsSync(apisDir)) return { paths: [] };
+
+  const out: string[] = [];
+  for (const entry of readdirSync(apisDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const testsDir = join(apisDir, entry.name, "tests");
+    if (!existsSync(testsDir)) continue;
+    try {
+      if (statSync(testsDir).isDirectory()) out.push(testsDir);
+    } catch { /* skip unreadable */ }
+  }
+  return { paths: out.sort() };
+}
 
 export function registerRun(program: Command): void {
   program
@@ -551,6 +596,7 @@ export function registerRun(program: Command): void {
     .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers", parseRateLimit)
     .option("--bail", "Stop on first suite failure")
     .option("--sequential", "Run regular suites one after another instead of in parallel (opt-out of Promise.all)")
+    .option("--all", "TASK-116: discover every apis/<name>/tests/ directory in the workspace and merge them into a single run row (one runs.id per CI invocation, even with multiple registered APIs). Implies CI-style aggregation; pairs with auto-detected commit_sha / branch / trigger=ci.")
     .option("--no-db", "Do not save results to .zond/zond.db")
     .option("--db <path>", "Path to SQLite database file (default: .zond/zond.db)")
     .option("--auth-token <token>", "Auth token injected as {{auth_token}} variable")
@@ -579,8 +625,25 @@ export function registerRun(program: Command): void {
     )
     .action(async (pathArgs: string[] | undefined, opts, _cmd: Command) => {
       let paths = pathArgs ?? [];
-      const apiFlag = (opts.api as string | undefined) ?? (paths.length > 0 ? undefined : readCurrentApi() ?? undefined);
+      const apiFlag = (opts.api as string | undefined) ?? (paths.length > 0 || opts.all === true ? undefined : readCurrentApi() ?? undefined);
       const dbPath = typeof opts.db === "string" ? opts.db : undefined;
+
+      // TASK-116: --all expands to every apis/<name>/tests/ directory in the
+      // workspace, merging them into a single run row.
+      if (opts.all === true) {
+        const discovered = discoverWorkspaceTestPaths();
+        if ("error" in discovered) {
+          printError(discovered.error);
+          process.exitCode = 2;
+          return;
+        }
+        if (discovered.paths.length === 0) {
+          printError("--all found no apis/<name>/tests/ directories in the workspace. Run `zond add api <name>` and `zond generate` first.");
+          process.exitCode = 1;
+          return;
+        }
+        paths = discovered.paths;
+      }
 
       if (paths.length === 0 && apiFlag) {
         const resolved = resolveApiCollection(apiFlag, dbPath);

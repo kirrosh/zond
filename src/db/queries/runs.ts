@@ -32,6 +32,11 @@ function buildRunFilterSQL(filters: RunFilters): { where: string; params: unknow
     params.push(`%${filters.test_name}%`);
   }
 
+  if (filters.trigger) {
+    clauses.push("r.trigger = ?");
+    params.push(filters.trigger);
+  }
+
   const where = clauses.length > 0 ? "WHERE " + clauses.join(" AND ") : "";
   return { where, params };
 }
