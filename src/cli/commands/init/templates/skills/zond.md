@@ -72,7 +72,7 @@ If any artifact is missing or stale (`zond doctor` flags it), run
 
 | User asked... | Start at | Skip |
 |---|---|---|
-| "audit this API", "cover this spec", "test the whole API" | 1 (Orient) | — |
+| "audit this API", "cover this spec", "test the whole API" | 1 (Orient), then `zond audit --api <name>` for one-shot pipeline | — |
 | "find bugs", "probe this API", "test for 5xx" | 1 then 5 (Probes) | — |
 | "tests are failing", "diagnose run X", "fix failures" | 4 (Diagnose) | 1–3 |
 | "the run after my fix" | 3 (Run) → 4 (Diagnose) | 1–2 |
@@ -594,6 +594,31 @@ pass `--redact-identity` so org/member/project slugs become placeholders.
 `definitely_bug` (5xx, schema violation, mass-assignment 2xx) — skip for
 `env_issue` and `quirk`. Case-study fills TL;DR / Context / Spec / Repro /
 What happened / Why it matters; missing fields become `<TODO: ...>` placeholders.
+
+## One-shot full audit (TASK-262)
+
+`zond audit --api <name>` запускает весь pipeline одной командой:
+discover → generate → probe validation/methods → session-wrapped run на
+tests + probes → coverage → `audit-report.html`. Каждая stage печатает
+`==> Stage N/M: <name>`; failure любой stage не останавливает остальные —
+финальный exit 1 если хотя бы одна упала.
+
+```bash
+zond audit --api <name> --dry-run                    # план без выполнения
+zond audit --api <name>                              # минимальный pipeline
+zond audit --api <name> --seed                       # bootstrap --apply --seed вместо discover
+zond audit --api <name> --with-mass-assignment --with-security
+zond audit --api <name> --out reports/audit-<name>.html
+```
+
+`generate` пропускается mtime-эвристикой: если `apis/<name>/tests/`
+свежее, чем `spec.json`, повторный `audit` не перегенерирует тесты
+(пройдёшь `--force` чтобы отключить). Для drill-down открой
+`audit-report.html` — там таблица stages + coverage-сводка + ссылки
+на `zond report export <run-id>`.
+
+Когда _не_ использовать: узкие задачи ("починить run X", "почему
+этот endpoint 500-ит") — иди по фазам ниже, не оборачивай в audit.
 
 ## Auth / environments
 

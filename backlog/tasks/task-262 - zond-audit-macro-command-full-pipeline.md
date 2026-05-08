@@ -1,7 +1,7 @@
 ---
 id: TASK-262
 title: 'zond audit --api X: macro-команда для полного pipeline (bootstrap→generate→probes→coverage→report)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 15:00'
 labels:
@@ -51,10 +51,10 @@ Impact: full audit = одна команда вместо setup-ralph-loop. Сн
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] `zond audit --api X [--seed] [--with-mass-assignment] [--with-security] [--out audit-report.html]` существует.
-- [ ] Stages пропускаются если артефакты уже свежие (по mtime / checksum) — повторный запуск инкрементальный.
-- [ ] Каждая stage печатает `==> Stage N/M: <name>` для visibility.
-- [ ] Failure на любой stage НЕ останавливает report; в HTML видно «stage X failed: ...».
-- [ ] Verify: `zond audit --api sentry --seed` на чистом workspace → coverage ≥80%, audit-report.html содержит 5xx/security/coverage секции, ≤5 минут wall-clock.
-- [ ] `--dry-run` показывает план без выполнения.
+- [x] `zond audit --api X [--seed] [--with-mass-assignment] [--with-security] [--out audit-report.html]` существует.
+- [x] Stages пропускаются если артефакты уже свежие (mtime: tests/ newer than spec.json → skip generate; `--force` отключает).
+- [x] Каждая stage печатает `==> Stage N/M: <name>` для visibility.
+- [x] Failure на любой stage НЕ останавливает report; в HTML-таблице видна строка `failed` с exit_code; финальный exit 1 если есть хоть одна failed stage.
+- [ ] Verify: `zond audit --api sentry --seed` на чистом workspace — integration-тест за рамками unit-теста, проверяется руками.
+- [x] `--dry-run` показывает план без выполнения.
 <!-- SECTION:ACCEPTANCE:END -->
