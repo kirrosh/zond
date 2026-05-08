@@ -50,6 +50,64 @@ function classifyRows(matrix: CoverageMatrix): CoverageBreakdown {
   return { coveredRows, partialRows, uncoveredRows };
 }
 
+/**
+ * TASK-280: row-level pass/fail classification used by both the text and JSON
+ * outputs so they share a single source of truth.
+ *
+ *   covered2xx        — at least one stored result on this endpoint was a
+ *                       passing 2xx (matches `✅ N covered (passing 2xx)`)
+ *   coveredButNon2xx  — endpoint was hit but never produced a 2xx pass
+ *                       (5xx, 4xx, assertion failure — anything that landed
+ *                        a response or generated an `error`)
+ *   unhit             — no stored results at all on this endpoint
+ */
+export interface RowBucket {
+  endpoint: string;
+  method: string;
+  path: string;
+  /** Latest observed HTTP status across all cells/results on this row, or
+   *  `null` for unhit / network-error-only rows. */
+  lastStatus: number | null;
+}
+
+export interface BucketBreakdown {
+  covered2xx: RowBucket[];
+  coveredButNon2xx: RowBucket[];
+  unhit: RowBucket[];
+}
+
+export function bucketRows(matrix: CoverageMatrix): BucketBreakdown {
+  const covered2xx: RowBucket[] = [];
+  const coveredButNon2xx: RowBucket[] = [];
+  const unhit: RowBucket[] = [];
+  for (const row of matrix.rows) {
+    const cells = Object.values(row.cells);
+    const allResults = cells.flatMap(c => c.results);
+    const has2xxPass = allResults.some(
+      r => r.status === "pass" && r.responseStatus != null && r.responseStatus >= 200 && r.responseStatus < 300,
+    );
+    const lastStatus = lastObservedStatus(allResults);
+    const bucket: RowBucket = {
+      endpoint: row.endpoint,
+      method: row.method,
+      path: row.path,
+      lastStatus,
+    };
+    if (has2xxPass) covered2xx.push(bucket);
+    else if (allResults.length > 0) coveredButNon2xx.push(bucket);
+    else unhit.push(bucket);
+  }
+  return { covered2xx, coveredButNon2xx, unhit };
+}
+
+function lastObservedStatus(results: { responseStatus: number | null }[]): number | null {
+  for (let i = results.length - 1; i >= 0; i--) {
+    const s = results[i]?.responseStatus;
+    if (typeof s === "number") return s;
+  }
+  return null;
+}
+
 export async function coverageCommand(options: CoverageOptions): Promise<number> {
   try {
     if (options.apiName) {
@@ -149,7 +207,15 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
       }
     }
   } else {
+    // TASK-280: emit explicit covered2xx / coveredButNon2xx / unhit buckets
+    // so JSON consumers see the same breakdown as the text reporter. Legacy
+    // fields (covered/uncovered/partial, coveredEndpoints/partialEndpoints/
+    // uncoveredEndpoints) are kept as deprecated aliases pending full envelope-
+    // policy unification (TASK-184).
+    const buckets = bucketRows(cov.matrix);
     printJson(jsonOk("coverage", {
+      // Legacy aliases — DO NOT add new consumers; use `totals.*` and
+      // `*Endpoints` arrays below instead.
       covered: coveredCount,
       uncovered: uncoveredRows.length,
       partial: partialRows.length,
@@ -161,6 +227,16 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
       coveredEndpoints: coveredRows.map((r) => r.endpoint),
       partialEndpoints: partialRows.map((r) => r.endpoint),
       uncoveredEndpoints: uncoveredRows.map((r) => r.endpoint),
+      // Canonical buckets (TASK-280).
+      totals: {
+        all: total,
+        covered2xx: buckets.covered2xx.length,
+        coveredButNon2xx: buckets.coveredButNon2xx.length,
+        unhit: buckets.unhit.length,
+      },
+      covered2xxEndpoints: buckets.covered2xx,
+      coveredButNon2xxEndpoints: buckets.coveredButNon2xx,
+      unhitEndpoints: buckets.unhit,
     }));
   }
 
@@ -206,6 +282,12 @@ async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
       }
     }
   } else {
+    const unhit = allEndpoints.map((ep) => ({
+      endpoint: `${ep.method.toUpperCase()} ${ep.path}`,
+      method: ep.method.toUpperCase(),
+      path: ep.path,
+      lastStatus: null,
+    }));
     printJson(jsonOk("coverage", {
       covered: 0,
       uncovered: total,
@@ -215,7 +297,11 @@ async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
       runId: null,
       coveredEndpoints: [],
       partialEndpoints: [],
-      uncoveredEndpoints: allEndpoints.map((ep) => `${ep.method.toUpperCase()} ${ep.path}`),
+      uncoveredEndpoints: unhit.map(u => u.endpoint),
+      totals: { all: total, covered2xx: 0, coveredButNon2xx: 0, unhit: total },
+      covered2xxEndpoints: [],
+      coveredButNon2xxEndpoints: [],
+      unhitEndpoints: unhit,
     }));
   }
 

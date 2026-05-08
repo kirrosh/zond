@@ -406,6 +406,35 @@ needs a GET-by-id to check.
 
 ---
 
+### `coverage` — three-bucket JSON breakdown
+
+`zond coverage --api <name> --json` returns the same split that the text
+reporter shows, in three explicit arrays so downstream tooling doesn't have
+to re-derive it from the matrix:
+
+```jsonc
+{
+  "totals":   { "all": 219, "covered2xx": 67, "coveredButNon2xx": 152, "unhit": 0 },
+  "covered2xxEndpoints":      [{ "endpoint": "GET /a",  "method": "GET",  "path": "/a",  "lastStatus": 200 }, …],
+  "coveredButNon2xxEndpoints":[{ "endpoint": "PUT /b",  "method": "PUT",  "path": "/b",  "lastStatus": 502 }, …],
+  "unhitEndpoints":           [{ "endpoint": "GET /c",  "method": "GET",  "path": "/c",  "lastStatus": null }, …]
+}
+```
+
+Buckets:
+
+- **covered2xx** — at least one stored result on the endpoint was a
+  passing 2xx (matches `✅ N covered (passing 2xx)` in the text view).
+- **coveredButNon2xx** — endpoint was hit but never returned a 2xx pass:
+  5xx, 4xx, or assertion-failed steps.
+- **unhit** — no stored results at all on this endpoint.
+
+`covered`, `partial`, `uncovered`, and the `*Endpoints` string arrays are
+kept as **deprecated aliases** for backward compatibility — new consumers
+should read `totals.*` and the three bucket arrays.
+
+---
+
 ### `report export` — single-file shareable HTML run reports
 
 After a run lives in SQLite (`zond.db`), `zond report export <run-id>`
