@@ -16,6 +16,7 @@ import { probeValidationCommand } from "./probe-validation.ts";
 import { probeMethodsCommand } from "./probe-methods.ts";
 import { probeMassAssignmentCommand } from "./probe-mass-assignment.ts";
 import { probeSecurityCommand } from "./probe-security.ts";
+import { probeByBogusIdCommand } from "./probe-by-bogus-id.ts";
 import { globalJson, resolveSpecArg, resolveApiEnv, warnDeprecatedProbe } from "../resolve.ts";
 import { existsSync } from "fs";
 import { parsePositiveInt } from "../argv.ts";
@@ -159,6 +160,30 @@ function defineProbeSecurity(parent: Command, name: string, deprecated: boolean)
     });
 }
 
+function defineProbeByBogusId(parent: Command, name: string): void {
+  parent
+    .command(`${name} [spec]`)
+    .description(
+      "Generate negative-coverage suites: hit every parameterized path with a bogus id (uuid-zeros / 999999999 / nonexistent slug) and expect 4xx (404/400/410). Closes the coverage gap between positive CRUD chains and security probes — typically +60 endpoint hits per spec without writing YAML by hand. (TASK-275)",
+    )
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
+    .requiredOption("--output <dir>", "Output directory for generated probe files")
+    .option("--tag <tag>", "Probe only endpoints with this tag")
+    .option("--list-tags", "List available tags from spec and exit")
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      process.exitCode = await probeByBogusIdCommand({
+        specPath: resolved.spec,
+        output: opts.output,
+        tag: opts.tag,
+        listTags: opts.listTags,
+        json: globalJson(cmd),
+      });
+    });
+}
+
 function defineProbeMethods(parent: Command, name: string, deprecated: boolean): void {
   parent
     .command(`${name} [spec]`)
@@ -188,6 +213,7 @@ export function registerProbes(program: Command): void {
   defineProbeMethods(probeCmd, "methods", false);
   defineProbeMassAssignment(probeCmd, "mass-assignment", false);
   defineProbeSecurity(probeCmd, "security", false);
+  defineProbeByBogusId(probeCmd, "by-bogus-id");
 
   // Deprecated top-level aliases — preserve the original registration order
   // (validation, mass-assignment, security inserted before lint-spec, then

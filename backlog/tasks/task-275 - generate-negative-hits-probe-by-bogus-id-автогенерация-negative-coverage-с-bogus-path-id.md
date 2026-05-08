@@ -1,9 +1,12 @@
 ---
 id: TASK-275
-title: 'generate --negative-hits / probe-by-bogus-id: автогенерация negative-coverage с bogus path-id'
-status: To Do
+title: >-
+  generate --negative-hits / probe-by-bogus-id: автогенерация negative-coverage
+  с bogus path-id
+status: Done
 assignee: []
 created_date: '2026-05-08 18:00'
+updated_date: '2026-05-08 13:21'
 labels:
   - feedback-loop
   - api-sentry
@@ -40,12 +43,13 @@ Actual: ручная работа, прецедент «жгу 11% coverage за
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] CLI: новая команда (или флаг к `generate`) с явным `--help`, документирующим назначение pattern «bogus id → expect 4xx».
-- [ ] Per-FK эвристика выбора bogus value по типу (uuid/int/slug/email).
-- [ ] Output — отдельный suite-файл с тегом `negative-by-id` (для `--union tag:` см. TASK-274).
-- [ ] Expect.status — массив (404/400/410), toleratorсо schema drift; не падать на single-value spec.
-- [ ] Verify на Sentry: 60+ negative-hits, прирост hit-coverage ≥ 10% относительно single CRUD-сьюта.
-- [ ] Idempotent: повторный запуск не дублирует кейсы.
+- [x] #1 CLI: новая команда (или флаг к `generate`) с явным `--help`, документирующим назначение pattern «bogus id → expect 4xx».
+- [x] #2 Per-FK эвристика выбора bogus value по типу (uuid/int/slug/email).
+- [x] #3 Output — отдельный suite-файл с тегом `negative-by-id` (для `--union tag:` см. TASK-274).
+- [x] #4 Expect.status — массив (404/400/410), toleratorсо schema drift; не падать на single-value spec.
+- [ ] #5 Verify на Sentry: 60+ negative-hits, прирост hit-coverage ≥ 10% относительно single CRUD-сьюта.
+- [x] #6 Idempotent: повторный запуск не дублирует кейсы.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->

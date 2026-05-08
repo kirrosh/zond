@@ -320,6 +320,7 @@ Run on a passing API to surface latent bugs.
 ```bash
 zond probe validation apis/<name>/spec.json --output apis/<name>/probes/validation
 zond probe methods    apis/<name>/spec.json --output apis/<name>/probes/methods
+zond probe by-bogus-id apis/<name>/spec.json --output apis/<name>/probes/negative-by-id
 zond probe mass-assignment apis/<name>/spec.json --env apis/<name>/.env.yaml \
   --output apis/<name>/probes/mass-assignment-digest.md \
   --emit-tests apis/<name>/probes/mass-assignment
@@ -327,6 +328,12 @@ zond probe mass-assignment apis/<name>/spec.json --env apis/<name>/.env.yaml \
 zond run apis/<name>/probes/<class> --report json
 zond db diagnose <run-id> --json
 ```
+
+`probe by-bogus-id` (TASK-275): для каждого пути с `{id|slug|uuid}` шлёт один
+запрос с заведомо несуществующим значением (`00000000-…` для uuid, `999999999`
+для int, `zond-bogus-slug` для slug). Ожидание `[400, 404, 410]` — любой 5xx
+или 2xx — bug-кандидат. Закрывает 60+ хитов negative-coverage без ручного
+YAML; объединяй с positive-сьютом через `zond coverage --union tag:negative-by-id`.
 
 > Старые имена `zond probe-validation` / `probe-methods` / `probe-mass-assignment` /
 > `probe-security` оставлены как алиасы на 1 релиз и пишут deprecation warning
