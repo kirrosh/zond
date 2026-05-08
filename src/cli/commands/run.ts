@@ -21,6 +21,7 @@ import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from ".
 import { AUTH_PATH_RE } from "../../core/runner/auth-path.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
+import { detectStatusDrifts, formatDriftPlan, applyDriftsToTests, appendToleratedDrifts } from "../../core/runner/learn-drift.ts";
 
 export interface RunOptions {
   /**
@@ -61,6 +62,17 @@ export interface RunOptions {
    *  (ECONNRESET / EPIPE / socket hang up / fetch failed / abort).
    *  HTTP statuses are not retried by this path. Default 1, 0 disables. */
   retryOnNetwork?: number;
+  /** TASK-282: detect "passing-test-but-wrong-status" drift and print a plan.
+   *  Implies --validate-schema (requires a spec) so we only flag drift when
+   *  the body matches the OpenAPI schema — the case where retrying with the
+   *  observed status would produce a green test. */
+  learn?: boolean;
+  /** TASK-282: actually mutate files instead of printing the plan. Requires
+   *  `learn: true` and a `learnTarget`. */
+  learnApply?: boolean;
+  /** TASK-282: where to record the drift — rewrite YAML (`test`) or append to
+   *  apis/<name>/tolerated-drifts.yaml (`drifts`). */
+  learnTarget?: "test" | "drifts";
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -260,13 +272,28 @@ export async function runCommand(options: RunOptions): Promise<number> {
         printWarning(`Failed to load OpenAPI spec '${specPath}' for spec_pointer evidence: ${(err as Error).message}`);
       }
     }
-    if (options.validateSchema) {
+    // TASK-282: --learn requires schema validation evidence (status mismatch
+    // is only a "drift" if the body actually matches the OpenAPI contract —
+    // otherwise we'd silently encourage masking a real schema bug).
+    const needsSchema = options.validateSchema || options.learn;
+    if (needsSchema) {
       if (!openApiDoc) {
-        printError("--validate-schema requires --spec <path|url> or a collection with openapi_spec set");
+        const flag = options.learn ? "--learn" : "--validate-schema";
+        printError(`${flag} requires --spec <path|url> or a collection with openapi_spec set`);
         return 2;
       }
       schemaValidator = createSchemaValidator(openApiDoc as Parameters<typeof createSchemaValidator>[0]);
     }
+  }
+
+  // TASK-282: validate --learn flag combinations early (before run).
+  if (options.learnApply && !options.learn) {
+    printError("--learn-apply requires --learn");
+    return 2;
+  }
+  if (options.learnApply && !options.learnTarget) {
+    printError("--learn-apply requires --learn-target=test or --learn-target=drifts");
+    return 2;
   }
 
   const runOpts = {
@@ -407,6 +434,36 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
+  // 5c. TASK-282: --learn — surface or apply status-code drift.
+  if (options.learn) {
+    const drifts = detectStatusDrifts(results, { schemaValidatorAttached: schemaValidator !== undefined });
+    if (!options.learnApply) {
+      process.stderr.write(formatDriftPlan(drifts));
+    } else if (drifts.length === 0) {
+      process.stderr.write("zond: --learn-apply: no drift to apply\n");
+    } else if (options.learnTarget === "test") {
+      const applied = await applyDriftsToTests(drifts);
+      process.stderr.write(`zond: --learn-apply --learn-target=test: rewrote ${applied.updated} step(s)\n`);
+      for (const e of applied.errors) {
+        printWarning(`learn-apply: ${e.suite_file} step "${e.step_name}": ${e.reason}`);
+      }
+    } else if (options.learnTarget === "drifts") {
+      // Resolve apis/<name>/ from the primary path's collection record.
+      let apiDir: string | undefined;
+      try {
+        const collection = findCollectionByTestPath(primaryPath);
+        if (collection?.base_dir) apiDir = collection.base_dir;
+        else if (collection?.test_path) apiDir = dirname(collection.test_path);
+      } catch { /* DB unavailable */ }
+      if (!apiDir) {
+        printError("--learn-target=drifts: cannot resolve apis/<name>/ — collection not registered (run `zond add api <name>`)");
+        return 2;
+      }
+      const written = await appendToleratedDrifts(apiDir, drifts);
+      process.stderr.write(`zond: --learn-apply --learn-target=drifts: wrote ${written.written} entry(ies) to ${written.file}\n`);
+    }
+  }
+
   // 6. Save to DB
   let savedRunId: number | undefined;
   if (!options.noDb) {
@@ -508,6 +565,12 @@ export function registerRun(program: Command): void {
     .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
     .option("--session-id <id>", "Group this run under a session. Resolution order: --session-id flag > ZOND_SESSION_ID env > .zond/current-session file (set by 'zond session start')")
+    .option("--learn", "TASK-282: detect status-code drift (passing-test-but-wrong-status). Implies --validate-schema. Without --learn-apply prints the plan; combine with --learn-apply --learn-target=test|drifts to mutate.")
+    .option("--learn-apply", "Apply the drift plan instead of printing it. Requires --learn and --learn-target.")
+    .addOption(
+      new Option("--learn-target <where>", "What to mutate when --learn-apply is set: rewrite expect.status in YAML (test) or append to apis/<name>/tolerated-drifts.yaml (drifts)")
+        .choices(["test", "drifts"]),
+    )
     .option(
       "--retry-on-network <N>",
       "Auto-retry on transient network errors (ECONNRESET, EPIPE, socket hang up, fetch failed, timeout) — HTTP status codes (incl. 5xx) are NOT retried. Exponential backoff with jitter, base 250ms. Default 1, 0 disables.",
@@ -570,6 +633,9 @@ export function registerRun(program: Command): void {
         }) ?? undefined,
         json: false,
         retryOnNetwork: typeof opts.retryOnNetwork === "number" ? opts.retryOnNetwork : 1,
+        learn: opts.learn === true,
+        learnApply: opts.learnApply === true,
+        learnTarget: opts.learnTarget as "test" | "drifts" | undefined,
       });
     });
 }
