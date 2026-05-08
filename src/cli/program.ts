@@ -30,6 +30,7 @@ import { registerSession } from "./commands/session.ts";
 import { registerDoctor } from "./commands/doctor.ts";
 import { registerRefreshApi } from "./commands/refresh-api.ts";
 import { registerAdd } from "./commands/add-api.ts";
+import { registerAudit } from "./commands/audit.ts";
 
 import { getSecretRegistry } from "../core/secrets/registry.ts";
 import { getRuntimeInfo } from "./runtime.ts";
@@ -88,6 +89,7 @@ export function buildProgram(): Command {
   registerGenerate(program);
   registerDiscover(program);
   registerBootstrap(program);
+  registerAudit(program);
 
   registerProbes(program);
   registerProbeAliasesEarly(program);
