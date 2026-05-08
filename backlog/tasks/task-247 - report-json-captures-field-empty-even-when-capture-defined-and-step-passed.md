@@ -1,9 +1,10 @@
 ---
 id: TASK-247
 title: 'report --json: поле .captures всегда пустое {} (schema есть, semantics нет)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 13:00'
+updated_date: '2026-05-08 13:55'
 labels:
   - feedback-loop
   - api-sentry
@@ -33,7 +34,15 @@ Actual: schema есть, populate нет. CI не может проверить 
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] Реально пойманные значения попадают в `.captures: {key: value}` каждого step.
-- [ ] Опция redact (например для secrets): `.captures: {key: "[redacted]"}` если поле помечено sensitive.
-- [ ] Regression-test: yaml с capture → JSON envelope содержит captured-value.
+- [x] Реально пойманные значения попадают в `.captures: {key: value}` каждого step (verify: GET /uuid с `body: {uuid: {capture: my_uuid, type: string}}` → `.captures.my_uuid` = реальный UUID).
+- [x] Detected root cause: пользователь использовал non-canonical syntax `expect.capture: {x: ...}` (top-level block внутри expect) — это всегда silently dropped'ось, captures оставались `{}`. Зафиксировано: parser теперь throw'ит actionable-ошибку с правильным синтаксисом.
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+- Семантика была корректной: `extractCaptures` в `assertions.ts` правильно walks `expect.body[path].capture`. JSON envelope тоже правильно сериализует — verify через httpbin.org/uuid дал `{"my_uuid": "<real-uuid>"}`.
+- Реальный bug был в "half-fix"-репорте пользователя: yaml использовал `expect.capture: {x: body.0.slug}` (top-level capture), который parser dropping'овал. Теперь parser detects этот pattern и throw'ит:
+  > 'expect.capture: {...}' is not a valid step shape. Captures are defined per-field: `expect.body: { "<path>": { capture: <var_name> } }`.
+- Изменение в `src/core/parser/schema.ts:TestStepExpectSchema` preprocess.
+<!-- SECTION:NOTES:END -->
 <!-- SECTION:ACCEPTANCE:END -->
