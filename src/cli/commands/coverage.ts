@@ -1,12 +1,13 @@
-import { readOpenApiSpec, extractEndpoints, scanCoveredEndpoints, filterUncoveredEndpoints, normalizePath, specPathToRegex, analyzeEndpoints } from "../../core/generator/index.ts";
+import { readOpenApiSpec, extractEndpoints, analyzeEndpoints } from "../../core/generator/index.ts";
 import { getDb } from "../../db/schema.ts";
-import { getResultsByRunId, getRunById } from "../../db/queries.ts";
-import { printError, printSuccess } from "../output.ts";
+import { loadCoverage } from "../../core/coverage/loader.ts";
+import type { CoverageMatrix, MatrixRow } from "../../core/coverage/reasons.ts";
+import { printError } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 
 export interface CoverageOptions {
-  spec: string;
-  tests: string;
+  apiName?: string;
+  spec?: string;
   failOnCoverage?: number;
   runId?: number;
   json?: boolean;
@@ -22,162 +23,182 @@ function useColor(): boolean {
   return process.stdout.isTTY ?? false;
 }
 
-function extractPathFromUrl(url: string): string | null {
-  try {
-    return new URL(url).pathname;
-  } catch {
-    return url.startsWith("/") ? url : null;
+interface CoverageBreakdown {
+  coveredRows: MatrixRow[];
+  partialRows: MatrixRow[];
+  uncoveredRows: MatrixRow[];
+}
+
+function classifyRows(matrix: CoverageMatrix): CoverageBreakdown {
+  const coveredRows: MatrixRow[] = [];
+  const partialRows: MatrixRow[] = [];
+  const uncoveredRows: MatrixRow[] = [];
+  for (const row of matrix.rows) {
+    const cells = Object.values(row.cells);
+    if (cells.some((c) => c.status === "covered")) coveredRows.push(row);
+    else if (cells.some((c) => c.status === "partial")) partialRows.push(row);
+    else uncoveredRows.push(row);
   }
+  return { coveredRows, partialRows, uncoveredRows };
 }
 
 export async function coverageCommand(options: CoverageOptions): Promise<number> {
-  const { spec, tests } = options;
-
   try {
-    const doc = await readOpenApiSpec(spec);
-    const allEndpoints = extractEndpoints(doc);
-
-    if (allEndpoints.length === 0) {
-      printError("No endpoints found in the OpenAPI spec");
-      return 1;
+    if (options.apiName) {
+      return await runMatrixCoverage(options);
     }
-
-    const covered = await scanCoveredEndpoints(tests);
-    const uncovered = filterUncoveredEndpoints(allEndpoints, covered);
-    const coveredCount = allEndpoints.length - uncovered.length;
-    const percentage = Math.round((coveredCount / allEndpoints.length) * 100);
-
-    const color = useColor();
-
-    // Enriched mode with run results
-    let passing = 0;
-    let apiError = 0;
-    let testFailed = 0;
-
-    if (options.runId != null) {
-      getDb();
-      const run = getRunById(options.runId);
-      if (!run) {
-        printError(`Run #${options.runId} not found`);
-        return 2;
-      }
-
-      const results = getResultsByRunId(options.runId);
-
-      // Build endpoint → status map
-      const endpointStatus = new Map<string, "passing" | "api_error" | "test_failed">();
-      for (const r of results) {
-        if (!r.request_url || !r.request_method) continue;
-        const urlPath = extractPathFromUrl(r.request_url);
-        if (!urlPath) continue;
-        const normalizedUrl = normalizePath(urlPath);
-
-        for (const ep of allEndpoints) {
-          const regex = specPathToRegex(ep.path);
-          if (r.request_method === ep.method && regex.test(normalizedUrl)) {
-            const key = `${ep.method} ${ep.path}`;
-            const existing = endpointStatus.get(key);
-
-            if (r.response_status !== null && r.response_status >= 500) {
-              endpointStatus.set(key, "api_error");
-            } else if (r.status === "fail" || r.status === "error") {
-              if (existing !== "api_error") {
-                endpointStatus.set(key, "test_failed");
-              }
-            } else if (!existing) {
-              endpointStatus.set(key, "passing");
-            }
-            break;
-          }
-        }
-      }
-
-      for (const status of endpointStatus.values()) {
-        if (status === "passing") passing++;
-        else if (status === "api_error") apiError++;
-        else if (status === "test_failed") testFailed++;
-      }
-    }
-
-    if (!options.json) {
-      if (options.runId != null) {
-        console.log(`Coverage: ${coveredCount}/${allEndpoints.length} endpoints (${percentage}%) — Run #${options.runId}`);
-        console.log("");
-
-        if (passing > 0) {
-          console.log(`  ${color ? GREEN : ""}✅ ${passing} covered and passing${color ? RESET : ""}`);
-        }
-        if (apiError > 0) {
-          console.log(`  ${color ? YELLOW : ""}⚠️  ${apiError} covered but returning 5xx (possibly broken API)${color ? RESET : ""}`);
-        }
-        if (testFailed > 0) {
-          console.log(`  ${color ? RED : ""}❌ ${testFailed} covered, test assertions failed${color ? RESET : ""}`);
-        }
-        if (uncovered.length > 0) {
-          console.log(`  ${color ? DIM : ""}⬜ ${uncovered.length} not covered${color ? RESET : ""}`);
-        }
-      } else {
-        // Standard mode
-        console.log(`Coverage: ${coveredCount}/${allEndpoints.length} endpoints (${percentage}%)`);
-        console.log("");
-
-        // Covered endpoints
-        if (coveredCount > 0) {
-          console.log(`${color ? GREEN : ""}Covered:${color ? RESET : ""}`);
-          for (const ep of allEndpoints) {
-            if (!uncovered.includes(ep)) {
-              console.log(`  ${color ? GREEN : ""}✓${color ? RESET : ""} ${ep.method.padEnd(7)} ${ep.path}`);
-            }
-          }
-          console.log("");
-        }
-
-        // Uncovered endpoints
-        if (uncovered.length > 0) {
-          console.log(`${color ? RED : ""}Uncovered:${color ? RESET : ""}`);
-          for (const ep of uncovered) {
-            console.log(`  ${color ? RED : ""}✗${color ? RESET : ""} ${ep.method.padEnd(7)} ${ep.path}`);
-          }
-        }
-      }
-
-      // Static warnings (always shown in human-readable mode)
-      const warnings = analyzeEndpoints(allEndpoints);
-      if (warnings.length > 0) {
-        console.log("");
-        console.log(`${color ? YELLOW : ""}Spec warnings:${color ? RESET : ""}`);
-        for (const w of warnings) {
-          console.log(`  ${color ? YELLOW : ""}⚠${color ? RESET : ""} ${w.method.padEnd(7)} ${w.path}: ${w.warnings.join(", ")}`);
-        }
-      }
-    }
-
-    if (options.json) {
-      const coveredEndpoints = allEndpoints.filter(ep => !uncovered.includes(ep)).map(ep => `${ep.method} ${ep.path}`);
-      const uncoveredEndpoints = uncovered.map(ep => `${ep.method} ${ep.path}`);
-      printJson(jsonOk("coverage", {
-        covered: coveredCount,
-        uncovered: uncovered.length,
-        total: allEndpoints.length,
-        percentage,
-        coveredEndpoints,
-        uncoveredEndpoints,
-      }));
-    }
-
-    if (options.failOnCoverage !== undefined) {
-      return percentage < options.failOnCoverage ? 1 : 0;
-    }
-    return uncovered.length > 0 ? 1 : 0;
+    return await runSpecOnlyCoverage(options);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (options.json) {
-      printJson(jsonError("coverage", [message]));
-    } else {
-      printError(message);
-    }
+    if (options.json) printJson(jsonError("coverage", [message]));
+    else printError(message);
     return 2;
   }
+}
+
+/**
+ * Matrix-based path: an endpoint is "covered" iff some result on it landed
+ * a 2xx pass. Driven by the latest stored run (or `--runId`). This is the
+ * answer to "did we actually exercise the endpoint", which is what
+ * `--fail-on-coverage` gates in CI.
+ */
+async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
+  getDb();
+  const cov = await loadCoverage({
+    apiName: options.apiName!,
+    ...(options.runId != null ? { runId: options.runId } : {}),
+  });
+  const total = cov.matrix.rows.length;
+  if (total === 0) {
+    printError("No endpoints found in the OpenAPI spec");
+    return 1;
+  }
+
+  const { coveredRows, partialRows, uncoveredRows } = classifyRows(cov.matrix);
+  const coveredCount = coveredRows.length;
+  const percentage = Math.round((coveredCount / total) * 100);
+
+  let passing = 0;
+  let apiError = 0;
+  let testFailed = 0;
+  for (const row of [...coveredRows, ...partialRows]) {
+    const cells = Object.values(row.cells);
+    const has5xx = cells.some((c) =>
+      c.results.some((r) => r.responseStatus != null && r.responseStatus >= 500),
+    );
+    const has2xxPass = cells.some((c) =>
+      c.results.some((r) => r.status === "pass" && r.responseStatus != null && r.responseStatus >= 200 && r.responseStatus < 300),
+    );
+    const hasFail = cells.some((c) => c.results.some((r) => r.status !== "pass"));
+    if (has5xx) apiError++;
+    else if (has2xxPass) passing++;
+    else if (hasFail) testFailed++;
+  }
+
+  if (!options.json) {
+    const color = useColor();
+    const runLabel = cov.run ? ` — Run #${cov.run.id}` : " — no runs yet";
+    console.log(`Coverage: ${coveredCount}/${total} endpoints (${percentage}%)${runLabel}`);
+    console.log("");
+
+    if (passing > 0) {
+      console.log(`  ${color ? GREEN : ""}✅ ${passing} covered (passing 2xx)${color ? RESET : ""}`);
+    }
+    if (apiError > 0) {
+      console.log(`  ${color ? YELLOW : ""}⚠️  ${apiError} returning 5xx (possibly broken API)${color ? RESET : ""}`);
+    }
+    if (testFailed > 0) {
+      console.log(`  ${color ? RED : ""}❌ ${testFailed} hit endpoint but assertions failed${color ? RESET : ""}`);
+    }
+    if (partialRows.length > 0 && testFailed === 0) {
+      console.log(`  ${color ? YELLOW : ""}◐ ${partialRows.length} partial (only non-2xx responses)${color ? RESET : ""}`);
+    }
+    if (uncoveredRows.length > 0) {
+      console.log(`  ${color ? DIM : ""}⬜ ${uncoveredRows.length} not covered${color ? RESET : ""}`);
+    }
+
+    if (cov.matrix.totals.byReason["no-fixtures"] > 0 || cov.matrix.totals.byReason["auth-scope-mismatch"] > 0) {
+      console.log("");
+      if (cov.matrix.totals.byReason["no-fixtures"] > 0) {
+        console.log(`  ${color ? DIM : ""}↳ ${cov.matrix.totals.byReason["no-fixtures"]} cells blocked by no-fixtures${color ? RESET : ""}`);
+      }
+      if (cov.matrix.totals.byReason["auth-scope-mismatch"] > 0) {
+        console.log(`  ${color ? DIM : ""}↳ ${cov.matrix.totals.byReason["auth-scope-mismatch"]} cells blocked by auth-scope-mismatch${color ? RESET : ""}`);
+      }
+    }
+  } else {
+    printJson(jsonOk("coverage", {
+      covered: coveredCount,
+      uncovered: uncoveredRows.length,
+      partial: partialRows.length,
+      total,
+      percentage,
+      runId: cov.run?.id ?? null,
+      coveredEndpoints: coveredRows.map((r) => r.endpoint),
+      partialEndpoints: partialRows.map((r) => r.endpoint),
+      uncoveredEndpoints: uncoveredRows.map((r) => r.endpoint),
+    }));
+  }
+
+  if (options.failOnCoverage !== undefined) {
+    return percentage < options.failOnCoverage ? 1 : 0;
+  }
+  return uncoveredRows.length > 0 ? 1 : 0;
+}
+
+/**
+ * Legacy fallback: when neither `--api` nor a current API is set, report
+ * spec-only stats. Without a registered collection there is no run to read,
+ * so no endpoint is callable-covered — surface that explicitly instead of
+ * silently scanning YAML and over-reporting.
+ */
+async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
+  if (!options.spec) {
+    const msg = "Need --api <name> (preferred) or --spec <path>. Coverage is computed against stored run results.";
+    if (options.json) printJson(jsonError("coverage", [msg]));
+    else printError(msg);
+    return 2;
+  }
+  const doc = await readOpenApiSpec(options.spec);
+  const allEndpoints = extractEndpoints(doc);
+  if (allEndpoints.length === 0) {
+    printError("No endpoints found in the OpenAPI spec");
+    return 1;
+  }
+  const total = allEndpoints.length;
+  const percentage = 0;
+
+  if (!options.json) {
+    const color = useColor();
+    console.log(`Coverage: 0/${total} endpoints (0%) — no API registered`);
+    console.log("");
+    console.log(`  ${color ? DIM : ""}Register the spec with \`zond add api --spec <path>\` to track run results.${color ? RESET : ""}`);
+    const warnings = analyzeEndpoints(allEndpoints);
+    if (warnings.length > 0) {
+      console.log("");
+      console.log(`${color ? YELLOW : ""}Spec warnings:${color ? RESET : ""}`);
+      for (const w of warnings) {
+        console.log(`  ${color ? YELLOW : ""}⚠${color ? RESET : ""} ${w.method.padEnd(7)} ${w.path}: ${w.warnings.join(", ")}`);
+      }
+    }
+  } else {
+    printJson(jsonOk("coverage", {
+      covered: 0,
+      uncovered: total,
+      partial: 0,
+      total,
+      percentage,
+      runId: null,
+      coveredEndpoints: [],
+      partialEndpoints: [],
+      uncoveredEndpoints: allEndpoints.map((ep) => `${ep.method.toUpperCase()} ${ep.path}`),
+    }));
+  }
+
+  if (options.failOnCoverage !== undefined) {
+    return percentage < options.failOnCoverage ? 1 : 0;
+  }
+  return 1;
 }
 
 import type { Command } from "commander";
@@ -189,22 +210,23 @@ export function registerCoverage(program: Command): void {
   program
     .command("coverage")
     .description(
-      "Analyze API test coverage. Exit codes: 0 = every endpoint covered " +
-      "(or coverage ≥ --fail-on-coverage when set); 1 = uncovered endpoints " +
-      "remain (or coverage < --fail-on-coverage); 2 = bad input or read error " +
-      "(missing spec, unreadable tests dir, --run-id not found). " +
-      "Warnings (e.g. required_params_no_examples) never affect the exit code.",
+      "Analyze API test coverage from stored run results. An endpoint is " +
+      "counted as covered when at least one passing test produced a 2xx on " +
+      "it. Defaults to the latest stored run for the resolved API; pass " +
+      "--run-id to pin a specific run. Exit codes: 0 = every endpoint " +
+      "covered (or coverage ≥ --fail-on-coverage when set); 1 = uncovered " +
+      "endpoints remain (or coverage < --fail-on-coverage); 2 = bad input " +
+      "or read error.",
     )
-    .option("--api <name>", "Use API collection (auto-resolves spec and tests dir)")
-    .option("--spec <path>", "Path to OpenAPI spec (required unless --api used)")
-    .option("--tests <dir>", "Path to test files directory (required unless --api used)")
+    .option("--api <name>", "Use API collection (auto-resolves spec; reads stored runs)")
+    .option("--spec <path>", "Spec-only fallback when no API is registered (no run results)")
     .option("--fail-on-coverage <N>", "Exit 1 when coverage percentage is below N (0–100)", parsePercentage)
-    .option("--run-id <number>", "Cross-reference with a test run for pass/fail/5xx breakdown", parseInteger("--run-id"))
+    .option("--run-id <number>", "Pin to a specific run instead of the latest", parseInteger("--run-id"))
     .option("--db <path>", "Path to SQLite database file")
     .action(async (opts, cmd: Command) => {
+      const apiFlag = (opts.api as string | undefined) ?? (opts.spec ? undefined : readCurrentApi() ?? undefined);
+      let apiName: string | undefined;
       let spec: string | undefined = opts.spec;
-      let tests: string | undefined = opts.tests;
-      const apiFlag = (opts.api as string | undefined) ?? (spec || tests ? undefined : readCurrentApi() ?? undefined);
 
       if (apiFlag) {
         const resolved = resolveApiCollection(apiFlag, opts.db);
@@ -213,22 +235,13 @@ export function registerCoverage(program: Command): void {
           process.exitCode = resolved.error.startsWith("Failed") ? 2 : 1;
           return;
         }
+        apiName = apiFlag;
         if (!spec && resolved.spec) spec = resolved.spec;
-        if (!tests && resolved.testPath) tests = resolved.testPath;
       }
-      if (!spec) {
-        printError("Missing --spec <path>. Usage: zond coverage --spec <path> --tests <dir>");
-        process.exitCode = 2;
-        return;
-      }
-      if (!tests) {
-        printError("Missing --tests <dir>. Usage: zond coverage --spec <path> --tests <dir>");
-        process.exitCode = 2;
-        return;
-      }
+
       process.exitCode = await coverageCommand({
-        spec,
-        tests,
+        ...(apiName ? { apiName } : {}),
+        ...(spec ? { spec } : {}),
         failOnCoverage: opts.failOnCoverage,
         runId: opts.runId,
         json: globalJson(cmd),
