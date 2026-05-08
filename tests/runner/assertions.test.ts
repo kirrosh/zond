@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { checkAssertions, extractCaptures } from "../../src/core/runner/assertions.ts";
+import { checkAssertions, extractCaptures, findMissedCaptures } from "../../src/core/runner/assertions.ts";
 import type { HttpResponse } from "../../src/core/runner/types.ts";
 
 function makeResponse(overrides: Partial<HttpResponse> = {}): HttpResponse {
@@ -349,6 +349,83 @@ describe("extractCaptures", () => {
 
   test("returns empty when body is undefined", () => {
     expect(extractCaptures({ id: { capture: "x" } }, undefined)).toEqual({});
+  });
+
+  // TASK-256
+  test("nested capture (expect.body.id.capture style → flattened path 'id')", () => {
+    const captures = extractCaptures(
+      { id: { capture: "rule_id" } },
+      { id: 17026746, name: "z-rule-2" },
+    );
+    expect(captures).toEqual({ rule_id: 17026746 });
+  });
+
+  test("deep capture with bracket notation (data[0].id)", () => {
+    const captures = extractCaptures(
+      { "data[0].id": { capture: "first_id" } },
+      { data: [{ id: "abc" }, { id: "def" }] },
+    );
+    expect(captures).toEqual({ first_id: "abc" });
+  });
+
+  test("deep capture with dotted index (data.0.id) is equivalent to brackets", () => {
+    const captures = extractCaptures(
+      { "data.0.id": { capture: "first_id" } },
+      { data: [{ id: "abc" }, { id: "def" }] },
+    );
+    expect(captures).toEqual({ first_id: "abc" });
+  });
+});
+
+describe("findMissedCaptures (TASK-256)", () => {
+  test("returns one entry per body capture rule whose path didn't resolve", () => {
+    const missed = findMissedCaptures(
+      { id: { capture: "rule_id" }, name: { equals: "x" } },
+      { other_field: 1 },
+    );
+    expect(missed).toEqual([{ var: "rule_id", source: "body", path: "id" }]);
+  });
+
+  test("captures that DID resolve are not reported as missed", () => {
+    const missed = findMissedCaptures(
+      { id: { capture: "rule_id" } },
+      { id: 42 },
+    );
+    expect(missed).toEqual([]);
+  });
+
+  test("deep path miss is reported with original path string", () => {
+    const missed = findMissedCaptures(
+      { "data[0].nope": { capture: "x" } },
+      { data: [{ id: "abc" }] },
+    );
+    expect(missed).toEqual([{ var: "x", source: "body", path: "data[0].nope" }]);
+  });
+
+  test("missing header capture is reported with header source", () => {
+    const missed = findMissedCaptures(
+      undefined,
+      undefined,
+      { "x-trace-id": { capture: "trace" } },
+      { "content-type": "application/json" },
+    );
+    expect(missed).toEqual([{ var: "trace", source: "header", path: "x-trace-id" }]);
+  });
+
+  test("undefined response body marks all body captures missing", () => {
+    const missed = findMissedCaptures(
+      { id: { capture: "x" }, name: { capture: "y" } },
+      undefined,
+    );
+    expect(missed.map(m => m.var).sort()).toEqual(["x", "y"]);
+  });
+
+  test("rules without capture are ignored", () => {
+    const missed = findMissedCaptures(
+      { name: { equals: "z" } },
+      {},
+    );
+    expect(missed).toEqual([]);
   });
 });
 

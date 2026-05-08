@@ -332,3 +332,52 @@ export function extractCaptures(
 
   return captures;
 }
+
+/**
+ * Find capture rules whose path didn't resolve in the response, returning
+ * `{ var, source, path }` per miss. Surfaced as auxiliary assertion failures
+ * so the user sees "captures: {}" with a reason instead of silent emptiness —
+ * the empty-captures pitfall is the #1 footgun in CRUD chains because the
+ * downstream step is silently skipped or runs with `undefined`. TASK-256.
+ */
+export function findMissedCaptures(
+  bodyRules: Record<string, AssertionRule> | undefined,
+  responseBody: unknown,
+  headerRules?: Record<string, string | AssertionRule>,
+  responseHeaders?: Record<string, string>,
+): Array<{ var: string; source: "body" | "header"; path: string }> {
+  const misses: Array<{ var: string; source: "body" | "header"; path: string }> = [];
+
+  if (bodyRules) {
+    for (const [path, rule] of Object.entries(bodyRules)) {
+      if (!rule.capture) continue;
+      if (responseBody === undefined) {
+        misses.push({ var: rule.capture, source: "body", path });
+        continue;
+      }
+      let value: unknown;
+      if (path === "_body") {
+        value = responseBody;
+      } else if (path.startsWith("_body.")) {
+        value = getByPath(responseBody, path.slice(6));
+      } else {
+        value = getByPath(responseBody, path);
+      }
+      if (value === undefined) {
+        misses.push({ var: rule.capture, source: "body", path });
+      }
+    }
+  }
+
+  if (headerRules) {
+    for (const [key, rule] of Object.entries(headerRules)) {
+      if (typeof rule === "string" || !rule.capture) continue;
+      const value = responseHeaders ? responseHeaders[key.toLowerCase()] : undefined;
+      if (value === undefined) {
+        misses.push({ var: rule.capture, source: "header", path: key });
+      }
+    }
+  }
+
+  return misses;
+}
