@@ -1,9 +1,12 @@
 ---
 id: TASK-281
-title: 'discover --verify / --refresh: пере-резолв stale fixture-id (GET → 404 → повторно открыть)'
-status: To Do
+title: >-
+  discover --verify / --refresh: пере-резолв stale fixture-id (GET → 404 →
+  повторно открыть)
+status: Done
 assignee: []
 created_date: '2026-05-08 19:00'
+updated_date: '2026-05-08 13:39'
 labels:
   - feedback-loop
   - api-sentry
@@ -33,12 +36,13 @@ Expected: новый флаг `discover --verify` (или `--refresh`):
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] `discover --verify` HEAD/GET'ает каждую fixture с резолвимым `<resource>_id`/`<resource>_slug`, классифицирует как `live` / `stale` / `unknown`.
-- [ ] `--verify` без `--apply` не пишет в `.env.yaml`; печатает компактный отчёт `N live, M stale, K unknown`.
-- [ ] `--verify --apply` (или `--refresh`) для stale unset'ит и пробует re-resolve через основной discover-flow.
-- [ ] 5xx на verify → классифицировать как `unknown`, не trashить (защита от flake).
-- [ ] Verify на Sentry: после probe security удалить team вручную → `discover --verify` помечает её как stale; `--refresh` ставит новую.
-- [ ] ZOND.md: коротко документирует stale-flow для probe-сессий.
+- [ ] #1 `discover --verify` HEAD/GET'ает каждую fixture с резолвимым `<resource>_id`/`<resource>_slug`, классифицирует как `live` / `stale` / `unknown`.
+- [ ] #2 `--verify` без `--apply` не пишет в `.env.yaml`; печатает компактный отчёт `N live, M stale, K unknown`.
+- [ ] #3 `--verify --apply` (или `--refresh`) для stale unset'ит и пробует re-resolve через основной discover-flow.
+- [ ] #4 5xx на verify → классифицировать как `unknown`, не trashить (защита от flake).
+- [ ] #5 Verify на Sentry: после probe security удалить team вручную → `discover --verify` помечает её как stale; `--refresh` ставит новую.
+- [ ] #6 ZOND.md: коротко документирует stale-flow для probe-сессий.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->

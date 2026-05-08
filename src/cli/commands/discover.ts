@@ -115,6 +115,11 @@ export interface DiscoverOptions {
   /** Per-request timeout (ms). */
   timeoutMs?: number;
   json?: boolean;
+  /** TASK-281: GET each fixture's read-by-id endpoint to classify live/stale/
+   *  unknown. Without `--apply` this is a read-only report; with `--apply` (or
+   *  the `--refresh` shortcut) stale fixtures are unset and re-resolved
+   *  through the normal discover flow. */
+  verify?: boolean;
 }
 
 export interface FkTarget {
@@ -145,7 +150,13 @@ export interface DiscoveryItem {
     | "miss-network"
     | "miss-status"
     | "miss-empty"
-    | "miss-no-id";
+    | "miss-no-id"
+    // TASK-281 verify-mode states
+    | "verify-live"
+    | "verify-stale"
+    | "verify-unknown"
+    | "verify-no-read"
+    | "verify-skip-empty";
   reason?: string;
 }
 
@@ -324,6 +335,90 @@ export async function probeOne(
   return item;
 }
 
+/** TASK-281: GET <ownerResource>'s read-by-id endpoint with the current
+ *  fixture value and classify the result. 5xx is treated as `unknown` (don't
+ *  trash valid fixtures over a flaky API). */
+export async function verifyOne(
+  target: FkTarget,
+  current: string | undefined,
+  ownerResource: ResourceYaml | undefined,
+  endpoints: EndpointInfo[],
+  schemes: SecuritySchemeInfo[],
+  vars: Record<string, string>,
+  baseUrl: string,
+  timeoutMs: number,
+): Promise<DiscoveryItem> {
+  const item: DiscoveryItem = {
+    varName: target.varName,
+    resource: target.ownerResource,
+    listPath: "",
+    current,
+    status: "verify-unknown",
+  };
+  if (isPlaceholder(current)) {
+    item.status = "verify-skip-empty";
+    item.reason = "fixture is empty/placeholder — nothing to verify";
+    return item;
+  }
+  if (!ownerResource?.endpoints?.read) {
+    item.status = "verify-no-read";
+    item.reason = `resource "${target.ownerResource}" has no read-by-id endpoint in .api-resources.yaml`;
+    return item;
+  }
+  const parsed = parseEndpointLabel(ownerResource.endpoints.read);
+  if (!parsed) {
+    item.status = "verify-no-read";
+    item.reason = `cannot parse read endpoint label "${ownerResource.endpoints.read}"`;
+    return item;
+  }
+  // Substitute parent path-params from env vars; the resource's own idParam is
+  // taken from `current` (we are verifying that very value).
+  const idParam = ownerResource.idParam;
+  let effectivePath = parsed.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
+    if (name === idParam) return current!;
+    const val = vars[name];
+    return typeof val === "string" && val ? val : `{${name}}`;
+  });
+  if (effectivePath.includes("{")) {
+    item.status = "verify-unknown";
+    item.reason = `cannot resolve parent path-params for ${parsed.path}`;
+    return item;
+  }
+  item.listPath = effectivePath;
+
+  const ep = endpoints.find(
+    e => e.method.toUpperCase() === "GET" && e.path === parsed.path && !e.deprecated,
+  );
+  const url = `${baseUrl.replace(/\/+$/, "")}${effectivePath}`;
+  const headers: Record<string, string> = {
+    accept: "application/json",
+    ...(ep ? liveAuthHeaders(ep, schemes, vars) : {}),
+  };
+  let resp;
+  try {
+    resp = await executeRequest({ method: "GET", url, headers }, { timeout: timeoutMs, retries: 0 });
+  } catch (err) {
+    item.status = "verify-unknown";
+    item.reason = `network error: ${err instanceof Error ? err.message : String(err)}`;
+    return item;
+  }
+  if (resp.status >= 200 && resp.status < 300) {
+    item.status = "verify-live";
+    item.discovered = current;
+    return item;
+  }
+  if (resp.status === 404 || resp.status === 410) {
+    item.status = "verify-stale";
+    item.reason = `${parsed.method} ${effectivePath} → ${resp.status}`;
+    return item;
+  }
+  // 401/403 — token/scope issue, not a stale id; 5xx — flake; treat both as
+  // unknown so we never delete a fixture on shaky evidence.
+  item.status = "verify-unknown";
+  item.reason = `${parsed.method} ${effectivePath} → ${resp.status}`;
+  return item;
+}
+
 /** Append-or-update a key in YAML text. Conservative: matches `<key>:` at
  *  the start of a line and rewrites the value, preserving trailing comments
  *  that documented original placeholders. */
@@ -379,21 +474,68 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
       return 0;
     }
 
-    // Probe each target sequentially — keeps load on the API low and the
-    // diff readable. Discovery is a one-off pre-flight, not a hot loop.
+    // TASK-281: --verify mode — GET the read-by-id endpoint for every fixture
+    // and classify (live / stale / unknown). Without --apply this is purely
+    // diagnostic; with --apply we unset stale entries and re-resolve them via
+    // the regular discover flow below.
     const items: DiscoveryItem[] = [];
-    for (const target of targets) {
-      const current = env[target.varName];
-      const item = await probeOne(
-        target,
-        current,
-        endpoints,
-        securitySchemes,
-        env,
-        baseUrl,
-        options.timeoutMs ?? 30000,
-      );
-      items.push(item);
+    if (options.verify) {
+      for (const target of targets) {
+        const owner = resourceMap.resources.find(r => r.resource === target.ownerResource);
+        const item = await verifyOne(
+          target,
+          env[target.varName],
+          owner,
+          endpoints,
+          securitySchemes,
+          env,
+          baseUrl,
+          options.timeoutMs ?? 30000,
+        );
+        items.push(item);
+      }
+
+      // For each stale fixture, drop it from env so the upcoming probeOne call
+      // treats it as a placeholder and re-resolves through the list endpoint.
+      // Without --apply we stop here — verify is read-only by default.
+      if (options.apply) {
+        for (const item of items) {
+          if (item.status === "verify-stale") delete env[item.varName];
+        }
+        // Re-resolve only the previously-stale targets — leaves unverified live
+        // ones in place (no point hitting the list endpoint for them).
+        const staleTargets = targets.filter(t => items.some(i => i.varName === t.varName && i.status === "verify-stale"));
+        for (const target of staleTargets) {
+          const refreshed = await probeOne(
+            target,
+            env[target.varName],
+            endpoints,
+            securitySchemes,
+            env,
+            baseUrl,
+            options.timeoutMs ?? 30000,
+          );
+          // Replace the verify-stale entry with the refresh outcome.
+          const idx = items.findIndex(i => i.varName === target.varName);
+          if (idx >= 0) items[idx] = refreshed;
+        }
+      }
+    } else {
+      // Probe each target sequentially — keeps load on the API low and the
+      // diff readable. Discovery is a one-off pre-flight, not a hot loop.
+      for (const target of targets) {
+        const current = env[target.varName];
+        const item = await probeOne(
+          target,
+          current,
+          endpoints,
+          securitySchemes,
+          env,
+          baseUrl,
+          options.timeoutMs ?? 30000,
+        );
+        items.push(item);
+      }
     }
 
     const writes = items.filter(i => i.status === "write");
@@ -428,6 +570,14 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
           writes: writes.length,
           alreadySet: items.filter(i => i.status === "skip-already-set").length,
           misses: items.filter(i => i.status.startsWith("miss-")).length,
+          ...(options.verify ? {
+            verify: {
+              live: items.filter(i => i.status === "verify-live").length,
+              stale: items.filter(i => i.status === "verify-stale").length,
+              unknown: items.filter(i => i.status === "verify-unknown").length,
+              skipped: items.filter(i => i.status === "verify-skip-empty" || i.status === "verify-no-read").length,
+            },
+          } : {}),
         },
       }));
     } else {
@@ -445,7 +595,11 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
             ? `(kept: ${i.current})`
             : i.status === "skip-already-equal"
               ? `(unchanged: ${i.current})`
-              : (i.reason ?? ""),
+              : i.status === "verify-live"
+                ? `(live: ${i.current})`
+                : i.status === "verify-stale"
+                  ? `(stale: ${i.current})${i.reason ? ` — ${i.reason}` : ""}`
+                  : (i.reason ?? ""),
       ]);
       const widths = cols.map((h, i) => Math.max(h.length, ...rows.map(r => r[i]!.length)));
       const fmt = (cells: string[]) => cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
@@ -453,10 +607,19 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
       console.log(widths.map(w => "─".repeat(w)).join("  "));
       for (const r of rows) console.log(fmt(r));
       console.log("");
+      if (options.verify) {
+        const live = items.filter(i => i.status === "verify-live").length;
+        const stale = items.filter(i => i.status === "verify-stale").length;
+        const unknown = items.filter(i => i.status === "verify-unknown").length;
+        console.log(`Verify summary: ${live} live, ${stale} stale, ${unknown} unknown.`);
+        if (stale > 0 && !options.apply) {
+          printWarning(`${stale} stale fixture(s) detected. Re-run with --refresh to drop and re-resolve them.`);
+        }
+      }
       if (applied) {
         printSuccess(`Wrote ${writes.length} value(s) to ${envPath}` + (backupPath ? ` (backup: ${backupPath})` : ""));
       } else if (writes.length === 0) {
-        console.log("Nothing to write (all targets already set or no discoveries succeeded).");
+        if (!options.verify) console.log("Nothing to write (all targets already set or no discoveries succeeded).");
       } else {
         printWarning(`Dry-run: ${writes.length} value(s) ready. Re-run with --apply to write ${envPath}.`);
       }
@@ -485,6 +648,8 @@ export function registerDiscover(program: Command): void {
     .option("--api-dir <path>", "Override apis/<name>/ root (defaults to the collection's base_dir)")
     .option("--env <path>", "Override .env.yaml path (defaults to <api-dir>/.env.yaml)")
     .option("--apply", "Write discovered values to .env.yaml (with .env.yaml.bak backup). Default: dry-run.")
+    .option("--verify", "TASK-281: GET each fixture's read-by-id endpoint and classify live/stale/unknown. Combine with --apply (or use --refresh) to drop stale fixtures and re-resolve them.")
+    .option("--refresh", "TASK-281: shortcut for --verify --apply — re-validate every fixture, then re-resolve any that 404'd.")
     .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
     .action(async (opts, cmd: Command) => {
       const resolved = resolveSpecArg(undefined, opts.api, opts.db);
@@ -499,11 +664,14 @@ export function registerDiscover(program: Command): void {
           apiDir = `apis/${opts.api}`;
         }
       }
+      const refresh = opts.refresh === true;
       process.exitCode = await discoverCommand({
         specPath: resolved.spec,
         apiDir,
         envPath: opts.env,
-        apply: opts.apply === true,
+        // --refresh implies --verify --apply.
+        apply: opts.apply === true || refresh,
+        verify: opts.verify === true || refresh,
         timeoutMs: opts.timeout,
         json: globalJson(cmd),
       });
