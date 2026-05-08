@@ -89,6 +89,10 @@ export type Severity =
    *  4xx-with-extras was a false signal. User must fix fixture / FK / scope
    *  before this endpoint can be probed (TASK-91). */
   | "inconclusive-baseline"
+  /** Baseline POST returned ≥500 — the endpoint just crashes, mass-assignment
+   *  semantics aren't observable here. Likely a duplicate of validation-probe's
+   *  finding for the same endpoint (TASK-276). */
+  | "inconclusive-5xx"
   | "low"
   | "ok"
   | "skipped";
@@ -475,6 +479,17 @@ async function probeEndpoint(
   verdict.response = { status: resp.status, body: resp.body_parsed ?? resp.body };
 
   if (resp.status >= 500) {
+    // TASK-276: if the baseline (no extras) also crashed with ≥500, the
+    // endpoint is just crashing — mass-assignment semantics aren't
+    // observable, and validation-probe will already have flagged the same
+    // endpoint. Don't surface as HIGH privilege-escalation; that buries
+    // real findings under noise.
+    if (baselineResp.status >= 500) {
+      verdict.severity = "inconclusive-5xx";
+      verdict.summary = `baseline ${baselineResp.status} → injected ${resp.status} — endpoint crashes regardless of extras (likely duplicate of validation-probe)`;
+      for (const f of verdict.fields) f.outcome = "unknown";
+      return verdict;
+    }
     verdict.severity = "high";
     verdict.summary = `5xx unhandled (${resp.status}) — see negative-probe`;
     return verdict;
@@ -511,7 +526,11 @@ async function probeEndpoint(
     // and continue to body-classification so per-field outcomes are still
     // recorded for the digest.
     verdict.severity = "high";
-    verdict.summary = `extras-bypass: baseline ${baselineResp.status} → injected ${resp.status} (extras opened a code path baseline didn't reach)`;
+    const bypassReason =
+      baselineResp.status >= 500
+        ? "server crash on baseline — extras-bypass turned a 5xx into a successful write"
+        : "extras opened a code path baseline didn't reach";
+    verdict.summary = `extras-bypass: baseline ${baselineResp.status} → injected ${resp.status} (${bypassReason})`;
     // Fall through to the 2xx classification below; finaliseSeverity won't
     // overwrite "high" once it's set — but we also want to still mark
     // applied/ignored fields. We skip finaliseSeverity at the end for this
@@ -772,6 +791,7 @@ function finaliseSeverity(v: EndpointVerdict, strict: boolean) {
 const SEVERITY_ORDER: Severity[] = [
   "high",
   "inconclusive-baseline",
+  "inconclusive-5xx",
   "medium",
   "low",
   "ok",
@@ -781,6 +801,7 @@ const SEVERITY_ORDER: Severity[] = [
 const SEVERITY_HEADER: Record<Severity, string> = {
   high: "🚨 HIGH — privilege escalation candidates",
   "inconclusive-baseline": "⚠️  INCONCLUSIVE — baseline body invalid (fix fixture / FK / scope and re-probe)",
+  "inconclusive-5xx": "⚠️  INCONCLUSIVE — baseline 5xx (endpoint crashes — likely duplicate of validation-probe)",
   medium: "⚠️  MEDIUM — inconclusive (no follow-up GET available)",
   low: "ℹ️  LOW — accepted-and-ignored (silent acceptance)",
   ok: "✅ OK — rejected 4xx (best behaviour)",
@@ -851,6 +872,11 @@ export function formatDigestMarkdown(
           `- **Action:** the baseline POST itself failed — set the right fixture / FK / path-params in your env (e.g. \`domain_id\`, \`account_id\`) and re-run.`,
         );
       }
+      if (v.severity === "inconclusive-5xx") {
+        lines.push(
+          `- **Action:** baseline crashed with 5xx — fix the underlying server bug (validation-probe likely reported it for the same endpoint) before mass-assignment can be observed here.`,
+        );
+      }
       lines.push("");
     }
   }
@@ -866,7 +892,7 @@ export function formatDigestMarkdown(
 
 function groupBySeverity(verdicts: EndpointVerdict[]): Record<Severity, EndpointVerdict[]> {
   const out: Record<Severity, EndpointVerdict[]> = {
-    high: [], "inconclusive-baseline": [], medium: [], low: [], ok: [], skipped: [],
+    high: [], "inconclusive-baseline": [], "inconclusive-5xx": [], medium: [], low: [], ok: [], skipped: [],
   };
   for (const v of verdicts) out[v.severity].push(v);
   return out;

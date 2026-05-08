@@ -421,7 +421,7 @@ describe("runMassAssignmentProbes", () => {
     expect(v.summary).toMatch(/strict contract honoured/);
   });
 
-  it("flags 5xx as HIGH", async () => {
+  it("flags 5xx as HIGH when baseline succeeded", async () => {
     responder = (req) => {
       if (req.method === "POST" && isBaseline(req.body)) {
         return { status: 201, body: { id: "baseline-id", name: "alice" } };
@@ -437,6 +437,46 @@ describe("runMassAssignmentProbes", () => {
     const v = result.verdicts[0]!;
     expect(v.severity).toBe("high");
     expect(v.summary).toMatch(/5xx/);
+  });
+
+  it("classifies baseline 5xx + injected 5xx as INCONCLUSIVE-5XX (TASK-276)", async () => {
+    // Endpoint just crashes — validation-probe will already report this.
+    // Mass-assignment cannot observe extras-handling, so don't surface as
+    // HIGH privilege-escalation noise.
+    responder = () => ({ status: 502, body: { error: "bad gateway" } });
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      noCleanup: true,
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("inconclusive-5xx");
+    expect(v.summary).toMatch(/baseline 502/);
+    expect(v.summary).toMatch(/injected 502/);
+    for (const f of v.fields) expect(f.outcome).toBe("unknown");
+  });
+
+  it("classifies baseline 5xx + injected 2xx as HIGH extras-bypass with crash note (TASK-276)", async () => {
+    responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 500, body: { error: "boom" } };
+      }
+      if (req.method === "POST") {
+        return { status: 201, body: { id: "x", name: "alice", is_admin: true, role: "admin" } };
+      }
+      return { status: 204 };
+    };
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint(), getUserByIdEndpoint(), deleteUserEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      noCleanup: true,
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("high");
+    expect(v.summary).toMatch(/extras-bypass/);
+    expect(v.summary).toMatch(/server crash on baseline/);
   });
 
   it("skips PATCH/PUT when env doesn't supply path id (--no-discover)", async () => {

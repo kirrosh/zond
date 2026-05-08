@@ -1,9 +1,13 @@
 ---
 id: TASK-276
-title: 'probe-mass-assignment: 5xx-baseline классифицируется как HIGH (false-positive privilege-escalation)'
-status: To Do
-assignee: []
+title: >-
+  probe-mass-assignment: 5xx-baseline классифицируется как HIGH (false-positive
+  privilege-escalation)
+status: Done
+assignee:
+  - '@me'
 created_date: '2026-05-08 19:00'
+updated_date: '2026-05-08 13:01'
 labels:
   - feedback-loop
   - api-sentry

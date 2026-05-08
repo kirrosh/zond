@@ -370,9 +370,12 @@ it.
 ### Phase 5.1 — Manual mass-assignment catch-up
 
 `probe-mass-assignment` digest splits findings into HIGH / MED / LOW /
-**INCONCLUSIVE**. INCONCLUSIVE = the auto-prober couldn't build a valid body
-(same fixture problem as Phase 4a). After the fixture pack is filled, sweep
-INCONCLUSIVE with this template — one file per resource:
+**INCONCLUSIVE** / **INCONCLUSIVE-5XX**. INCONCLUSIVE = the auto-prober
+couldn't build a valid body (same fixture problem as Phase 4a).
+INCONCLUSIVE-5XX = baseline POST itself crashed with ≥500 — the endpoint is
+broken; validation-probe will already report the same crash, so don't waste
+time on it here. After the fixture pack is filled, sweep INCONCLUSIVE with
+this template — one file per resource:
 
 ```yaml
 # apis/<name>/probes/mass-assignment/<resource>.yaml
