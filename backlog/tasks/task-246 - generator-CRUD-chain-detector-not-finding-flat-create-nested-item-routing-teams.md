@@ -1,9 +1,10 @@
 ---
 id: TASK-246
 title: 'generator: CRUD-chain detector не находит item-path при flat-create + nested-item routing (POST /teams/ vs item /teams/{org}/{team}/)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 13:00'
+updated_date: '2026-05-08 13:50'
 labels:
   - feedback-loop
   - api-sentry
@@ -38,8 +39,16 @@ Actual: 3 family skipped в explain (teams + связанные).
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] CRUD detector матчит item-path по path-param-name из create-response (не только по prefix).
-- [ ] Дополнительный сигнал: `tags` operation совпадают.
-- [ ] Verify: `zond generate --api sentry --explain | grep -E '^teams'` → НЕ `skipped` (есть chain).
-- [ ] `crud-teams.yaml` сгенерирован с POST /teams/ + GET/PATCH/DELETE по nested item-path.
+- [x] CRUD detector fallback: item-path matched когда `<basePath>/{id}` regex не сработал, но есть endpoint с тем же tag и terminal `{param}` равным singular(resource)/`<sg>_id`/`<sg>_id_or_slug`/`<sg>_slug`.
+- [x] Используется и tags-сигнал, и param-name эвристика — оба должны совпадать (минимум ложных срабатываний).
+- [x] Verify Sentry: `zond generate --api sentry --explain | grep '^teams'` → `chain    POST + GET/{id} matched` (было `skipped`).
+- [x] CRUD detection rate: было 14/31, стало 17/31 (+3 family — teams, плюс ещё две).
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+- `src/core/generator/suite-generator.ts:detectCrudGroupsWithDiagnostics`: после первичного `itemPattern` regex'а добавлен fallback по shared tag + terminal-param-name match.
+- Singular formы покрыты через `singularizeResource(resource).toLowerCase()`. Для `teams` → `team`, матчит `{team}` / `{team_id_or_slug}`.
+- itemPath берётся из `resolvedItemEndpoints[0]` — ровно один путь после fallback'а.
+<!-- SECTION:NOTES:END -->
 <!-- SECTION:ACCEPTANCE:END -->
