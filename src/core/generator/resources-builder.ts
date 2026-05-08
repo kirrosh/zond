@@ -79,8 +79,11 @@ function getCaptureField(create: EndpointInfo): string {
 
 function inferFkOwner(paramName: string, allResources: string[]): string | null {
   // `audience_id` → match `audiences`; `contact_id` → `contacts`. Strips
-  // common id-suffixes (_id, Id) and looks for plural/singular matches.
-  const stem = paramName.replace(/_id$|Id$|_uuid$/, "").toLowerCase();
+  // common id-suffixes (_id, Id) and compound variants like _id_or_slug.
+  const stem = paramName
+    .replace(/_id_or_slug$|_id_or_name$|_or_slug$|_or_name$/, "")
+    .replace(/_id$|Id$|_uuid$|_slug$/, "")
+    .toLowerCase();
   if (!stem) return null;
   for (const res of allResources) {
     const r = res.toLowerCase();

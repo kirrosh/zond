@@ -223,12 +223,22 @@ async function probeOne(
     item.reason = `expected GET for list of ${target.ownerResource}, got ${parsed.method}`;
     return item;
   }
-  item.listPath = parsed.path;
+  // For nested list paths (e.g. /orgs/{org}/projects/), substitute any
+  // parent path-params that are already known in vars. If all params resolve,
+  // proceed as a normal list call. Only bail if a param is still missing.
+  let effectivePath = parsed.path;
   if (parsed.path.includes("{")) {
-    item.status = "miss-nested-list";
-    item.reason = `nested collection (${parsed.path}) — needs parent fixture, not yet supported`;
-    return item;
+    effectivePath = parsed.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
+      const val = vars[name];
+      return typeof val === "string" && val ? val : `{${name}}`;
+    });
+    if (effectivePath.includes("{")) {
+      item.status = "miss-nested-list";
+      item.reason = `nested collection (${parsed.path}) — missing parent fixture(s) in .env.yaml`;
+      return item;
+    }
   }
+  item.listPath = effectivePath;
 
   // Already filled and not a placeholder → skip the call (live API, save it).
   if (!isPlaceholder(current)) {
@@ -245,7 +255,7 @@ async function probeOne(
     return item;
   }
 
-  const url = `${baseUrl.replace(/\/+$/, "")}${parsed.path}`;
+  const url = `${baseUrl.replace(/\/+$/, "")}${effectivePath}`;
   const headers: Record<string, string> = {
     accept: "application/json",
     ...liveAuthHeaders(listEp, schemes, vars),
