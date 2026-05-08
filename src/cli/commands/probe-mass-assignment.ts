@@ -18,6 +18,7 @@ import { printMutationBanner, countCleanupFailures } from "../../core/probe/shar
 interface BucketCounts {
   high: number;
   inconclusiveBaseline: number;
+  inconclusive5xx: number;
   medium: number;
   low: number;
   ok: number;
@@ -27,6 +28,7 @@ interface BucketCounts {
 const MA_BUCKETS: ReadonlyArray<readonly [string, keyof BucketCounts & string]> = [
   ["high", "high"],
   ["inconclusive-baseline", "inconclusiveBaseline"],
+  ["inconclusive-5xx", "inconclusive5xx"],
   ["medium", "medium"],
   ["low", "low"],
   ["ok", "ok"],
@@ -36,6 +38,7 @@ const MA_BUCKETS: ReadonlyArray<readonly [string, keyof BucketCounts & string]> 
 const MA_SUMMARY: ReadonlyArray<readonly [string, keyof BucketCounts & string]> = [
   ["HIGH", "high"],
   ["INCONCLUSIVE", "inconclusiveBaseline"],
+  ["INCONCLUSIVE-5XX", "inconclusive5xx"],
   ["MED", "medium"],
   ["LOW", "low"],
   ["OK", "ok"],
@@ -43,7 +46,7 @@ const MA_SUMMARY: ReadonlyArray<readonly [string, keyof BucketCounts & string]> 
 ];
 
 const MA_ZERO: BucketCounts = {
-  high: 0, inconclusiveBaseline: 0, medium: 0, low: 0, ok: 0, skipped: 0,
+  high: 0, inconclusiveBaseline: 0, inconclusive5xx: 0, medium: 0, low: 0, ok: 0, skipped: 0,
 };
 
 export interface ProbeMassAssignmentOptions {
