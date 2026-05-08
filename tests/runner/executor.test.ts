@@ -555,7 +555,7 @@ describe("flow control", () => {
 
     const result = await runSuite(suite);
     expect(result.steps[0]!.status).toBe("skip");
-    expect(result.steps[0]!.error).toContain("Skipped");
+    expect(result.steps[0]!.error).toContain("skipped");
     expect(result.steps[1]!.status).toBe("pass");
   });
 

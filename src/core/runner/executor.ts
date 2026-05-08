@@ -231,7 +231,11 @@ export async function runSuite(
     if (step.skip_if) {
       const exprAfterSubst = String(substituteString(step.skip_if, variables));
       if (evaluateExpr(exprAfterSubst)) {
-        pushStep(makeSkippedResult(interpolateName(step.name, variables), `Skipped: ${step.skip_if}`), step);
+        const varMatch = step.skip_if.match(/\{\{([^{}]+)\}\}/);
+        const skipMsg = varMatch
+          ? `skipped: required fixture {{${varMatch[1]!.trim()}}} is empty`
+          : `skipped: ${step.skip_if}`;
+        pushStep(makeSkippedResult(interpolateName(step.name, variables), skipMsg), step);
         continue;
       }
     }
@@ -269,6 +273,25 @@ export async function runSuite(
         }
       }
       continue;
+    }
+    // Skip if any path-variable in the template resolved to empty — an empty
+    // path segment produces URLs like /repos//commits/ which always 404/500.
+    // The explicit skip_if guard only covers the first param (TASK-237);
+    // this catches all others.
+    {
+      let emptyVar: string | null = null;
+      for (const m of step.path.matchAll(/\{\{([^{}]+)\}\}/g)) {
+        const varName = m[1]!.trim();
+        const val = variables[varName];
+        if (val === "" || val === null || val === undefined) { emptyVar = varName; break; }
+      }
+      if (emptyVar) {
+        pushStep(makeSkippedResult(
+          interpolateName(step.name, variables),
+          `skipped: required fixture {{${emptyVar}}} is empty`,
+        ), step);
+        continue;
+      }
     }
     const url = buildUrl(resolvedBaseUrl, resolved.path, resolved.query);
     const headers: Record<string, string> = { ...resolvedSuiteHeaders, ...resolved.headers };
