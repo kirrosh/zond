@@ -156,6 +156,7 @@ function defineProbeSecurity(parent: Command, name: string, deprecated: boolean)
         timeoutMs: opts.timeout,
         overwrite: opts.overwrite === true,
         json: globalJson(cmd),
+        apiName: typeof opts.api === "string" ? opts.api : undefined,
       });
     });
 }

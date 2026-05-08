@@ -16,6 +16,7 @@ import { applySanitizer } from "../../core/exporter/exporter.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 import { tallyBySeverity, formatSummaryLine } from "../../core/probe/verdict-aggregator.ts";
 import { printMutationBanner, countCleanupFailures } from "../../core/probe/shared.ts";
+import { persistVerdictsAsOrphans } from "../../core/probe/orphan-tracker.ts";
 
 interface Buckets {
   high: number;
@@ -61,6 +62,10 @@ export interface ProbeSecurityOptions {
   json?: boolean;
   listTags?: boolean;
   overwrite?: boolean;
+  /** TASK-278: API name for orphan-tracker file path
+   *  (`~/.zond/orphans/<api>/<run-id>.jsonl`). Defaults to "default" when
+   *  the probe is invoked without --api. */
+  apiName?: string;
 }
 
 function parseClasses(input: string): SecurityClass[] | string {
@@ -177,6 +182,37 @@ export async function probeSecurityCommand(
     // the underlying status.
     const orphans = countCleanupFailures(result.verdicts);
 
+    // TASK-278: persist created-resource records to ~/.zond/orphans/<api>/<run-id>.jsonl
+    // even when cleanup succeeded — successful entries become tombstones that
+    // suppress the leak; failed ones are picked up by `zond cleanup --orphans`.
+    const orphanRunId = `${Date.now()}`;
+    const orphanApi = options.apiName ?? "default";
+    if (!options.dryRun) {
+      try {
+        await persistVerdictsAsOrphans(orphanApi, orphanRunId, result.verdicts);
+      } catch (err) {
+        // Non-fatal — orphan tracking is a hygiene aid, not a probe blocker.
+        if (!options.json) {
+          process.stderr.write(`zond: failed to persist orphan tracker: ${(err as Error).message}\n`);
+        }
+      }
+    }
+    const orphanList = result.verdicts
+      .filter(v => {
+        const c = v.cleanup;
+        if (!c?.attempted || c.id === undefined) return false;
+        if (c.error) return true;
+        return c.status != null && c.status >= 400 && c.status !== 404;
+      })
+      .map(v => ({
+        method: v.method.toUpperCase(),
+        path: v.path,
+        id: String(v.cleanup!.id),
+        deletePath: v.cleanup!.deletePath ?? "",
+        lastStatus: v.cleanup!.status ?? null,
+        error: v.cleanup!.error ?? null,
+      }));
+
     if (options.json) {
       printJson(
         jsonOk("probe-security", {
@@ -203,8 +239,17 @@ export async function probeSecurityCommand(
       }
       if (orphans > 0) {
         printWarning(
-          `${orphans} orphan resource(s): cleanup DELETE failed (non-404). Manual remediation may be needed — see digest.`,
+          `${orphans} orphan resource(s): cleanup DELETE failed (non-404). Manual remediation may be needed.`,
         );
+        // TASK-278: list each orphan with id + deletePath so the operator can
+        // see what's leaked without grep'ing the digest.
+        if (orphanList.length > 0) {
+          for (const o of orphanList) {
+            const tail = o.lastStatus != null ? `→ ${o.lastStatus}` : (o.error ? `→ err: ${o.error.split(" | ")[0]}` : "");
+            process.stderr.write(`  ${o.method} ${o.path} (id=${o.id}); DELETE ${o.deletePath} ${tail}\n`);
+          }
+          process.stderr.write(`Run \`zond cleanup --orphans --api ${orphanApi}\` to retry.\n`);
+        }
       }
       const cleanedCount = result.verdicts.filter(v => v.cleanup?.attempted && v.cleanup.status != null && v.cleanup.status < 400).length;
       if (cleanedCount > 0) {

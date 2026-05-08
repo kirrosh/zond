@@ -6,6 +6,7 @@ import { registerServe } from "./commands/serve.ts";
 import { registerCoverage } from "./commands/coverage.ts";
 import { registerCi } from "./commands/ci-init.ts";
 import { registerClean } from "./commands/clean.ts";
+import { registerCleanup } from "./commands/cleanup.ts";
 import { registerInit } from "./commands/init/index.ts";
 import { registerDescribe } from "./commands/describe.ts";
 import { registerDb } from "./commands/db.ts";
@@ -82,6 +83,7 @@ export function buildProgram(): Command {
   registerRequest(program);
 
   registerClean(program);
+  registerCleanup(program);
 
   registerGenerate(program);
   registerDiscover(program);
