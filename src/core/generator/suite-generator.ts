@@ -416,11 +416,46 @@ export function detectCrudGroupsWithDiagnostics(
       ep => !ep.deprecated && itemPattern.test(ep.path),
     );
 
-    const read = itemEndpoints.find(ep => ep.method.toUpperCase() === "GET");
-    const update = itemEndpoints.find(
+    // Fallback for "subdomain"/nested-item routing (Sentry-style):
+    // create lives under one root (`/api/0/organizations/{org}/teams/`)
+    // but item-path lives under another (`/api/0/teams/{org}/{team}/`).
+    // The strict basePath/{id} regex misses these. Match instead by:
+    //   1. shared OpenAPI tag with the create operation,
+    //   2. terminal {param} matching the singular form of the resource
+    //      (`{team}` / `{team_id}` / `{team_id_or_slug}`).
+    let resolvedItemEndpoints = itemEndpoints;
+    if (resolvedItemEndpoints.length === 0) {
+      const singular = singularizeResource(resource).toLowerCase();
+      const itemTerminalRe = /\{([^}]+)\}\/?$/;
+      const matchesResourceParam = (p: string) => {
+        const m = p.match(itemTerminalRe);
+        if (!m) return false;
+        const param = m[1]!.toLowerCase();
+        return (
+          param === singular ||
+          param === `${singular}_id` ||
+          param === `${singular}_id_or_slug` ||
+          param === `${singular}_slug`
+        );
+      };
+      const createTags = new Set(createEp.tags ?? []);
+      const sharedTag = (ep: EndpointInfo) =>
+        (ep.tags ?? []).some(t => createTags.has(t));
+
+      resolvedItemEndpoints = endpoints.filter(
+        ep =>
+          !ep.deprecated &&
+          ep.path !== createEp.path &&
+          matchesResourceParam(ep.path) &&
+          sharedTag(ep),
+      );
+    }
+
+    const read = resolvedItemEndpoints.find(ep => ep.method.toUpperCase() === "GET");
+    const update = resolvedItemEndpoints.find(
       ep => ["PUT", "PATCH"].includes(ep.method.toUpperCase()),
     );
-    const del = itemEndpoints.find(ep => ep.method.toUpperCase() === "DELETE");
+    const del = resolvedItemEndpoints.find(ep => ep.method.toUpperCase() === "DELETE");
     // List endpoint matches with the same trailing-slash tolerance.
     const list = endpoints.find(
       ep =>
@@ -441,7 +476,7 @@ export function detectCrudGroupsWithDiagnostics(
       reason: "",
     };
 
-    if (itemEndpoints.length === 0) {
+    if (resolvedItemEndpoints.length === 0) {
       diag.reason = `no item endpoint matching ${basePath}/{...}`;
       diagnostics.push(diag);
       continue;
@@ -452,7 +487,7 @@ export function detectCrudGroupsWithDiagnostics(
       continue;
     }
 
-    const itemPath = itemEndpoints[0]!.path;
+    const itemPath = resolvedItemEndpoints[0]!.path;
     const idMatch = itemPath.match(/\{([^}]+)\}\/?$/);
     if (!idMatch) {
       diag.reason = "item path has no terminal {param}";
