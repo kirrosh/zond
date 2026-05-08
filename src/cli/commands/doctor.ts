@@ -148,8 +148,23 @@ function readYamlIfExists<T>(path: string): T | null {
 }
 
 function readArtifactSpecHash(path: string): string | null {
-  const doc = readYamlIfExists<{ specHash?: unknown }>(path);
-  return typeof doc?.specHash === "string" ? doc.specHash : null;
+  if (!existsSync(path)) return null;
+  try {
+    // Scan only the first 25 lines for the specHash field — it always appears
+    // near the top of artifact files. Avoids YAML-parsing the entire file,
+    // which can fail or be very slow for large catalogs (150KB+).
+    const raw = readFileSync(path, "utf-8");
+    const lines = raw.split("\n", 25);
+    for (const line of lines) {
+      const m = line.match(/^specHash:\s*["']?([0-9a-f]{64})["']?/);
+      if (m) return m[1]!;
+    }
+    // Fallback for non-standard layouts.
+    const doc = readYamlIfExists<{ specHash?: unknown }>(path);
+    return typeof doc?.specHash === "string" ? doc.specHash : null;
+  } catch {
+    return null;
+  }
 }
 
 function maskSecret(value: string): string {
