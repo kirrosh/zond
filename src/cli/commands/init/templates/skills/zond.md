@@ -74,6 +74,7 @@ If any artifact is missing or stale (`zond doctor` flags it), run
 |---|---|---|
 | "audit this API", "cover this spec", "test the whole API" | 1 (Orient), then `zond audit --api <name>` for one-shot pipeline | — |
 | "find bugs", "probe this API", "test for 5xx" | 1 then 5 (Probes) | — |
+| "только security / SSRF / CRLF", "security-only audit", "без CRUD-аудита" | `zond probe security <classes> --api <name> --dry-run` (затем без `--dry-run`) — см. Phase 5.2 | 1–4 |
 | "tests are failing", "diagnose run X", "fix failures" | 4 (Diagnose) | 1–3 |
 | "the run after my fix" | 3 (Run) → 4 (Diagnose) | 1–2 |
 | "what variables does this API need", "is auth_token set" | `zond doctor --api <name> --json` | direct file reads |

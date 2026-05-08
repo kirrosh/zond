@@ -1,8 +1,10 @@
 ---
 id: TASK-155
 title: 'skill: probe-security mutation warning + security-only entry point'
-status: To Do
+status: Done
 assignee: []
+created_date: ''
+updated_date: '2026-05-08 15:34'
 labels:
   - skill
   - docs
@@ -15,6 +17,7 @@ priority: medium
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-8 feedback round 3 (skill)](../notes/m-8-audit-cli-gaps/feedback-round3.md).
@@ -59,11 +62,19 @@ priority: medium
    | "Проверь только security (SSRF/CRLF) на этом API, без CRUD-аудита" | `zond probe-security <classes> --api <name> --dry-run` (затем без --dry-run) |
 
 3. Перекрёстная ссылка из Phase 5.2 на новый entry-point row.
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
-- [ ] В Phase 5.2 есть блок ⚠️ с инструкцией про `--dry-run` ПЕРВЫМ
+<!-- AC:BEGIN -->
+- [ ] #1 В Phase 5.2 есть блок ⚠️ с инструкцией про `--dry-run` ПЕРВЫМ
       шагом для shared/prod org.
-- [ ] В entry-points таблице есть security-only audit row.
-- [ ] После закрытия TASK-151 — warning переписан под snapshot+restore
+- [ ] #2 В entry-points таблице есть security-only audit row.
+- [ ] #3 После закрытия TASK-151 — warning переписан под snapshot+restore
       поведение (отдельная под-задача / в рамках TASK-151).
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Phase 5.2 уже содержит state-aware cleanup (TASK-151 done) и --dry-run как first invocation на prod orgs. Добавлена недостающая security-only entry-point row в таблицу.
+<!-- SECTION:NOTES:END -->
