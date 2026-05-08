@@ -120,6 +120,19 @@ const TestStepExpectSchema: z.ZodType<TestStepExpect> = z.preprocess(
   (val) => {
     if (typeof val !== "object" || val === null) return val;
     const obj = val as Record<string, unknown>;
+    // Reject `expect.capture: {...}` — non-canonical syntax some users
+    // reach for. zond captures live INSIDE body-rules
+    // (`body: { "path.to.field": { capture: var_name } }`); a top-level
+    // `capture:` block inside `expect:` is silently dropped, leaving the
+    // test green with no captured values. Throw with a clear pointer.
+    // (TASK-247)
+    if ("capture" in obj && typeof obj.capture === "object" && obj.capture !== null && !Array.isArray(obj.capture)) {
+      throw new Error(
+        `'expect.capture: {...}' is not a valid step shape. Captures are defined per-field: ` +
+        `\`expect.body: { "<path>": { capture: <var_name> } }\`. ` +
+        `Top-level 'capture' inside 'expect' is silently ignored — the test would pass with no captured values.`,
+      );
+    }
     // body: null → remove it
     if (obj.body === null) {
       const { body: _, ...rest } = obj;
