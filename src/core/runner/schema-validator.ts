@@ -8,6 +8,14 @@ import type { AssertionResult } from "./types.ts";
 
 export interface SchemaValidator {
   validate(method: string, path: string, status: number, body: unknown): AssertionResult[];
+  /** TASK-142: surface whether an endpoint and a response branch matched.
+   *  Lets ad-hoc callers (`zond request --validate-schema`) distinguish
+   *  "no spec entry for this URL" from "spec entry exists, body is valid". */
+  inspect(method: string, path: string, status: number): {
+    matchedEndpoint: { method: string; path: string } | null;
+    matchedResponseStatus: string | null;
+    hasJsonSchema: boolean;
+  };
 }
 
 interface EndpointEntry {
@@ -73,6 +81,25 @@ export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator 
     return (json?.schema as OpenAPIV3.SchemaObject | undefined) ?? undefined;
   }
 
+  function inspectMatch(method: string, path: string, status: number) {
+    const upper = method.toUpperCase();
+    const ep = endpoints.find(e => e.method === upper && e.regex.test(path));
+    if (!ep) {
+      return { matchedEndpoint: null, matchedResponseStatus: null, hasJsonSchema: false };
+    }
+    const exact = ep.responses[String(status)] as OpenAPIV3.ResponseObject | undefined;
+    const wildcard = ep.responses[`${Math.floor(status / 100)}XX`] as OpenAPIV3.ResponseObject | undefined;
+    const fallback = ep.responses.default as OpenAPIV3.ResponseObject | undefined;
+    const matchedKey = exact ? String(status) : wildcard ? `${Math.floor(status / 100)}XX` : fallback ? "default" : null;
+    const response = exact ?? wildcard ?? fallback;
+    const hasJsonSchema = !!(response?.content?.["application/json"]?.schema);
+    return {
+      matchedEndpoint: { method: ep.method, path: ep.path },
+      matchedResponseStatus: matchedKey,
+      hasJsonSchema,
+    };
+  }
+
   return {
     validate(method, path, status, body) {
       const schema = findResponseSchema(method, path, status);
@@ -94,6 +121,7 @@ export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator 
       const errors = validator.errors ?? [];
       return errors.map(e => ajvErrorToAssertion(e, body));
     },
+    inspect: inspectMatch,
   };
 }
 

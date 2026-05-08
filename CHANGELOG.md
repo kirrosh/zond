@@ -17,6 +17,21 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-142: `zond request --validate-schema` and `--validate-against "METHOD:/path"`.**
+  One-off ad-hoc requests can now check the response body against the
+  OpenAPI response schema without wrapping the call in YAML. Auto-resolves
+  the endpoint from request method + URL.path (templated paths like
+  `/users/{id}` matched via the same regex used by `run --validate-schema`).
+  Selects the response branch from the actual status code (200 → 200 schema,
+  404 → 404 schema, anything else → `default`). Output adds a
+  `Schema validation: PASS / FAIL` block with the matched endpoint,
+  response branch, and human-readable schema errors (`schema.required`,
+  `schema.type`, etc.). FAIL → exit 1; `no-endpoint`/`no-spec`/`no-schema`
+  → soft no-op with a one-line hint. `--validate-against` overrides the
+  auto-resolver when the URL doesn't fit the spec template (e.g.
+  parameterized resources fetched by slug). Requires `--api <name>` —
+  the spec is loaded from the registered collection.
+
 - **TASK-143: `zond report bundle <range>` — batch triage exporter.**
   One command instead of `4 runs × 2 formats = 8 calls`. Range forms:
   `A..B` (inclusive numeric range), `A,B,C` (comma list), or

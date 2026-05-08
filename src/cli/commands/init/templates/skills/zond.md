@@ -245,6 +245,20 @@ records, "real" enum values), fall back to `zond request`:
 zond request GET /domains | jq '.data[] | select(.status=="verified") | .id'
 ```
 
+For one-off contract checks without writing a YAML test, pair it with
+`--validate-schema` (TASK-142):
+
+```bash
+zond request --api <name> --validate-schema GET /users/abc       # auto-resolve endpoint
+zond request --api <name> --validate-against "GET:/users/{id}" GET /users/abc
+```
+
+The output adds a `Schema validation: PASS / FAIL` block with the
+matched endpoint, response branch, and JSON-pointer of any nodes that
+failed (`schema.required`, `schema.type`, …). Exit 1 on FAIL; soft no-op
+(`no-endpoint`/`no-spec`/`no-schema`) when the spec doesn't cover the
+URL — pass `--validate-against` to override the auto-resolver.
+
 Add to `apis/<name>/.env.yaml`:
 
 ```yaml
