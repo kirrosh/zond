@@ -194,6 +194,33 @@ export function printMutationBanner(
  * the API itself or by the test under inspection. Used to surface an
  * "N orphans, manual cleanup needed" line in the CLI summary.
  */
+/**
+ * TASK-264: does this OpenAPI path template have ANY `{param}` segment
+ * whose name matches a non-empty entry in `vars` (a seeded fixture)?
+ * Used by `--isolated` to gate PUT/PATCH/DELETE attacks.
+ *
+ * Permissive on the var-side: we treat `audience_id`, `audience-slug`,
+ * `audience` as the same fixture so spec-naming variations don't leak.
+ */
+export function pathTouchesSeededVar(path: string, vars: Record<string, string>): boolean {
+  const placeholders = [...path.matchAll(/\{([^}]+)\}/g)].map(m => m[1]!);
+  if (placeholders.length === 0) return false;
+  const filledKeys = new Set(
+    Object.keys(vars).filter(k => {
+      const v = vars[k];
+      return typeof v === "string" && v.trim().length > 0;
+    }).map(k => k.toLowerCase().replace(/[-_]/g, "")),
+  );
+  for (const ph of placeholders) {
+    const norm = ph.toLowerCase().replace(/[-_]/g, "");
+    if (filledKeys.has(norm)) return true;
+    // Strip the OpenAPI noisy suffixes (e.g. `_id`, `_or_slug`) and try again.
+    const stripped = norm.replace(/(idorslug|orslug|id|slug)$/i, "");
+    if (stripped && filledKeys.has(stripped)) return true;
+  }
+  return false;
+}
+
 export function countCleanupFailures(
   verdicts: Array<{ cleanup?: { attempted: boolean; status?: number; error?: string } }>,
 ): number {

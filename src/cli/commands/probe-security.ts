@@ -66,6 +66,10 @@ export interface ProbeSecurityOptions {
    *  (`~/.zond/orphans/<api>/<run-id>.jsonl`). Defaults to "default" when
    *  the probe is invoked without --api. */
   apiName?: string;
+  /** TASK-264: refuse to attack PUT/PATCH endpoints whose path-params come
+   *  from `.env.yaml` (seeded fixtures). Trade coverage for guaranteed
+   *  fixture safety. */
+  isolated?: boolean;
 }
 
 function parseClasses(input: string): SecurityClass[] | string {
@@ -151,6 +155,7 @@ export async function probeSecurityCommand(
       noCleanup: options.noCleanup,
       timeoutMs: options.timeoutMs,
       dryRun: options.dryRun,
+      isolated: options.isolated === true,
     });
 
     // TASK-168 (m-10): register env vars + redact the digest before

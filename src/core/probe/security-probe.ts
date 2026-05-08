@@ -25,6 +25,7 @@ import {
   hasJsonBody,
   liveAuthHeaders,
   getAuthHeaders,
+  pathTouchesSeededVar,
 } from "./shared.ts";
 import {
   buildProbeUrl,
@@ -108,6 +109,14 @@ export interface SecurityProbeOptions {
    * pass `[]` to disable; ops can pass longer for laggier replicas.
    */
   cleanupRetryDelaysMs?: number[];
+  /** TASK-264: when true, refuse to attack PUT/PATCH/DELETE endpoints whose
+   *  path-params are filled from `.env.yaml` (a.k.a. seeded fixtures). The
+   *  trade-off: lower coverage (those endpoints get SKIPPED), but a
+   *  guaranteed «probe doesn't mutate fixtures the user spent time
+   *  bootstrapping» property. POST endpoints still run — they create their
+   *  own resources, so isolation is automatic, with cleanup falling back to
+   *  the existing DELETE-counterpart + orphan-tracker flow (TASK-278). */
+  isolated?: boolean;
 }
 
 export interface SecurityProbeResult {
@@ -206,6 +215,13 @@ export async function runSecurityProbes(
     const m = ep.method.toUpperCase();
     if (m !== "POST" && m !== "PUT" && m !== "PATCH") continue;
     totalEndpoints++;
+
+    // TASK-264: --isolated guard. Mutation on a seeded fixture would corrupt
+    // user data the next `zond run` depends on; skip the endpoint instead.
+    if (opts.isolated && (m === "PUT" || m === "PATCH") && pathTouchesSeededVar(ep.path, opts.vars)) {
+      verdicts.push(skipped(ep, "skipped: --isolated mode protects seeded fixtures (PUT/PATCH on seeded path-params)"));
+      continue;
+    }
 
     if (!hasJsonBody(ep)) {
       verdicts.push(skipped(ep, "no JSON request body"));
