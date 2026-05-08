@@ -4,13 +4,12 @@ title: src/web/ → src/ui/ production migration foundation
 status: Done
 assignee: []
 created_date: '2026-04-30 09:36'
-updated_date: '2026-04-30 10:36'
+updated_date: '2026-05-08 13:10'
 labels:
   - trust-loop
   - decision-5
   - ui
-dependencies:
-  - TASK-95
+dependencies: []
 priority: high
 ---
 
