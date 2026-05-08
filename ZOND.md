@@ -386,6 +386,25 @@ SKIPPED but the digest spells out *why*
 the generic missing-env message. Use `--no-discover` to disable when GET
 side-effects are unwanted.
 
+**Isolated mode (`--isolated`, TASK-264).** Probes mutate live data — by
+default, a `PUT /teams/{team_slug}` attack can scribble over the team you
+just bootstrapped via `.env.yaml`, breaking the next `zond run`. Pass
+`--isolated` and the probe will refuse to attack PUT/PATCH endpoints whose
+path-params resolve from `.env.yaml` (it skips them with `skipReason:
+"--isolated mode protects seeded fixtures"`). POST endpoints still run —
+they create their own throwaway resource and the existing
+DELETE-counterpart + orphan-tracker (TASK-278) clean it up.
+
+```bash
+zond probe security --api sentry --isolated
+# PUT /teams/{team_slug} → SKIPPED: --isolated mode protects seeded fixtures
+# POST /teams           → probed, then DELETE-cleaned up
+```
+
+The trade-off is lower coverage — the seeded-fixture endpoints get a
+SKIPPED entry instead of HIGH/LOW findings — but `tests-run → probes-run
+→ tests-run` round-trips on the same fixtures stop 404'ing.
+
 #### Stale fixture re-validation (`--verify` / `--refresh`)
 
 After `probe security` / `probe mass-assignment` runs, an FK fixture in

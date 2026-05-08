@@ -132,6 +132,7 @@ function defineProbeSecurity(parent: Command, name: string, deprecated: boolean)
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .option("--list-tags", "List available tags from spec and exit")
     .option("--no-cleanup", "Skip follow-up DELETE on resources created by baseline / 2xx attacks")
+    .option("--isolated", "TASK-264: refuse to attack PUT/PATCH endpoints whose path-params come from .env.yaml — protects seeded fixtures from probe-induced mutation. Lower coverage in exchange for guaranteed fixture safety.")
     .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests")
     .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
@@ -157,6 +158,7 @@ function defineProbeSecurity(parent: Command, name: string, deprecated: boolean)
         overwrite: opts.overwrite === true,
         json: globalJson(cmd),
         apiName: typeof opts.api === "string" ? opts.api : undefined,
+        isolated: opts.isolated === true,
       });
     });
 }
