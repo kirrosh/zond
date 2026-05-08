@@ -17,6 +17,19 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-153: `probe security` fuzzy-echo classifier for CRLF.** The echo
+  detector previously used verbatim substring match, which missed real
+  stored-CRLF bugs when the backend stripped `\r`, URL-decoded `%0d%0a`
+  before saving, or truncated the field at the first newline (only the
+  tail landed in storage). The classifier now branches by class: SSRF and
+  open-redirect stay verbatim (URL preserved as-is), CRLF additionally
+  tries URL-decoded pairs, CR/LF normalization variants, and tail-only
+  match after a newline. The match kind (`verbatim` / `url-decoded` /
+  `CRLF→LF` / `CR stripped` / `tail after CRLF` / …) is recorded in
+  `finding.reason` for investigation. Bodies are walked as a tree of
+  string leaves so CR/LF chars aren't hidden behind JSON escape
+  sequences in the haystack.
+
 - **TASK-145: `zond doctor --missing-only` + `--query` + canonical `--json` shape.**
   The `--json` envelope is now documented as the canonical contract — all
   diagnostic data lives under `.data` (no `.diagnostics` wrapper). `--help`

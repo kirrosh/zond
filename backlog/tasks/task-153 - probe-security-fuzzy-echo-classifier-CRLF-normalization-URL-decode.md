@@ -1,8 +1,10 @@
 ---
 id: TASK-153
 title: 'probe-security: fuzzy-echo classifier (CRLF normalization, URL-decode)'
-status: To Do
+status: Done
 assignee: []
+created_date: ''
+updated_date: '2026-05-08 15:37'
 labels:
   - probe
   - probe-security
@@ -15,6 +17,7 @@ priority: medium
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-8 feedback round 3 §L](../notes/m-8-audit-cli-gaps/feedback-round3.md).
@@ -57,16 +60,24 @@ priority: medium
    сработала: `"payload echoed verbatim"` vs
    `"payload echoed after CRLF strip (\\r removed)"` — это даёт
    аналитику для investigation.
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
-- [ ] Для CRLF-finding с payload `"x\r\nY"` и response, где сохранилось
+<!-- AC:BEGIN -->
+- [ ] #1 Для CRLF-finding с payload `"x\r\nY"` и response, где сохранилось
       только `"\nY"` — severity = HIGH (не LOW).
-- [ ] URL-decoded match: payload `"x%0d%0aY"` echo'нутый как `"x\r\nY"` —
+- [ ] #2 URL-decoded match: payload `"x%0d%0aY"` echo'нутый как `"x\r\nY"` —
       HIGH.
-- [ ] Tail-only match: payload `"x\r\nY"`, в response только `"Y"` без
+- [ ] #3 Tail-only match: payload `"x\r\nY"`, в response только `"Y"` без
       префикса — HIGH.
-- [ ] Verbatim match по-прежнему работает (regression-тест).
-- [ ] SSRF / open-redirect classifier не меняется (verbatim only).
-- [ ] `finding.reason` содержит ярлык типа матча.
-- [ ] CHANGELOG.
+- [ ] #4 Verbatim match по-прежнему работает (regression-тест).
+- [ ] #5 SSRF / open-redirect classifier не меняется (verbatim only).
+- [ ] #6 `finding.reason` содержит ярлык типа матча.
+- [ ] #7 CHANGELOG.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+fuzzy-echo classifier: CRLF получает URL-decode, CR/LF normalization variants, tail-after-CRLF; SSRF/open-redirect остались verbatim. finding.reason содержит match-kind. body walked tree-style.
+<!-- SECTION:NOTES:END -->
