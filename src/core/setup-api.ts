@@ -228,6 +228,23 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     openapiSpec = spec;
     if ((doc as any).servers?.[0]?.url) {
       baseUrl = (doc as any).servers[0].url;
+      // Resolve OpenAPI server variables (e.g. {region}) using their declared defaults.
+      // Without this, the raw placeholder ends up in .env.yaml and causes cryptic TLS
+      // errors because the hostname literally contains "{region}".
+      const serverVars = (doc as any).servers[0].variables as
+        Record<string, { default?: string }> | undefined;
+      if (serverVars && baseUrl.includes("{")) {
+        baseUrl = baseUrl.replace(/\{([^}]+)\}/g, (_: string, name: string) =>
+          serverVars[name]?.default ?? `{${name}}`
+        );
+      }
+      // Warn if any placeholder remains unresolved (spec didn't provide a default).
+      const unresolved = [...baseUrl.matchAll(/\{([^}]+)\}/g)].map(m => m[1]);
+      if (unresolved.length > 0) {
+        warnings.push(
+          `base_url contains unresolved server variable${unresolved.length === 1 ? "" : "s"}: ${unresolved.map(v => `{${v}}`).join(", ")}. Edit .env.yaml and replace with a concrete value.`,
+        );
+      }
     }
     if (baseUrl && !baseUrl.startsWith("http://") && !baseUrl.startsWith("https://")) {
       warnings.push(`Spec server URL "${baseUrl}" is relative — requests will fail without a host. Override with envVars: {"base_url": "https://your-host${baseUrl}"}`);
