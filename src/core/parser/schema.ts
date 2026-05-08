@@ -169,12 +169,43 @@ const SourceMetadataSchema: z.ZodType<SourceMetadata> = z.object({
   schema_pointer: z.string().optional(),
 }).passthrough() as z.ZodType<SourceMetadata>;
 
+const KNOWN_STEP_KEYS = new Set([
+  "name", "source", "method", "path", "headers",
+  "json", "form", "multipart", "query", "expect",
+  "skip_if", "retry_until", "for_each", "set", "always",
+  // raw HTTP method keys are folded into method/path by extractMethodAndPath
+  ...HTTP_METHODS,
+]);
+
+// Common typo / wrong-name body keys we detect explicitly to emit an
+// actionable error instead of silently dropping. Real APIs reject the empty
+// POST that follows, but the user spends 10+ minutes debugging — this hint
+// turns it into a one-line fix. (TASK-244)
+const BODY_KEY_HINTS: Record<string, string> = {
+  body: "json (for application/json) or form/multipart for non-JSON bodies",
+  data: "json (for application/json) or form for application/x-www-form-urlencoded",
+  payload: "json",
+  raw: "json (raw bodies are not supported; serialize to JSON or use form)",
+};
+
 const TestStepSchema: z.ZodType<TestStep> = z.preprocess(
   (raw) => {
     const obj = extractMethodAndPath(raw);
-    // Make expect optional for set-only steps
     if (typeof obj === "object" && obj !== null) {
       const o = obj as Record<string, unknown>;
+
+      // Reject silently-dropped body-shaped keys with a clear suggestion.
+      for (const [bad, hint] of Object.entries(BODY_KEY_HINTS)) {
+        if (bad in o) {
+          const stepName = typeof o.name === "string" ? ` in step "${o.name}"` : "";
+          throw new Error(
+            `Unknown step key '${bad}'${stepName}. Did you mean '${hint}'? ` +
+            `(zond does not recognize '${bad}:' and would silently drop the body)`,
+          );
+        }
+      }
+
+      // Make expect optional for set-only steps
       if (o.set && !o.expect) {
         o.expect = {};
       }
