@@ -233,12 +233,18 @@ describe("buildProgram — numeric validations (exit 2 via CommanderError)", () 
 });
 
 describe("TASK-182: zond probe umbrella + back-compat aliases", () => {
-  test("`zond probe --help` lists the four classes", async () => {
+  test("`zond probe --help` lists every probe class", async () => {
     const program = buildProgram();
     const probeCmd = program.commands.find((c) => c.name() === "probe");
     expect(probeCmd).toBeDefined();
     const subs = probeCmd!.commands.map((c) => c.name()).sort();
-    expect(subs).toEqual(["mass-assignment", "methods", "security", "validation"]);
+    expect(subs).toEqual([
+      "by-bogus-id",
+      "mass-assignment",
+      "methods",
+      "security",
+      "validation",
+    ]);
   });
 
   test("legacy probe-* names are still registered as top-level aliases", () => {
