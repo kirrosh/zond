@@ -595,6 +595,9 @@ zond report export <run-id> -o triage/run-<id>.html          # explicit path
 zond report case-study <failure-id>                          # default: triage/<api>/run-<id>/case-study-<ts>.md
 zond report case-study <failure-id> --stdout                 # also pipe to gh issue create --body-file -
 zond report case-study <failure-id> --json                   # envelope with `markdown`
+zond report bundle 135..142 -o triage/sweep/                 # batch: case-study + html + diagnose for each run + index.md
+zond report bundle 135,137,141 --include diagnose            # filter artefacts (case-study | export | diagnose)
+zond report bundle --session <id> -o triage/session/         # group by session_id (TASK-143)
 ```
 
 Defaults: bodies > 8 KB are truncated with a marker (`--no-body-cap` to

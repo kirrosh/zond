@@ -17,6 +17,19 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-143: `zond report bundle <range>` — batch triage exporter.**
+  One command instead of `4 runs × 2 formats = 8 calls`. Range forms:
+  `A..B` (inclusive numeric range), `A,B,C` (comma list), or
+  `--session <id>` (resolve all runs from a CLI session via `runs.session_id`).
+  For each run writes `<dir>/<run-id>/case-study.md` (only when failures
+  exist), `<dir>/<run-id>/report.html` (single-file HTML), and
+  `<dir>/<run-id>/diagnose.json`. A top-level `index.md` lists run-id /
+  spec / totals / artefact links / agent_directive snippet from
+  `diagnose`. `--include` filters the artefact set (subset of
+  `case-study`, `export`, `diagnose`); `--body-cap`/`--no-body-cap`
+  forwards to both case-study and HTML renderers. Default output dir
+  is `triage/bundle/<timestamp>/` when `--output` is omitted.
+
 - **TASK-146: `probe mass-assignment --emit-template "METHOD:/path"`.**
   Generates a ready-to-edit YAML probe template for one endpoint, so the
   user doesn't have to copy-paste the boilerplate from the skill (Phase

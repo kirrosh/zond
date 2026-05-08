@@ -1,8 +1,10 @@
 ---
 id: TASK-143
-title: 'zond report bundle <run-from>..<run-to> — пакетный экспорт'
-status: To Do
+title: zond report bundle <run-from>..<run-to> — пакетный экспорт
+status: Done
 assignee: []
+created_date: ''
+updated_date: '2026-05-08 16:03'
 labels:
   - report
   - export
@@ -13,6 +15,7 @@ priority: medium
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-8 feedback §5 раунд 2 (skill)](../notes/m-8-audit-cli-gaps/feedback-original.md).
@@ -34,13 +37,21 @@ case-studies + HTML-export + diagnose digest для диапазона run-id.
    артефакты, agent_directive из diagnose.
 3. Опция `--include` — выбрать подмножество артефактов.
 4. Уважать `--body-cap` из TASK-141 для case-studies.
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
-- [ ] Поддержка трёх форм диапазона: `A..B`, список через запятую,
+<!-- AC:BEGIN -->
+- [ ] #1 Поддержка трёх форм диапазона: `A..B`, список через запятую,
       `--session <id>`.
-- [ ] Сводный `index.md` с таблицей и ссылками.
-- [ ] `--include` фильтрует артефакты.
-- [ ] Тесты на сборку bundle на фикстуре с 3 run'ами.
-- [ ] Скилл Phase 7 обновлён с примером.
-- [ ] CHANGELOG.
+- [ ] #2 Сводный `index.md` с таблицей и ссылками.
+- [ ] #3 `--include` фильтрует артефакты.
+- [ ] #4 Тесты на сборку bundle на фикстуре с 3 run'ами.
+- [ ] #5 Скилл Phase 7 обновлён с примером.
+- [ ] #6 CHANGELOG.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+report bundle <range> с тремя формами: A..B, A,B,C, --session <id>. Артефакты: case-study (только при failures), report.html, diagnose.json + index.md с таблицей. --include фильтрует. --body-cap forward в обоих рендерерах. 9 unit-тестов. Скилл Phase 7 обновлён.
+<!-- SECTION:NOTES:END -->

@@ -355,6 +355,7 @@ export async function reportCaseStudyCommand(
 import type { Command } from "commander";
 import { globalJson } from "../resolve.ts";
 import { parsePositiveInt } from "../argv.ts";
+import { reportBundleCommand, type BundleArtifact } from "./report-bundle.ts";
 
 export function registerReport(program: Command): void {
   const reportCmd = program.command("report").description("Export run reports for sharing");
@@ -379,6 +380,35 @@ export function registerReport(program: Command): void {
         overwrite: opts.overwrite === true,
         bodyCapBytes,
         redactIdentity: opts.redactIdentity === true,
+        json: globalJson(cmd),
+      });
+    });
+
+  reportCmd
+    .command("bundle [range]")
+    .description("TASK-143: batch triage exporter — collect case-study + HTML report + diagnose JSON for a range of runs in one shot. <range> can be \"A..B\" (inclusive), \"A,B,C\" (list), or use --session <id>.")
+    .option("-o, --output <dir>", "Output directory (default: triage/bundle/<timestamp>/)")
+    .option("--session <id>", "Resolve runs by session_id instead of an explicit range")
+    .option(
+      "--include <artefacts>",
+      "Comma-separated subset of artefacts to write (default: all). One or more of: case-study, export, diagnose",
+      (val: string) => val.split(",").map(s => s.trim()).filter(Boolean),
+    )
+    .option("--db <path>", "Path to SQLite database file")
+    .option("--body-cap <n>", "Truncate request/response bodies to N bytes (default 8192). Pass 0 / use --no-body-cap to disable.", parsePositiveInt("--body-cap"))
+    .option("--no-body-cap", "Keep full request/response bodies (overrides --body-cap)")
+    .action(async (range: string | undefined, opts, cmd: Command) => {
+      const bodyCapBytes = opts.bodyCap === false ? 0 : (typeof opts.bodyCap === "number" ? opts.bodyCap : undefined);
+      const include = (opts.include as string[] | undefined)?.filter(
+        (a): a is BundleArtifact => a === "case-study" || a === "export" || a === "diagnose",
+      );
+      process.exitCode = await reportBundleCommand({
+        range,
+        sessionId: opts.session,
+        output: opts.output,
+        include,
+        dbPath: opts.db,
+        bodyCapBytes,
         json: globalJson(cmd),
       });
     });
