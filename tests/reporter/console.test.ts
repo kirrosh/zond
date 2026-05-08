@@ -93,6 +93,38 @@ describe("formatFailures", () => {
     expect(out).toContain("Error: Connection refused");
   });
 
+  test("schema-rule failure renders humanised expected, not [object Object] (TASK-277)", () => {
+    const step = makeStep({
+      status: "fail",
+      assertions: [
+        {
+          field: "body",
+          rule: "schema.required",
+          passed: false,
+          actual: { plugins: [] },
+          expected: 'missing required field "name"; expected required: [id, slug, name]',
+          kind: "schema",
+        },
+      ],
+    });
+    const out = formatFailures(step, false);
+    expect(out).not.toContain("[object Object]");
+    expect(out).toContain('missing required field "name"');
+    expect(out).toContain("expected required: [id, slug, name]");
+  });
+
+  test("non-schema actual objects render as JSON, not [object Object]", () => {
+    const step = makeStep({
+      status: "fail",
+      assertions: [
+        { field: "body", rule: "equals", passed: false, actual: { a: 1 }, expected: { a: 2 } },
+      ],
+    });
+    const out = formatFailures(step, false);
+    expect(out).not.toContain("[object Object]");
+    expect(out).toContain('{"a":1}');
+  });
+
   test("returns empty for step with no failures", () => {
     const step = makeStep({
       status: "fail",

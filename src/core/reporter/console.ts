@@ -75,16 +75,28 @@ export function formatFailures(step: StepResult, color: boolean): string {
 
   const failed = step.assertions.filter((a) => !a.passed);
   for (const a of failed) {
-    const msg = `${a.field}: expected ${a.rule} but got ${formatValue(a.actual)}`;
+    const msg = formatAssertion(a);
     lines.push(color ? `    ${RED}${msg}${RESET}` : `    ${msg}`);
   }
   return lines.join("\n");
+}
+
+function formatAssertion(a: { field: string; rule: string; actual: unknown; expected: unknown; kind?: string }): string {
+  // Schema assertions already carry a humanised `expected` string ("missing
+  // required field …", "type integer", …). Use it directly — interpolating
+  // the actual subtree via String() turns into "[object Object]" and buries
+  // the actionable detail (TASK-277).
+  if (a.kind === "schema" && typeof a.expected === "string") {
+    return `${a.field}: ${a.expected}`;
+  }
+  return `${a.field}: expected ${a.rule} but got ${formatValue(a.actual)}`;
 }
 
 function formatValue(value: unknown): string {
   if (value === undefined) return "undefined";
   if (value === null) return "null";
   if (typeof value === "string") return `"${value}"`;
+  if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
 
