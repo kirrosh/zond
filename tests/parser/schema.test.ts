@@ -269,4 +269,29 @@ describe("validateSuite", () => {
     });
     expect(suite.parameterize).toEqual({ endpoint: ["/a", "/b"] });
   });
+
+  // TASK-244 / TASK-257 — body-key hints: error message lists json/form/multipart
+  // so users with file-upload endpoints find the multipart syntax immediately.
+  describe("body-key hints", () => {
+    test("'raw:' rejects with hint mentioning multipart for file upload", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "upload", POST: "/files", raw: "...", expect: {} } as unknown as Record<string, unknown>],
+      })).toThrow(/multipart: \{ field: \{ file: <path> \} \}/);
+    });
+
+    test("'body:' rejects with hint mentioning all three formats", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "post", POST: "/x", body: { k: "v" }, expect: {} } as unknown as Record<string, unknown>],
+      })).toThrow(/json.*form.*multipart/);
+    });
+
+    test("'payload:' rejects with json suggestion", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "p", POST: "/x", payload: { k: "v" }, expect: {} } as unknown as Record<string, unknown>],
+      })).toThrow(/Did you mean 'json'/);
+    });
+  });
 });

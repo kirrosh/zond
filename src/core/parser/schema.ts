@@ -195,10 +195,13 @@ const KNOWN_STEP_KEYS = new Set([
 // POST that follows, but the user spends 10+ minutes debugging — this hint
 // turns it into a one-line fix. (TASK-244)
 const BODY_KEY_HINTS: Record<string, string> = {
-  body: "json (for application/json) or form/multipart for non-JSON bodies",
-  data: "json (for application/json) or form for application/x-www-form-urlencoded",
+  body: "json (for application/json), form (urlencoded), or multipart (file upload)",
+  data: "json (for application/json) or form (urlencoded)",
   payload: "json",
-  raw: "json (raw bodies are not supported; serialize to JSON or use form)",
+  // TASK-257: previous hint pointed only at `form:` which is x-www-form-urlencoded
+  // and useless for file uploads. Surface `multipart:` explicitly so users with
+  // file-upload endpoints (Sentry release artifacts, etc.) find it.
+  raw: "json for raw JSON, multipart: { field: { file: <path> } } for file upload, or form for urlencoded — raw bodies are not parsed",
 };
 
 const TestStepSchema: z.ZodType<TestStep> = z.preprocess(

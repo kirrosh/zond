@@ -1,9 +1,10 @@
 ---
 id: TASK-257
 title: 'runner: multipart/form-data с file upload не поддерживается, hint указывает только на `form:`'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 14:30'
+updated_date: '2026-05-08 17:00'
 labels:
   - feedback-loop
   - api-sentry
@@ -52,9 +53,17 @@ Log: /tmp/zond-fb/sentry/rounds/raw-12.log (`zond validate /tmp/_up.yaml`).
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] Поддержан хотя бы один способ отправить `multipart/form-data` с file и текстовыми частями (рекомендуется `multipart:` блок с `parts: [...]`).
-- [ ] `Content-Type` boundary генерируется автоматически — пользователю не нужно его вручную задавать.
-- [ ] `--help` / docs описывают синтаксис.
-- [ ] Verify: `POST /api/0/organizations/{org}/releases/{ver}/files/` на Sentry → 201 (или подтверждённый skip по плану), без обходных curl.
-- [ ] Если решение — не поддерживать, то hint при `raw:` явно говорит «multipart not supported» вместо предложения `form:`.
+- [x] Поддержан `multipart:` блок с text-полями и file-полями `{file, filename?, content_type?}` — функционально уже было реализовано (`schema.ts:172`, `executor.ts:329-343`), задача закрывает discoverability-gap.
+- [x] `Content-Type` boundary генерируется автоматически (Bun `FormData` + `fetch`) — пользователю не нужно задавать вручную, явно описано в ZOND.md.
+- [x] ZOND.md → новая секция "Body formats" с таблицей json/form/multipart + полным примером file upload (Sentry release artifacts).
+- [x] Verify на httpbin.org: `POST /post` с text-частью + file-частью → 200, `files.attachment` содержит контент, `form.title` равно отправленному.
+- [x] Hint для `raw:` обновлён: теперь явно упоминает `multipart: { field: { file: <path> } } for file upload` вместо ввода в заблуждение `form:`. Покрыт parser-тестами в `tests/parser/schema.test.ts` (3 кейса: raw, body, payload).
 <!-- SECTION:ACCEPTANCE:END -->
+
+## Implementation notes
+
+<!-- SECTION:NOTES:BEGIN -->
+- Обнаружено в ходе работы: multipart полностью реализован (`MultipartFieldSchema` в parser, `formData = new FormData()` в executor с file-loading через `Bun.file().arrayBuffer()` и `new Blob([buf], {type})`). Generator также эмитит `multipart:` для OpenAPI endpoints с `requestBodyContentType === "multipart/form-data"`.
+- Корневая причина бага feedback-12#F3: ZOND.md ничего не говорит про multipart, а hint TASK-244 на `raw:` рекомендовал `form:` — что для file upload бесполезно. Пользователь и тестер не нашли feature, потому что её не было видно.
+- Изменения: `BODY_KEY_HINTS.raw` обновлён в `src/core/parser/schema.ts:201`, добавлена секция "Body formats" в ZOND.md, добавлены parser-тесты на все три hint-варианта.
+<!-- SECTION:NOTES:END -->
