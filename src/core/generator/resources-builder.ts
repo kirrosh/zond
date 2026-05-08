@@ -63,6 +63,14 @@ function epLabel(ep: EndpointInfo): string {
   return `${ep.method.toUpperCase()} ${ep.path}`;
 }
 
+function pathStripSlash(p: string): string {
+  return p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p;
+}
+
+function isParamSeg(seg: string | undefined): boolean {
+  return !!seg && /^\{[^}]+\}$/.test(seg);
+}
+
 function getCaptureField(create: EndpointInfo): string {
   // Look at the create endpoint's success response schema for an `id`-ish
   // field. Falls back to "id" — the universal default.
@@ -77,9 +85,100 @@ function getCaptureField(create: EndpointInfo): string {
   return "id";
 }
 
-function inferFkOwner(paramName: string, allResources: string[]): string | null {
-  // `audience_id` → match `audiences`; `contact_id` → `contacts`. Strips
-  // common id-suffixes (_id, Id) and compound variants like _id_or_slug.
+/**
+ * Structurally infer the list-endpoint that owns each path-parameter by
+ * walking the actual URL graph in the spec. Beats name-stemming because
+ *
+ *  • `_id_or_slug`, `_or_name`, non-English plurals, weird casing — all
+ *    transparent: we only look at segment positions, not at param names.
+ *  • Returns the *exact* GET path to call, not a guessed resource name we
+ *    later have to hope is wired up correctly.
+ *  • Two-strategy lookup so it survives both canonical nesting
+ *    (`/orgs/{org}/projects/{proj}/...` — prev seg `projects` is a list)
+ *    and Sentry-style sibling-param chains
+ *    (`/projects/{org}/{proj}/...` — prev seg is itself a param;
+ *    we walk back to the nearest non-param segment and search for any
+ *    GET path ending with that hint).
+ */
+export function resolveOwnerListPaths(endpoints: EndpointInfo[]): Map<string, string> {
+  const getPathSet = new Set<string>();
+  const getPathsByLastSeg = new Map<string, string[]>();
+  for (const ep of endpoints) {
+    if (ep.method.toUpperCase() !== "GET" || ep.deprecated) continue;
+    const path = pathStripSlash(ep.path);
+    getPathSet.add(path);
+    const segs = path.split("/").filter(Boolean);
+    const last = segs[segs.length - 1];
+    if (last && !isParamSeg(last)) {
+      const arr = getPathsByLastSeg.get(last) ?? [];
+      arr.push(path);
+      getPathsByLastSeg.set(last, arr);
+    }
+  }
+
+  const result = new Map<string, string>();
+  const consider = (param: string, candidate: string) => {
+    const existing = result.get(param);
+    // Prefer shorter (more canonical/top-level) list path.
+    if (!existing || candidate.length < existing.length) result.set(param, candidate);
+  };
+
+  for (const ep of endpoints) {
+    if (ep.deprecated) continue;
+    const segs = pathStripSlash(ep.path).split("/");
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i]!;
+      const m = /^\{([^}]+)\}$/.exec(seg);
+      if (!m) continue;
+      const param = m[1]!;
+      const prevSeg = segs[i - 1];
+
+      // Strategy 1 (canonical): prev seg is a non-param noun and the
+      // prefix up to (but not including) `{param}` is a GET endpoint.
+      if (prevSeg && !isParamSeg(prevSeg)) {
+        const prefix = segs.slice(0, i).join("/");
+        if (getPathSet.has(prefix)) {
+          consider(param, prefix);
+          continue;
+        }
+      }
+
+      // Strategy 2 (sibling-param chain): walk back to the nearest
+      // non-param segment, then look for *any* GET path that terminates
+      // with that segment. Pick the shortest match.
+      let hint: string | undefined;
+      for (let j = i - 1; j >= 0; j--) {
+        const s = segs[j]!;
+        if (!isParamSeg(s) && s !== "") {
+          hint = s;
+          break;
+        }
+      }
+      if (!hint) continue;
+      const candidates = getPathsByLastSeg.get(hint);
+      if (!candidates || candidates.length === 0) continue;
+      const shortest = candidates.reduce((a, b) => (a.length <= b.length ? a : b));
+      consider(param, shortest);
+    }
+  }
+
+  return result;
+}
+
+function listPathToResourceName(listPath: string): string {
+  const segs = pathStripSlash(listPath).split("/").filter(Boolean);
+  for (let i = segs.length - 1; i >= 0; i--) {
+    if (!isParamSeg(segs[i])) return segs[i]!;
+  }
+  return "resource";
+}
+
+/**
+ * Body-FK fallback. Used only when a body field's name doesn't appear
+ * as a path-param anywhere (so the structural resolver has nothing to
+ * say). Cheap heuristic — kept narrow on purpose.
+ */
+function inferFkOwnerByName(paramName: string, allResources: string[]): string | null {
   const stem = paramName
     .replace(/_id_or_slug$|_id_or_name$|_or_slug$|_or_name$/, "")
     .replace(/_id$|Id$|_uuid$|_slug$/, "")
@@ -94,51 +193,51 @@ function inferFkOwner(paramName: string, allResources: string[]): string | null 
   return null;
 }
 
-function collectFkDependencies(
-  group: CrudGroup,
-  allResources: string[],
+function collectPathFkDeps(
+  basePath: string,
+  idParam: string,
+  ownerListPaths: Map<string, string>,
+  resourceByListPath: Map<string, string>,
 ): ResourceFkRef[] {
   const deps: ResourceFkRef[] = [];
   const seen = new Set<string>();
-
-  // Path-param dependencies on basePath (e.g. /audiences/{audience_id}/contacts).
-  // Skip the resource's own idParam — that's the resource itself, not a dep.
   const pathParamRe = /\{([^}]+)\}/g;
   let match: RegExpExecArray | null;
-  while ((match = pathParamRe.exec(group.basePath)) !== null) {
+  while ((match = pathParamRe.exec(basePath)) !== null) {
     const param = match[1]!;
-    if (param === group.idParam) continue;
-    if (seen.has(`path:${param}`)) continue;
-    seen.add(`path:${param}`);
-    deps.push({
-      var: param,
-      param,
-      in: "path",
-      ownerResource: inferFkOwner(param, allResources),
-    });
+    if (param === idParam) continue;
+    if (seen.has(param)) continue;
+    seen.add(param);
+    const listPath = ownerListPaths.get(param);
+    const ownerResource = listPath ? (resourceByListPath.get(listPath) ?? null) : null;
+    deps.push({ var: param, param, in: "path", ownerResource });
   }
+  return deps;
+}
 
-  // Body-level FKs on create payload — fields named *_id / *_uuid that
-  // aren't generated server-side. Heuristic, not exhaustive.
-  if (group.create?.requestBodySchema) {
-    const schema = group.create.requestBodySchema as OpenAPIV3.SchemaObject;
-    const props = (schema.properties ?? {}) as Record<string, OpenAPIV3.SchemaObject>;
-    const required = new Set(schema.required ?? []);
-    for (const [name] of Object.entries(props)) {
-      if (!/_id$|Id$|_uuid$/.test(name)) continue;
-      if (!required.has(name)) continue;
-      const key = `body:${name}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      deps.push({
-        var: name,
-        param: name,
-        in: "body",
-        ownerResource: inferFkOwner(name, allResources),
-      });
-    }
+function collectBodyFkDeps(
+  group: CrudGroup,
+  ownerListPaths: Map<string, string>,
+  resourceByListPath: Map<string, string>,
+  allResources: string[],
+): ResourceFkRef[] {
+  const deps: ResourceFkRef[] = [];
+  if (!group.create?.requestBodySchema) return deps;
+  const schema = group.create.requestBodySchema as OpenAPIV3.SchemaObject;
+  const props = (schema.properties ?? {}) as Record<string, OpenAPIV3.SchemaObject>;
+  const required = new Set(schema.required ?? []);
+  for (const [name] of Object.entries(props)) {
+    if (!/_id$|Id$|_uuid$/.test(name)) continue;
+    if (!required.has(name)) continue;
+    // Try structural resolution first (the body field name often matches a
+    // path-param elsewhere — `audience_id` body field, `audience_id` path
+    // param both point at /audiences/). Fall back to name-stemming.
+    let ownerResource: string | null = null;
+    const listPath = ownerListPaths.get(name);
+    if (listPath) ownerResource = resourceByListPath.get(listPath) ?? null;
+    if (!ownerResource) ownerResource = inferFkOwnerByName(name, allResources);
+    deps.push({ var: name, param: name, in: "body", ownerResource });
   }
-
   return deps;
 }
 
@@ -149,9 +248,54 @@ export interface BuildResourcesParams {
 
 export function buildApiResourceMap(params: BuildResourcesParams): ApiResourceMap {
   const groups = detectCrudGroups(params.endpoints);
-  const resourceNames = groups.map(g => g.resource);
+  const ownerListPaths = resolveOwnerListPaths(params.endpoints);
 
-  const resources: ApiResourceEntry[] = groups.map(g => {
+  // Index CRUD-group list paths by normalised path so the FK resolver can
+  // hand back the resource name a structural lookup pointed at.
+  const resourceByListPath = new Map<string, string>();
+  for (const g of groups) {
+    if (g.list) resourceByListPath.set(pathStripSlash(g.list.path), g.resource);
+  }
+
+  // Imp resources: any list path that path-FKs point at structurally but
+  // no CRUD group claims (top-level GET-only collections like
+  // `/api/0/organizations/`, nested list-only collections, etc.). Without
+  // these, every FK that depends on a non-CRUD parent ends up with
+  // `ownerResource: null` and `discover` skips them — the actual root
+  // cause of the "discover --apply is a no-op" symptom.
+  const implicitResources: ApiResourceEntry[] = [];
+  const seenImplicit = new Set<string>();
+  for (const [, listPath] of ownerListPaths) {
+    if (resourceByListPath.has(listPath)) continue;
+    if (seenImplicit.has(listPath)) continue;
+    seenImplicit.add(listPath);
+    const listEp = params.endpoints.find(
+      e =>
+        e.method.toUpperCase() === "GET" &&
+        !e.deprecated &&
+        pathStripSlash(e.path) === listPath,
+    );
+    if (!listEp) continue;
+    const name = listPathToResourceName(listPath);
+    implicitResources.push({
+      resource: name,
+      basePath: listPath,
+      itemPath: "",
+      idParam: "",
+      captureField: "id",
+      hasFullCrud: false,
+      endpoints: { list: epLabel(listEp) },
+      fkDependencies: [],
+    });
+    resourceByListPath.set(listPath, name);
+  }
+
+  const resourceNames = [
+    ...groups.map(g => g.resource),
+    ...implicitResources.map(r => r.resource),
+  ];
+
+  const crudResources: ApiResourceEntry[] = groups.map(g => {
     const captureField = g.create ? getCaptureField(g.create) : "id";
     const requiresEtag = !!(g.update?.requiresEtag || g.delete?.requiresEtag);
     return {
@@ -169,13 +313,26 @@ export function buildApiResourceMap(params: BuildResourcesParams): ApiResourceMa
         ...(g.delete ? { delete: epLabel(g.delete) } : {}),
       },
       ...(requiresEtag ? { requiresEtag: true } : {}),
-      fkDependencies: collectFkDependencies(g, resourceNames),
+      fkDependencies: [
+        ...collectPathFkDeps(g.basePath, g.idParam, ownerListPaths, resourceByListPath),
+        ...collectBodyFkDeps(g, ownerListPaths, resourceByListPath, resourceNames),
+      ],
     };
   });
 
+  // Implicit resources also chain — `/orgs/{org}/projects/` lists projects
+  // but needs `organization_id_or_slug` set to call. Surface that so
+  // `discover` knows to fetch the parent first.
+  for (const r of implicitResources) {
+    r.fkDependencies = collectPathFkDeps(r.basePath, "", ownerListPaths, resourceByListPath);
+  }
+
+  const resources = [...crudResources, ...implicitResources];
+
   // Endpoints that aren't in any CRUD group — RPC-style actions, webhook
-  // accept-only routes, etc. The skill should know these exist so it
-  // doesn't think the API is fully covered by the CRUD map.
+  // accept-only routes, etc. Implicit-list endpoints stay in orphans
+  // because they're not full CRUD; they're surfaced through resources for
+  // discovery purposes only.
   const claimedEps = new Set<string>();
   for (const g of groups) {
     if (g.list) claimedEps.add(epLabel(g.list));
