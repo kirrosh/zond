@@ -161,6 +161,9 @@ export interface CleanFilter {
 export function selectEntries(manifest: Manifest, filter: CleanFilter): ManifestEntry[] {
   const out: ManifestEntry[] = [];
   for (const e of manifest.generated) {
+    // spec.json is the source-of-truth snapshot downloaded from the network.
+    // It is never auto-deleted — removal requires manual action or re-adding the API.
+    if (e.category === "spec") continue;
     if (filter.all) {
       out.push(e);
       continue;
