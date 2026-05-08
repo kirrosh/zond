@@ -266,11 +266,22 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
     return "{{$randomSlug}}";
   }
 
+  // Description-aware: when the schema describes a domain/hostname (Resend
+  // `POST /domains/`, Cloudflare zones, etc.) but the field is generically
+  // named `name`, the default `{{$randomName}}` returns "Bob Wilson" and the
+  // server rejects it. TASK-224.
+  if (schema.description && /\b(domain|hostname|fqdn)\b/i.test(schema.description)) {
+    return "{{$randomDomain}}";
+  }
+
   // Name-based heuristics
   if (name) {
     const lower = name.toLowerCase();
     if (lower === "slug" || lower.endsWith("_slug")) {
       return "{{$randomSlug}}";
+    }
+    if (lower === "domain" || lower === "hostname" || lower === "fqdn" || lower.endsWith("_domain")) {
+      return "{{$randomDomain}}";
     }
     // Closed-vocabulary fields where servers validate against an internal
     // dictionary even when the spec lacks `enum:`. Random strings → 400.

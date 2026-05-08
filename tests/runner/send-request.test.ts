@@ -118,6 +118,46 @@ describe("send-request — resolveAdHocRequest (TASK-200)", () => {
     expect(resolved.url).toBe("https://api.example.com/users/1");
   });
 
+  // TASK-231: --api with auth_token in env auto-injects Authorization
+  test("auto-injects Authorization: Bearer when --api env has auth_token", async () => {
+    writeFileSync(join(ws.path, ".env.yaml"), "base_url: https://api.example.com\nauth_token: sntryu_abc123\n");
+    getDb(dbPath);
+    createCollection({ name: "demo", test_path: ws.path, base_dir: ws.path });
+    const resolved = await resolveAdHocRequest({
+      method: "GET",
+      url: "/whoami",
+      collectionName: "demo",
+      dbPath,
+      searchDir: ws.path,
+    });
+    expect(resolved.headers.Authorization).toBe("Bearer sntryu_abc123");
+  });
+
+  test("user-supplied Authorization header wins over auto-injection", async () => {
+    writeFileSync(join(ws.path, ".env.yaml"), "base_url: https://api.example.com\nauth_token: ignored\n");
+    getDb(dbPath);
+    createCollection({ name: "demo", test_path: ws.path, base_dir: ws.path });
+    const resolved = await resolveAdHocRequest({
+      method: "GET",
+      url: "/whoami",
+      headers: { Authorization: "Bearer override-token" },
+      collectionName: "demo",
+      dbPath,
+      searchDir: ws.path,
+    });
+    expect(resolved.headers.Authorization).toBe("Bearer override-token");
+  });
+
+  test("no auth injection without --api even when auth_token in cwd env", async () => {
+    writeFileSync(join(ws.path, ".env.yaml"), "auth_token: leaked\n");
+    const resolved = await resolveAdHocRequest({
+      method: "GET",
+      url: "https://api.example.com/x",
+      searchDir: ws.path,
+    });
+    expect(resolved.headers.Authorization).toBeUndefined();
+  });
+
   test("auto-detects Content-Type: application/json for JSON bodies", async () => {
     const resolved = await resolveAdHocRequest({
       method: "POST",

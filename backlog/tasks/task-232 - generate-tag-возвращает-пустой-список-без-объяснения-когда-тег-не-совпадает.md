@@ -1,7 +1,7 @@
 ---
 id: TASK-232
 title: generate --tag возвращает пустой список без объяснения когда тег не совпадает
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 07:56'
 labels:

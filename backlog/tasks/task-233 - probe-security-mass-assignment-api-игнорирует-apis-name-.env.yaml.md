@@ -1,7 +1,7 @@
 ---
 id: TASK-233
 title: probe security/mass-assignment --api игнорирует apis/<name>/.env.yaml
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 07:56'
 labels:

@@ -14,7 +14,7 @@ import {
   findUnresolvedVars,
   detectCrudGroupsWithDiagnostics,
 } from "../../core/generator/suite-generator.ts";
-import { filterByTag } from "../../core/generator/chunker.ts";
+import { filterByTag, collectTags } from "../../core/generator/chunker.ts";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import { printError, printSuccess } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
@@ -131,15 +131,33 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
     }
 
     // Filter by tag
+    let tagDiagnostic: string | undefined;
     if (options.tag) {
+      const beforeTag = endpoints;
       endpoints = filterByTag(endpoints, options.tag);
+      // TASK-232: when --tag matches nothing, show the available tags so the
+      // user can tell "typo" apart from "spec really has no endpoints here".
+      // Cheap nearest-match: pick the first tag containing or contained-by the
+      // requested string (case-insensitive); covers "Members" → "Member".
+      if (endpoints.length === 0 && beforeTag.length > 0) {
+        const available = collectTags(beforeTag);
+        const wanted = options.tag.trim().toLowerCase();
+        const closest = available.find(t => {
+          const tl = t.toLowerCase();
+          return tl.includes(wanted) || wanted.includes(tl);
+        });
+        const hint = closest ? ` (did you mean ${closest}?)` : "";
+        const list = available.length > 0 ? available.join(", ") : "(none)";
+        tagDiagnostic = `No endpoints with tag '${options.tag}'${hint}. Available tags: ${list}`;
+      }
     }
 
     if (endpoints.length === 0) {
+      const message = tagDiagnostic ?? "No endpoints to generate tests for";
       if (options.json) {
-        printJson(jsonOk("generate", { files: [], message: "No endpoints to generate tests for" }, warnings));
+        printJson(jsonOk("generate", { files: [], message }, warnings));
       } else {
-        console.log("No endpoints to generate tests for.");
+        console.log(`${message}.`);
       }
       return 0;
     }

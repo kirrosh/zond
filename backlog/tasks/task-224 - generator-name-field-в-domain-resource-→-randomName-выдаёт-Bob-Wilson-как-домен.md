@@ -3,7 +3,7 @@ id: TASK-224
 title: >-
   generator: name field в domain-resource → randomName выдаёт 'Bob Wilson' как
   домен
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 14:56'
 labels:
