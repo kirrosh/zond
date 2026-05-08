@@ -513,10 +513,16 @@ the second call — note as *project decision*, not a bug.
 ## Phase 6 — Coverage report & spec drift
 
 ```bash
+zond coverage --api <name>                         # latest run; covered = endpoint had a passing 2xx
+zond coverage --api <name> --run-id <id>           # pin a specific run
 zond coverage --api <name> --fail-on-coverage 80
-zond coverage --api <name> --run-id <id>           # per-run
 zond refresh-api <name> --spec <new-spec>          # re-snapshot when upstream spec changed
 ```
+
+Coverage is run-driven: an endpoint counts as covered only when a stored
+result on it landed `pass` + 2xx. Smoke, CRUD, probes, anything stored in
+`zond.db` contributes equally. If the latest run is the wrong one, pin
+with `--run-id`.
 
 ## Phase 7 — Share findings
 
