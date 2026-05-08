@@ -39,8 +39,8 @@ function buildRunFilterSQL(filters: RunFilters): { where: string; params: unknow
 export function createRun(opts: CreateRunOpts): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch, collection_id, session_id)
-    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch, $collection_id, $session_id)
+    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch, collection_id, session_id, tags)
+    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch, $collection_id, $session_id, $tags)
   `);
   const result = stmt.run({
     $started_at: opts.started_at,
@@ -50,8 +50,29 @@ export function createRun(opts: CreateRunOpts): number {
     $branch: opts.branch ?? null,
     $collection_id: opts.collection_id ?? null,
     $session_id: opts.session_id ?? null,
+    $tags: opts.tags && opts.tags.length > 0 ? JSON.stringify(opts.tags) : null,
   });
   return Number(result.lastInsertRowid);
+}
+
+/** Decode the JSON-encoded `tags` column into a string array. Returns null
+ *  if the column is null or unparseable (legacy rows / corruption). */
+function decodeTags(raw: unknown): string[] | null {
+  if (raw == null) return null;
+  if (typeof raw !== "string") return null;
+  try {
+    const v = JSON.parse(raw);
+    if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function decodeRunRow(row: unknown): RunRecord | null {
+  if (!row || typeof row !== "object") return null;
+  const r = row as Record<string, unknown> & { tags?: unknown };
+  return { ...(r as unknown as RunRecord), tags: decodeTags(r.tags) };
 }
 
 export function finalizeRun(runId: number, results: TestRunResult[]): void {
@@ -88,7 +109,44 @@ export function finalizeRun(runId: number, results: TestRunResult[]): void {
 
 export function getRunById(runId: number): RunRecord | null {
   const db = getDb();
-  return db.query("SELECT * FROM runs WHERE id = ?").get(runId) as RunRecord | null;
+  const row = db.query("SELECT * FROM runs WHERE id = ?").get(runId);
+  return decodeRunRow(row);
+}
+
+/** TASK-274: list runs of a collection with optional time-window or
+ *  tag-membership filters, ordered by started_at ASC (matches the
+ *  session-based loader so coverage union order is stable). NULL collection
+ *  is intentionally excluded — for tag/since selectors the user has
+ *  pinpointed an API, ad-hoc/probe runs should be tagged or use --union
+ *  session to be picked up. */
+export function listRunsByCollectionFiltered(
+  collectionId: number,
+  filters: { since?: string; tag?: string; limit?: number },
+): RunRecord[] {
+  const db = getDb();
+  const clauses: string[] = ["collection_id = ?", "finished_at IS NOT NULL"];
+  const params: unknown[] = [collectionId];
+  if (filters.since) {
+    clauses.push("started_at >= ?");
+    params.push(filters.since);
+  }
+  if (filters.tag) {
+    // tags is a JSON array of strings — match exact element via LIKE on the
+    // serialised form. Cheap and correct for our small N (one row per run);
+    // a JSON1-table-function approach would be overkill here.
+    clauses.push("tags LIKE ?");
+    params.push(`%"${filters.tag.replace(/[\\%_]/g, "\\$&")}"%`);
+  }
+  const limitClause = filters.limit && filters.limit > 0 ? ` LIMIT ${filters.limit}` : "";
+  const rows = db.query(
+    `SELECT * FROM runs WHERE ${clauses.join(" AND ")} ORDER BY started_at ASC${limitClause}`,
+  ).all(...(params as (string | number)[]));
+  const out: RunRecord[] = [];
+  for (const r of rows) {
+    const decoded = decodeRunRow(r);
+    if (decoded) out.push(decoded);
+  }
+  return out;
 }
 
 export function listRuns(limit = 20, offset = 0, filters?: RunFilters): RunSummary[] {

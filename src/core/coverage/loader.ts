@@ -9,7 +9,7 @@
  */
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { findCollectionByNameOrId, getLatestRunByCollection, getResultsByRunId, getRunById, listRunsBySession } from "../../db/queries.ts";
+import { findCollectionByNameOrId, getLatestRunByCollection, getResultsByRunId, getRunById, listRunsBySession, listRunsByCollectionFiltered } from "../../db/queries.ts";
 import type { RunRecord } from "../../db/queries.ts";
 import { assertLocalSpec } from "../setup-api.ts";
 import { readOpenApiSpec, extractEndpoints } from "../generator/openapi-reader.ts";
@@ -33,6 +33,14 @@ export interface CoverageLoadOptions {
   /** TASK-255: when set, expanded to all runs in the session (filtered to
    *  this collection). Wins over `runIds` and `runId`. */
   sessionId?: string;
+  /** TASK-274: ISO timestamp lower bound (inclusive) — fold every run of
+   *  this collection started at-or-after this point. Wins over `runIds`
+   *  and `runId`, loses to `sessionId`. */
+  sinceIso?: string;
+  /** TASK-274: tag membership filter — fold every run of this collection
+   *  whose stored `tags` JSON contains this name. Wins over `runIds`
+   *  and `runId`, loses to `sessionId` / `sinceIso`. */
+  tag?: string;
   profile?: "safe" | "full";
   tagFilter?: string[];
   /** Override workspace root (defaults to findWorkspaceRoot). */
@@ -51,6 +59,10 @@ export interface CoverageLoadResult {
    *  ordered by started_at ascending. Single-element when no union flags
    *  were used. */
   runs: RunRecord[];
+  /** TASK-274: which selector resolved the run set, for diagnostics and
+   *  the JSON envelope (`union_mode`). null when only a single run
+   *  contributed and no union selector was used. */
+  unionMode: "session" | "since" | "tag" | "runs" | null;
   profile: "safe" | "full";
   tagFilter: string[];
   ephemeralCount: number;
@@ -97,10 +109,11 @@ export async function loadCoverage(options: CoverageLoadOptions): Promise<Covera
   const endpoints = extractEndpoints(doc);
 
   // Resolve which runs contribute results. Precedence:
-  // sessionId > runIds > runId > latest. Filter session runs by collection
-  // so a coverage call for `--api foo` doesn't accidentally include another
-  // collection's runs that share the session.
+  // sessionId > sinceIso > tag > runIds > runId > latest. since:/tag: are
+  // filtered to this collection only — the user has named an API, so they
+  // want runs of that API, not every collection that happens to share a tag.
   let runs: RunRecord[] = [];
+  let unionMode: "session" | "since" | "tag" | "runs" | null = null;
   if (options.sessionId) {
     const sessRuns = listRunsBySession(options.sessionId);
     // Include runs whose collection matches AND runs with NULL collection_id —
@@ -112,10 +125,18 @@ export async function loadCoverage(options: CoverageLoadOptions): Promise<Covera
       .filter((r) => r.collection_id === collection.id || r.collection_id == null)
       .map((r) => getRunById(r.id))
       .filter((r): r is RunRecord => r !== null);
+    unionMode = "session";
+  } else if (options.sinceIso) {
+    runs = listRunsByCollectionFiltered(collection.id, { since: options.sinceIso });
+    unionMode = "since";
+  } else if (options.tag) {
+    runs = listRunsByCollectionFiltered(collection.id, { tag: options.tag });
+    unionMode = "tag";
   } else if (options.runIds && options.runIds.length > 0) {
     runs = options.runIds
       .map((id) => getRunById(id))
       .filter((r): r is RunRecord => r !== null);
+    unionMode = "runs";
   } else if (options.runId != null) {
     const r = getRunById(options.runId);
     if (r) runs = [r];
@@ -151,6 +172,7 @@ export async function loadCoverage(options: CoverageLoadOptions): Promise<Covera
     matrix,
     run,
     runs,
+    unionMode,
     profile,
     tagFilter,
     ephemeralCount: ephemeralEndpoints.size,

@@ -537,16 +537,29 @@ the second call — note as *project decision*, not a bug.
 ## Phase 6 — Coverage report & spec drift
 
 ```bash
-zond coverage --api <name>                         # latest run; covered = endpoint had a passing 2xx
-zond coverage --api <name> --run-id <id>           # pin a specific run
+zond coverage --api <name>                              # latest run; covered = endpoint had a passing 2xx
+zond coverage --api <name> --run-id <id>                # pin a specific run
 zond coverage --api <name> --fail-on-coverage 80
-zond refresh-api <name> --spec <new-spec>          # re-snapshot when upstream spec changed
+zond coverage --api <name> --union session              # tests-run + probes-run from one `session start` block
+zond coverage --api <name> --union since:24h            # every run of the API in the last 24h
+zond coverage --api <name> --union tag:smoke            # every run whose suites carried `tags: [smoke]`
+zond coverage --api <name> --union runs:58,59           # explicit list (release-vs-release)
+zond refresh-api <name> --spec <new-spec>               # re-snapshot when upstream spec changed
 ```
 
 Coverage is run-driven: an endpoint counts as covered only when a stored
 result on it landed `pass` + 2xx. Smoke, CRUD, probes, anything stored in
 `zond.db` contributes equally. If the latest run is the wrong one, pin
-with `--run-id`.
+with `--run-id`. To aggregate across runs use `--union`:
+
+- `session` — every run in the active (or `--session-id <id>`) session.
+- `since:<dur>` — time-window (`1h`/`24h`/`7d`/`30m`); CI "last-day coverage".
+- `tag:<name>` — every run whose stored tags include `<name>` (suite-level
+  `tags:` plus any explicit `--tag <x>` from `zond run` are persisted on the
+  run row).
+- `runs:<id1,id2,…>` — explicit list (a bare `<id1,id2,…>` is also accepted).
+
+JSON envelope carries `union_mode` and `runIds[]` for downstream tooling.
 
 ## Phase 7 — Share findings
 

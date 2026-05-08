@@ -30,12 +30,23 @@ export function getCollectionById(id: number): CollectionRecord | null {
 
 export function getLatestRunByCollection(collectionId: number): RunRecord | null {
   const db = getDb();
-  return db.query(`
+  const row = db.query(`
     SELECT * FROM runs
     WHERE collection_id = ? AND finished_at IS NOT NULL
     ORDER BY started_at DESC
     LIMIT 1
-  `).get(collectionId) as RunRecord | null;
+  `).get(collectionId) as (Record<string, unknown> & { tags?: unknown }) | null;
+  if (!row) return null;
+  let tags: string[] | null = null;
+  if (typeof row.tags === "string") {
+    try {
+      const v = JSON.parse(row.tags);
+      if (Array.isArray(v) && v.every((x) => typeof x === "string")) tags = v;
+    } catch {
+      // legacy/corrupt — leave null
+    }
+  }
+  return { ...(row as unknown as RunRecord), tags };
 }
 
 export function listCollections(): CollectionSummary[] {

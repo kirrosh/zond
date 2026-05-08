@@ -67,7 +67,7 @@ function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -84,7 +84,8 @@ const SCHEMA = `
     environment   TEXT,
     duration_ms   INTEGER,
     collection_id INTEGER REFERENCES collections(id),
-    session_id    TEXT
+    session_id    TEXT,
+    tags          TEXT
   );
 
   CREATE TABLE IF NOT EXISTS results (
@@ -209,6 +210,12 @@ function runMigrations(db: Database): void {
       db.exec("DROP TABLE IF EXISTS chat_messages");
       db.exec("DROP TABLE IF EXISTS chat_sessions");
       db.exec("DROP TABLE IF EXISTS ai_generations");
+    }
+    if (ver >= 8 && ver < 9) {
+      // Migration v8→v9: tags column on runs (JSON array of strings — union
+      // of suite-level tags actually executed in the run, plus any explicit
+      // --tag filters). Powers `coverage --union tag:<name>` (TASK-274).
+      db.exec("ALTER TABLE runs ADD COLUMN tags TEXT");
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

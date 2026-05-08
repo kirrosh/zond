@@ -14,6 +14,10 @@ export interface CoverageOptions {
   runIds?: number[];
   /** TASK-255: union across all runs in a session (filtered to the API). */
   sessionId?: string;
+  /** TASK-274: union across all runs of the API started after this ISO ts. */
+  sinceIso?: string;
+  /** TASK-274: union across all runs of the API tagged <tag>. */
+  tag?: string;
   json?: boolean;
 }
 
@@ -71,6 +75,8 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
   const cov = await loadCoverage({
     apiName: options.apiName!,
     ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    ...(options.sinceIso ? { sinceIso: options.sinceIso } : {}),
+    ...(options.tag ? { tag: options.tag } : {}),
     ...(options.runIds && options.runIds.length > 0 ? { runIds: options.runIds } : {}),
     ...(options.runId != null ? { runId: options.runId } : {}),
   });
@@ -104,9 +110,16 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
   if (!options.json) {
     const color = useColor();
     let runLabel: string;
-    if (cov.runs.length === 0) runLabel = " — no runs yet";
+    if (cov.runs.length === 0) {
+      runLabel = cov.unionMode
+        ? ` — no runs match --union ${cov.unionMode}`
+        : " — no runs yet";
+    }
     else if (cov.runs.length === 1) runLabel = ` — Run #${cov.runs[0]!.id}`;
-    else runLabel = ` — union of ${cov.runs.length} runs (#${cov.runs.map(r => r.id).join(", #")})`;
+    else {
+      const modeLabel = cov.unionMode ? ` ${cov.unionMode}` : "";
+      runLabel = ` — union${modeLabel} of ${cov.runs.length} runs (#${cov.runs.map(r => r.id).join(", #")})`;
+    }
     console.log(`Coverage: ${coveredCount}/${total} endpoints (${percentage}%)${runLabel}`);
     console.log("");
 
@@ -144,6 +157,7 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
       percentage,
       runId: cov.run?.id ?? null,
       runIds: cov.runs.map((r) => r.id),
+      union_mode: cov.unionMode,
       coveredEndpoints: coveredRows.map((r) => r.endpoint),
       partialEndpoints: partialRows.map((r) => r.endpoint),
       uncoveredEndpoints: uncoveredRows.map((r) => r.endpoint),
@@ -218,21 +232,74 @@ import { readCurrentApi } from "../../core/context/current.ts";
 import { readCurrentSession } from "../../core/context/session.ts";
 import { listRunsBySession } from "../../db/queries.ts";
 
-/** TASK-255: parse `--union session` / `--union <id1,id2,...>`. Returns
- *  either a session sentinel or a list of numeric run IDs. Exported for
- *  unit tests. */
-export function parseUnion(value: string): { kind: "session" } | { kind: "runIds"; ids: number[] } {
+export type UnionSpec =
+  | { kind: "session" }
+  | { kind: "since"; durationMs: number; raw: string }
+  | { kind: "tag"; name: string }
+  | { kind: "runIds"; ids: number[] };
+
+const DURATION_RE = /^(\d+)\s*(s|m|h|d)$/i;
+const UNIT_MS: Record<string, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+
+/** TASK-274: parse a duration like `30m`, `2h`, `7d`. Throws on bad input. */
+export function parseDuration(value: string): number {
+  const m = value.trim().match(DURATION_RE);
+  if (!m) {
+    throw new Error(
+      `Invalid duration '${value}' — expected '<N><unit>' where unit is s/m/h/d (e.g. '30m', '24h', '7d').`,
+    );
+  }
+  const n = Number(m[1]!);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new Error(`Invalid duration '${value}' — must be a positive integer.`);
+  }
+  return n * UNIT_MS[m[2]!.toLowerCase()]!;
+}
+
+/** TASK-255 + TASK-274: parse `--union <selector>`. Supported forms:
+ *    - `session`                     — all runs in the active/specified session
+ *    - `since:<dur>` (e.g. `since:24h`)— runs of this collection started after now-dur
+ *    - `tag:<name>`                  — runs of this collection whose stored tags include <name>
+ *    - `runs:A,B,C` or bare `A,B,C`  — explicit list of run IDs (back-compat)
+ *  Exported for unit tests. */
+export function parseUnion(value: string): UnionSpec {
   const v = value.trim();
-  if (v.toLowerCase() === "session") return { kind: "session" };
-  const ids = v.split(",").map(s => s.trim()).filter(s => s.length > 0).map(s => {
+  if (v.length === 0) {
+    throw new Error(
+      "--union expects 'session', 'since:<dur>', 'tag:<name>', or 'runs:<id1,id2,…>' (also accepts a bare comma-separated id list).",
+    );
+  }
+  const lower = v.toLowerCase();
+  if (lower === "session") return { kind: "session" };
+
+  if (lower.startsWith("since:")) {
+    const raw = v.slice("since:".length).trim();
+    if (!raw) throw new Error("--union since:<dur> needs a duration (e.g. 'since:24h').");
+    return { kind: "since", durationMs: parseDuration(raw), raw };
+  }
+
+  if (lower.startsWith("tag:")) {
+    const name = v.slice("tag:".length).trim();
+    if (!name) throw new Error("--union tag:<name> needs a tag (e.g. 'tag:smoke').");
+    return { kind: "tag", name };
+  }
+
+  // `runs:` prefix is the documented form; bare comma list kept for
+  // back-compat with the original TASK-255 surface (`--union 58,59`).
+  const idsRaw = lower.startsWith("runs:") ? v.slice("runs:".length) : v;
+  const ids = idsRaw.split(",").map((s) => s.trim()).filter((s) => s.length > 0).map((s) => {
     const n = Number(s);
     if (!Number.isInteger(n) || n < 1) {
-      throw new Error(`--union expects 'session' or a comma-separated list of run IDs, got '${value}'`);
+      throw new Error(
+        `--union expects 'session', 'since:<dur>', 'tag:<name>', or 'runs:<id1,id2,…>' — got '${value}'.`,
+      );
     }
     return n;
   });
   if (ids.length === 0) {
-    throw new Error("--union expects 'session' or a comma-separated list of run IDs");
+    throw new Error(
+      "--union expects 'session', 'since:<dur>', 'tag:<name>', or 'runs:<id1,id2,…>'.",
+    );
   }
   return { kind: "runIds", ids };
 }
@@ -244,13 +311,30 @@ export function registerCoverage(program: Command): void {
       "Analyze API test coverage from stored run results. An endpoint is " +
       "counted as covered when at least one passing test produced a 2xx on " +
       "it. Defaults to the latest stored run for the resolved API; pass " +
-      "--run-id to pin a specific run, or --union session / --session-id " +
-      "<id> to combine multiple runs (e.g. tests-run + probes-run from one " +
-      "`zond session start` block). Recipe for combined coverage:\n" +
+      "--run-id to pin a specific run, or --union <selector> to combine " +
+      "multiple runs.\n" +
+      "\n" +
+      "--union selectors:\n" +
+      "  session                   Active session (or --session-id <id>) — every run in the\n" +
+      "                            session is folded in; use this for the\n" +
+      "                            tests-run + probes-run pattern from one\n" +
+      "                            `zond session start` block.\n" +
+      "  since:<dur>               Time-window across the API (1h, 24h, 7d, 30m). Folds\n" +
+      "                            every run started within the window — handy for CI\n" +
+      "                            'last-day coverage' aggregates spanning multiple sessions.\n" +
+      "  tag:<name>                Every run whose stored tags include <name>. Tags come\n" +
+      "                            from suite-level `tags:` plus any explicit `--tag <x>`\n" +
+      "                            on `zond run`. Useful for slicing by class\n" +
+      "                            (e.g. `tag:smoke`, `tag:negative`).\n" +
+      "  runs:<id1,id2,...>        Explicit list of run IDs (e.g. release-vs-release).\n" +
+      "                            A bare `<id1,id2,...>` is also accepted for back-compat.\n" +
+      "\n" +
+      "Recipe (session form):\n" +
       "  zond session start --label combined\n" +
       "  zond run apis/<api>/tests\n" +
       "  zond run apis/<api>/probes\n" +
       "  zond coverage --api <api> --union session\n" +
+      "\n" +
       "Exit codes: 0 = every endpoint covered (or coverage ≥ " +
       "--fail-on-coverage when set); 1 = uncovered endpoints remain (or " +
       "coverage < --fail-on-coverage); 2 = bad input or read error.",
@@ -261,8 +345,8 @@ export function registerCoverage(program: Command): void {
     .option("--run-id <number>", "Pin to a specific run instead of the latest", parseInteger("--run-id"))
     .option("--session-id <id>", "Union all runs in this session (filtered to the chosen API)")
     .option(
-      "--union <ids|session>",
-      "Combine multiple runs: 'session' for the active/specified session, or comma-separated run IDs (e.g. '58,59')",
+      "--union <selector>",
+      "Combine multiple runs. Selector: 'session', 'since:<dur>' (e.g. since:24h), 'tag:<name>', or 'runs:<id1,id2,…>' (bare comma-list also accepted)",
     )
     .option("--db <path>", "Path to SQLite database file")
     .action(async (opts, cmd: Command) => {
@@ -282,9 +366,12 @@ export function registerCoverage(program: Command): void {
       }
 
       // Resolve --union and --session-id. --session-id wins; --union session
-      // resolves via .zond/current-session; --union <ids> just passes the ids.
+      // resolves via .zond/current-session; --union since:/tag:/runs: are
+      // routed via discrete loader options so the loader can do one DB query.
       let sessionId: string | undefined = opts.sessionId;
       let runIds: number[] | undefined;
+      let sinceIso: string | undefined;
+      let tag: string | undefined;
       if (opts.union) {
         try {
           const parsed = parseUnion(opts.union as string);
@@ -296,6 +383,12 @@ export function registerCoverage(program: Command): void {
               return;
             }
             sessionId = current.id;
+          } else if (parsed.kind === "since") {
+            // Anchor the window at "now minus dur" — coverage CLI is
+            // wall-clock-driven, the loader just sees the resolved ISO.
+            sinceIso = new Date(Date.now() - parsed.durationMs).toISOString();
+          } else if (parsed.kind === "tag") {
+            tag = parsed.name;
           } else {
             runIds = parsed.ids;
           }
@@ -306,10 +399,19 @@ export function registerCoverage(program: Command): void {
         }
       }
 
+      // since:/tag: only make sense with an API resolved (they query the
+      // collection's run history). Fail fast rather than silently scoping to
+      // every collection.
+      if ((sinceIso || tag) && !apiName) {
+        printError("--union since:/tag: requires an API. Pass --api <name> or set the current API.");
+        process.exitCode = 2;
+        return;
+      }
+
       // Hint when an active session has multiple runs but the user defaulted
       // to "latest run only". Skip when --json (don't pollute envelope) or
       // any explicit selector is set.
-      const noSelector = !opts.runId && !sessionId && !runIds;
+      const noSelector = !opts.runId && !sessionId && !runIds && !sinceIso && !tag;
       if (apiName && noSelector && !globalJson(cmd)) {
         const current = readCurrentSession();
         if (current) {
@@ -329,6 +431,8 @@ export function registerCoverage(program: Command): void {
         runId: opts.runId,
         ...(runIds ? { runIds } : {}),
         ...(sessionId ? { sessionId } : {}),
+        ...(sinceIso ? { sinceIso } : {}),
+        ...(tag ? { tag } : {}),
         json: globalJson(cmd),
       });
     });
