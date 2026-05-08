@@ -1,9 +1,10 @@
 ---
 id: TASK-36
 title: 'T36: Tagless endpoints fallback на per-resource suite'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-27 15:28'
+updated_date: '2026-05-08 16:20'
 labels:
   - generator
 milestone: m-1
@@ -37,3 +38,9 @@ priority: medium
 - Тест: spec с tagged + untagged endpoints → оба попадают в suites.
 - Coverage до и после: tagless endpoints больше не "uncovered".
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+groupEndpointsByTag: untagged endpoints → fallback по первому non-templated path-сегменту. /audiences и /audiences/{id} → группа 'audiences'. /{tenant}/jobs/{id} → 'jobs'. 4 unit-теста, +обновлён existing test про untagged. Tagged endpoints продолжают использовать первый тег.
+<!-- SECTION:NOTES:END -->

@@ -17,6 +17,16 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-36: tagless endpoints fall back to per-resource grouping.**
+  `groupEndpointsByTag` previously piled every untagged endpoint into a
+  single `untagged` bucket — Resend's `/audiences` POST/GET/DELETE all
+  ended up in one fat `smoke-untagged.yaml` instead of a focused
+  `audiences-smoke` / `crud-audiences` pair. Untagged endpoints now key
+  by their first non-templated path segment (`/audiences/{id}` →
+  `audiences`, `/{tenant}/jobs/{id}` → `jobs`), so tagless specs
+  produce the same per-resource suite layout as tagged ones. Path of
+  `/` keeps the legacy `untagged` key.
+
 - **TASK-116: `zond run --all` + CI context autodetection.** `--all`
   discovers every `apis/<name>/tests/` directory in the workspace and
   merges them into a single `runs.id` — one run row per CI invocation,

@@ -8,19 +8,34 @@ export interface ChunkPlan {
   chunks: Array<{ tag: string; count: number }>;
 }
 
-/** Group endpoints by their first tag, or "untagged" if none */
+/**
+ * Group endpoints by their first tag. TASK-36: untagged endpoints fall
+ * back to per-resource grouping (first path segment), so `/audiences` and
+ * `/audiences/{id}` land in the same `audiences` group instead of being
+ * piled into a single `untagged` bucket. Endpoints whose path has no
+ * usable first segment (e.g. `/`) keep the legacy `untagged` key.
+ */
 export function groupEndpointsByTag(endpoints: EndpointInfo[]): Map<string, EndpointInfo[]> {
   const groups = new Map<string, EndpointInfo[]>();
   for (const ep of endpoints) {
-    const tag = ep.tags[0] ?? "untagged";
-    const list = groups.get(tag);
-    if (list) {
-      list.push(ep);
-    } else {
-      groups.set(tag, [ep]);
-    }
+    const key = ep.tags[0] ?? resourceKeyFromPath(ep.path);
+    const list = groups.get(key);
+    if (list) list.push(ep);
+    else groups.set(key, [ep]);
   }
   return groups;
+}
+
+/** Extract the first non-templated path segment for tagless fallback. */
+function resourceKeyFromPath(path: string): string {
+  const segments = path.split("/").filter(Boolean);
+  for (const seg of segments) {
+    // Skip templated segments like {id} — they aren't resource names.
+    if (seg.startsWith("{") && seg.endsWith("}")) continue;
+    if (seg.length === 0) continue;
+    return seg;
+  }
+  return "untagged";
 }
 
 /** Decide whether to chunk, and return the tag breakdown */
