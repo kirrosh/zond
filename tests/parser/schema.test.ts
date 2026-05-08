@@ -294,4 +294,45 @@ describe("validateSuite", () => {
       })).toThrow(/Did you mean 'json'/);
     });
   });
+
+  // TASK-249 — expect.status spot-message: surface a single-line hint instead
+  // of the raw zod-issue path for the most common wrong shapes (oneOf, string,
+  // mixed array). The message must mention the supported shapes.
+  describe("expect.status spot-message", () => {
+    const HINT = /use a number .* array of numbers/;
+    test("rejects oneOf: [...] with hint", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: { oneOf: [200, 404] } } } as unknown as Record<string, unknown>],
+      })).toThrow(/oneOf/);
+    });
+    test("rejects anyOf: [...] with hint", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: { anyOf: [200, 404] } } } as unknown as Record<string, unknown>],
+      })).toThrow(HINT);
+    });
+    test("rejects string status with hint", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: "200" } } as unknown as Record<string, unknown>],
+      })).toThrow(HINT);
+    });
+    test("rejects array containing strings with hint", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: [200, "404"] } } as unknown as Record<string, unknown>],
+      })).toThrow(HINT);
+    });
+    test("accepts number and array of numbers", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: 200 } }],
+      })).not.toThrow();
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: [200, 404] } }],
+      })).not.toThrow();
+    });
+  });
 });

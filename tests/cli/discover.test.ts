@@ -205,6 +205,38 @@ describe("zond discover", () => {
     expect(after).toMatch(/audience_id:\s*pre_set_value/);
   });
 
+  // TASK-273 — empty list-response on a fresh target API gets miss-empty +
+  // a hint pointing at "create one first" instead of the cryptic miss-no-id.
+  test("empty list response → miss-empty with create-one-first hint", async () => {
+    const envPath = join(apiDir, ".env.empty.yaml");
+    await writeFile(envPath, `base_url: ${baseUrl}\n`);
+
+    const origWrite = process.stdout.write;
+    let captured = "";
+    process.stdout.write = ((chunk: unknown) => {
+      captured += typeof chunk === "string" ? chunk : String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      const exit = await discoverCommand({
+        specPath,
+        apiDir,
+        envPath,
+        apply: false,
+        json: true,
+      });
+      expect(exit).toBe(0);
+    } finally {
+      process.stdout.write = origWrite;
+    }
+
+    const env = JSON.parse(captured);
+    const empty = env.data.items.find((i: { varName: string }) => i.varName === "empty_id");
+    expect(empty.status).toBe("miss-empty");
+    expect(empty.reason).toMatch(/no empties in target API/);
+    expect(empty.reason).toMatch(/create one first/);
+  });
+
   test("missing base_url returns exit 2", async () => {
     const envPath = join(apiDir, ".env.nobase.yaml");
     await writeFile(envPath, "auth_token: abc\n");

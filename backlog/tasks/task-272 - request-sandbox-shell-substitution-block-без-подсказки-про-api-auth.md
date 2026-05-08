@@ -1,7 +1,7 @@
 ---
 id: TASK-272
 title: 'zond request: sandbox блочит shell-substitution для secrets, но не подсказывает про --api auto-auth'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 18:00'
 labels:
@@ -38,8 +38,9 @@ Actual: сухой sandbox-error без указателя на правильн
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] Sandbox-block для `--body`/header value содержит явный hint про `--api <name>` auto-auth.
-- [ ] Hint показывается только если в cwd обнаружен `apis/*/` workspace (иначе нерелевантно).
-- [ ] `zond request --help` явно отмечает: «`--api <name>` auto-loads `Authorization` and base headers from `apis/<name>/.secrets.yaml`».
-- [ ] Regression: попытка `--body '{"token": "$(cat secret)"}'` → блок + hint.
+- [x] Hint при 401/403 без `--api` (когда в cwd есть `apis/*/`) — две строки на stderr с примером `--api <name>`.
+- [x] Hint при unexpanded shell-substitution (`$(...)`/`` `...` `` в `--body` или header) — детектится, печатается тот же hint.
+- [x] Hint показывается только если в cwd обнаружен `apis/*/` workspace.
+- [x] `--api <name>` в `--help`: «auto-loads env + Authorization from apis/<name>/.secrets.yaml».
+- [x] Regression-тест: 401 без `--api` в `apis/`-workspace → hint в stderr; без apis/ — hint подавлен.
 <!-- SECTION:ACCEPTANCE:END -->

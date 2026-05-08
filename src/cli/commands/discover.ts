@@ -84,6 +84,23 @@ function extractFirstField(body: unknown, preferred: string): string | undefined
   }
   return undefined;
 }
+
+/** True when the list-response is well-shaped but contains zero items.
+ *  Used to distinguish "no <entity> in target API yet — go create one"
+ *  from "response shape unrecognized" (TASK-273). */
+export function isEmptyListBody(body: unknown): boolean {
+  if (Array.isArray(body)) return body.length === 0;
+  if (body && typeof body === "object") {
+    const obj = body as Record<string, unknown>;
+    for (const key of ["data", "items", "results", "records"]) {
+      if (key in obj) {
+        const arr = obj[key];
+        return Array.isArray(arr) && arr.length === 0;
+      }
+    }
+  }
+  return false;
+}
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../core/generator/types.ts";
@@ -279,13 +296,22 @@ export async function probeOne(
     item.reason = `${parsed.method} ${parsed.path} → ${resp.status}`;
     return item;
   }
-  const id = extractFirstField(
-    resp.body_parsed ?? resp.body,
-    preferredFieldFromVar(target.varName),
-  );
+  const respBody = resp.body_parsed ?? resp.body;
+  const id = extractFirstField(respBody, preferredFieldFromVar(target.varName));
   if (id === undefined) {
-    item.status = "miss-no-id";
-    item.reason = `response shape has no extractable first id`;
+    // TASK-273: empty target-API is the most common cause of miss-no-id on
+    // fresh workspaces. Distinguish "list is well-shaped but empty" from
+    // "list shape unrecognized" so the user gets actionable guidance instead
+    // of guessing for 30 minutes whether zond is broken.
+    if (isEmptyListBody(respBody)) {
+      item.status = "miss-empty";
+      item.reason =
+        `no ${target.ownerResource} in target API — create one first (in the product UI ` +
+        `or via API), then re-run discover`;
+    } else {
+      item.status = "miss-no-id";
+      item.reason = `response shape has no extractable first id (no array/data/items/results/records field)`;
+    }
     return item;
   }
   if (current && current === id) {

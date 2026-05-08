@@ -133,6 +133,31 @@ const TestStepExpectSchema: z.ZodType<TestStepExpect> = z.preprocess(
         `Top-level 'capture' inside 'expect' is silently ignored — the test would pass with no captured values.`,
       );
     }
+    // expect.status: spot-message for common wrong shapes.
+    // Schema accepts `number | number[]`. Users reaching from other tools often
+    // write `oneOf: [...]`, `any: [...]`, a string `"200"`, or an array
+    // containing strings. The raw zod-issue path (`tests.N.expect.status.0`)
+    // is hard to read — surface a single-line hint here. (TASK-249, feedback-13#F1)
+    if ("status" in obj && obj.status !== undefined && obj.status !== null) {
+      const s = obj.status;
+      const STATUS_HINT =
+        "expect.status: use a number (200), an array of numbers ([200, 404]), or omit. " +
+        "oneOf/any/anyOf are not supported.";
+      if (typeof s === "object" && !Array.isArray(s)) {
+        const keys = Object.keys(s as Record<string, unknown>);
+        const wrong = keys.find((k) => ["oneOf", "anyOf", "any", "in", "one_of"].includes(k));
+        if (wrong) {
+          throw new Error(`'expect.status' got '${wrong}: [...]' — ${STATUS_HINT}`);
+        }
+        throw new Error(`'expect.status' got an object — ${STATUS_HINT}`);
+      }
+      if (typeof s === "string") {
+        throw new Error(`'expect.status' got string "${s}" — ${STATUS_HINT}`);
+      }
+      if (Array.isArray(s) && s.some((v) => typeof v !== "number")) {
+        throw new Error(`'expect.status' array must contain only numbers — ${STATUS_HINT}`);
+      }
+    }
     // body: null → remove it
     if (obj.body === null) {
       const { body: _, ...rest } = obj;

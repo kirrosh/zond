@@ -25,7 +25,10 @@ Run `zond --version` first; if missing:
   pre-built artifacts (catalog/resources/fixtures) — use those. Drop into
   `apis/<name>/spec.json` only when probe-* needs full schemas.
 - **NEVER `curl` or `wget`** — use `zond request <method> <url>` for ad-hoc
-  HTTP so it lands in the run DB and respects auth.
+  HTTP so it lands in the run DB and respects auth. Pass `--api <name>` to
+  auto-load `Authorization` from `apis/<name>/.secrets.yaml` — never
+  shell-substitute the token by hand (`$(yq …)` is also blocked by the
+  sandbox).
 - **NEVER hardcode tokens** — put values in `apis/<name>/.secrets.yaml`
   (auto-gitignored), reference from `.env.yaml` as `@secret:auth_token`.
   Plain shell-env references (`${SENTRY_AUTH_TOKEN}`) also work. Tests
@@ -226,7 +229,14 @@ Bootstrap is idempotent: a re-run skips already-set vars unless
 `--force`. Cascade caps at `--max-passes` (default 8).
 
 Suffix-aware: `*_slug` captures `slug`, `*_uuid` → `uuid`, `*_id` → `id`.
-Skips vars already filled with a non-placeholder value. For special
+Skips vars already filled with a non-placeholder value.
+
+If a list-endpoint returns `200 []` (well-shaped but empty), discover
+reports `miss-empty` with reason `no <resource> in target API — create
+one first…`. Distinct from `miss-no-id` (response shape unrecognized:
+no `array`/`data`/`items`/`results`/`records` field). On a fresh
+workspace this usually means: trigger an event in the product (Sentry
+SDK install, Resend send, etc.) and re-run `zond discover`. For special
 fixtures the spec can't describe (verified-only emails, domain-validated
 records, "real" enum values), fall back to `zond request`:
 

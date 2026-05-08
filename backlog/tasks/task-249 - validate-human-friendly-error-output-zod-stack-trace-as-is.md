@@ -1,7 +1,7 @@
 ---
 id: TASK-249
 title: 'validate: zod-stack-trace вместо human-friendly error output'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-08 13:00'
 updated_date: '2026-05-08 18:00'
@@ -34,5 +34,6 @@ Re-confirmed feedback-13#F1 (priority bump low → medium). Конкретный
 - [ ] Default validate output — компактный human-friendly формат (1-2 строки на issue: path + expected/got).
 - [ ] `--verbose` сохраняет полный zod-stack для отладки.
 - [ ] Regression-fixture: invalid yaml → `validate` output содержит read-able path и краткое сообщение, без `_def`/`ZodIssue`.
-- [ ] Spot-message для частых grуп `expect.status` / `expect.body` / `capture` (типа: «use 200, [200,404], or omit; oneOf is not supported»).
+- [x] Spot-message для `expect.status`: oneOf/anyOf/string/array-of-strings → одна строка с подсказкой `use a number (200), an array of numbers ([200, 404]), or omit`. (`src/core/parser/schema.ts`, тесты `tests/parser/schema.test.ts`.)
+- [ ] Аналогичные spot-messages для `expect.body` / `capture` — следующая итерация.
 <!-- SECTION:ACCEPTANCE:END -->
