@@ -18,7 +18,8 @@ import { RULE_AFFECTS } from "./affects.ts";
 
 export type { Issue, LintConfig, LintResult, LintStats, Severity, RuleId } from "./types.ts";
 export { loadConfig, defaultConfig } from "./config.ts";
-export { formatHuman, formatNdjson } from "./reporter.ts";
+export { formatHuman, formatNdjson, formatGrouped, buildRuleSummary } from "./reporter.ts";
+export type { RuleSummaryEntry } from "./reporter.ts";
 
 export function lintSpec(doc: OpenAPIV3.Document, config: LintConfig): LintResult {
   const issues: Issue[] = [];

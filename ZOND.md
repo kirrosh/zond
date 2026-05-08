@@ -117,7 +117,7 @@ selected via `zond use`.
 | `probe mass-assignment [spec]` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--no-discover`, `--timeout <ms>` |
 | `probe security <classes> [spec]` | Live SSRF / CRLF / open-redirect probes with baseline-OK gate; classes = comma-separated subset of `ssrf,crlf,open-redirect` | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--dry-run`, `--timeout <ms>` |
 | `probe-validation` / `probe-methods` / `probe-mass-assignment` / `probe-security` | **Deprecated aliases** for the four `probe <class>` commands. Removed in next release; emits warning to stderr. | (same as above) |
-| `lint-spec [spec]` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--api <name>`, `--strict`, `--rule <list>`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
+| `lint-spec [spec]` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--api <name>`, `--strict`, `--rule <list>`, `--filter-rule <list>`, `--severity <list>`, `--top <N>`, `--verbose`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
 | `catalog [spec]` | Standalone build of `.api-catalog.yaml` (registered APIs already have one in `apis/<name>/`) | `--api <name>`, `--output <dir>` |
 | `describe [spec]` | Describe endpoints from OpenAPI spec | `--api <name>`, `--compact`, `--list-params`, `--method`, `--path` |
 | `generate [spec]` | Autogenerate test suites; combine with `--uncovered-only` to top up after `zond refresh-api`. Use `--explain` (no `--output`) to print the CRUD detection table without writing files. | `--api <name>`, `--output`, `--tag`, `--uncovered-only`, `--explain` |
@@ -146,11 +146,20 @@ classes of problems:
   silently send invalid data and the server rejects it with 422.
 
 ```bash
-zond lint-spec openapi.json                                # human report
-zond lint-spec openapi.json --json | jq '.data.issues'      # structured
-zond lint-spec openapi.json --rule '!B2,!B5,!B6,!B9'        # disable heuristics
+zond lint-spec openapi.json                                # rule × severity rollup (TASK-279)
+zond lint-spec openapi.json --verbose                       # legacy flat one-line-per-issue list
+zond lint-spec openapi.json --severity high                 # render only HIGH issues
+zond lint-spec openapi.json --filter-rule B1,B6 --top 10    # whitelist + top-N rules
+zond lint-spec openapi.json --json | jq '.data.summary'     # structured (issues + summary)
+zond lint-spec openapi.json --rule '!B2,!B5,!B6,!B9'        # disable heuristics (severity overrides)
 zond lint-spec openapi.json --config .zond-lint.json        # per-project rules
 ```
+
+> **`--rule` vs `--filter-rule`.** `--rule` overrides severity (`R1=low`,
+> `!R2` to disable). `--filter-rule` is post-lint whitelisting — it shows
+> only the listed rules without changing how they're scored. Exit codes are
+> always computed against the unfiltered run, so a `--severity low` view
+> won't accidentally hide a HIGH issue from a CI script reading `$?`.
 
 | Group | Rule | Severity (default) | What it checks |
 |---|---|---|---|

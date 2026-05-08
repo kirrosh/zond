@@ -47,3 +47,75 @@ function formatWhere(i: Issue): string {
 export function formatNdjson(issues: Issue[]): string {
   return issues.map(i => JSON.stringify(i)).join("\n") + (issues.length ? "\n" : "");
 }
+
+/**
+ * TASK-279: rule × severity rollup. The flat `formatHuman` output has a habit
+ * of producing 700+ lines on real-world specs (Sentry: 385 of 714 issues are
+ * a single rule). This collapses them to one row per rule so a human can
+ * triage by impact instead of `grep '(B1)' | wc -l`.
+ */
+export interface RuleSummaryEntry {
+  rule: string;
+  severity: Severity;
+  count: number;
+  endpoints: number;
+  message: string;
+  sample?: { method?: string; path?: string; jsonpointer?: string };
+}
+
+export function buildRuleSummary(issues: Issue[]): RuleSummaryEntry[] {
+  type Bucket = { rule: string; severity: Severity; count: number; endpointSet: Set<string>; message: string; sample?: RuleSummaryEntry["sample"] };
+  const map = new Map<string, Bucket>();
+  for (const i of issues) {
+    const key = `${i.rule}|${i.severity}`;
+    let b = map.get(key);
+    if (!b) {
+      b = { rule: i.rule, severity: i.severity, count: 0, endpointSet: new Set(), message: i.message };
+      if (i.path || i.method || i.jsonpointer) {
+        b.sample = { method: i.method, path: i.path, jsonpointer: i.jsonpointer };
+      }
+      map.set(key, b);
+    }
+    b.count++;
+    if (i.path) b.endpointSet.add(`${i.method ?? "*"} ${i.path}`);
+    else if (i.jsonpointer) b.endpointSet.add(i.jsonpointer);
+  }
+  const rank: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
+  return [...map.values()]
+    .sort((a, b) => rank[a.severity] - rank[b.severity] || b.count - a.count)
+    .map(b => ({
+      rule: b.rule,
+      severity: b.severity,
+      count: b.count,
+      endpoints: b.endpointSet.size,
+      message: b.message,
+      ...(b.sample ? { sample: b.sample } : {}),
+    }));
+}
+
+export function formatGrouped(issues: Issue[], stats: LintStats, opts: { top?: number } = {}): string {
+  if (issues.length === 0) {
+    return useColor() ? `${BOLD}✓ no issues${RESET}\n` : "✓ no issues\n";
+  }
+  const summary = buildRuleSummary(issues);
+  const rows = opts.top != null && opts.top > 0 ? summary.slice(0, opts.top) : summary;
+
+  const lines: string[] = [];
+  let lastSev: Severity | null = null;
+  for (const r of rows) {
+    if (r.severity !== lastSev) {
+      const header = `${ICON[r.severity]} ${r.severity.toUpperCase()}`;
+      lines.push(useColor() ? `${COLOR[r.severity]}${BOLD}${header}${RESET}` : header);
+      lastSev = r.severity;
+    }
+    const tag = useColor() ? `${COLOR[r.severity]}${r.rule}${RESET}` : r.rule;
+    const endpointsLabel = r.endpoints === r.count ? `${r.count}` : `${r.count} (${r.endpoints} endpoints)`;
+    lines.push(`  ${tag.padEnd(useColor() ? 14 : 4)}  ${endpointsLabel.padStart(6)}  ${r.message}`);
+  }
+  lines.push("");
+  const truncated = opts.top != null && opts.top > 0 && summary.length > rows.length
+    ? ` (showing top ${rows.length} of ${summary.length} rules; pass --top 0 or --verbose for all)`
+    : "";
+  lines.push(`${stats.total} issue(s) across ${stats.endpoints} endpoint(s)${truncated}. Re-run with --verbose for the flat list.`);
+  return lines.join("\n") + "\n";
+}

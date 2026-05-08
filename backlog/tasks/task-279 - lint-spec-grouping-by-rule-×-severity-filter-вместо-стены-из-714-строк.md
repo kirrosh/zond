@@ -1,9 +1,10 @@
 ---
 id: TASK-279
 title: 'lint-spec: grouping by rule × severity-filter вместо стены из 714 строк'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 19:00'
+updated_date: '2026-05-08 14:09'
 labels:
   - feedback-loop
   - api-sentry
@@ -41,12 +42,13 @@ B8 (HIGH) — 61 endpoints  — additionalProperties not set
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] Default-вывод `lint-spec` — group-by-rule summary (rule × severity × count × short-message), отсортирован по severity desc, count desc.
-- [ ] `--verbose`/`--flat` сохраняет текущий 1-строка-на-issue вывод.
-- [ ] `--severity` / `--rule` / `--top` фильтры реализованы и документированы в `--help`.
-- [ ] `--json` envelope содержит и summary, и occurrences; зафиксирован в существующем JSON-envelope-policy module (TASK-184).
-- [ ] Verify на Sentry-spec: default-вывод укладывается в ~30 строк summary вместо 714.
-- [ ] Regression-snap test: фиктивная spec с 3 rule × N occurrences → ожидаемый summary.
+- [ ] #1 Default-вывод `lint-spec` — group-by-rule summary (rule × severity × count × short-message), отсортирован по severity desc, count desc.
+- [ ] #2 `--verbose`/`--flat` сохраняет текущий 1-строка-на-issue вывод.
+- [ ] #3 `--severity` / `--rule` / `--top` фильтры реализованы и документированы в `--help`.
+- [ ] #4 `--json` envelope содержит и summary, и occurrences; зафиксирован в существующем JSON-envelope-policy module (TASK-184).
+- [ ] #5 Verify на Sentry-spec: default-вывод укладывается в ~30 строк summary вместо 714.
+- [ ] #6 Regression-snap test: фиктивная spec с 3 rule × N occurrences → ожидаемый summary.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->
