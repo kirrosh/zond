@@ -586,15 +586,18 @@ describe("generateSuites", () => {
     expect(petsSuite).toBeDefined();
   });
 
-  test("untagged endpoints go to 'untagged' slug", () => {
+  test("untagged endpoints fall back to first-path-segment grouping (TASK-36)", () => {
     const endpoints = [
-      makeEndpoint({ path: "/ping", method: "GET" }),
+      makeEndpoint({ path: "/audiences", method: "GET" }),
+      makeEndpoint({ path: "/audiences/{id}", method: "DELETE" }),
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
 
-    // /ping matches healthcheck pattern → sanity suite is also generated
-    const smokeSuite = suites.find(s => s.name === "untagged-smoke");
-    expect(smokeSuite).toBeDefined();
+    // Tagless endpoints under /audiences should land in audiences-* suites,
+    // not a generic untagged-smoke pile.
+    const audSmoke = suites.find(s => s.name === "audiences-smoke");
+    expect(audSmoke).toBeDefined();
+    expect(suites.find(s => s.name === "untagged-smoke")).toBeUndefined();
   });
 
   test("suite-level auth when all endpoints share same security", () => {
