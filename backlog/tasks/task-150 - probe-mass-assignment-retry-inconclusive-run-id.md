@@ -1,8 +1,10 @@
 ---
 id: TASK-150
-title: 'probe-mass-assignment --retry-inconclusive <run-id>'
+title: probe-mass-assignment --retry-inconclusive <run-id>
 status: To Do
 assignee: []
+created_date: ''
+updated_date: '2026-05-08 15:50'
 labels:
   - probe
   - probe-mass-assignment
@@ -15,6 +17,7 @@ priority: medium
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Был частью оригинального TASK-137, выделен после реализации `--discover-fk`.
@@ -42,18 +45,26 @@ priority: medium
    `--include` или прямой передачей).
 4. Сравнить результат с предыдущим — сколько inconclusive стали ok / high.
 5. Не дублировать verdicts со старого run (создаётся новый run-id).
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
-- [ ] Флаг `--retry-inconclusive <run-id>` парсит run id и достаёт
+<!-- AC:BEGIN -->
+- [ ] #1 Флаг `--retry-inconclusive <run-id>` парсит run id и достаёт
       verdicts.
-- [ ] Запуск ограничен endpoint-ами, которые в исходном run были
+- [ ] #2 Запуск ограничен endpoint-ами, которые в исходном run были
       `inconclusive-baseline`.
-- [ ] В выводе показано «previously inconclusive: N → resolved: K,
+- [ ] #3 В выводе показано «previously inconclusive: N → resolved: K,
       still inconclusive: N-K».
-- [ ] Тест: фикстура с 3 INCONCLUSIVE → прогон с
+- [ ] #4 Тест: фикстура с 3 INCONCLUSIVE → прогон с
       `--retry-inconclusive` после фиктивного env-апдейта → 0 INCONCLUSIVE.
-- [ ] CHANGELOG.
+- [ ] #5 CHANGELOG.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+ОТЛОЖЕНО: probe-mass-assignment не персистит verdicts в БД (нет probe_verdicts/probe_runs schema); --retry-inconclusive <run-id> требует либо нового DB-слоя для verdicts, либо парсинга markdown digest. После TASK-137 --discover-fk дефолт и резолвит большинство inconclusive-baseline на первом прогоне → niche optimization. Реализация требует архитектурного решения (DB schema vs JSON sidecar vs digest parser). Откладывается до явного запроса.
+<!-- SECTION:NOTES:END -->
 
 ## Notes
 

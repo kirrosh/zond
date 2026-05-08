@@ -163,7 +163,10 @@ export function serializeSuite(suite: RawSuite): string {
               lines.push(`          ${rk}:`);
               serializeValue(rv, 6, lines);
             } else {
-              lines.push(`          ${rk}: ${yamlScalar(String(rv))}`);
+              // Preserve scalar types — `not_equals: true` (boolean) must not
+              // become `not_equals: "true"` (string), or assertions silently
+              // mistype against real boolean fields.
+              lines.push(`          ${rk}: ${formatInlineValue(rv)}`);
             }
           }
         }

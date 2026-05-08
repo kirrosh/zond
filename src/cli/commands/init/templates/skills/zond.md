@@ -383,7 +383,20 @@ couldn't build a valid body (same fixture problem as Phase 4a).
 INCONCLUSIVE-5XX = baseline POST itself crashed with ≥500 — the endpoint is
 broken; validation-probe will already report the same crash, so don't waste
 time on it here. After the fixture pack is filled, sweep INCONCLUSIVE with
-this template — one file per resource:
+the **`--emit-template`** generator (TASK-146) — one endpoint per call:
+
+```bash
+zond probe mass-assignment --api <name> --emit-template "POST:/<resource>" \
+  --output apis/<name>/probes/mass-assignment/<resource>.yaml
+```
+
+This emits a `create → verify → cleanup` chain pre-filled with classic
+mass-assignment vectors (`is_admin`, `role`, `owner_id`, …) plus any
+`readOnly: true` / `x-zond-protected` fields lifted from the spec. Drop
+`# …real create body sourced from fixtures…` placeholders into actual
+fixture references and run with `zond run` against the live env.
+The same boilerplate-by-hand template (kept here for reference / when
+the spec is missing or the heuristic detects nothing useful):
 
 ```yaml
 # apis/<name>/probes/mass-assignment/<resource>.yaml
