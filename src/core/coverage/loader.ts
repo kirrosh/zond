@@ -9,7 +9,7 @@
  */
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { findCollectionByNameOrId, getLatestRunByCollection, getResultsByRunId, getRunById } from "../../db/queries.ts";
+import { findCollectionByNameOrId, getLatestRunByCollection, getResultsByRunId, getRunById, listRunsBySession } from "../../db/queries.ts";
 import type { RunRecord } from "../../db/queries.ts";
 import { assertLocalSpec } from "../setup-api.ts";
 import { readOpenApiSpec, extractEndpoints } from "../generator/openapi-reader.ts";
@@ -25,6 +25,14 @@ import {
 export interface CoverageLoadOptions {
   apiName: string;
   runId?: number;
+  /** TASK-255: union across multiple runs (e.g. tests-run + probes-run from
+   *  the same session). Loader concatenates results from each run before
+   *  feeding the matrix engine — buildCoverageMatrix is order-agnostic. When
+   *  set, takes precedence over `runId`. */
+  runIds?: number[];
+  /** TASK-255: when set, expanded to all runs in the session (filtered to
+   *  this collection). Wins over `runIds` and `runId`. */
+  sessionId?: string;
   profile?: "safe" | "full";
   tagFilter?: string[];
   /** Override workspace root (defaults to findWorkspaceRoot). */
@@ -36,7 +44,13 @@ export interface CoverageLoadResult {
   baseDir: string;
   specPath: string;
   matrix: CoverageMatrix;
+  /** Latest of the runs included in the coverage. Null if no runs found.
+   *  Kept singular for back-compat; for the full list use `runs`. */
   run: RunRecord | null;
+  /** TASK-255: every run that contributed results to this coverage matrix,
+   *  ordered by started_at ascending. Single-element when no union flags
+   *  were used. */
+  runs: RunRecord[];
   profile: "safe" | "full";
   tagFilter: string[];
   ephemeralCount: number;
@@ -82,13 +96,37 @@ export async function loadCoverage(options: CoverageLoadOptions): Promise<Covera
   const doc = await readOpenApiSpec(specPath);
   const endpoints = extractEndpoints(doc);
 
-  let run: RunRecord | null = null;
-  if (options.runId != null) {
-    run = getRunById(options.runId);
+  // Resolve which runs contribute results. Precedence:
+  // sessionId > runIds > runId > latest. Filter session runs by collection
+  // so a coverage call for `--api foo` doesn't accidentally include another
+  // collection's runs that share the session.
+  let runs: RunRecord[] = [];
+  if (options.sessionId) {
+    const sessRuns = listRunsBySession(options.sessionId);
+    // Include runs whose collection matches AND runs with NULL collection_id —
+    // the latter covers probe-suites and ad-hoc runs that didn't tag the API
+    // explicitly but still produced results against this session's workdir.
+    // Filtering them out makes `coverage --union session` silently show only
+    // the test-suite run (the original feedback-12 #F1 symptom).
+    runs = sessRuns
+      .filter((r) => r.collection_id === collection.id || r.collection_id == null)
+      .map((r) => getRunById(r.id))
+      .filter((r): r is RunRecord => r !== null);
+  } else if (options.runIds && options.runIds.length > 0) {
+    runs = options.runIds
+      .map((id) => getRunById(id))
+      .filter((r): r is RunRecord => r !== null);
+  } else if (options.runId != null) {
+    const r = getRunById(options.runId);
+    if (r) runs = [r];
   } else {
-    run = getLatestRunByCollection(collection.id);
+    const latest = getLatestRunByCollection(collection.id);
+    if (latest) runs = [latest];
   }
-  const results = run ? getResultsByRunId(run.id) : [];
+  const results = runs.flatMap((r) => getResultsByRunId(r.id));
+  // `run` (singular) reflects the latest contributing run for back-compat
+  // with consumers that only care about a single run label.
+  const run = runs.length > 0 ? runs[runs.length - 1]! : null;
 
   const fixturesAffected = await readFixturesAffected(baseDir);
   const ephemeralEndpoints = await readEphemeralEndpoints(root);
@@ -112,6 +150,7 @@ export async function loadCoverage(options: CoverageLoadOptions): Promise<Covera
     specPath,
     matrix,
     run,
+    runs,
     profile,
     tagFilter,
     ephemeralCount: ephemeralEndpoints.size,

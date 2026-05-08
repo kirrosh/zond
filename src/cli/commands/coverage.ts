@@ -10,6 +10,10 @@ export interface CoverageOptions {
   spec?: string;
   failOnCoverage?: number;
   runId?: number;
+  /** TASK-255: union across multiple runs. */
+  runIds?: number[];
+  /** TASK-255: union across all runs in a session (filtered to the API). */
+  sessionId?: string;
   json?: boolean;
 }
 
@@ -66,6 +70,8 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
   getDb();
   const cov = await loadCoverage({
     apiName: options.apiName!,
+    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    ...(options.runIds && options.runIds.length > 0 ? { runIds: options.runIds } : {}),
     ...(options.runId != null ? { runId: options.runId } : {}),
   });
   const total = cov.matrix.rows.length;
@@ -97,7 +103,10 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
 
   if (!options.json) {
     const color = useColor();
-    const runLabel = cov.run ? ` — Run #${cov.run.id}` : " — no runs yet";
+    let runLabel: string;
+    if (cov.runs.length === 0) runLabel = " — no runs yet";
+    else if (cov.runs.length === 1) runLabel = ` — Run #${cov.runs[0]!.id}`;
+    else runLabel = ` — union of ${cov.runs.length} runs (#${cov.runs.map(r => r.id).join(", #")})`;
     console.log(`Coverage: ${coveredCount}/${total} endpoints (${percentage}%)${runLabel}`);
     console.log("");
 
@@ -134,6 +143,7 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
       total,
       percentage,
       runId: cov.run?.id ?? null,
+      runIds: cov.runs.map((r) => r.id),
       coveredEndpoints: coveredRows.map((r) => r.endpoint),
       partialEndpoints: partialRows.map((r) => r.endpoint),
       uncoveredEndpoints: uncoveredRows.map((r) => r.endpoint),
@@ -205,6 +215,27 @@ import type { Command } from "commander";
 import { globalJson, resolveApiCollection } from "../resolve.ts";
 import { parseInteger, parsePercentage } from "../argv.ts";
 import { readCurrentApi } from "../../core/context/current.ts";
+import { readCurrentSession } from "../../core/context/session.ts";
+import { listRunsBySession } from "../../db/queries.ts";
+
+/** TASK-255: parse `--union session` / `--union <id1,id2,...>`. Returns
+ *  either a session sentinel or a list of numeric run IDs. Exported for
+ *  unit tests. */
+export function parseUnion(value: string): { kind: "session" } | { kind: "runIds"; ids: number[] } {
+  const v = value.trim();
+  if (v.toLowerCase() === "session") return { kind: "session" };
+  const ids = v.split(",").map(s => s.trim()).filter(s => s.length > 0).map(s => {
+    const n = Number(s);
+    if (!Number.isInteger(n) || n < 1) {
+      throw new Error(`--union expects 'session' or a comma-separated list of run IDs, got '${value}'`);
+    }
+    return n;
+  });
+  if (ids.length === 0) {
+    throw new Error("--union expects 'session' or a comma-separated list of run IDs");
+  }
+  return { kind: "runIds", ids };
+}
 
 export function registerCoverage(program: Command): void {
   program
@@ -213,15 +244,26 @@ export function registerCoverage(program: Command): void {
       "Analyze API test coverage from stored run results. An endpoint is " +
       "counted as covered when at least one passing test produced a 2xx on " +
       "it. Defaults to the latest stored run for the resolved API; pass " +
-      "--run-id to pin a specific run. Exit codes: 0 = every endpoint " +
-      "covered (or coverage ≥ --fail-on-coverage when set); 1 = uncovered " +
-      "endpoints remain (or coverage < --fail-on-coverage); 2 = bad input " +
-      "or read error.",
+      "--run-id to pin a specific run, or --union session / --session-id " +
+      "<id> to combine multiple runs (e.g. tests-run + probes-run from one " +
+      "`zond session start` block). Recipe for combined coverage:\n" +
+      "  zond session start --label combined\n" +
+      "  zond run apis/<api>/tests\n" +
+      "  zond run apis/<api>/probes\n" +
+      "  zond coverage --api <api> --union session\n" +
+      "Exit codes: 0 = every endpoint covered (or coverage ≥ " +
+      "--fail-on-coverage when set); 1 = uncovered endpoints remain (or " +
+      "coverage < --fail-on-coverage); 2 = bad input or read error.",
     )
     .option("--api <name>", "Use API collection (auto-resolves spec; reads stored runs)")
     .option("--spec <path>", "Spec-only fallback when no API is registered (no run results)")
     .option("--fail-on-coverage <N>", "Exit 1 when coverage percentage is below N (0–100)", parsePercentage)
     .option("--run-id <number>", "Pin to a specific run instead of the latest", parseInteger("--run-id"))
+    .option("--session-id <id>", "Union all runs in this session (filtered to the chosen API)")
+    .option(
+      "--union <ids|session>",
+      "Combine multiple runs: 'session' for the active/specified session, or comma-separated run IDs (e.g. '58,59')",
+    )
     .option("--db <path>", "Path to SQLite database file")
     .action(async (opts, cmd: Command) => {
       const apiFlag = (opts.api as string | undefined) ?? (opts.spec ? undefined : readCurrentApi() ?? undefined);
@@ -239,11 +281,54 @@ export function registerCoverage(program: Command): void {
         if (!spec && resolved.spec) spec = resolved.spec;
       }
 
+      // Resolve --union and --session-id. --session-id wins; --union session
+      // resolves via .zond/current-session; --union <ids> just passes the ids.
+      let sessionId: string | undefined = opts.sessionId;
+      let runIds: number[] | undefined;
+      if (opts.union) {
+        try {
+          const parsed = parseUnion(opts.union as string);
+          if (parsed.kind === "session") {
+            const current = readCurrentSession();
+            if (!current) {
+              printError("--union session requires an active session (run 'zond session start' first), or pass --session-id <id>.");
+              process.exitCode = 2;
+              return;
+            }
+            sessionId = current.id;
+          } else {
+            runIds = parsed.ids;
+          }
+        } catch (err) {
+          printError(err instanceof Error ? err.message : String(err));
+          process.exitCode = 2;
+          return;
+        }
+      }
+
+      // Hint when an active session has multiple runs but the user defaulted
+      // to "latest run only". Skip when --json (don't pollute envelope) or
+      // any explicit selector is set.
+      const noSelector = !opts.runId && !sessionId && !runIds;
+      if (apiName && noSelector && !globalJson(cmd)) {
+        const current = readCurrentSession();
+        if (current) {
+          const sessRuns = listRunsBySession(current.id);
+          if (sessRuns.length > 1) {
+            const hint = `Active session has ${sessRuns.length} runs. ` +
+              `Coverage shows the latest only — pass '--union session' to combine all runs in the session.`;
+            process.stderr.write(`zond: ${hint}\n`);
+          }
+        }
+      }
+
       process.exitCode = await coverageCommand({
         ...(apiName ? { apiName } : {}),
         ...(spec ? { spec } : {}),
         failOnCoverage: opts.failOnCoverage,
         runId: opts.runId,
+        ...(runIds ? { runIds } : {}),
+        ...(sessionId ? { sessionId } : {}),
         json: globalJson(cmd),
       });
     });
