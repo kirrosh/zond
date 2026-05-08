@@ -276,6 +276,61 @@ describe("zond bootstrap", () => {
     expect(after).not.toContain("stale-value");
   });
 
+  // TASK-271: per-target classification + stop reason + plan/exec marker.
+  test("--apply on already-filled fixtures: noOp=true, mode=exec, all already", async () => {
+    const envPath = join(apiDir, ".env.task271.noop.yaml");
+    await writeFile(envPath,
+      `base_url: ${baseUrl}\n` +
+      `org_slug: "acme"\n` +
+      `project_slug: "frontend"\n` +
+      `widget_id: "widget_existing"\n`,
+    );
+
+    // Capture the JSON envelope by mocking stdout.
+    const origWrite = process.stdout.write;
+    const chunks: string[] = [];
+    process.stdout.write = ((c: unknown) => { chunks.push(typeof c === "string" ? c : String(c)); return true; }) as typeof process.stdout.write;
+    let exit: number;
+    try {
+      exit = await bootstrapCommand({ specPath, apiDir, envPath, apply: true, seed: true, json: true });
+    } finally {
+      process.stdout.write = origWrite;
+    }
+    expect(exit).toBe(0);
+    const out = JSON.parse(chunks.join(""));
+    expect(out.data.mode).toBe("exec");
+    expect(out.data.summary.noOp).toBe(true);
+    expect(out.data.summary.cascadeStop).toBeDefined();
+    // Every target classified as `already`.
+    expect(out.data.perTarget.length).toBeGreaterThan(0);
+    expect(out.data.perTarget.every((t: { status: string }) => t.status === "already")).toBe(true);
+  });
+
+  test("dry-run on empty env: mode=plan, applied=false, perTarget reflects discovered/seeded", async () => {
+    widgetCreates = 0;
+    const envPath = join(apiDir, ".env.task271.plan.yaml");
+    await writeFile(envPath, `base_url: ${baseUrl}\n`);
+
+    const origWrite = process.stdout.write;
+    const chunks: string[] = [];
+    process.stdout.write = ((c: unknown) => { chunks.push(typeof c === "string" ? c : String(c)); return true; }) as typeof process.stdout.write;
+    let exit: number;
+    try {
+      exit = await bootstrapCommand({ specPath, apiDir, envPath, apply: false, seed: true, json: true });
+    } finally {
+      process.stdout.write = origWrite;
+    }
+    expect(exit).toBe(0);
+    const out = JSON.parse(chunks.join(""));
+    expect(out.data.mode).toBe("plan");
+    expect(out.data.applied).toBe(false);
+    expect(out.data.summary.noOp).toBe(false);
+    // org_slug should land via discover, widget_id via seed.
+    const byVar = Object.fromEntries(out.data.perTarget.map((t: { var: string; status: string }) => [t.var, t.status]));
+    expect(byVar.org_slug).toBe("discovered");
+    expect(byVar.widget_id).toBe("seeded");
+  });
+
   test("missing base_url returns exit 2", async () => {
     const envPath = join(apiDir, ".env.nobase.yaml");
     await writeFile(envPath, "auth_token: abc\n");
