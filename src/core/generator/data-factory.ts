@@ -3,13 +3,26 @@ import type { OpenAPIV3 } from "openapi-types";
 /**
  * Recursively generates test data from an OpenAPI schema.
  * Uses heuristic placeholders ({{$...}} generators) where possible.
+ *
+ * `forRequest` (default true) toggles request-body filters that strip
+ * server-assigned fields the client must not send: properties marked
+ * `readOnly: true`, and the literal field name `id` at any object level
+ * (universally server-assigned in REST). Pass `forRequest: false` to
+ * preserve full schema shape for response-side fixtures.
  */
 export function generateFromSchema(
   schema: OpenAPIV3.SchemaObject,
   propertyName?: string,
-  _depth = 0,
+  opts: { _depth?: number; forRequest?: boolean } = {},
 ): unknown {
-  if (_depth > 5) return {};
+  const _depth = opts._depth ?? 0;
+  const forRequest = opts.forRequest ?? true;
+  const recurse = (s: OpenAPIV3.SchemaObject, name?: string) =>
+    generateFromSchema(s, name, { _depth: _depth + 1, forRequest });
+
+  if (_depth > 7) {
+    return depthLimitDefault(schema, propertyName);
+  }
 
   // Highest-priority signal: explicit example from spec.
   // Beats enum, format, heuristics — the spec author told us what to send.
@@ -35,7 +48,7 @@ export function generateFromSchema(
         merged.properties = { ...merged.properties, ...s.properties };
       }
     }
-    return generateFromSchema(merged, propertyName, _depth + 1);
+    return recurse(merged, propertyName);
   }
 
   // oneOf / anyOf: pick the most informative variant. Prefer objects with
@@ -43,10 +56,10 @@ export function generateFromSchema(
   // need the object variant, not a string that 422s. Falls back to first
   // non-null entry.
   if (schema.oneOf) {
-    return generateFromSchema(pickPreferredVariant(schema.oneOf as OpenAPIV3.SchemaObject[]), propertyName, _depth + 1);
+    return recurse(pickPreferredVariant(schema.oneOf as OpenAPIV3.SchemaObject[]), propertyName);
   }
   if (schema.anyOf) {
-    return generateFromSchema(pickPreferredVariant(schema.anyOf as OpenAPIV3.SchemaObject[]), propertyName, _depth + 1);
+    return recurse(pickPreferredVariant(schema.anyOf as OpenAPIV3.SchemaObject[]), propertyName);
   }
 
   // enum: first value (always valid for the API contract)
@@ -84,7 +97,7 @@ export function generateFromSchema(
     case "array": {
       const arr = schema as OpenAPIV3.ArraySchemaObject;
       if (arr.items) {
-        const item = generateFromSchema(arr.items as OpenAPIV3.SchemaObject, undefined, _depth + 1);
+        const item = recurse(arr.items as OpenAPIV3.SchemaObject, undefined);
         return [item];
       }
       return [];
@@ -96,17 +109,24 @@ export function generateFromSchema(
       if (schema.properties) {
         const obj: Record<string, unknown> = {};
         for (const [key, propSchema] of Object.entries(schema.properties)) {
-          obj[key] = generateFromSchema(propSchema as OpenAPIV3.SchemaObject, key, _depth + 1);
+          const ps = propSchema as OpenAPIV3.SchemaObject;
+          if (forRequest && shouldSkipForRequest(key, ps)) continue;
+          obj[key] = recurse(ps, key);
         }
         return obj;
       }
-      // Record type: additionalProperties defines value schema
-      if (schema.additionalProperties && typeof schema.additionalProperties === "object") {
-        const valSchema = schema.additionalProperties as OpenAPIV3.SchemaObject;
-        return { key1: generateFromSchema(valSchema, "key1", _depth + 1), key2: generateFromSchema(valSchema, "key2", _depth + 1) };
-      }
-      if (schema.additionalProperties === true) {
-        return { key1: "value1", key2: "value2" };
+      // Record type (additionalProperties only). The historical behavior was
+      // to materialize fake `key1`/`key2` entries to make the shape visible.
+      // Real APIs reject those — the keys are always domain-specific
+      // (filter names, label keys). Emit an empty `{}` instead: it preserves
+      // the object type (so type-validators pass) without injecting payloads
+      // the server didn't ask for. Callers who need realistic record content
+      // should override via fixture-pack/.env.yaml.
+      if (
+        (schema.additionalProperties && typeof schema.additionalProperties === "object") ||
+        schema.additionalProperties === true
+      ) {
+        return {};
       }
       // Bare object with no properties
       if (effectiveType === "object") {
@@ -114,6 +134,34 @@ export function generateFromSchema(
       }
       return "{{$randomString}}";
     }
+  }
+}
+
+/** Fields the client must not send in a request body: explicit `readOnly: true`,
+ *  or the literal name `id`. The latter is a heuristic for under-specified specs
+ *  (Sentry, many in-house APIs) that don't mark the server-assigned id readOnly
+ *  but still 4xx on it being present. */
+function shouldSkipForRequest(name: string, schema: OpenAPIV3.SchemaObject): boolean {
+  if (schema.readOnly === true) return true;
+  if (name === "id") return true;
+  return false;
+}
+
+/** When recursion hits the depth cap, return a type-appropriate placeholder
+ *  rather than `{}` — `{}` for `array<string>` produces `[{}]` which 422s on
+ *  every realistic API. */
+function depthLimitDefault(schema: OpenAPIV3.SchemaObject, name?: string): unknown {
+  const t = Array.isArray(schema.type)
+    ? (schema.type as string[]).find(x => x !== "null")
+    : schema.type;
+  switch (t) {
+    case "string": return formatToPlaceholder(schema.format) ?? guessStringPlaceholder(schema, name);
+    case "integer": return 1;
+    case "number": return 1;
+    case "boolean": return true;
+    case "array": return [];
+    case "object":
+    default: return {};
   }
 }
 
@@ -186,6 +234,7 @@ export function generateMultipartFromSchema(
 
   for (const [key, propSchema] of Object.entries(schema.properties)) {
     const s = propSchema as OpenAPIV3.SchemaObject;
+    if (shouldSkipForRequest(key, s)) continue;
     if (s.format === "binary" || s.format === "byte") {
       result[key] = { file: `./fixtures/${key}.bin`, content_type: "application/octet-stream" };
     } else {
