@@ -126,6 +126,10 @@ export function formatSuiteResult(result: TestRunResult, color: boolean): string
     const label = `${fiveXx} 5xx`;
     parts.push(color ? `${BOLD}${YELLOW}${label}${RESET}` : label);
   }
+  const errored = result.steps.filter(s => s.status === "error").length;
+  if (errored > 0) {
+    parts.push(color ? `${RED}${errored} errored${RESET}` : `${errored} errored`);
+  }
   if (result.skipped > 0) {
     parts.push(color ? `${GRAY}${result.skipped} skipped${RESET}` : `${result.skipped} skipped`);
   }
@@ -140,7 +144,7 @@ export function formatSuiteResult(result: TestRunResult, color: boolean): string
 }
 
 export function formatGrandTotal(results: TestRunResult[], color: boolean): string {
-  const totals = { passed: 0, failed: 0, skipped: 0, total: 0, fiveXx: 0 };
+  const totals = { passed: 0, failed: 0, skipped: 0, errored: 0, total: 0, fiveXx: 0 };
   let minStart = Infinity;
   let maxEnd = -Infinity;
 
@@ -148,6 +152,7 @@ export function formatGrandTotal(results: TestRunResult[], color: boolean): stri
     totals.passed += r.passed;
     totals.failed += r.failed;
     totals.skipped += r.skipped;
+    totals.errored += r.steps.filter(s => s.status === "error").length;
     totals.total += r.total;
     totals.fiveXx += count5xx(r.steps);
     const start = Date.parse(r.started_at);
@@ -169,6 +174,9 @@ export function formatGrandTotal(results: TestRunResult[], color: boolean): stri
   if (totals.fiveXx > 0) {
     const label = `${totals.fiveXx} 5xx`;
     parts.push(color ? `${BOLD}${YELLOW}${label}${RESET}` : label);
+  }
+  if (totals.errored > 0) {
+    parts.push(color ? `${RED}${totals.errored} errored${RESET}` : `${totals.errored} errored`);
   }
   if (totals.skipped > 0) {
     parts.push(color ? `${GRAY}${totals.skipped} skipped${RESET}` : `${totals.skipped} skipped`);
