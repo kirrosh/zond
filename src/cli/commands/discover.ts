@@ -100,7 +100,7 @@ export interface DiscoverOptions {
   json?: boolean;
 }
 
-interface FkTarget {
+export interface FkTarget {
   /** Env var name to fill (e.g. `audience_id`). */
   varName: string;
   /** Resource that owns the id (e.g. `audiences`). */
@@ -109,7 +109,7 @@ interface FkTarget {
   listLabel: string;
 }
 
-interface DiscoveryItem {
+export interface DiscoveryItem {
   varName: string;
   resource: string;
   listPath: string;
@@ -132,7 +132,7 @@ interface DiscoveryItem {
   reason?: string;
 }
 
-function isPlaceholder(value: string | undefined): boolean {
+export function isPlaceholder(value: string | undefined): boolean {
   if (!value) return true;
   const trimmed = value.trim();
   if (trimmed === "") return true;
@@ -147,20 +147,22 @@ function parseEndpointLabel(label: string): { method: string; path: string } | n
   return { method: parts[0]!.toUpperCase(), path: parts[1]! };
 }
 
-interface ResourceYaml {
+export interface ResourceYaml {
   resource: string;
   basePath: string;
   itemPath: string;
   idParam: string;
+  captureField?: string;
+  hasFullCrud?: boolean;
   endpoints: { list?: string; create?: string; read?: string; update?: string; delete?: string };
   fkDependencies: Array<{ var: string; param: string; in: "path" | "body"; ownerResource: string | null }>;
 }
 
-interface ApiResourceMapYaml {
+export interface ApiResourceMapYaml {
   resources: ResourceYaml[];
 }
 
-async function readResourceMap(apiDir: string): Promise<ApiResourceMapYaml | null> {
+export async function readResourceMap(apiDir: string): Promise<ApiResourceMapYaml | null> {
   const path = join(apiDir, ".api-resources.yaml");
   const file = Bun.file(path);
   if (!(await file.exists())) return null;
@@ -173,7 +175,7 @@ async function readResourceMap(apiDir: string): Promise<ApiResourceMapYaml | nul
 
 /** Build the unique target list from FK deps. Each FK var = one discovery
  *  attempt (we hit the owner's list endpoint once and reuse the result). */
-function collectTargets(map: ApiResourceMapYaml): FkTarget[] {
+export function collectTargets(map: ApiResourceMapYaml): FkTarget[] {
   const seen = new Set<string>();
   const out: FkTarget[] = [];
   for (const r of map.resources) {
@@ -191,7 +193,7 @@ function collectTargets(map: ApiResourceMapYaml): FkTarget[] {
   return out;
 }
 
-async function probeOne(
+export async function probeOne(
   target: FkTarget,
   current: string | undefined,
   endpoints: EndpointInfo[],
@@ -299,7 +301,7 @@ async function probeOne(
 /** Append-or-update a key in YAML text. Conservative: matches `<key>:` at
  *  the start of a line and rewrites the value, preserving trailing comments
  *  that documented original placeholders. */
-function upsertEnvLine(yamlText: string, key: string, value: string): string {
+export function upsertEnvLine(yamlText: string, key: string, value: string): string {
   const lines = yamlText.split("\n");
   const re = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`);
   const idx = lines.findIndex(l => re.test(l));

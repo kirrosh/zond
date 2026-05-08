@@ -12,6 +12,7 @@ import { registerDb } from "./commands/db.ts";
 import { registerRequest } from "./commands/request.ts";
 import { registerGenerate } from "./commands/generate.ts";
 import { registerDiscover } from "./commands/discover.ts";
+import { registerBootstrap } from "./commands/bootstrap.ts";
 import {
   registerProbes,
   registerProbeAliasesEarly,
@@ -84,6 +85,7 @@ export function buildProgram(): Command {
 
   registerGenerate(program);
   registerDiscover(program);
+  registerBootstrap(program);
 
   registerProbes(program);
   registerProbeAliasesEarly(program);

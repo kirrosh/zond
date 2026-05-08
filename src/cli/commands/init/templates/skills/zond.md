@@ -211,6 +211,20 @@ zond discover --api <name>            # dry-run: prints var → discovered value
 zond discover --api <name> --apply    # writes to .env.yaml (with .bak backup)
 ```
 
+For empty workspaces where parent fixtures are *also* missing, use
+`zond bootstrap` instead — it cascades discover until nested-list paths
+become reachable and (with `--seed`) POSTs to create-endpoints when the
+owner's list returns empty:
+
+```bash
+zond bootstrap --api <name> --apply             # cascade-only
+zond bootstrap --api <name> --apply --seed      # cascade + POST seeds
+zond bootstrap --api <name> --apply --force     # re-discover even if filled
+```
+
+Bootstrap is idempotent: a re-run skips already-set vars unless
+`--force`. Cascade caps at `--max-passes` (default 8).
+
 Suffix-aware: `*_slug` captures `slug`, `*_uuid` → `uuid`, `*_id` → `id`.
 Skips vars already filled with a non-placeholder value. For special
 fixtures the spec can't describe (verified-only emails, domain-validated
