@@ -1,7 +1,7 @@
 ---
 id: TASK-253
 title: 'generator: {{$randomString}} игнорирует enum:/x-platform — platform-поле сыпет 400 Invalid platform'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 14:00'
 labels:

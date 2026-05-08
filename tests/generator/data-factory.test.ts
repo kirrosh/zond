@@ -79,6 +79,68 @@ describe("generateFromSchema", () => {
     expect(result[0]).toBe("{{$randomString}}");
   });
 
+  // TASK-252: pattern-aware slug generation
+  test("string with slug-style pattern returns randomSlug placeholder", () => {
+    const result = generateFromSchema(
+      { type: "string", pattern: "^(?![0-9]+$)[a-z0-9_\\-]+$" } as OpenAPIV3.SchemaObject,
+    );
+    expect(result).toBe("{{$randomSlug}}");
+  });
+
+  test("string with slug property name returns randomSlug placeholder", () => {
+    const result = generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "slug");
+    expect(result).toBe("{{$randomSlug}}");
+  });
+
+  test("string with _slug suffix returns randomSlug placeholder", () => {
+    const result = generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "team_slug");
+    expect(result).toBe("{{$randomSlug}}");
+  });
+
+  test("mixed-case pattern is not treated as slug", () => {
+    const result = generateFromSchema(
+      { type: "string", pattern: "^[a-zA-Z0-9]+$" } as OpenAPIV3.SchemaObject,
+    );
+    expect(result).toBe("{{$randomString}}");
+  });
+
+  // TASK-253: closed-vocabulary heuristics
+  test("platform field defaults to python", () => {
+    const result = generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "platform");
+    expect(result).toBe("python");
+  });
+
+  test("language field defaults to en", () => {
+    const result = generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "language");
+    expect(result).toBe("en");
+  });
+
+  test("country field defaults to US", () => {
+    const result = generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "country");
+    expect(result).toBe("US");
+  });
+
+  test("timezone field defaults to UTC", () => {
+    const result = generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "timezone");
+    expect(result).toBe("UTC");
+  });
+
+  test("explicit enum still wins over name heuristic for platform", () => {
+    const result = generateFromSchema(
+      { type: "string", enum: ["javascript", "ruby"] } as OpenAPIV3.SchemaObject,
+      "platform",
+    );
+    expect(result).toBe("javascript");
+  });
+
+  test("explicit example still wins over name heuristic for platform", () => {
+    const result = generateFromSchema(
+      { type: "string", example: "go" } as OpenAPIV3.SchemaObject,
+      "platform",
+    );
+    expect(result).toBe("go");
+  });
+
   test("allOf merges schemas", () => {
     const schema: OpenAPIV3.SchemaObject = {
       allOf: [

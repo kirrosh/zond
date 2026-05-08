@@ -184,6 +184,14 @@ function pickPreferredVariant(variants: OpenAPIV3.SchemaObject[]): OpenAPIV3.Sch
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** A schema `pattern` that explicitly allows lowercase but not uppercase
+ *  letters (typical slug regex like `^[a-z0-9_\-]+$`). Used to switch from
+ *  mixed-case `{{$randomString}}` to a slug-shaped generator. */
+function isLowercaseOnlyPattern(pattern: string | undefined): boolean {
+  if (!pattern) return false;
+  return pattern.includes("a-z") && !pattern.includes("A-Z");
+}
+
 /** A string example shaped like a UUID, on a field that looks like a foreign
  *  key (name ends with `_id` or schema declares `format: uuid`), is almost
  *  always a tenant-specific value the spec author left in `example:`. Sending
@@ -250,9 +258,28 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
   // Format-based dispatch already happened earlier in generateFromSchema;
   // this branch only sees strings whose format is empty or unrecognised.
 
+  // Pattern-aware: many specs constrain slugs via regex like
+  // `^(?![0-9]+$)[a-z0-9_\-]+$` without setting `format`. Default
+  // `{{$randomString}}` mixes upper+lower → 400 from the validator.
+  // Heuristic: pattern allows `a-z` but forbids `A-Z` → emit a slug.
+  if (isLowercaseOnlyPattern(schema.pattern)) {
+    return "{{$randomSlug}}";
+  }
+
   // Name-based heuristics
   if (name) {
     const lower = name.toLowerCase();
+    if (lower === "slug" || lower.endsWith("_slug")) {
+      return "{{$randomSlug}}";
+    }
+    // Closed-vocabulary fields where servers validate against an internal
+    // dictionary even when the spec lacks `enum:`. Random strings → 400.
+    // Pick the most universally-accepted value per dictionary.
+    if (lower === "platform") return "python";
+    if (lower === "language" || lower === "lang" || lower === "locale") return "en";
+    if (lower === "country" || lower === "country_code") return "US";
+    if (lower === "timezone" || lower === "time_zone" || lower === "tz") return "UTC";
+    if (lower === "currency" || lower === "currency_code") return "USD";
     // Email-context fields. Email-API specs (Resend, SendGrid, Mailgun) often
     // omit `format: email` on `from`/`to`/`reply_to`/`cc`/`bcc` — the field
     // name is the only clue, and `{{$randomString}}` guarantees a 422.
