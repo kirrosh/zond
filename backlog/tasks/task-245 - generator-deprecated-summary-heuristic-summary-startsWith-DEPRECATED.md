@@ -1,9 +1,10 @@
 ---
 id: TASK-245
 title: 'generator: эмитит "(DEPRECATED) ..." эндпоинты без --include-deprecated (Sentry помечает в summary, не deprecated:true)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 13:00'
+updated_date: '2026-05-08 13:40'
 labels:
   - feedback-loop
   - api-sentry
@@ -35,7 +36,15 @@ Actual: 4-5 явно мёртвых тестов на каждый CRUD-сьют
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] Эвристика: `summary`/`description` matches `^\s*[\(\[]?DEPRECATED[\)\]]?[\s:]` → считается deprecated.
-- [ ] Эвристика подключена к тому же фильтру, что и `deprecated: true` (TASK-80).
-- [ ] Verify: `crud-alert-rules.yaml`, `crud-rules.yaml` без `--include-deprecated` → 0 DEPRECATED-step'ов.
+- [x] Эвристика matches `(DEPRECATED) ...`/`[DEPRECATED] ...`/`DEPRECATED: ...` в `summary`, `operationId` (Sentry кладёт сюда!) и `description` + markdown `## Deprecated` heading в description.
+- [x] Подключено к существующему фильтру (TASK-80) — TASK-80's warning «Skipped N deprecated endpoint(s) — pass --include-deprecated» автоматически срабатывает.
+- [x] Verify Sentry: `zond generate --api sentry --tag Alerts` → `⚠ Skipped 10 deprecated endpoint(s)`, в `crud-*.yaml` 0 DEPRECATED-step'ов.
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+- `src/core/generator/openapi-reader.ts`: новая `isMarkedDeprecatedInText(summary, description, operationId)`. Sentry помечает deprecated именно в `operationId` (`"(DEPRECATED) List ..."`) и markdown-header в description (`"## Deprecated"`), не в `deprecated: true` flag.
+- Два regex: `DEPRECATED_PREFIX_RE` (для summary/operationId/description-prefix) и `DEPRECATED_HEADING_RE` (markdown `## Deprecated`).
+- Подключено к `endpoint.deprecated` ИЛИ — downstream filter в suite-generator уже работает.
+<!-- SECTION:NOTES:END -->
 <!-- SECTION:ACCEPTANCE:END -->
