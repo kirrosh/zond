@@ -79,7 +79,16 @@ export interface SecurityVerdict {
   /** All attempted attacks. Empty for SKIPPED endpoints. */
   findings: SecurityFinding[];
   baseline?: { status: number };
-  cleanup?: { attempted: boolean; status?: number; error?: string };
+  cleanup?: {
+    attempted: boolean;
+    status?: number;
+    error?: string;
+    /** TASK-278: created resource id (slug/uuid/...) so `zond cleanup --orphans`
+     *  can retry DELETE without re-running the probe. */
+    id?: string | number;
+    /** TASK-278: concrete DELETE URL path with the id substituted. */
+    deletePath?: string;
+  };
   skipReason?: string;
 }
 
@@ -725,6 +734,19 @@ async function tryCleanup(
   const url = `${(vars["base_url"] ?? "").replace(/\/+$/, "")}${concretePath}`;
   const headers = liveAuthHeaders(delEp, schemes, vars);
 
+  // TASK-278: stash id + deletePath on the verdict so the orphan tracker
+  // (and `zond cleanup --orphans`) can replay this DELETE without re-running
+  // the probe. Done before retries so even an aborted run leaves a trace.
+  {
+    const prior = verdict.cleanup ?? { attempted: false };
+    verdict.cleanup = {
+      ...prior,
+      attempted: prior.attempted || true,
+      id,
+      deletePath: concretePath,
+    };
+  }
+
   // Eventual-consistency retry (round-5 follow-up): POST creates on the
   // write replica, immediate DELETE hits a read replica that hasn't seen
   // the new id yet → 404. Two short backoffs swallow that transient
@@ -748,6 +770,8 @@ async function tryCleanup(
           attempted: true,
           status: resp.status,
           ...(prior.error ? { error: prior.error } : {}),
+          ...(prior.id !== undefined ? { id: prior.id } : {}),
+          ...(prior.deletePath ? { deletePath: prior.deletePath } : {}),
         };
         return;
       }
@@ -775,6 +799,8 @@ function accumulateCleanupError(verdict: SecurityVerdict, msg: string): void {
   verdict.cleanup = {
     attempted: true,
     ...(prior.status ? { status: prior.status } : {}),
+    ...(prior.id !== undefined ? { id: prior.id } : {}),
+    ...(prior.deletePath ? { deletePath: prior.deletePath } : {}),
     error: errors,
   };
 }

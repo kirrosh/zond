@@ -1,9 +1,10 @@
 ---
 id: TASK-278
 title: 'probe security orphans: перечислить id/URL + команда `zond cleanup --orphans`'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 19:00'
+updated_date: '2026-05-08 14:27'
 labels:
   - feedback-loop
   - api-sentry
@@ -42,11 +43,12 @@ Expected:
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] Probe-runtime пишет orphan-список в `~/.zond/orphans/<api>/<run-id>.jsonl` для **всех** созданных ресурсов (не только тех, чьё DELETE упало) — на случай аборта по Ctrl-C / процесс-крэша.
-- [ ] Reporter после probe-run в случае cleanup-failure печатает компактную таблицу orphan-ов (method/path/id) + строку `Run \`zond cleanup --orphans --api <name>\` to retry`.
-- [ ] CLI: `zond cleanup --orphans` поддерживает фильтры `--api` / `--run` / `--dry-run`; идемпотентен; 404 трактуется как success.
-- [ ] Verify на Sentry: после probe security 4 orphan-ресурса видны списком, `zond cleanup --orphans` подчищает 0/4 → 4/4 (ну или показывает причину 5xx).
-- [ ] ZOND.md: секция «Orphan resources & cleanup» с примером.
+- [ ] #1 Probe-runtime пишет orphan-список в `~/.zond/orphans/<api>/<run-id>.jsonl` для **всех** созданных ресурсов (не только тех, чьё DELETE упало) — на случай аборта по Ctrl-C / процесс-крэша.
+- [ ] #2 Reporter после probe-run в случае cleanup-failure печатает компактную таблицу orphan-ов (method/path/id) + строку `Run \`zond cleanup --orphans --api <name>\` to retry`.
+- [ ] #3 CLI: `zond cleanup --orphans` поддерживает фильтры `--api` / `--run` / `--dry-run`; идемпотентен; 404 трактуется как success.
+- [ ] #4 Verify на Sentry: после probe security 4 orphan-ресурса видны списком, `zond cleanup --orphans` подчищает 0/4 → 4/4 (ну или показывает причину 5xx).
+- [ ] #5 ZOND.md: секция «Orphan resources & cleanup» с примером.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->

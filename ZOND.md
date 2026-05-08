@@ -1080,6 +1080,36 @@ zond clean --api petstore --force     # actually delete
 - After deletion the surrounding empty directories are removed too, but
   only if they hold nothing else.
 
+### Orphan resources & `zond cleanup --orphans`
+
+Live security/mass-assignment probes create resources to attack and try to
+DELETE them on the way out. When that DELETE fails (5xx, 401/403, network
+flake — anything other than 404), the resource leaks into your real
+workspace. Each probe run snapshots every cleanup attempt to
+`~/.zond/orphans/<api>/<run-id>.jsonl`, so you don't have to find the
+remnants by hand.
+
+```bash
+# Probe summary now lists each orphan with its id and DELETE path:
+#   POST /teams/ (id=zond-probe-x7q3); DELETE /teams/zond-probe-x7q3/ → 500
+#   Run `zond cleanup --orphans --api sentry` to retry.
+
+zond cleanup --orphans --api sentry --dry-run   # show the plan
+zond cleanup --orphans --api sentry              # retry DELETEs
+zond cleanup --orphans --run 1730312121234       # restrict to one probe run
+```
+
+Behaviour:
+
+- `404` and `2xx` on retry → success; the record is superseded (an append-
+  only `removed: true` line) so the next run won't re-attempt it.
+- `5xx` / `4xx` (other than 404) / network errors → still alive; exits 1
+  so a CI gate can react.
+- The store is append-only. Crashes mid-cleanup leave the partial state
+  recoverable; nothing is rewritten in place.
+- Override the directory with `ZOND_ORPHANS_DIR` (used by the test
+  suite); default is `~/.zond/orphans/`.
+
 ### Sessions — group multiple runs into one campaign
 
 A "session" stitches multiple `zond run` invocations under one `session_id` so the dashboard's `/runs` view collapses them into a single row instead of N scattered runs. Use it when running a typical sweep — `smoke + probe-methods + probe-validation + mass-assignment` — and you want them grouped as one campaign.
