@@ -2,6 +2,7 @@ import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
 import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, clusterEnvIssues, buildEnvIssue, recommendedAction, softDeleteHint, type RecommendedAction, type EnvIssue } from "./failure-hints.ts";
+import { buildSuggestedFixes, type SuggestedFix } from "./suggested-fixes.ts";
 import { AUTH_PATH_RE } from "../runner/auth-path.ts";
 
 function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
@@ -148,6 +149,10 @@ export interface DiagnoseResult {
   env_issue?: EnvIssue;
   auth_hint?: string;
   cascade_skips?: CascadeSkipGroup[];
+  /** TASK-29: actionable suggestions populated from 404 placeholder
+   *  detection + .env.yaml unfilled-key audit. Empty / undefined when
+   *  nothing actionable was found. */
+  suggested_fixes?: SuggestedFix[];
   failures: Array<{
     suite_name: string;
     test_name: string;
@@ -323,6 +328,17 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
     ? { grouped_failures: undefined, compactFailures: failures }
     : groupFailures(failures, maxExamples);
 
+  // TASK-29: surface placeholder path-params + unfilled .env.yaml keys.
+  const suggestedFixes = buildSuggestedFixes({
+    failures: failures.map(f => ({
+      response_status: f.response_status,
+      request_url: f.request_url,
+      suite_name: f.suite_name,
+      test_name: f.test_name,
+    })),
+    envFilePath,
+  });
+
   return {
     run: {
       id: diagRun.id,
@@ -342,6 +358,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
     ...(env_issue ? { env_issue } : {}),
     ...(auth_hint ? { auth_hint } : {}),
     ...(cascade_skips ? { cascade_skips } : {}),
+    ...(suggestedFixes.length > 0 ? { suggested_fixes: suggestedFixes } : {}),
     failures: compactFailures,
     ...(grouped_failures ? { grouped_failures } : {}),
   };

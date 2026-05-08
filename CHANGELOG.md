@@ -17,6 +17,20 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-29: `zond db diagnose --json` now surfaces `suggested_fixes`.**
+  Two actionable signals on top of the existing `agent_directive` /
+  `recommended_action` / `env_issue` envelope:
+  (1) **placeholder path-params on 404s** — when a 404 hits a URL still
+  containing literal `example`, all-zero UUIDs, `your-…-here`,
+  `replace-me`, or sentinel hex tails (`…dead/beef/cafe`), the segment
+  is flagged with a fix message pointing at `zond discover --apply` or
+  the matching fixture in `.env.yaml`. Deduplicated across failures so
+  one broken segment doesn't repeat N times.
+  (2) **unfilled `.env.yaml` keys** — reads the API's `.env.yaml` and
+  flags values that are empty, `<TODO>` / `<…>`, `example`,
+  `your-…-here`, or `replace-me`. The agent gets a concrete list of
+  keys to fill before re-running, instead of guessing from a 404 burst.
+
 - **TASK-36: tagless endpoints fall back to per-resource grouping.**
   `groupEndpointsByTag` previously piled every untagged endpoint into a
   single `untagged` bucket — Resend's `/audiences` POST/GET/DELETE all
