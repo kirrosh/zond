@@ -641,7 +641,8 @@ function classify(
   resp: { status: number; body?: unknown; body_parsed?: unknown },
 ): SecurityFinding {
   const status = resp.status;
-  const echoed = bodyContains(resp.body_parsed ?? resp.body, payload);
+  const echo = classifyEcho(resp.body_parsed ?? resp.body, payload, hit.class);
+  const echoed = echo.matched;
 
   if (status >= 500) {
     return {
@@ -656,6 +657,9 @@ function classify(
   }
   if (status >= 200 && status < 300) {
     if (echoed) {
+      const label = echo.kind === "verbatim"
+        ? "payload echoed verbatim"
+        : `payload echoed (${echo.kind})`;
       return {
         field: hit.field,
         class: hit.class,
@@ -663,7 +667,7 @@ function classify(
         status,
         echoed,
         severity: "high",
-        reason: `payload echoed in response — stored ${hit.class} candidate`,
+        reason: `${label} — stored ${hit.class} candidate`,
       };
     }
     return {
@@ -698,14 +702,102 @@ function classify(
   };
 }
 
-function bodyContains(body: unknown, needle: string): boolean {
-  if (!needle) return false;
-  if (typeof body === "string") return body.includes(needle);
+function bodyToString(body: unknown): string {
+  if (!body) return "";
+  if (typeof body === "string") return body;
+  // Walk object/array, concatenating raw string leaves so CR/LF chars aren't
+  // hidden behind JSON escape sequences (\r → "\\r" after JSON.stringify).
+  const parts: string[] = [];
+  const seen = new WeakSet<object>();
+  const visit = (v: unknown): void => {
+    if (typeof v === "string") parts.push(v);
+    else if (v && typeof v === "object") {
+      if (seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) v.forEach(visit);
+      else for (const k of Object.keys(v as object)) visit((v as Record<string, unknown>)[k]);
+    }
+  };
   try {
-    return JSON.stringify(body).includes(needle);
+    visit(body);
   } catch {
-    return false;
+    return "";
   }
+  return parts.join("\n");
+}
+
+function safeDecodeURI(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
+  }
+}
+
+type EchoKind =
+  | "verbatim"
+  | "url-decoded"
+  | "CR stripped"
+  | "LF stripped"
+  | "CRLF→LF"
+  | "CRLF→CR"
+  | "tail after CRLF";
+
+interface EchoResult {
+  matched: boolean;
+  kind: EchoKind | "none";
+}
+
+export function classifyEcho(body: unknown, payload: string, cls: SecurityClass): EchoResult {
+  if (!payload) return { matched: false, kind: "none" };
+  const haystackRaw = bodyToString(body);
+  if (!haystackRaw) return { matched: false, kind: "none" };
+
+  // SSRF / open-redirect: verbatim only — URLs are usually preserved as-is.
+  if (cls !== "crlf") {
+    return haystackRaw.includes(payload)
+      ? { matched: true, kind: "verbatim" }
+      : { matched: false, kind: "none" };
+  }
+
+  // CRLF: try verbatim → URL-decode pairs → CR/LF normalization variants → tail.
+  if (haystackRaw.includes(payload)) return { matched: true, kind: "verbatim" };
+
+  const haystackDecoded = safeDecodeURI(haystackRaw);
+  const payloadDecoded = safeDecodeURI(payload);
+
+  if (
+    (payloadDecoded !== payload && haystackRaw.includes(payloadDecoded)) ||
+    (haystackDecoded !== haystackRaw && haystackDecoded.includes(payload)) ||
+    (payloadDecoded !== payload && haystackDecoded !== haystackRaw && haystackDecoded.includes(payloadDecoded))
+  ) {
+    return { matched: true, kind: "url-decoded" };
+  }
+
+  // Normalize: try variants of payload where backend stripped CR or LF.
+  const variants: Array<[string, EchoKind]> = [];
+  if (payloadDecoded.includes("\r\n")) {
+    variants.push([payloadDecoded.replace(/\r\n/g, "\n"), "CRLF→LF"]);
+    variants.push([payloadDecoded.replace(/\r\n/g, "\r"), "CRLF→CR"]);
+    variants.push([payloadDecoded.replace(/\r\n/g, ""), "CRLF→LF"]);
+  }
+  if (payloadDecoded.includes("\r")) variants.push([payloadDecoded.replace(/\r/g, ""), "CR stripped"]);
+  if (payloadDecoded.includes("\n")) variants.push([payloadDecoded.replace(/\n/g, ""), "LF stripped"]);
+
+  for (const [variant, kind] of variants) {
+    if (variant && variant !== payloadDecoded && (haystackRaw.includes(variant) || haystackDecoded.includes(variant))) {
+      return { matched: true, kind };
+    }
+  }
+
+  // Tail-substring: parser truncated at newline, only suffix landed in storage.
+  const splitMatch = payloadDecoded.match(/(?:\r\n|%0d%0a|%0a|%0d|\r|\n)(.+)$/i);
+  const tail = splitMatch?.[1];
+  if (tail && tail.length >= 3 && (haystackRaw.includes(tail) || haystackDecoded.includes(tail))) {
+    return { matched: true, kind: "tail after CRLF" };
+  }
+
+  return { matched: false, kind: "none" };
 }
 
 function summaryLine(v: SecurityVerdict): string {
