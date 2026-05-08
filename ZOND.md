@@ -106,7 +106,7 @@ selected via `zond use`.
 | `refresh-api <name>` | Re-snapshot spec.json + regenerate the 3 artifacts | `--spec <path\|url>`, `--insecure` |
 | `doctor` | Fixture gaps in `.env.yaml` + artifact freshness vs spec.json (exit 0/1/2) | `--api <name>` |
 | `discover` | Auto-fill `.env.yaml` FK ids by hitting list-endpoints (dry-run by default) | `--api <name>` (req), `--apply`, `--env <path>`, `--timeout <ms>` |
-| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--session-id <id>`, `--report json\|junit`, `--report-out <file>` |
+| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--session-id <id>`, `--learn`, `--learn-apply`, `--learn-target test\|drifts`, `--report json\|junit`, `--report-out <file>` |
 | `session start\|end\|status` | Group multiple `zond run` calls into one campaign in `/runs` Sessions view | `--label <text>`, `--id <uuid>` |
 | `validate <path>` | Validate YAML tests | |
 | `coverage` | API test coverage. Exit 0 = full coverage (or ≥ `--fail-on-coverage`); 1 = uncovered endpoints (or below threshold); 2 = bad input/read error. Warnings (e.g. `required_params_no_examples`) never affect the exit code. | `--spec`, `--tests`, `--api`, `--fail-on-coverage <N>` |
@@ -779,6 +779,41 @@ without a JSON response schema are skipped silently.
 
 If `--validate-schema` is passed without `--spec` and the active collection has
 no `openapi_spec`, the run exits with code 2.
+
+### Learning from drifts (`--learn`)
+
+`zond run --learn` flags «passing test, wrong status» cases — the spec says
+`201`, the server returns `200`, the body still matches the OpenAPI schema, so
+the failure is purely a status-code mismatch. By default `--learn` only prints
+the plan; nothing is written to disk.
+
+```bash
+zond run --api sentry --learn
+# Drift detected (3 cases):
+#   POST /user-feedback/   spec=201  observed=200  body-schema=ok  → suggest: update test, or add to drifts
+#   POST /sessions/        spec=201  observed=200  body-schema=ok  → suggest: update test
+#   POST /scim/v2/Users/   spec=201  observed=200  body-schema=ok  → suggest: update test
+```
+
+Apply the plan in one of two ways:
+
+```bash
+# Rewrite expect.status in the YAML — minimal, line-based edit, preserves comments.
+zond run --api sentry --learn --learn-apply --learn-target=test
+
+# Record under apis/<name>/tolerated-drifts.yaml for human review (no test mutation).
+zond run --api sentry --learn --learn-apply --learn-target=drifts
+```
+
+`--learn` implies `--validate-schema`: a status mismatch is only treated as
+drift when the body still validates against the OpenAPI response schema. If
+the body diverges from the schema, the case is **not** proposed — that's a
+real contract bug that should not be silently masked.
+
+> **Do not run `--learn-apply` against an untrusted target.** A hostile or
+> misconfigured server can return any 2xx + a schema-shaped body, which would
+> teach `zond` to accept its drift permanently. Reserve the apply-flow for
+> servers whose contract you trust.
 
 ---
 
