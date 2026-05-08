@@ -1,7 +1,7 @@
 ---
 id: TASK-231
 title: request --api не подхватывает auth_token из apis/<name>/.env.yaml
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 07:56'
 labels:

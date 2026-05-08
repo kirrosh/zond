@@ -22,9 +22,9 @@ export function globalJson(cmd: Command): boolean {
   return cmd.opts().json === true;
 }
 
-/** Resolve API collection → returns { spec?, testPath? } or { error } when not found. */
+/** Resolve API collection → returns { spec?, testPath?, baseDir? } or { error } when not found. */
 export function resolveApiCollection(apiName: string, dbPath: string | undefined):
-  | { spec: string | null; testPath: string | null }
+  | { spec: string | null; testPath: string | null; baseDir: string | null }
   | { error: string } {
   if (typeof apiName !== "string" || apiName.length === 0) {
     return { error: "Internal: --api received non-string value" };
@@ -34,10 +34,31 @@ export function resolveApiCollection(apiName: string, dbPath: string | undefined
     const col = findCollectionByNameOrId(apiName);
     if (!col) return { error: `API '${apiName}' not found` };
     const spec = col.openapi_spec ? resolveCollectionSpec(col.openapi_spec) : null;
-    return { spec, testPath: col.test_path ?? null };
+    return { spec, testPath: col.test_path ?? null, baseDir: col.base_dir ?? null };
   } catch (err) {
     return { error: `Failed to resolve --api: ${(err as Error).message}` };
   }
+}
+
+/**
+ * Resolve `apis/<name>/.env.yaml` for a registered API. TASK-233: probe
+ * subcommands required `--env <file>` even when `--api <name>` was given,
+ * forcing users to repeat the path. When --api is set we derive the env
+ * file from the collection's base_dir; only error if the file is missing.
+ *
+ * Returns the absolute path to the env file when it exists, otherwise an
+ * error object. Callers may also fall back to other strategies on miss.
+ */
+export function resolveApiEnv(apiName: string, dbPath: string | undefined):
+  | { env: string }
+  | { error: string } {
+  const col = resolveApiCollection(apiName, dbPath);
+  if ("error" in col) return col;
+  if (!col.baseDir) {
+    return { error: `API '${apiName}' has no base_dir registered — pass --env <file> explicitly.` };
+  }
+  const envPath = `${col.baseDir.replace(/\/+$/, "")}/.env.yaml`;
+  return { env: envPath };
 }
 
 /**

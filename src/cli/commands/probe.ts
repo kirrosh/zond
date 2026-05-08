@@ -16,9 +16,38 @@ import { probeValidationCommand } from "./probe-validation.ts";
 import { probeMethodsCommand } from "./probe-methods.ts";
 import { probeMassAssignmentCommand } from "./probe-mass-assignment.ts";
 import { probeSecurityCommand } from "./probe-security.ts";
-import { globalJson, resolveSpecArg, warnDeprecatedProbe } from "../resolve.ts";
+import { globalJson, resolveSpecArg, resolveApiEnv, warnDeprecatedProbe } from "../resolve.ts";
+import { existsSync } from "fs";
 import { parsePositiveInt } from "../argv.ts";
 import { printError } from "../output.ts";
+
+/**
+ * TASK-233: pick the env file to feed live-probe commands.
+ *  - Explicit --env wins (legacy behaviour).
+ *  - Otherwise --api <name> derives `apis/<name>/.env.yaml` via the registered
+ *    collection's base_dir.
+ *  - With `tolerateMissing` (probe security/--dry-run), an absent file is
+ *    quietly turned into "no env" — the command will fall back to cwd.
+ */
+function resolveProbeEnv(
+  envFlag: string | undefined,
+  apiFlag: string | undefined,
+  dbPath: string | undefined,
+  opts: { tolerateMissing?: boolean } = {},
+): { env: string | undefined } | { error: string } {
+  if (envFlag) return { env: envFlag };
+  if (!apiFlag) {
+    if (opts.tolerateMissing) return { env: undefined };
+    return { error: "Missing --env <file> (or pass --api <name> to derive it from apis/<name>/.env.yaml)" };
+  }
+  const resolved = resolveApiEnv(apiFlag, dbPath);
+  if ("error" in resolved) return resolved;
+  if (!existsSync(resolved.env)) {
+    if (opts.tolerateMissing) return { env: undefined };
+    return { error: `Env file not found: ${resolved.env} (derived from --api ${apiFlag})` };
+  }
+  return { env: resolved.env };
+}
 
 function defineProbeValidation(parent: Command, name: string, deprecated: boolean): void {
   parent
@@ -57,7 +86,7 @@ function defineProbeMassAssignment(parent: Command, name: string, deprecated: bo
     )
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
-    .requiredOption("--env <file>", "Env YAML with base_url + auth_token (live calls require this)")
+    .option("--env <file>", "Env YAML with base_url + auth_token (live calls require this; auto-derived from apis/<name>/.env.yaml when --api is given)")
     .option("--output <file>", "Write markdown digest to file (default: stdout)")
     .option("--emit-tests <dir>", "Also emit YAML regression suites locking in safe behaviour for CI")
     .option("--tag <tag>", "Probe only endpoints with this tag")
@@ -70,9 +99,11 @@ function defineProbeMassAssignment(parent: Command, name: string, deprecated: bo
       if (deprecated) warnDeprecatedProbe("probe-mass-assignment", "mass-assignment");
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      const envFile = resolveProbeEnv(opts.env, opts.api, opts.db);
+      if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
       process.exitCode = await probeMassAssignmentCommand({
         specPath: resolved.spec,
-        env: opts.env,
+        env: envFile.env,
         output: opts.output,
         emitTests: opts.emitTests,
         tag: opts.tag,
@@ -94,7 +125,7 @@ function defineProbeSecurity(parent: Command, name: string, deprecated: boolean)
     )
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
-    .option("--env <file>", "Env YAML with base_url + auth_token (live calls require this; --dry-run can run without)")
+    .option("--env <file>", "Env YAML with base_url + auth_token (live calls require this; --dry-run can run without; auto-derived from apis/<name>/.env.yaml when --api is given)")
     .option("--output <file>", "Write markdown digest to file (default: stdout)")
     .option("--emit-tests <dir>", "Also emit YAML regression suites locking in safe behaviour for CI")
     .option("--tag <tag>", "Probe only endpoints with this tag")
@@ -107,10 +138,14 @@ function defineProbeSecurity(parent: Command, name: string, deprecated: boolean)
       if (deprecated) warnDeprecatedProbe("probe-security", "security");
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      // probe-security tolerates a missing env (--dry-run path), so don't
+      // fail when --api is given but the env file isn't on disk yet.
+      const envFile = resolveProbeEnv(opts.env, opts.api, opts.db, { tolerateMissing: true });
+      if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
       process.exitCode = await probeSecurityCommand({
         specPath: resolved.spec,
         classes,
-        env: opts.env,
+        env: envFile.env,
         output: opts.output,
         emitTests: opts.emitTests,
         tag: opts.tag,

@@ -3,6 +3,11 @@ import { loadEnvironment, substituteString, substituteDeep } from "../parser/var
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
 
+function hasHeaderCI(headers: Record<string, string>, name: string): boolean {
+  const lower = name.toLowerCase();
+  return Object.keys(headers).some((k) => k.toLowerCase() === lower);
+}
+
 export function extractByPath(obj: unknown, path: string): unknown {
   const segments = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
   let current: unknown = obj;
@@ -96,6 +101,21 @@ export async function resolveAdHocRequest(options: SendAdHocRequestOptions): Pro
     } catch {
       // Not JSON — don't set content-type, let server decide
     }
+  }
+
+  // TASK-231: when --api resolved an env with `auth_token`, auto-inject the
+  // standard `Authorization: Bearer …` header. This mirrors the YAML runner's
+  // behaviour (probes/suites template the same header from the security
+  // scheme) so `zond request --api X GET /…` doesn't 401 just because the
+  // user didn't repeat `--header "Authorization: Bearer {{auth_token}}"`.
+  // User-supplied Authorization always wins.
+  if (
+    options.collectionName
+    && typeof vars.auth_token === "string"
+    && vars.auth_token.length > 0
+    && !hasHeaderCI(finalHeaders, "Authorization")
+  ) {
+    finalHeaders["Authorization"] = `Bearer ${vars.auth_token}`;
   }
 
   return {

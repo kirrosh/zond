@@ -104,6 +104,25 @@ describe("generateFromSchema", () => {
     expect(result).toBe("{{$randomString}}");
   });
 
+  // TASK-224: domain heuristics
+  test("domain field name returns randomDomain placeholder", () => {
+    const result = generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "domain");
+    expect(result).toBe("{{$randomDomain}}");
+  });
+
+  test("description mentioning 'domain' overrides name=randomName", () => {
+    const result = generateFromSchema(
+      { type: "string", description: "The domain to verify" } as OpenAPIV3.SchemaObject,
+      "name",
+    );
+    expect(result).toBe("{{$randomDomain}}");
+  });
+
+  test("plain name field still maps to randomName", () => {
+    const result = generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "name");
+    expect(result).toBe("{{$randomName}}");
+  });
+
   // TASK-253: closed-vocabulary heuristics
   test("platform field defaults to python", () => {
     const result = generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "platform");
