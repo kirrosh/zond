@@ -129,6 +129,7 @@ tests:
 - Body goes in `json: {...}` (or `form:`, `multipart:`, `text:` — see ZOND.md).
 - Captures: `expect.body.<field>: { capture: <var_name> }` — extracts that field from the JSON response into a variable usable by later steps in the same suite.
 - Assertions on the body: `equals`, `exists`, `matches`, `gt`/`lt`, `oneOf`, etc. (see ZOND.md "Assertions").
+- `expect.status` accepts a number (`200`) or an array of numbers (`[200, 404]`). `oneOf`/`anyOf`/string forms are **not** supported — pass an array directly.
 - `always: true` — step runs even if a prior step failed (use for cleanup so test data doesn't leak).
 - `skip_if: "{{var}} =="` — skip when a fixture var is unset.
 - Per-step `headers:` override the suite-level `headers:`.

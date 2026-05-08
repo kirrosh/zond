@@ -1,7 +1,7 @@
 ---
 id: TASK-273
 title: 'discover: на пустом target-API без подсказки "send an event/data first" вместо miss-no-id'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 18:00'
 labels:
@@ -41,8 +41,9 @@ Actual: голый `miss-no-id` без направления.
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] При `miss-no-id` для FK с известным entity-classом печатать generic hint «no <entity> in target API — create one first».
-- [ ] Per-API override через `apis/<name>/.api-catalog/seed-hints.yaml` (опционально), Sentry — со ссылкой на SDK-event/replay/file-upload.
-- [ ] Hint подавляется в `--json` (envelope несёт `reason: empty-target` отдельно).
-- [ ] Regression: пустой sentry workspace → `discover --api sentry` для issue/replay/file даёт hint, не голый miss.
+- [x] Новый статус `miss-empty` отделён от `miss-no-id`: well-shaped пустой list (`[]` / `{data:[]}` / `{items:[]}` / `{results:[]}` / `{records:[]}`) → `miss-empty` с reason «no <ownerResource> in target API — create one first (in the product UI or via API), then re-run discover».
+- [x] `miss-no-id` reason пояснён: `no array/data/items/results/records field` (когда форма ответа неузнана).
+- [x] Reason в reason-колонке consoleовой таблицы и в `data.items[].reason` JSON envelope.
+- [x] Regression-тест на discover: `[]` ответ → `miss-empty` + сообщение «create one first».
+- [ ] Per-API override через `apis/<name>/.api-catalog/seed-hints.yaml` (опционально, на следующую итерацию: SDK-event/replay/file-upload-specific текст).
 <!-- SECTION:ACCEPTANCE:END -->

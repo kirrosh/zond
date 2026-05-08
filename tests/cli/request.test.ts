@@ -120,6 +120,49 @@ describe("requestCommand", () => {
     }
   });
 
+  // TASK-272 — auto-auth hint discoverability
+  test("on 401 without --api in apis/ workspace prints --api hint to stderr", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-hint-", marker: "config", chdir: true });
+    try {
+      // create apis/sentry/ to trigger the hint
+      const fs = await import("node:fs");
+      fs.mkdirSync(join(ws.path, "apis", "sentry"), { recursive: true });
+
+      globalThis.fetch = mock(async () =>
+        new Response("{}", { status: 401, headers: { "Content-Type": "application/json" } })
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      const code = await requestCommand({
+        method: "GET",
+        url: "http://localhost/x",
+        // no api set
+      });
+      expect(code).toBe(0);
+      expect(output.err).toMatch(/--api sentry/);
+      expect(output.err).toMatch(/auto-load Authorization/);
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("no --api hint when apis/ workspace is absent", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-no-hint-", marker: "config", chdir: true });
+    try {
+      globalThis.fetch = mock(async () =>
+        new Response("{}", { status: 401, headers: { "Content-Type": "application/json" } })
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      await requestCommand({ method: "GET", url: "http://localhost/x" });
+      expect(output.err).not.toMatch(/--api/);
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
   test("sends request with headers", async () => {
     let capturedHeaders: Record<string, string> = {};
     globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
