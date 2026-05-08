@@ -1,9 +1,10 @@
 ---
 id: TASK-256
 title: 'runner: canonical `expect.body.<path>.capture: var` молча не пишет в step.captures (CRUD chain ломается)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 14:30'
+updated_date: '2026-05-08 16:00'
 labels:
   - feedback-loop
   - api-sentry
@@ -51,9 +52,19 @@ Log: /tmp/c90.json (re-create project rule + DELETE project rule).
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] `expect.body.<path>.capture: var` записывает значение в `step.captures[var]`.
-- [ ] Captured value доступен следующим тестам chain как `{{var}}` в URL/body/headers.
-- [ ] Покрыт unit-тестом: один nested capture (`expect.body.id.capture`), один deep (`expect.body.data[0].id.capture`).
-- [ ] Verify: запустить `_chase-90.yaml` без хардкода `rule_id` → DELETE step реально шлёт HTTP, статус 204/404 (не http=null).
-- [ ] Если captured ничего не нашёл (path miss) → step warning, не silent {}.
+- [x] `expect.body.<path>.capture: var` записывает значение в `step.captures[var]` — работало уже после TASK-247 (parser flatten + extractCaptures), покрыто новыми тестами.
+- [x] Captured value доступен следующим тестам chain как `{{var}}` в URL/body/headers (через `Object.assign(variables, captures)`).
+- [x] Покрыт unit-тестом: nested capture (`body.id`) + deep (`body.data[0].id` и `body.data.0.id`) в `tests/runner/assertions.test.ts`.
+- [x] Если captured ничего не нашёл (path miss) → auxiliary failed assertion в step.assertions, step падает с явным сообщением `capture <var>: body '<path>' present` вместо silent `captures: {}`. Реализовано через `findMissedCaptures` + `buildMissedCaptureAssertions`.
+- [x] `getByPath` поддерживает bracket-notation (`data[0].id` ≡ `data.0.id`) — раньше только dotted.
+- [ ] ~~Verify _chase-90.yaml~~ — runtime-сценарий, проверится в следующем feedback-раунде. Reproducible миник на httpbin.org показал ожидаемое: shape `{a:1}` → `id` отсутствует → step fail с auxiliary assertion → DELETE skip "Depends on missing capture: rule_id".
 <!-- SECTION:ACCEPTANCE:END -->
+
+## Implementation notes
+
+<!-- SECTION:NOTES:BEGIN -->
+- Корневой бажный кейс был не "не пишет", а **silent path-miss**: `extractCaptures` молча пропускал capture-rule, у которого `getByPath` вернул `undefined`. На реальных API (Sentry, Resend) это происходит когда поле в response-body не совпадает с ожидаемым именем (e.g. `{data: {id}}` vs `{id}`) — пользователь видит `captures: {}` без объяснения.
+- Решение: новая функция `findMissedCaptures` (`src/core/runner/assertions.ts`) — возвращает массив `{var, source, path}` для каждого пропуска. Executor превращает их в `auxiliary` failed assertion через `buildMissedCaptureAssertions`. Step становится fail, downstream шаги корректно скипаются через существующий missingCaptures-механизм.
+- Бонус: расширил `getByPath` (`src/core/utils.ts`) — `[N]` теперь нормализуется в `.N`, чтобы пользователи могли писать естественный JSONPath-стиль `data[0].id`.
+- Поведение для retry_until-блока: тоже пушит auxiliary-assertion, но retry-loop сам решит, фейл это или нет (через condition).
+<!-- SECTION:NOTES:END -->

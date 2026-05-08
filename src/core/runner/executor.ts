@@ -1,10 +1,10 @@
 import { resolve, dirname, basename } from "node:path";
 import type { TestSuite, TestStep, Environment, SourceMetadata } from "../parser/types.ts";
 import { substituteString, substituteStep, substituteDeep, extractVariableReferences } from "../parser/variables.ts";
-import type { TestRunResult, StepResult, HttpRequest } from "./types.ts";
+import type { TestRunResult, StepResult, HttpRequest, AssertionResult } from "./types.ts";
 import { executeRequest, type FetchOptions } from "./http-client.ts";
 import type { RateLimiter } from "./rate-limiter.ts";
-import { checkAssertions, extractCaptures } from "./assertions.ts";
+import { checkAssertions, extractCaptures, findMissedCaptures } from "./assertions.ts";
 import { evaluateExpr } from "./expr-eval.ts";
 import { applyTransform } from "./transforms.ts";
 import type { SchemaValidator } from "./schema-validator.ts";
@@ -26,6 +26,24 @@ function mergeProvenance(
 ): SourceMetadata | null {
   if (!suiteSrc && !stepSrc) return null;
   return { ...(suiteSrc ?? {}), ...(stepSrc ?? {}) };
+}
+
+/** TASK-256: turn each missed-capture (path didn't resolve in response)
+ *  into an auxiliary failed assertion. The step then fails loudly with
+ *  "capture <var>: path '<path>' not found in body" instead of producing
+ *  silent `captures: {}` that the user only notices when the next step in a
+ *  CRUD chain skips with `Depends on missing capture`. */
+function buildMissedCaptureAssertions(
+  misses: ReturnType<typeof findMissedCaptures>,
+): AssertionResult[] {
+  return misses.map((m) => ({
+    field: `capture ${m.var}`,
+    rule: m.source === "body" ? "body-path-exists" : "header-exists",
+    passed: false,
+    actual: undefined,
+    expected: `${m.source} '${m.path}' present`,
+    kind: "auxiliary",
+  }));
 }
 
 function makeSkippedResult(
@@ -369,7 +387,9 @@ export async function runSuite(
         try {
           const response = await executeRequest(request, fetchOptions);
           const captures = extractCaptures(resolved.expect.body, response.body_parsed, resolved.expect.headers, response.headers);
+          const missedCaps = findMissedCaptures(resolved.expect.body, response.body_parsed, resolved.expect.headers, response.headers);
           const assertions = checkAssertions(resolved.expect, response);
+          assertions.push(...buildMissedCaptureAssertions(missedCaps));
           if (options.schemaValidator && response.body_parsed !== undefined) {
             assertions.push(...options.schemaValidator.validate(resolved.method, resolved.path, response.status, response.body_parsed));
           }
@@ -437,7 +457,9 @@ export async function runSuite(
       }
 
       // Run assertions
+      const missedCaps = findMissedCaptures(resolved.expect.body, response.body_parsed, resolved.expect.headers, response.headers);
       const assertions = checkAssertions(resolved.expect, response);
+      assertions.push(...buildMissedCaptureAssertions(missedCaps));
       if (options.schemaValidator && response.body_parsed !== undefined) {
         assertions.push(...options.schemaValidator.validate(resolved.method, resolved.path, response.status, response.body_parsed));
       }
