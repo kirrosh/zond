@@ -257,6 +257,11 @@ interface BootstrapResult {
   writes: Map<string, string>;
 }
 
+/** TASK-271: explicit reason the cascade stopped iterating, surfaced in the
+ *  summary so users can tell `nothing-to-do` apart from `we ran out of
+ *  budget`. */
+export type CascadeStopReason = "stable" | "max-passes" | "no-targets";
+
 async function runCascade(
   targets: FkTarget[],
   endpoints: EndpointInfo[],
@@ -268,7 +273,7 @@ async function runCascade(
   writes: Map<string, string>,
   passesOut: Pass[],
   startIndex: number,
-): Promise<void> {
+): Promise<CascadeStopReason> {
   for (let pass = 0; pass < maxPasses; pass++) {
     const items: DiscoveryItem[] = [];
     const newWrites: string[] = [];
@@ -284,8 +289,9 @@ async function runCascade(
       }
     }
     passesOut.push({ index: startIndex + pass, items, newWrites });
-    if (newWrites.length === 0) return;
+    if (newWrites.length === 0) return "stable";
   }
+  return "max-passes";
 }
 
 export async function bootstrapCommand(options: BootstrapOptions): Promise<number> {
@@ -331,19 +337,28 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
       for (const t of targets) env[t.varName] = "";
     }
 
+    // Snapshot which vars were already filled before any discover/seed. We
+    // need this for per-target classification (`already` vs `discovered`).
+    const preFilled = new Set(targets.filter(t => !isPlaceholder(env[t.varName])).map(t => t.varName));
+
     const writes = new Map<string, string>();
     const passes: Pass[] = [];
-    await runCascade(targets, endpoints, schemes, env, baseUrl, timeout, maxPasses, writes, passes, 1);
+    let lastCascadeStop: CascadeStopReason = "no-targets";
+    if (targets.length > 0) {
+      lastCascadeStop = await runCascade(targets, endpoints, schemes, env, baseUrl, timeout, maxPasses, writes, passes, 1);
+    }
 
     const seeds: SeedAttempt[] = [];
+    let seedStop: "stable" | "max-passes" | "no-progress" | "not-run" = "not-run";
     if (options.seed) {
       // Two-phase seed: a seed unlocks parents, which can let cascade fill
       // children in the next pass. We loop seed→cascade until either
       // (a) no remaining empty FK has a viable owner, or (b) no progress
       // is made — whichever comes first.
-      for (let outer = 0; outer < maxPasses; outer++) {
+      let outer = 0;
+      for (; outer < maxPasses; outer++) {
         const stillEmpty = targets.filter(t => isPlaceholder(env[t.varName]));
-        if (stillEmpty.length === 0) break;
+        if (stillEmpty.length === 0) { seedStop = "stable"; break; }
 
         let progressed = false;
         for (const t of stillEmpty) {
@@ -365,10 +380,11 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
             progressed = true;
           }
         }
-        if (!progressed) break;
+        if (!progressed) { seedStop = "no-progress"; break; }
         // After seeding parents, give cascade another go for nested children.
-        await runCascade(targets, endpoints, schemes, env, baseUrl, timeout, maxPasses, writes, passes, passes.length + 1);
+        lastCascadeStop = await runCascade(targets, endpoints, schemes, env, baseUrl, timeout, maxPasses, writes, passes, passes.length + 1);
       }
+      if (outer >= maxPasses) seedStop = "max-passes";
     }
 
     let applied = false;
@@ -394,13 +410,56 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     const filledFkVars = targets.filter(t => !isPlaceholder(env[t.varName])).length;
     const fillRate = totalFkVars === 0 ? 1 : filledFkVars / totalFkVars;
 
+    // TASK-271: per-target classification — `already` (was filled at start),
+    // `discovered` (cascade list-endpoint pulled an id), `seeded` (POST-create
+    // seeded a parent and we captured its id), `failed:<reason>` (still empty
+    // — surface why so the operator knows where to step in by hand).
+    type TargetStatus = "already" | "discovered" | "seeded" | `failed:${string}`;
+    const perTarget: Array<{ var: string; resource: string; status: TargetStatus; value?: string; reason?: string }> = [];
+    for (const t of targets) {
+      const value = env[t.varName];
+      let status: TargetStatus;
+      let reason: string | undefined;
+      if (preFilled.has(t.varName) && !options.force) {
+        status = "already";
+      } else if (!isPlaceholder(value)) {
+        const seeded = seeds.find(s => s.varName === t.varName && s.status === "seeded");
+        status = seeded ? "seeded" : "discovered";
+      } else {
+        // Still empty — pick the most recent miss-* item from the cascade as
+        // the reason; fallback to the seed attempt's reason.
+        const lastItem = [...passes].reverse()
+          .flatMap(p => p.items)
+          .find(i => i.varName === t.varName);
+        if (lastItem) {
+          reason = lastItem.reason ?? lastItem.status;
+          status = `failed:${lastItem.status}`;
+        } else {
+          const lastSeed = [...seeds].reverse().find(s => s.varName === t.varName);
+          if (lastSeed) {
+            reason = lastSeed.reason ?? lastSeed.status;
+            status = `failed:${lastSeed.status}`;
+          } else {
+            reason = "no list endpoint and no create endpoint to seed from";
+            status = "failed:no-route";
+          }
+        }
+      }
+      perTarget.push({ var: t.varName, resource: t.ownerResource, status, ...(isPlaceholder(value) ? {} : { value }), ...(reason ? { reason } : {}) });
+    }
+
+    const noOp = totalFkVars > 0 && filledFkVars === totalFkVars && writes.size === 0 && seeds.length === 0;
+    const mode: "exec" | "plan" = options.apply ? "exec" : "plan";
+
     if (options.json) {
       printJson(jsonOk("bootstrap", {
         envPath,
         applied,
+        mode,
         backup: backupPath,
         passes: passes.map(p => ({ pass: p.index, writes: p.newWrites, items: p.items })),
         seeds,
+        perTarget,
         summary: {
           targets: totalFkVars,
           filled: filledFkVars,
@@ -408,30 +467,56 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
           writes: writes.size,
           seedsAttempted: seeds.length,
           seedsSucceeded: seeds.filter(s => s.status === "seeded").length,
+          passes: passes.length,
+          cascadeStop: lastCascadeStop,
+          ...(options.seed ? { seedStop } : {}),
+          noOp,
         },
       }));
     } else {
-      console.log(`Bootstrap against ${baseUrl} (${envPath}):`);
+      const tag = mode === "exec" ? "[exec]" : "[plan]";
+      console.log(`${tag} Bootstrap against ${baseUrl} (${envPath})`);
       console.log("");
-      for (const p of passes) {
-        console.log(`Pass ${p.index}: ${p.newWrites.length} new fixture(s)${p.newWrites.length ? ` — ${p.newWrites.join(", ")}` : ""}`);
-      }
-      if (seeds.length > 0) {
-        console.log("");
-        console.log("Seed attempts:");
-        for (const s of seeds) {
-          const tail = s.status === "seeded" ? `→ ${s.capturedId}` : `(${s.reason ?? ""})`;
-          console.log(`  ${s.status.padEnd(18)} ${s.varName.padEnd(28)} ${s.resource.padEnd(20)} ${tail}`);
+
+      if (noOp) {
+        console.log(`bootstrap: nothing to do — ${filledFkVars}/${totalFkVars} fixtures already present.`);
+      } else {
+        // Per-target table.
+        if (perTarget.length > 0) {
+          console.log("Fixture status:");
+          for (const r of perTarget) {
+            const head = r.status.padEnd(20);
+            const value = r.value !== undefined ? `→ ${r.value}` : "";
+            const reason = r.reason ? ` (${r.reason})` : "";
+            console.log(`  ${head} ${r.var.padEnd(28)} ${r.resource.padEnd(20)} ${value}${reason}`);
+          }
+          console.log("");
         }
+        for (const p of passes) {
+          console.log(`Pass ${p.index}: ${p.newWrites.length} new fixture(s)${p.newWrites.length ? ` — ${p.newWrites.join(", ")}` : ""}`);
+        }
+        if (passes.length > 0) {
+          console.log(`Cascade stopped after ${passes.length} pass(es): ${lastCascadeStop}.`);
+        }
+        if (seeds.length > 0) {
+          console.log("");
+          console.log("Seed attempts:");
+          for (const s of seeds) {
+            const tail = s.status === "seeded" ? `→ ${s.capturedId}` : `(${s.reason ?? ""})`;
+            console.log(`  ${s.status.padEnd(18)} ${s.varName.padEnd(28)} ${s.resource.padEnd(20)} ${tail}`);
+          }
+          console.log(`Seed loop stopped: ${seedStop}.`);
+        }
+        console.log("");
+        console.log(`Filled ${filledFkVars}/${totalFkVars} path-FK vars (${Math.round(fillRate * 100)}%).`);
       }
-      console.log("");
-      console.log(`Filled ${filledFkVars}/${totalFkVars} path-FK vars (${Math.round(fillRate * 100)}%).`);
+
       if (applied) {
         printSuccess(`Wrote ${writes.size} value(s) to ${envPath}` + (backupPath ? ` (backup: ${backupPath})` : ""));
       } else if (writes.size === 0) {
-        console.log("Nothing to write (everything already set or no discoveries succeeded).");
+        if (!noOp) console.log("Nothing to write (cascade/seed produced no new values).");
       } else {
-        printWarning(`Dry-run: ${writes.size} value(s) ready. Re-run with --apply to write ${envPath}.`);
+        printWarning(`[plan] ${writes.size} value(s) ready. Re-run with --apply to write ${envPath}.`);
       }
     }
     return 0;
