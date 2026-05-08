@@ -1,9 +1,10 @@
 ---
 id: TASK-259
 title: 'probes: мутируют live-state, FK-fixtures становятся stale в середине сессии (без warning)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 14:30'
+updated_date: '2026-05-08 17:30'
 labels:
   - feedback-loop
   - api-sentry
@@ -49,8 +50,18 @@ Log: /tmp/zond-fb/sentry/rounds/raw-12.log + api-bugs-12.md.
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] Перед запуском mutating-probes печатается явный warning о live-state мутациях с подсказкой `--dry-run` (если такой режим есть/появится).
-- [ ] Решение для FK-divergence: либо probes юзают ephemeral resources, либо после probe-run печатают `fixtures may be stale; re-run discover` + список изменённых FK.
-- [ ] Cleanup-failures (orphan resources) репортятся в exit-summary с явным «N orphans, see api-bugs-NN.md».
-- [ ] Verify: tests-run → probes-run → tests-run на тех же fixtures работает без 404 на seeded ID, либо есть чёткий путь восстановления.
+- [x] Pre-run banner на stderr перед `probe-mass-assignment` и `probe-security` (live-mutating). Список FK-shaped fixture ключей (`*_id`, `*_slug`, `*_uuid`, `*_token`, `monitor_id_or_slug` и т.д.) с предупреждением что они могут стать stale + recovery hint `zond discover --api <name>`. Подавляется в `--json` и `--dry-run`.
+- [x] FK-divergence: post-run hint при `cleanedCount > 0` — "N resource(s) created and deleted by probes. FK fixtures in .env.yaml may be stale — re-run zond discover --api <name>". Сделано вместо ephemeral-режима (TASK-264 — отдельно).
+- [x] Cleanup-failures: новый shared `countCleanupFailures` (фильтрует 404 как success) + summary line "N orphan resource(s): cleanup DELETE failed (non-404). Manual remediation may be needed". Считается в обоих CLI и идёт в JSON envelope как `orphans: <N>`. probe-security exit code теперь учитывает `orphans > 0`.
+- [x] Verify на mass-assignment с боевым sentry spec: banner печатается на stderr, в `--json` режиме подавлен. 11 unit-тестов на shared helpers (`countCleanupFailures`, `printMutationBanner`).
+- [ ] ~~Verify tests→probes→tests без 404~~ — runtime-тест, требует живого Sentry. Recovery-путь `zond discover --api X` зафиксирован в banner и в post-run hint.
 <!-- SECTION:ACCEPTANCE:END -->
+
+## Implementation notes
+
+<!-- SECTION:NOTES:BEGIN -->
+- `src/core/probe/shared.ts`: новые exports `printMutationBanner(name, vars, {quiet})` (stderr-only) и `countCleanupFailures(verdicts)` (404 = success).
+- `src/cli/commands/probe-mass-assignment.ts` + `probe-security.ts`: интеграция banner + orphan-counter. `probe-security` ранее имел собственный фильтр `cleanup?.error` — заменено на shared (уравняли семантику с mass-assignment, и теперь 404 правильно не учитывается).
+- Banner подавляется в `--json` (envelope уже несёт warnings) и `--dry-run` (security — нет live-вызовов). Только stderr — не ломает CI-output, не пушит в digest.
+- ephemeral-режим (`--isolated`) — выделено в TASK-264, как было запланировано.
+<!-- SECTION:NOTES:END -->

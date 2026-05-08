@@ -15,6 +15,7 @@ import { getSecretRegistry } from "../../core/secrets/registry.ts";
 import { applySanitizer } from "../../core/exporter/exporter.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 import { tallyBySeverity, formatSummaryLine } from "../../core/probe/verdict-aggregator.ts";
+import { printMutationBanner, countCleanupFailures } from "../../core/probe/shared.ts";
 
 interface Buckets {
   high: number;
@@ -130,6 +131,13 @@ export async function probeSecurityCommand(
       return 2;
     }
 
+    // TASK-259: live security probes mutate via PUT/PATCH/POST + cleanup
+    // DELETE. Skip the banner in --dry-run (no live calls) and --json (warnings
+    // travel in the envelope instead).
+    if (!options.dryRun) {
+      printMutationBanner("probe-security", vars, { quiet: options.json === true });
+    }
+
     const result = await runSecurityProbes({
       endpoints,
       securitySchemes,
@@ -163,6 +171,11 @@ export async function probeSecurityCommand(
     }
 
     const counts = tallyBySeverity(result.verdicts, SEC_BUCKETS, SEC_ZERO);
+    // TASK-259: shared cleanup-failure counter (404 treated as success — the
+    // resource is already gone, which is the cleanup goal). Replaces the
+    // previous local filter that flagged any `cleanup.error` regardless of
+    // the underlying status.
+    const orphans = countCleanupFailures(result.verdicts);
 
     if (options.json) {
       printJson(
@@ -171,6 +184,7 @@ export async function probeSecurityCommand(
           totalEndpoints: result.totalEndpoints,
           probed: result.specProbed,
           severity: counts,
+          orphans,
           emittedTests: emittedSuites,
         }),
       );
@@ -187,19 +201,23 @@ export async function probeSecurityCommand(
       if (counts.high > 0) {
         printWarning(`${counts.high} HIGH-severity finding(s) — review the digest before deploy.`);
       }
-    }
-
-    const cleanupFailures = result.verdicts.filter(v => v.cleanup?.error).length;
-    if (cleanupFailures > 0 && !options.json) {
-      printWarning(
-        `${cleanupFailures} endpoint(s) with cleanup failures — see "Cleanup failures" section in the digest. Manual remediation may be required.`,
-      );
+      if (orphans > 0) {
+        printWarning(
+          `${orphans} orphan resource(s): cleanup DELETE failed (non-404). Manual remediation may be needed — see digest.`,
+        );
+      }
+      const cleanedCount = result.verdicts.filter(v => v.cleanup?.attempted && v.cleanup.status != null && v.cleanup.status < 400).length;
+      if (cleanedCount > 0) {
+        printWarning(
+          `${cleanedCount} resource(s) created and deleted by probes. FK fixtures in .env.yaml may be stale — re-run \`zond discover --api <name>\` before next CRUD run.`,
+        );
+      }
     }
 
     // Exit non-zero on HIGH (CI gate) or cleanup failures (data
     // integrity). Cleanup failure means probe-security mutated state
     // it couldn't restore — the operator needs to act.
-    return counts.high > 0 || cleanupFailures > 0 ? 1 : 0;
+    return counts.high > 0 || orphans > 0 ? 1 : 0;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (options.json) printJson(jsonError("probe-security", [message]));

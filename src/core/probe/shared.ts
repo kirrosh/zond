@@ -152,6 +152,61 @@ export function isMutating(method: string): boolean {
   return m === "POST" || m === "PUT" || m === "PATCH";
 }
 
+/**
+ * TASK-259: pre-run banner shown to stderr before any mutating probe runs
+ * on a live API. Lists the probe's name and reminds the user that:
+ *   1. resources will be created and deleted on the target;
+ *   2. seeded `.env.yaml` fixtures (slug/id/name) may go stale because
+ *      probes may rename or replace them;
+ *   3. `--no-cleanup` keeps created resources around for inspection.
+ *
+ * Emits to stderr (not stdout) so it doesn't pollute --json envelopes or
+ * the Markdown digest. Suppressed when `quiet` is true (used in CI/JSON
+ * paths where the structured envelope already carries warnings).
+ */
+export function printMutationBanner(
+  probeName: string,
+  vars: Record<string, string>,
+  opts?: { quiet?: boolean },
+): void {
+  if (opts?.quiet) return;
+  const fixtureKeys = Object.keys(vars).filter((k) =>
+    /(_id|_slug|_uuid|_name|_token)$/i.test(k) || /^(monitor|project|team|alert_rule|rule|organization)_id_or_slug$/.test(k),
+  );
+  const fixtureLine = fixtureKeys.length > 0
+    ? `   FK fixtures that may go stale: ${fixtureKeys.slice(0, 8).join(", ")}${fixtureKeys.length > 8 ? `, +${fixtureKeys.length - 8} more` : ""}\n`
+    : "";
+  process.stderr.write(
+    `\n` +
+    `⚠  ${probeName} mutates live data on the target API.\n` +
+    `   It creates and (by default) deletes resources via POST/PUT/PATCH/DELETE.\n` +
+    `${fixtureLine}` +
+    `   Recovery if FK fixtures change: re-run \`zond discover --api <name>\` to refresh \`.env.yaml\`.\n` +
+    `   Pass \`--no-cleanup\` to keep probe-created resources for inspection.\n` +
+    `\n`,
+  );
+}
+
+/**
+ * TASK-259: count probe verdicts whose cleanup DELETE was attempted but
+ * failed (network error, or 4xx other than 404). 404 is intentionally
+ * treated as success: the resource is gone, possibly already removed by
+ * the API itself or by the test under inspection. Used to surface an
+ * "N orphans, manual cleanup needed" line in the CLI summary.
+ */
+export function countCleanupFailures(
+  verdicts: Array<{ cleanup?: { attempted: boolean; status?: number; error?: string } }>,
+): number {
+  let n = 0;
+  for (const v of verdicts) {
+    const c = v.cleanup;
+    if (!c || !c.attempted) continue;
+    if (c.error) { n++; continue; }
+    if (c.status != null && c.status >= 400 && c.status !== 404) n++;
+  }
+  return n;
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
