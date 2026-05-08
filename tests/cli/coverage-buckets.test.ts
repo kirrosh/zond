@@ -73,6 +73,23 @@ describe("bucketRows (TASK-280)", () => {
     expect(buckets.unhit).toEqual([]);
   });
 
+  test("TASK-270: rows that hit but never pass land in coveredButNon2xx (= hit_coverage but not pass_coverage)", () => {
+    // Two rows: A is a clean 2xx pass, B is a 5xx-only hit. pass-coverage
+    // should count A only; hit-coverage should count both.
+    const matrix: CoverageMatrix = {
+      rows: [
+        row("GET", "/a", { "2xx": cell([ref("pass", 200)]), "4xx": emptyCell(), "5xx": emptyCell() }),
+        row("PUT", "/b", { "2xx": emptyCell(), "4xx": emptyCell(), "5xx": cell([ref("fail", 502)]) }),
+      ],
+      totals: { endpoints: 2, cells: 6, covered: 1, partial: 1, uncovered: 0, byReason: {} as never },
+    };
+    const buckets = bucketRows(matrix);
+    // pass-coverage proxy
+    expect(buckets.covered2xx).toHaveLength(1);
+    // hit-coverage proxy = covered2xx + coveredButNon2xx
+    expect(buckets.covered2xx.length + buckets.coveredButNon2xx.length).toBe(2);
+  });
+
   test("network-error-only result (responseStatus=null) is still 'hit' but lastStatus=null", () => {
     const matrix: CoverageMatrix = {
       rows: [
