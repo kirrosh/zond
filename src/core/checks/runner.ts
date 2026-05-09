@@ -17,6 +17,7 @@ import { extractEndpoints, readOpenApiSpec } from "../generator/index.ts";
 import { detectCrudGroups } from "../generator/suite-generator.ts";
 import type { EndpointInfo } from "../generator/types.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
+import { enumerateBoundaryCases } from "../generator/coverage-phase.ts";
 import { executeRequest } from "../runner/http-client.ts";
 import { createSchemaValidator, type SchemaValidator } from "../runner/schema-validator.ts";
 import type { HttpRequest, HttpResponse } from "../runner/types.ts";
@@ -55,6 +56,15 @@ export interface RunChecksOptions {
   /** ARV-3 AC #6 — when true, security checks return skip with a
    *  warning. The CLI surfaces this as `--bootstrap-cleanup-failed`. */
   bootstrapCleanupFailed?: boolean;
+  /** ARV-6 — `examples` (current default: one positive + the
+   *  single-site negative mutator) vs `coverage` (deterministic
+   *  boundary-value enumeration over the body schema) vs `all` (both).
+   *  Coverage cases carry `meta.boundary` and `meta.phase = "coverage"`
+   *  for the SARIF reporter and reproducer hints. */
+  phase?: "examples" | "coverage" | "all";
+  /** ARV-6 AC #5 — gate the NUL byte (\x00) in string boundaries.
+   *  Off by default because some HTTP/JSON stacks panic on it. */
+  allowX00?: boolean;
 }
 
 export interface RunChecksResult {
@@ -146,6 +156,47 @@ function buildMissingHeader(op: EndpointInfo, baseUrl: string): BuiltCase | null
     meta: { dropped_header: dropped },
   };
   return { req, case: c };
+}
+
+/** ARV-6: emit one BuiltCase per (field × boundary) over the body schema.
+ *  Valid boundaries ride as `kind: "positive"` so positive_data_acceptance
+ *  evaluates them; invalid boundaries ride as `kind: "negative_data"` so
+ *  negative_data_rejection evaluates them. Both carry `meta.boundary` and
+ *  `meta.phase: "coverage"` so the finding surfaces *which* boundary the
+ *  server tripped on. */
+function buildCoverageCases(
+  op: EndpointInfo,
+  baseUrl: string,
+  opts: { allowX00?: boolean },
+): BuiltCase[] {
+  if (!op.requestBodySchema) return [];
+  const m = op.method.toUpperCase();
+  if (m === "GET" || m === "DELETE") return [];
+  const cases = enumerateBoundaryCases(op.requestBodySchema, { allowX00: opts.allowX00 });
+  const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op)}`;
+  const headers = buildBaseHeaders(op, { withRequired: true });
+  const out: BuiltCase[] = [];
+  for (const cc of cases) {
+    const body = JSON.stringify(cc.body);
+    const req: HttpRequest = { method: m, url, headers, body };
+    const kind: CaseKind = cc.valid ? "positive" : "negative_data";
+    out.push({
+      req,
+      case: {
+        operation: op,
+        request: { method: req.method, url: req.url, headers: req.headers, body: req.body },
+        mode: cc.valid ? "positive" : "negative",
+        kind,
+        meta: {
+          phase: "coverage",
+          boundary: cc.boundary,
+          field_path: cc.field_path,
+          mutation: "boundary",
+        },
+      },
+    });
+  }
+  return out;
 }
 
 function buildNegativeData(op: EndpointInfo, baseUrl: string): BuiltCase | null {
@@ -252,16 +303,29 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   // hammer the same `OPTIONS /widgets` four times for four declared ops.
   const probedUnsupportedPaths = new Set<string>();
 
+  const phase = opts.phase ?? "examples";
+  const wantsExamples = phase === "examples" || phase === "all";
+  const wantsCoverage = phase === "coverage" || phase === "all";
+
   for (const op of ops) {
     const cases: BuiltCase[] = [];
-    if (neededKinds.has("positive")) cases.push(buildPositive(op, opts.baseUrl));
+    if (wantsExamples && neededKinds.has("positive")) cases.push(buildPositive(op, opts.baseUrl));
     if (neededKinds.has("missing_required_header")) {
       const c = buildMissingHeader(op, opts.baseUrl);
       if (c) cases.push(c);
     }
-    if (neededKinds.has("negative_data")) {
+    if (wantsExamples && neededKinds.has("negative_data")) {
       const c = buildNegativeData(op, opts.baseUrl);
       if (c) cases.push(c);
+    }
+    if (wantsCoverage && (neededKinds.has("negative_data") || neededKinds.has("positive"))) {
+      // ARV-6: deterministic boundary-value enumeration. Filter out
+      // kinds nobody asked for so a `--check positive_data_acceptance`
+      // run doesn't pay for invalid-boundary requests.
+      const boundary = buildCoverageCases(op, opts.baseUrl, { allowX00: opts.allowX00 });
+      for (const b of boundary) {
+        if (neededKinds.has(b.case.kind)) cases.push(b);
+      }
     }
     if (neededKinds.has("unsupported_method") && !probedUnsupportedPaths.has(op.path)) {
       const declared = buckets.get(op.path)?.declared ?? new Set([op.method.toUpperCase()]);
