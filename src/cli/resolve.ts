@@ -102,12 +102,3 @@ export function resolveSpecArg(
   return { spec: resolved.spec };
 }
 
-/**
- * TASK-182 (m-11): one-release deprecation warning on the old top-level
- * probe-* names. Remove the alias + this helper in the next minor.
- */
-export function warnDeprecatedProbe(oldName: string, newName: string): void {
-  process.stderr.write(
-    `[zond] '${oldName}' is deprecated, use 'zond probe ${newName}' instead. The alias will be removed in the next release.\n`,
-  );
-}
