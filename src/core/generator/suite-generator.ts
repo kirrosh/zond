@@ -481,8 +481,13 @@ export function detectCrudGroupsWithDiagnostics(
       diagnostics.push(diag);
       continue;
     }
-    if (!read) {
-      diag.reason = "item endpoint exists but no GET-by-id (minimum is POST + GET/{id})";
+    // TASK-260: accept headless chains — POST + (GET/PUT/PATCH/DELETE on /{id}).
+    // Resources with no GET-by-id (e.g. external-teams, some user-binding endpoints)
+    // were previously skipped entirely, even though POST captures the ID and PUT/DELETE
+    // can drive the chain on their own. The Read/Verify steps in the suite generator
+    // are already conditional on `group.read`, so headless chains generate cleanly.
+    if (!read && !update && !del) {
+      diag.reason = "item endpoint exists but no GET/PUT/PATCH/DELETE on /{id}";
       diagnostics.push(diag);
       continue;
     }
@@ -497,7 +502,14 @@ export function detectCrudGroupsWithDiagnostics(
     const idParam = idMatch[1]!;
 
     diag.verdict = "chain";
-    diag.reason = "POST + GET/{id} matched";
+    if (read) {
+      diag.reason = "POST + GET/{id} matched";
+    } else {
+      // TASK-260: explicit headless reason so `--explain` differentiates the
+      // two chain shapes — useful for debugging fixture flow.
+      const partner = update ? `${update.method.toUpperCase()}/{id}` : `DELETE/{id}`;
+      diag.reason = `POST + ${partner} matched (headless: no GET-by-id)`;
+    }
     diagnostics.push(diag);
 
     groups.push({

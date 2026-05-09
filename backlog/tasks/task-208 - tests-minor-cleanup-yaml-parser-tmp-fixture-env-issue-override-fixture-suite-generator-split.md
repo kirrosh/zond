@@ -3,9 +3,10 @@ id: TASK-208
 title: >-
   tests: minor cleanup (yaml-parser tmp fixture, env-issue-override fixture,
   suite-generator split)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:12'
+updated_date: '2026-05-09 10:02'
 labels:
   - tests
   - refactor

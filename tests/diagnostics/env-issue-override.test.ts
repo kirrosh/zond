@@ -5,6 +5,41 @@ import { diagnoseRun } from "../../src/core/diagnostics/db-analysis.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
 import { tmpDb, unlinkDb as unlink } from "../_helpers/tmp-db";
 
+// TASK-208 AC#2: shared step builders across both describe blocks. Earlier the
+// first block re-declared full TestRunResult inline (~50 lines per case) while
+// the second already had failingStep/passStep — unify on the helpers.
+function failingStep(
+  name: string,
+  url: string,
+  status = 400,
+  body = "",
+  method: string = "POST",
+  headers: Record<string, string> = {},
+): TestRunResult["steps"][number] {
+  return {
+    name,
+    status: "fail",
+    duration_ms: 10,
+    request: { method, url, headers },
+    response: { status, headers: {}, body, duration_ms: 10 },
+    assertions: [{ field: "status", rule: "equals 200", passed: false, actual: status, expected: 200 }],
+    captures: {},
+    error: body || `${status}`,
+  };
+}
+
+function passStep(name: string): TestRunResult["steps"][number] {
+  return {
+    name,
+    status: "pass",
+    duration_ms: 5,
+    request: { method: "GET", url: "http://api/ok", headers: {} },
+    response: { status: 200, headers: {}, body: "{}", duration_ms: 5 },
+    assertions: [],
+    captures: {},
+  };
+}
+
 describe("TASK-70: env_issue overrides per-failure recommended_action", () => {
   let dbPath: string;
   beforeEach(() => {
@@ -17,46 +52,16 @@ describe("TASK-70: env_issue overrides per-failure recommended_action", () => {
   });
 
   test("missing {{auth_token}} → env_issue, recommended_action=fix_env (not fix_test_logic)", () => {
-    // Simulate a run where every failure has the same unresolved-variable
-    // hint signature: server got a literal "{{auth_token}}" and rejected with 400.
+    const unresolved = '{"error":"unresolved variable {{auth_token}}"}';
+    const authHeaders = { Authorization: "Bearer {{auth_token}}" };
     const result: TestRunResult = {
       suite_name: "Users",
       started_at: "2024-01-01T00:00:00.000Z",
       finished_at: "2024-01-01T00:00:01.000Z",
-      total: 2,
-      passed: 0,
-      failed: 2,
-      skipped: 0,
+      total: 2, passed: 0, failed: 2, skipped: 0,
       steps: [
-        {
-          name: "Create user",
-          status: "fail",
-          duration_ms: 50,
-          request: {
-            method: "POST",
-            url: "http://api/users?token={{auth_token}}",
-            headers: { Authorization: "Bearer {{auth_token}}" },
-            body: '{"email":"x@y.z"}',
-          },
-          response: { status: 400, headers: {}, body: '{"error":"unresolved variable {{auth_token}}"}', duration_ms: 50 },
-          assertions: [{ field: "status", rule: "equals 200", passed: false, actual: 400, expected: 200 }],
-          captures: {},
-          error: "unresolved variable {{auth_token}}",
-        },
-        {
-          name: "Update user",
-          status: "fail",
-          duration_ms: 50,
-          request: {
-            method: "PATCH",
-            url: "http://api/users/1?token={{auth_token}}",
-            headers: { Authorization: "Bearer {{auth_token}}" },
-          },
-          response: { status: 400, headers: {}, body: '{"error":"unresolved variable {{auth_token}}"}', duration_ms: 50 },
-          assertions: [{ field: "status", rule: "equals 200", passed: false, actual: 400, expected: 200 }],
-          captures: {},
-          error: "unresolved variable {{auth_token}}",
-        },
+        failingStep("Create user", "http://api/users?token={{auth_token}}", 400, unresolved, "POST", authHeaders),
+        failingStep("Update user", "http://api/users/1?token={{auth_token}}", 400, unresolved, "PATCH", authHeaders),
       ],
     };
 
@@ -80,35 +85,16 @@ describe("TASK-70: env_issue overrides per-failure recommended_action", () => {
 
   test("5xx api_error keeps report_backend_bug even when env_issue is set", () => {
     // One unresolved-variable failure (so env_issue activates) + one real 5xx.
+    const unresolved = '{"error":"unresolved variable {{auth_token}}"}';
+    const authHeaders = { Authorization: "Bearer {{auth_token}}" };
     const result: TestRunResult = {
       suite_name: "Mixed",
       started_at: "2024-01-01T00:00:00.000Z",
       finished_at: "2024-01-01T00:00:01.000Z",
-      total: 2,
-      passed: 0,
-      failed: 2,
-      skipped: 0,
+      total: 2, passed: 0, failed: 2, skipped: 0,
       steps: [
-        {
-          name: "envvar",
-          status: "fail",
-          duration_ms: 50,
-          request: { method: "POST", url: "http://api/u?t={{auth_token}}", headers: { Authorization: "Bearer {{auth_token}}" } },
-          response: { status: 400, headers: {}, body: '{"error":"unresolved variable {{auth_token}}"}', duration_ms: 50 },
-          assertions: [{ field: "status", rule: "equals 200", passed: false, actual: 400, expected: 200 }],
-          captures: {},
-          error: "unresolved variable {{auth_token}}",
-        },
-        {
-          name: "envvar2",
-          status: "fail",
-          duration_ms: 50,
-          request: { method: "POST", url: "http://api/u2?t={{auth_token}}", headers: { Authorization: "Bearer {{auth_token}}" } },
-          response: { status: 400, headers: {}, body: '{"error":"unresolved variable {{auth_token}}"}', duration_ms: 50 },
-          assertions: [{ field: "status", rule: "equals 200", passed: false, actual: 400, expected: 200 }],
-          captures: {},
-          error: "unresolved variable {{auth_token}}",
-        },
+        failingStep("envvar", "http://api/u?t={{auth_token}}", 400, unresolved, "POST", authHeaders),
+        failingStep("envvar2", "http://api/u2?t={{auth_token}}", 400, unresolved, "POST", authHeaders),
       ],
     };
     const runId = createRun({ started_at: result.started_at });
@@ -134,31 +120,6 @@ describe("TASK-98: env_issue scope and per-suite clustering", () => {
     closeDb();
     unlink(dbPath);
   });
-
-  function failingStep(name: string, url: string, status = 400, body = ""): TestRunResult["steps"][number] {
-    return {
-      name,
-      status: "fail",
-      duration_ms: 10,
-      request: { method: "POST", url, headers: {} },
-      response: { status, headers: {}, body, duration_ms: 10 },
-      assertions: [{ field: "status", rule: "equals 200", passed: false, actual: status, expected: 200 }],
-      captures: {},
-      error: body || `${status}`,
-    };
-  }
-
-  function passStep(name: string): TestRunResult["steps"][number] {
-    return {
-      name,
-      status: "pass",
-      duration_ms: 5,
-      request: { method: "GET", url: "http://api/ok", headers: {} },
-      response: { status: 200, headers: {}, body: "{}", duration_ms: 5 },
-      assertions: [],
-      captures: {},
-    };
-  }
 
   test("AC#1: per-suite missing variable → suite-scoped env_issue, fix_env only there", () => {
     // payments suite needs {{stripe_key}} (unresolved) — both tests fail.

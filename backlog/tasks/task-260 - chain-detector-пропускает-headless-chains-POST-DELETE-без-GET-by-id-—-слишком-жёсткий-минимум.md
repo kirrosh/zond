@@ -1,17 +1,20 @@
 ---
 id: TASK-260
-title: 'chain detector: пропускает headless chains (POST + DELETE без GET-by-id) — слишком жёсткий минимум'
-status: To Do
+title: >-
+  chain detector: пропускает headless chains (POST + DELETE без GET-by-id) —
+  слишком жёсткий минимум
+status: Done
 assignee: []
 created_date: '2026-05-08 14:30'
+updated_date: '2026-05-09 10:02'
 labels:
   - feedback-loop
   - api-sentry
   - chain-detector
   - generator
+milestone: m-14
 dependencies:
   - TASK-246
-milestone: m-14
 priority: low
 ---
 
@@ -34,10 +37,11 @@ Actual: жёсткий минимум, ресурсы с такой формой
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] Chain detector принимает headless chain `POST + DELETE/{id}` (минимум) и `POST + PUT/{id}` без GET-by-id.
-- [ ] ID для последующих steps берётся из POST-response (через capture; зависимость с TASK-256).
-- [ ] Если поведение opt-in — есть флаг или setting; иначе — поведение по умолчанию.
-- [ ] Verify: `zond generate --api sentry --tag Teams` → `crud-external-teams.yaml` сгенерирован, `--explain` уже не пишет skipped для external-teams.
+- [ ] #1 Chain detector принимает headless chain `POST + DELETE/{id}` (минимум) и `POST + PUT/{id}` без GET-by-id.
+- [ ] #2 ID для последующих steps берётся из POST-response (через capture; зависимость с TASK-256).
+- [ ] #3 Если поведение opt-in — есть флаг или setting; иначе — поведение по умолчанию.
+- [ ] #4 Verify: `zond generate --api sentry --tag Teams` → `crud-external-teams.yaml` сгенерирован, `--explain` уже не пишет skipped для external-teams.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->
