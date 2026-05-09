@@ -19,7 +19,6 @@ import {
   registerProbeMethodsAlias,
 } from "./commands/probe.ts";
 import { registerLintSpec } from "./commands/lint-spec.ts";
-import { registerExport } from "./commands/export.ts";
 import { registerReport } from "./commands/report.ts";
 import { registerCatalog } from "./commands/catalog.ts";
 import { registerCompletions } from "./commands/completions.ts";
@@ -93,7 +92,6 @@ export function buildProgram(): Command {
   registerLintSpec(program);
   registerProbeMethodsAlias(program);
   registerCatalog(program);
-  registerExport(program);
   registerReport(program);
 
   registerCompletions(program);

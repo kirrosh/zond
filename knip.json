@@ -8,7 +8,6 @@
   ],
   "project": ["src/**/*.{ts,tsx}"],
   "ignore": [
-    "src/core/exporter/postman.ts",
     "src/cli/commands/init/templates/**",
     "src/db/queries/coverage.ts",
     "src/db/queries/settings.ts"

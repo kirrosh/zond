@@ -2,8 +2,20 @@
 id: decision-4
 title: Future of zond export postman
 date: '2026-04-28 14:05'
-status: accepted
+status: implemented (reversed 2026-05-09 — TASK-286)
 ---
+
+## 2026-05-09 update — REVERSED, command removed (TASK-286)
+
+m-13 audit-and-consolidation §3 reversed this decision: the postman
+exporter (`src/cli/commands/export.ts` + `src/core/exporter/postman.ts`,
+~963 LOC) is removed in m-13. OpenAPI-driven Postman tooling already
+covers the round-trip use case; maintaining a parallel YAML→Postman
+path is not justified by observed usage. The original "keep as-is"
+rationale below is preserved for history.
+
+---
+
 
 ## Context
 

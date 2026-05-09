@@ -1221,7 +1221,7 @@ single uniform envelope so a downstream parser only needs one shape:
 
 Holds for `db collections|runs|run|diagnose|compare`, `validate`, `coverage`,
 `generate`, `probe-*`, `request`, `init`, `add api`, `refresh-api`, `doctor`,
-`describe`, `use`, `update`, `postman`, `catalog`. The `data` payload shape
+`describe`, `use`, `catalog`. The `data` payload shape
 varies by command (e.g. `db run`'s `data` is `{ run, results }`); the envelope
 itself does not.
 
