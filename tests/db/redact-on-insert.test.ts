@@ -29,7 +29,6 @@ function makeRunResult(): TestRunResult {
   return {
     suite_name: "leaky",
     suite_file: "leaky.yaml",
-    file: "leaky.yaml",
     started_at: new Date().toISOString(),
     finished_at: new Date().toISOString(),
     total: 1,

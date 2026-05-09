@@ -258,7 +258,7 @@ function printSchemaValidation(v: SchemaValidationOutcome): void {
 function parseMethodPathArg(raw: string): { method: string; path: string } | null {
   const m = raw.match(/^\s*([A-Za-z]+)\s*[: ]\s*(\/.*?)\s*$/);
   if (!m) return null;
-  return { method: m[1].toUpperCase(), path: m[2] };
+  return { method: m[1]!.toUpperCase(), path: m[2]! };
 }
 
 function extractPath(url: string): string {
