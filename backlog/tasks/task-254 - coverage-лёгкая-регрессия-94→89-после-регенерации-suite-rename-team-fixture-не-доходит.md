@@ -3,10 +3,10 @@ id: TASK-254
 title: >-
   coverage: лёгкая регрессия 94→89 после регенерации (suite-rename +
   team-fixture не доходит)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 14:00'
-updated_date: '2026-05-09 09:06'
+updated_date: '2026-05-09 09:46'
 labels:
   - feedback-loop
   - api-sentry
@@ -48,3 +48,12 @@ Log: /tmp/zond-fb/sentry/rounds/raw-11.log
 - [ ] #4 Verify: после фикса coverage ≥ round-10 (94/219).
 <!-- SECTION:ACCEPTANCE:END -->
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Audit (refactor/0905):
+- Coverage engine keyed по `METHOD path` (src/core/coverage/reasons.ts:87 endpointKey, line 53 MatrixRow.endpoint), suite-имя в покрытие НЕ входит. Гипотеза #1 (rename ломает union) — отклонена: rename suites невозможно влияет на coverage. AC#2 → не нужен.
+- Остаётся гипотеза #2: team-fixture не доходит до зависимых steps в crud-teams.yaml → 5 endpoint'ов стали non-2xx. Это не coverage-баг, а fixture/chain-detection регрессия (overlap с TASK-246 и TASK-260).
+- Для AC#1/#4 нужны sentry-артефакты + новый round feedback-loop'а. Без них verify невозможен. Reassign to feedback-tester loop.
+<!-- SECTION:NOTES:END -->

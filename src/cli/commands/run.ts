@@ -3,7 +3,7 @@ import { stat } from "node:fs/promises";
 import { parseSafe } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
-import { preflightCheckVars, formatMissingVarLine } from "../../core/runner/preflight-vars.ts";
+import { preflightCheckVars, formatMissingVarLine, summarizeMissingVars } from "../../core/runner/preflight-vars.ts";
 import { runSuite } from "../../core/runner/executor.ts";
 import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
 import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
@@ -315,7 +315,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
   //     (their captures don't exist yet).
   {
     const setupHits = preflightCheckVars(setupSuites, env);
-    for (const hit of setupHits) printWarning(formatMissingVarLine(hit));
+    emitMissingVarWarnings(setupHits);
     if (options.strictVars && setupHits.length > 0) {
       printError(`--strict-vars: ${setupHits.length} undefined variable reference(s) in setup suites`);
       return 2;
@@ -338,7 +338,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
   //     are known producers; per-suite captures/sets/parameterize handled inside.
   {
     const hits = preflightCheckVars(regularSuites, enrichedEnv);
-    for (const hit of hits) printWarning(formatMissingVarLine(hit));
+    emitMissingVarWarnings(hits);
     if (options.strictVars && hits.length > 0) {
       printError(`--strict-vars: ${hits.length} undefined variable reference(s)`);
       return 2;
@@ -546,6 +546,20 @@ import { readCurrentApi } from "../../core/context/current.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+
+/**
+ * TASK-248: when 4+ hits collapse them into one summary line per unique
+ * variable name. Below threshold the per-(suite,step) form still helps
+ * users locate the missing reference.
+ */
+function emitMissingVarWarnings(hits: import("../../core/runner/preflight-vars.ts").MissingVarHit[]): void {
+  if (hits.length === 0) return;
+  if (hits.length < 4) {
+    for (const hit of hits) printWarning(formatMissingVarLine(hit));
+    return;
+  }
+  for (const line of summarizeMissingVars(hits)) printWarning(line);
+}
 
 /**
  * TASK-116: discover every `apis/<name>/tests/` directory in the workspace

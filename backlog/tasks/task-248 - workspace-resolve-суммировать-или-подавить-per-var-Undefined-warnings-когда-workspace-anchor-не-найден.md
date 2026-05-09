@@ -3,10 +3,10 @@ id: TASK-248
 title: >-
   workspace resolve: суммировать или подавить per-var Undefined-warnings когда
   workspace anchor не найден
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 13:00'
-updated_date: '2026-05-09 09:06'
+updated_date: '2026-05-09 09:46'
 labels:
   - feedback-loop
   - api-sentry

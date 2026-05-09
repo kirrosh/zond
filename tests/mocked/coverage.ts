@@ -1,4 +1,5 @@
 import { describe, test, expect, mock, beforeEach, afterAll } from "bun:test";
+import { captureOutput } from "../_helpers/output.ts";
 
 mock.module("../../src/core/generator/openapi-reader.ts", () => ({
   readOpenApiSpec: mock(() => Promise.resolve({
@@ -45,5 +46,23 @@ describe("coverageCommand (spec-only fallback)", () => {
   test("returns 2 when neither --api nor --spec provided", async () => {
     const code = await coverageCommand({});
     expect(code).toBe(2);
+  });
+
+  // TASK-250: regression — JSON envelope must always carry `runId`, even on
+  // the spec-only path where there is no run yet (value is null but key is
+  // present so jq '.data.runId' never throws "Cannot index … with string").
+  test("JSON envelope includes runId key (spec-only fallback → null)", async () => {
+    const cap = captureOutput({ console: true });
+    try {
+      const code = await coverageCommand({ spec: "spec.yaml", json: true });
+      expect(code).toBe(1);
+      const env = JSON.parse(cap.out.trim());
+      expect(env.ok).toBe(true);
+      expect(env.command).toBe("coverage");
+      expect("runId" in env.data).toBe(true);
+      expect(env.data.runId).toBeNull();
+    } finally {
+      cap.restore();
+    }
   });
 });

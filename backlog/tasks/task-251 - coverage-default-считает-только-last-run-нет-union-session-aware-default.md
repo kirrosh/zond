@@ -1,10 +1,10 @@
 ---
 id: TASK-251
 title: 'coverage: default считает только last run, нет union/session-aware default'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 13:00'
-updated_date: '2026-05-09 09:06'
+updated_date: '2026-05-09 09:46'
 labels:
   - feedback-loop
   - api-sentry

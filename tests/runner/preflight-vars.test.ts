@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { preflightCheckVars, formatMissingVarLine } from "../../src/core/runner/preflight-vars.ts";
+import { preflightCheckVars, formatMissingVarLine, summarizeMissingVars } from "../../src/core/runner/preflight-vars.ts";
 import type { TestSuite } from "../../src/core/parser/types.ts";
 
 function suite(partial: Partial<TestSuite>): TestSuite {
@@ -237,5 +237,31 @@ describe("preflightCheckVars", () => {
   test("formatMissingVarLine: with step, no file", () => {
     const line = formatMissingVarLine({ suite: "S", step: "T", variable: "v" });
     expect(line).toBe("Undefined variable {{v}} in S → T");
+  });
+
+  test("summarizeMissingVars: empty input → empty output", () => {
+    expect(summarizeMissingVars([])).toEqual([]);
+  });
+
+  test("summarizeMissingVars: dedupes by variable name and counts refs/suites", () => {
+    const lines = summarizeMissingVars([
+      { suite: "A", step: "t1", variable: "base_url" },
+      { suite: "A", step: "t2", variable: "base_url" },
+      { suite: "A", step: "t1", variable: "auth_token" },
+      { suite: "B", step: "t1", variable: "auth_token" },
+    ]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("{{auth_token}}");
+    expect(lines[0]).toContain("{{base_url}}");
+    expect(lines[0]).toContain("4 references across 2 suites");
+  });
+
+  test("summarizeMissingVars: caps head at 6 names with '… and N more'", () => {
+    const hits = ["a", "b", "c", "d", "e", "f", "g", "h"].map((v) => ({
+      suite: "S",
+      variable: v,
+    }));
+    const lines = summarizeMissingVars(hits);
+    expect(lines[0]).toContain("… and 2 more");
   });
 });
