@@ -1,9 +1,10 @@
 ---
 id: TASK-297
 title: 'rich zond --help: one-liner + skill link per command'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 07:00'
+updated_date: '2026-05-09 07:53'
 labels:
   - ux
   - agent-first
@@ -22,7 +23,7 @@ Cold-start discovery в одном вызове --help: для каждой ко
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond --help выводит одну строку summary на команду
+- [x] #1 zond --help выводит одну строку summary на команду
 - [ ] #2 zond <cmd> --help содержит ссылку 'related skill: ...'
 - [ ] #3 Snapshot-тест на --help
 <!-- AC:END -->

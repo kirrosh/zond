@@ -125,5 +125,29 @@ export function buildProgram(): Command {
   };
   for (const sub of program.commands) attachJson(sub, "");
 
+  // TASK-297: stamp every leaf with a "related skill" footer so `zond <cmd>
+  // --help` is a single-stop entry point for an agent: discover the flag
+  // surface AND know which skill file to open for the workflow context.
+  // Mapped by fully-qualified path; `*` matches any unnamed leaf and is
+  // tried last.
+  const skillFor: Record<string, string> = {
+    // probes → audit playbook (skills/scenarios.md drills auth/RBAC chains).
+    "probe security": "skills/scenarios.md",
+    "probe mass-assignment": "skills/scenarios.md",
+    "audit": "skills/scenarios.md",
+    // db family — failure triage workflow. Will point at skills/zond-triage.md
+    // once TASK-302 lands; for now Phase 4 of skills/zond.md covers it.
+  };
+  const attachHelp = (cmd: Command, parentPath: string): void => {
+    const path = parentPath ? `${parentPath} ${cmd.name()}` : cmd.name();
+    const hasAction = (cmd as unknown as { _actionHandler?: unknown })._actionHandler != null;
+    if (hasAction) {
+      const skill = skillFor[path] ?? "skills/zond.md";
+      cmd.addHelpText("after", `\nRelated skill: ${skill}`);
+    }
+    for (const sub of cmd.commands) attachHelp(sub, path);
+  };
+  for (const sub of program.commands) attachHelp(sub, "");
+
   return program;
 }
