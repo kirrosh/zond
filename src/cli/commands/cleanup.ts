@@ -10,7 +10,8 @@
 import { loadOrphans, markRemoved } from "../../core/probe/orphan-tracker.ts";
 import type { OrphanRecord } from "../../core/probe/orphan-tracker.ts";
 import { executeRequest } from "../../core/runner/http-client.ts";
-import { loadEnvironment } from "../../core/parser/variables.ts";
+import { loadEnvironment, loadEnvMeta } from "../../core/parser/variables.ts";
+import { resolveTimeoutMs } from "../../core/workspace/config.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printWarning, printSuccess } from "../output.ts";
 import type { Command } from "commander";
@@ -73,6 +74,22 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
     return 0;
   }
 
+  // Per-API timeout: CLI flag → apis/<api>/.env.yaml `timeoutMs:` → workspace
+  // `defaults.timeout_ms` → 30000.
+  const timeoutByApi = new Map<string, number>();
+  async function timeoutFor(api: string): Promise<number> {
+    let t = timeoutByApi.get(api);
+    if (t !== undefined) return t;
+    let envTimeout: number | undefined;
+    try {
+      const meta = await loadEnvMeta(undefined, `apis/${api}`);
+      envTimeout = meta.timeoutMs;
+    } catch { /* meta is best-effort */ }
+    t = resolveTimeoutMs(opts.timeoutMs, envTimeout);
+    timeoutByApi.set(api, t);
+    return t;
+  }
+
   const results: Array<{ record: OrphanRecord; status: number | null; ok: boolean; error?: string }> = [];
   for (const r of records) {
     let baseUrl = baseUrlByApi.get(r.api);
@@ -92,7 +109,7 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
     try {
       const resp = await executeRequest(
         { method: "DELETE", url, headers: {} },
-        { timeout: opts.timeoutMs ?? 30000, retries: 0 },
+        { timeout: await timeoutFor(r.api), retries: 0 },
       );
       // 404 = already gone → success. 2xx = just deleted → success.
       const ok = resp.status === 404 || (resp.status >= 200 && resp.status < 300);
@@ -146,7 +163,7 @@ export function registerCleanup(program: Command): void {
     .option("--api <name>", "Limit to a single API (matches the orphan-tracker subdirectory)")
     .option("--run <id>", "Limit to a single probe run id")
     .option("--dry-run", "Print the plan without sending DELETEs")
-    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)")
+    .option("--timeout <ms>", "Per-request timeout in ms (overrides .env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)")
     .action(async (opts, cmd: Command) => {
       process.exitCode = await cleanupCommand({
         orphans: opts.orphans === true,

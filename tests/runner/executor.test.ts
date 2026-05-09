@@ -597,6 +597,30 @@ describe("flow control", () => {
     expect(result.steps[0]!.status).toBe("skip");
   });
 
+  // TASK-234 / TASK-237: skip_if "{{var}} ==" with empty var must produce a
+  // friendly reason ("skipped: required fixture {{var}} is empty"), not the
+  // raw expression ("Skipped: {{var}} ==") that used to leak into the DB.
+  test("skip_if '{{var}} ==' with empty var produces friendly reason", async () => {
+    mockFetchResponses([]);
+    const suite: TestSuite = {
+      name: "Empty fixture",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Get org",
+        method: "GET",
+        path: "http://example.com/orgs/{{org_id}}/",
+        skip_if: "{{org_id}} ==",
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite, { org_id: "" });
+    expect(result.steps[0]!.status).toBe("skip");
+    expect(result.steps[0]!.error).toBe("skipped: required fixture {{org_id}} is empty");
+    expect(result.steps[0]!.error).not.toContain("Skipped:");
+    expect(result.steps[0]!.error).not.toContain(" ==");
+  });
+
   test("set step writes variables without HTTP request", async () => {
     mockFetchResponses([{ status: 200, body: { ok: true } }]);
 

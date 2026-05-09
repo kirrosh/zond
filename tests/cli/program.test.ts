@@ -1,6 +1,6 @@
 import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
 import { CommanderError } from "commander";
-import { mkdtempSync, rmSync, writeFileSync } from "fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { buildProgram, preprocessArgv } from "../../src/cli/program.ts";
@@ -74,30 +74,23 @@ describe("preprocessArgv (MSYS path fix)", () => {
 });
 
 describe("buildProgram — registration", () => {
-  test("does not register 'ui' command", () => {
+  test("does not register 'ui' or 'serve' commands", () => {
     const program = buildProgram();
     const names = program.commands.map((c) => c.name());
     expect(names).not.toContain("ui");
-    expect(names).toContain("serve");
+    expect(names).not.toContain("serve");
   });
 
   test("registers all user-facing commands", () => {
     const program = buildProgram();
     const names = new Set(program.commands.map((c) => c.name()));
     for (const expected of [
-      "run", "validate", "serve", "ci", "coverage", "init",
+      "run", "check", "ci", "coverage", "init",
       "add", "refresh-api", "doctor", "session",
       "describe", "db", "request", "generate", "catalog",
-      "export", "update",
     ]) {
       expect(names.has(expected)).toBe(true);
     }
-  });
-
-  test("update command has self-update alias", () => {
-    const program = buildProgram();
-    const updateCmd = program.commands.find((c) => c.name() === "update");
-    expect(updateCmd?.aliases()).toContain("self-update");
   });
 
   test("db has 5 nested subcommands", () => {
@@ -108,12 +101,6 @@ describe("buildProgram — registration", () => {
     for (const expected of ["collections", "runs", "run", "diagnose", "compare"]) {
       expect(dbSubs.has(expected)).toBe(true);
     }
-  });
-
-  test("export has postman subcommand", () => {
-    const program = buildProgram();
-    const exp = program.commands.find((c) => c.name() === "export");
-    expect(exp?.commands.map((c) => c.name())).toContain("postman");
   });
 
   test("ci has init subcommand", () => {
@@ -199,12 +186,6 @@ describe("buildProgram — numeric validations (exit 2 via CommanderError)", () 
     if (!result.ok) expect(result.code).toBe("commander.invalidArgument");
   });
 
-  test("--port=0 rejects with exit 2", async () => {
-    const result = await tryParse(["serve", "--port", "0"]);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe("commander.invalidArgument");
-  });
-
   test("--fail-on-coverage=150 rejects (out of range)", async () => {
     const result = await tryParse([
       "coverage", "--spec", "x.json", "--tests", "y/", "--fail-on-coverage", "150",
@@ -232,49 +213,119 @@ describe("buildProgram — numeric validations (exit 2 via CommanderError)", () 
   });
 });
 
-describe("TASK-182: zond probe umbrella + back-compat aliases", () => {
+describe("TASK-182 / TASK-300: zond probe umbrella", () => {
   test("`zond probe --help` lists every probe class", async () => {
     const program = buildProgram();
     const probeCmd = program.commands.find((c) => c.name() === "probe");
     expect(probeCmd).toBeDefined();
     const subs = probeCmd!.commands.map((c) => c.name()).sort();
+    // TASK-300: `validation` and `methods` collapsed into `static` — no aliases.
     expect(subs).toEqual([
-      "by-bogus-id",
       "mass-assignment",
-      "methods",
       "security",
-      "validation",
+      "static",
     ]);
   });
 
-  test("legacy probe-* names are still registered as top-level aliases", () => {
+  test("legacy probe-* top-level aliases are gone (TASK-288)", () => {
     const program = buildProgram();
     const top = program.commands.map((c) => c.name());
     for (const name of ["probe-validation", "probe-methods", "probe-mass-assignment", "probe-security"]) {
-      expect(top).toContain(name);
+      expect(top).not.toContain(name);
+    }
+  });
+});
+
+describe("TASK-293: --json envelope coverage", () => {
+  // Walk every leaf command (action handler attached) and assert it carries
+  // the auto-attached --json flag. Two documented exclusions: `run` (uses
+  // `--report json` for its bulk output, see TASK-73) and `completions`
+  // (shell-completion text, not data).
+  function collectLeafPaths(): string[] {
+    const program = buildProgram();
+    const out: string[] = [];
+    function walk(cmd: import("commander").Command, prefix: string): void {
+      const path = prefix ? `${prefix} ${cmd.name()}` : cmd.name();
+      const hasAction = (cmd as unknown as { _actionHandler?: unknown })._actionHandler != null;
+      if (hasAction && cmd.name() !== "help") out.push(path);
+      for (const sub of cmd.commands) walk(sub, path);
+    }
+    for (const sub of program.commands) walk(sub, "");
+    return out;
+  }
+
+  test("every leaf command (except `run` / `completions`) exposes --json", () => {
+    const program = buildProgram();
+    const skip = new Set(["run", "completions"]);
+    const failures: string[] = [];
+
+    function findLeaf(path: string[]): import("commander").Command | undefined {
+      let cur: import("commander").Command | undefined = program;
+      for (const seg of path) {
+        cur = cur?.commands.find((c) => c.name() === seg);
+        if (!cur) return undefined;
+      }
+      return cur;
+    }
+
+    for (const fullPath of collectLeafPaths()) {
+      if (skip.has(fullPath)) continue;
+      const leaf = findLeaf(fullPath.split(" "));
+      const has = leaf?.options.some((o) => o.long === "--json");
+      if (!has) failures.push(fullPath);
+    }
+    expect(failures).toEqual([]);
+  });
+});
+
+describe("TASK-297: rich --help with related-skill footer", () => {
+  // commander's addHelpText("after", ...) is rendered via Help.formatHelp,
+  // so we capture the output from .outputHelp() (a write-to-stream call)
+  // instead of helpInformation() (which returns the synchronous help text
+  // before the after-hook is appended in some commander versions).
+  // commander only fires the after-help text through outputHelp(), not
+  // helpInformation() — capture stdout to read the full rendered help.
+  function capture(cmd: import("commander").Command): string {
+    let out = "";
+    const orig = process.stdout.write;
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      out += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      cmd.outputHelp();
+    } finally {
+      process.stdout.write = orig;
+    }
+    return out;
+  }
+
+  test("`zond <leaf> --help` ends with a 'Related skill: …' footer", () => {
+    const program = buildProgram();
+    const sample: Array<string | string[]> = ["doctor", "prepare-fixtures", ["check", "spec"], ["check", "tests"]];
+    for (const entry of sample) {
+      const segs = Array.isArray(entry) ? entry : [entry];
+      let cmd: import("commander").Command | undefined = program;
+      for (const seg of segs) cmd = cmd?.commands.find((c) => c.name() === seg);
+      expect(cmd).toBeDefined();
+      expect(capture(cmd!)).toMatch(/Related skill: skills\//);
     }
   });
 
-  test("legacy probe-methods alias prints deprecation warning to stderr", async () => {
+  test("probe leaves point at skills/scenarios.md", () => {
     const program = buildProgram();
-    let stderrCapture = "";
-    const origErr = process.stderr.write;
-    process.stderr.write = ((chunk: string | Uint8Array) => {
-      stderrCapture += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
-      return true;
-    }) as typeof process.stderr.write;
-    const origExitCode = process.exitCode;
-    try {
-      // missing --output triggers exit 2, but the deprecation warning fires
-      // first inside the action handler.
-      await program.parseAsync(["bun", "script.ts", "probe-methods", "spec.json", "--output", "/tmp/zond-deprec-test"])
-        .catch(() => {});
-    } finally {
-      process.stderr.write = origErr;
-      process.exitCode = origExitCode;
-    }
-    expect(stderrCapture).toContain("'probe-methods' is deprecated");
-    expect(stderrCapture).toContain("zond probe methods");
+    const probe = program.commands.find((c) => c.name() === "probe")!;
+    const security = probe.commands.find((c) => c.name() === "security")!;
+    expect(capture(security)).toContain("Related skill: skills/scenarios.md");
+    const ma = probe.commands.find((c) => c.name() === "mass-assignment")!;
+    expect(capture(ma)).toContain("Related skill: skills/scenarios.md");
+  });
+
+  test("default leaf falls back to skills/zond.md", () => {
+    const program = buildProgram();
+    const check = program.commands.find((c) => c.name() === "check")!;
+    const tests = check.commands.find((c) => c.name() === "tests")!;
+    expect(capture(tests)).toContain("Related skill: skills/zond.md");
   });
 });
 
@@ -314,7 +365,7 @@ describe("TASK-89: usage errors do not emit [zond:internal] noise", () => {
   });
 });
 
-describe("T15: zond use → zond run resolves --api from .zond-current", () => {
+describe("T15: zond use → zond run resolves --api from .zond/current-api", () => {
   let cwd: string;
   let originalCwd: string;
 
@@ -346,17 +397,19 @@ describe("T15: zond use → zond run resolves --api from .zond-current", () => {
     return captureErr.join("");
   }
 
-  test("`zond run` (no args, no --api) falls back to .zond-current and tries to resolve it", async () => {
-    writeFileSync(join(cwd, ".zond-current"), "definitely-not-a-real-api\n", "utf-8");
+  test("`zond run` (no args, no --api) falls back to .zond/current-api and tries to resolve it", async () => {
+    mkdirSync(join(cwd, ".zond"), { recursive: true });
+    writeFileSync(join(cwd, ".zond/current-api"), "definitely-not-a-real-api\n", "utf-8");
     const stderr = await parseCapturingErr(["run", "--db", join(cwd, "zond.db")]);
-    // The collection lookup must have been attempted with the .zond-current value —
+    // The collection lookup must have been attempted with the .zond/current-api value —
     // i.e. we reached "API '...' not found", not "Missing path argument".
     expect(stderr).toContain("definitely-not-a-real-api");
     expect(stderr).not.toContain("Missing path argument");
   });
 
-  test("explicit path bypasses .zond-current fallback", async () => {
-    writeFileSync(join(cwd, ".zond-current"), "definitely-not-a-real-api\n", "utf-8");
+  test("explicit path bypasses .zond/current-api fallback", async () => {
+    mkdirSync(join(cwd, ".zond"), { recursive: true });
+    writeFileSync(join(cwd, ".zond/current-api"), "definitely-not-a-real-api\n", "utf-8");
     const stderr = await parseCapturingErr(["run", "/no/such/dir", "--db", join(cwd, "zond.db")]);
     expect(stderr).not.toContain("definitely-not-a-real-api");
   });

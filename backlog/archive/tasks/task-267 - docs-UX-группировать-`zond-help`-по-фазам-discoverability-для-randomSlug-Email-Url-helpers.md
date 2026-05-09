@@ -1,0 +1,55 @@
+---
+id: TASK-267
+title: >-
+  docs/UX: группировать `zond --help` по фазам + discoverability для
+  $randomSlug/Email/Url helpers
+status: Done
+assignee: []
+created_date: '2026-05-08 15:00'
+updated_date: '2026-05-09 09:23'
+labels:
+  - feedback-loop
+  - docs
+  - cli
+  - ux
+milestone: m-14
+dependencies: []
+priority: high
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Source: feedback-12 impressions, "Документация / discovery".
+
+1. **`zond --help` показывает 30+ команд плоским списком.** Тестер просил группировать:
+   - **setup**: `add api`, `bootstrap`, `discover`, `clean`, `doctor`
+   - **generate**: `generate`, `probe-validation`, `probe-methods`
+   - **run**: `run`, `session`, `probe`
+   - **analyze**: `coverage`, `db diagnose`, `db runs`
+   - **report**: `report`, `serve`, `audit`
+   - **other**: `validate`, `request`, `ci`
+
+2. **`$randomSlug`/`$randomEmail`/`$randomUrl` появляются в выводе `generate`, но нигде не задокументированы.** Пользователь не знает, что они существуют. Решения:
+   - `zond reference random-helpers` или `zond help random-helpers` — печатает таблицу всех `$random*` helpers с примерами.
+   - Альтернативно: блок «Random helpers» в выводе `zond generate --help`.
+   - Документ `docs/random-helpers.md` (uniform reference) + ссылка из `--help`.
+
+3. **Cookbook**: `docs/cookbook/<api>.md` для Sentry/Stripe/Petstore с типовыми сценариями «3 команды от пустоты до 80%». Если TASK-262 (`zond audit`) сделан, cookbook сводится к одной команде.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+<!-- SECTION:ACCEPTANCE:BEGIN -->
+- [ ] #1 `zond --help` группирует команды по фазам (setup/generate/run/analyze/report/other).
+- [ ] #2 `zond reference random-helpers` (или эквивалент) перечисляет все `$random*` с описанием и пример output.
+- [ ] #3 `docs/random-helpers.md` существует и упомянут в `generate --help`.
+- [ ] #4 (опционально) `docs/cookbook/sentry.md` с типовым flow.
+<!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done: 1) zond --help группирует команды по фазам Setup/Generate/Run/Analyze/Report/Other через Commander helpGroup. 2) Новая команда: zond reference random-helpers (human-readable таблица + --json для агентов). 3) docs/random-helpers.md — полный reference helper-ов и mapping для generate. 4) zond generate --help теперь упоминает helper-ы и команду reference. 5) Скиллы (zond.md, zond-triage.md, scenarios.md) обновлены: указывают на reference random-helpers, на новый default db diagnose, на TASK-258 поведение clean. AC #4 (cookbook) opt-in — отложено в backlog.
+<!-- SECTION:NOTES:END -->

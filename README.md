@@ -25,7 +25,7 @@ zond doctor --api my-api                               # what to fill in apis/my
 
 `zond init` writes a self-contained [`AGENTS.md`](AGENTS.md) and Claude Code
 skills — agents read it and use the CLI directly (`zond run`,
-`zond probe-validation`, `zond db diagnose`, …). No daemon, no transport, no
+`zond probe static`, `zond db diagnose`, …). No daemon, no transport, no
 extra configuration.
 
 Each registered API gets four files in `apis/<name>/`:
@@ -39,6 +39,10 @@ Run `zond refresh-api <name> [--spec <new-source>]` to re-snapshot when the
 upstream spec changes.
 
 Then say to your agent: _"Safely cover the API from openapi.json with tests."_
+
+Want the whole pipeline at once? `zond audit --api my-api` runs
+prepare-fixtures → generate → probes → run → coverage → HTML report in a
+single shot.
 
 <details>
 <summary>Other installation methods (npx)</summary>
@@ -72,7 +76,7 @@ Claude Code can write pytest from scratch — but it takes 30-60 minutes per flo
 | **Full Visibility** | Every run is stored in SQLite. Compare runs, track regressions, see exactly what the server returned. |
 | **Coverage Tracking** | See which endpoints are tested, which aren't, and what broke since last run. |
 | **Schema Validation** | `--validate-schema` checks every JSON response against the OpenAPI schema (types, required, enum, format, `$ref`) — catches contract drift the YAML expectations miss. |
-| **Spec Linting** | `zond lint-spec` static-analyses the OpenAPI document for internal-consistency bugs (e.g. example violates `format: date-time`) and strictness gaps (path-params without `format`, integer params without min/max) — surfaces issues before any HTTP request. |
+| **Spec Linting** | `zond check spec` static-analyses the OpenAPI document for internal-consistency bugs (e.g. example violates `format: date-time`) and strictness gaps (path-params without `format`, integer params without min/max) — surfaces issues before any HTTP request. |
 | **CI-Ready** | One command generates GitHub Actions or GitLab CI workflow. Tests in YAML, in git, with code review. |
 
 ## Try It
@@ -82,6 +86,21 @@ Claude Code can write pytest from scratch — but it takes 30-60 minutes per flo
 "Run only smoke tests against staging"
 "What broke since last run?"
 "Set up CI for API tests"
+```
+
+## Upgrading
+
+`zond update` was removed in favour of system package managers:
+
+```bash
+# macOS / Linux — re-run the installer
+curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
+
+# npm
+npm install -g @kirrosh/zond@latest
+
+# bun
+bun install -g @kirrosh/zond@latest
 ```
 
 ## Shell completions

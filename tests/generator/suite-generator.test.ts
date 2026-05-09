@@ -269,10 +269,11 @@ describe("detectCrudGroups", () => {
     expect(groups).toHaveLength(0);
   });
 
-  test("requires GET on item path (POST alone not enough)", () => {
+  test("requires SOME item endpoint (POST alone, no item path → skipped)", () => {
+    // TASK-260: POST + DELETE/{id} now produces a headless chain. Pure POST
+    // without any item endpoint still skips.
     const endpoints = [
       makeEndpoint({ path: "/pets", method: "POST" }),
-      makeEndpoint({ path: "/pets/{petId}", method: "DELETE" }),
     ];
     const groups = detectCrudGroups(endpoints);
     expect(groups).toHaveLength(0);
@@ -324,19 +325,54 @@ describe("detectCrudGroups", () => {
   test("TASK-139: diagnostics report skipped POSTs with reason", () => {
     const endpoints = [
       makeEndpoint({ path: "/alerts", method: "POST" }), // no item endpoint
-      makeEndpoint({ path: "/audit", method: "POST" }),
-      makeEndpoint({ path: "/audit/{id}", method: "DELETE" }), // has item, but no GET
     ];
     const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
     expect(groups).toHaveLength(0);
-    expect(diagnostics).toHaveLength(2);
+    expect(diagnostics).toHaveLength(1);
     const alerts = diagnostics.find(d => d.basePath === "/alerts")!;
     expect(alerts.verdict).toBe("skipped");
     expect(alerts.reason).toMatch(/no item endpoint/);
+  });
+
+  // TASK-260: accept headless chains — POST + DELETE/{id} or POST + PUT/{id}
+  // without GET-by-id. The captured ID still flows from POST response into
+  // the update/delete steps; the read/verify steps just won't be emitted.
+  test("TASK-260: POST + DELETE/{id} without GET → headless chain", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/audit", method: "POST" }),
+      makeEndpoint({ path: "/audit/{id}", method: "DELETE" }),
+    ];
+    const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.read).toBeUndefined();
+    expect(groups[0]!.delete).toBeDefined();
     const audit = diagnostics.find(d => d.basePath === "/audit")!;
-    expect(audit.verdict).toBe("skipped");
-    expect(audit.reason).toMatch(/no GET-by-id/);
-    expect(audit.hasDelete).toBe(true);
+    expect(audit.verdict).toBe("chain");
+    expect(audit.reason).toMatch(/headless: no GET-by-id/);
+  });
+
+  test("TASK-260: POST + PUT/{id} without GET → headless chain", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/external-teams", method: "POST" }),
+      makeEndpoint({ path: "/external-teams/{id}", method: "PUT" }),
+    ];
+    const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.update).toBeDefined();
+    const ext = diagnostics.find(d => d.basePath === "/external-teams")!;
+    expect(ext.reason).toMatch(/PUT\/\{id\} matched/);
+  });
+
+  test("TASK-260: POST with item endpoint that has only unsupported methods → still skipped", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/x", method: "POST" }),
+      makeEndpoint({ path: "/x/{id}", method: "HEAD" }),
+    ];
+    const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
+    expect(groups).toHaveLength(0);
+    const x = diagnostics.find(d => d.basePath === "/x")!;
+    expect(x.verdict).toBe("skipped");
+    expect(x.reason).toMatch(/no GET\/PUT\/PATCH\/DELETE on \/\{id\}/);
   });
 });
 
@@ -536,8 +572,8 @@ describe("generateSuites", () => {
     const smokeNames = suites.filter(s => s.tags?.includes("smoke") && !s.tags?.includes("unsafe")).map(s => s.name);
     const unsafeNames = suites.filter(s => s.tags?.includes("unsafe")).map(s => s.name);
 
-    expect(smokeNames).toContain("pets-smoke");
-    expect(smokeNames).toContain("users-smoke");
+    expect(smokeNames).toContain("pets-smoke-positive");
+    expect(smokeNames).toContain("users-smoke-positive");
     expect(unsafeNames).toContain("pets-smoke-unsafe");
   });
 
@@ -556,7 +592,7 @@ describe("generateSuites", () => {
     expect(crudSuites[0]!.name).toBe("pets-crud");
 
     // /health should be in smoke, not CRUD
-    const systemSmoke = suites.find(s => s.name === "system-smoke");
+    const systemSmoke = suites.find(s => s.name === "system-smoke-positive");
     expect(systemSmoke).toBeDefined();
     expect(systemSmoke!.tests).toHaveLength(1);
   });
@@ -568,10 +604,10 @@ describe("generateSuites", () => {
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
 
-    const petsSuite = suites.find(s => s.name === "pets-smoke");
+    const petsSuite = suites.find(s => s.name === "pets-smoke-positive");
     expect(petsSuite).toBeUndefined();
 
-    const usersSuite = suites.find(s => s.name === "users-smoke");
+    const usersSuite = suites.find(s => s.name === "users-smoke-positive");
     expect(usersSuite).toBeDefined();
   });
 
@@ -582,7 +618,7 @@ describe("generateSuites", () => {
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity, includeDeprecated: true });
 
-    const petsSuite = suites.find(s => s.name === "pets-smoke");
+    const petsSuite = suites.find(s => s.name === "pets-smoke-positive");
     expect(petsSuite).toBeDefined();
   });
 
@@ -595,9 +631,9 @@ describe("generateSuites", () => {
 
     // Tagless endpoints under /audiences should land in audiences-* suites,
     // not a generic untagged-smoke pile.
-    const audSmoke = suites.find(s => s.name === "audiences-smoke");
+    const audSmoke = suites.find(s => s.name === "audiences-smoke-positive");
     expect(audSmoke).toBeDefined();
-    expect(suites.find(s => s.name === "untagged-smoke")).toBeUndefined();
+    expect(suites.find(s => s.name === "untagged-smoke-positive")).toBeUndefined();
   });
 
   test("suite-level auth when all endpoints share same security", () => {
@@ -607,7 +643,7 @@ describe("generateSuites", () => {
     ];
     const suites = generateSuites({ endpoints, securitySchemes: bearerSecurity });
 
-    const smoke = suites.find(s => s.name === "pets-smoke");
+    const smoke = suites.find(s => s.name === "pets-smoke-positive");
     expect(smoke?.headers?.Authorization).toBe("Bearer {{auth_token}}");
     // Individual steps should NOT have headers
     for (const t of smoke!.tests) {
@@ -876,7 +912,7 @@ describe("smoke suite path seeds (T27 — positive variant)", () => {
     expect(negativeSuite!.tests[0]!["GET"]).toBe("/users/00000000-0000-0000-0000-000000000000");
   });
 
-  test("GET endpoint without path params stays in regular smoke (no positive/negative split)", () => {
+  test("GET endpoint without path params lands in unified smoke-positive (no negative)", () => {
     const endpoints = [
       makeEndpoint({
         path: "/items",
@@ -885,12 +921,15 @@ describe("smoke suite path seeds (T27 — positive variant)", () => {
       }),
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
-    expect(suites.find(s => s.name === "items-smoke")).toBeDefined();
-    expect(suites.find(s => s.name === "items-smoke-positive")).toBeUndefined();
+    const positive = suites.find(s => s.name === "items-smoke-positive");
+    expect(positive).toBeDefined();
+    // No path-params → no needs-id tag
+    expect(positive!.tags).toEqual(["smoke", "positive"]);
+    expect(suites.find(s => s.name === "items-smoke")).toBeUndefined();
     expect(suites.find(s => s.name === "items-smoke-negative")).toBeUndefined();
   });
 
-  test("paramless and path-param GETs in same tag produce 3 suites (smoke + negative + positive)", () => {
+  test("paramless and path-param GETs merge into one smoke-positive + smoke-negative (TASK-240)", () => {
     const endpoints = [
       makeEndpoint({ path: "/items", method: "GET", tags: ["items"] }),
       makeEndpoint({
@@ -901,9 +940,13 @@ describe("smoke suite path seeds (T27 — positive variant)", () => {
       }),
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
-    expect(suites.find(s => s.name === "items-smoke")).toBeDefined();
+    const positive = suites.find(s => s.name === "items-smoke-positive");
+    expect(positive).toBeDefined();
+    expect(positive!.tests).toHaveLength(2);
+    // needs-id only because at least one test has skip_if
+    expect(positive!.tags).toEqual(["smoke", "positive", "needs-id"]);
     expect(suites.find(s => s.name === "items-smoke-negative")).toBeDefined();
-    expect(suites.find(s => s.name === "items-smoke-positive")).toBeDefined();
+    expect(suites.find(s => s.name === "items-smoke")).toBeUndefined();
   });
 });
 

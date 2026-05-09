@@ -107,6 +107,93 @@ describe("dbCommand", () => {
     }
   });
 
+  // TASK-266: `db diagnose` without an id targets the most recent failing run.
+  test("diagnose without id picks latest failing run (TASK-266)", async () => {
+    db = tmpDb();
+    output = captureOutput({ console: true });
+    getDb(db);
+
+    const passId = createRun({ started_at: "2026-01-01T00:00:00Z" });
+    finalizeRun(passId, []);
+    const failId = createRun({ started_at: "2026-01-02T00:00:00Z" });
+    const dbh = getDb(db);
+    dbh.prepare(`UPDATE runs SET total=3, passed=2, failed=1 WHERE id=?`).run(failId);
+    // Newer passing run should NOT mask the older failing one.
+    const newerPassId = createRun({ started_at: "2026-01-03T00:00:00Z" });
+    finalizeRun(newerPassId, []);
+
+    const code = await dbCommand({
+      subcommand: "diagnose",
+      positional: [],
+      dbPath: db,
+      json: true,
+    });
+    expect(code).toBe(0);
+    const envelope = JSON.parse(output.out);
+    expect(envelope.ok).toBe(true);
+    expect(envelope.data.run_id).toBe(failId);
+    expect(envelope.data.resolution).toBe("latest-failing");
+  });
+
+  // TASK-266: --latest opts out of the "must be failing" filter.
+  test("diagnose --latest picks the most recent run regardless of status", async () => {
+    db = tmpDb();
+    output = captureOutput({ console: true });
+    getDb(db);
+    const failId = createRun({ started_at: "2026-01-01T00:00:00Z" });
+    const dbh = getDb(db);
+    dbh.prepare(`UPDATE runs SET total=2, passed=1, failed=1 WHERE id=?`).run(failId);
+    const passId = createRun({ started_at: "2026-01-02T00:00:00Z" });
+    finalizeRun(passId, []);
+
+    const code = await dbCommand({
+      subcommand: "diagnose",
+      positional: [],
+      latest: true,
+      dbPath: db,
+      json: true,
+    });
+    expect(code).toBe(0);
+    const envelope = JSON.parse(output.out);
+    expect(envelope.data.run_id).toBe(passId);
+    expect(envelope.data.resolution).toBe("latest");
+  });
+
+  // TASK-266: when nothing has failed, fall back to latest run + "no failures" warning.
+  test("diagnose with no failing runs falls back to latest with warning", async () => {
+    db = tmpDb();
+    output = captureOutput({ console: true });
+    getDb(db);
+    const passId = createRun({ started_at: "2026-01-01T00:00:00Z" });
+    finalizeRun(passId, []);
+
+    const code = await dbCommand({
+      subcommand: "diagnose",
+      positional: [],
+      dbPath: db,
+      json: true,
+    });
+    expect(code).toBe(0);
+    const envelope = JSON.parse(output.out);
+    expect(envelope.data.run_id).toBe(passId);
+    expect(envelope.data.resolution).toBe("latest-no-failures");
+    expect(envelope.warnings.some((w: string) => w.includes("No failing runs"))).toBe(true);
+  });
+
+  // TASK-266: empty database → exit 1, not 2.
+  test("diagnose with empty database returns exit 1", async () => {
+    db = tmpDb();
+    output = captureOutput({ console: true });
+    getDb(db);
+    const code = await dbCommand({
+      subcommand: "diagnose",
+      positional: [],
+      dbPath: db,
+      json: true,
+    });
+    expect(code).toBe(1);
+  });
+
   test("runs prints FAIL when 0 passed despite failed=0 (errors only)", async () => {
     db = tmpDb();
     output = captureOutput({ console: true });

@@ -12,6 +12,7 @@ import {
   recordGeneratedFiles,
   removeManifestEntries,
   selectEntries,
+  selectEntriesEx,
   sha256OfFile,
   toWorkspacePath,
   type ManifestEntry,
@@ -90,10 +91,32 @@ describe("manifest", () => {
     ]);
     const m = loadManifest(root);
     // spec.json is source-of-truth — never returned (TASK-226).
-    expect(selectEntries(m, { api: "a" })).toHaveLength(2);
-    expect(selectEntries(m, { api: "b" })).toHaveLength(1);
+    // TASK-258: --api alone preserves probes/ (separate pipeline).
+    expect(selectEntries(m, { api: "a" })).toHaveLength(1);
+    expect(selectEntries(m, { api: "a", category: "probes" })).toHaveLength(1);
+    expect(selectEntries(m, { api: "b" })).toHaveLength(0);
     expect(selectEntries(m, { category: "probes" })).toHaveLength(2);
     expect(selectEntries(m, { all: true })).toHaveLength(3);
+  });
+
+  test("selectEntriesEx exposes probesPreserved when --api scopes alone (TASK-258)", () => {
+    recordGeneratedFiles(root, [
+      { path: writeFile("apis/a/probes/p1.yaml", "1"), by: "t", api: "a", category: "probes" },
+      { path: writeFile("apis/a/probes/p2.yaml", "1"), by: "t", api: "a", category: "probes" },
+      { path: writeFile("apis/a/.api-catalog.yaml", "1"), by: "t", api: "a", category: "catalog" },
+    ]);
+    const m = loadManifest(root);
+    const apiOnly = selectEntriesEx(m, { api: "a" });
+    expect(apiOnly.selected).toHaveLength(1);
+    expect(apiOnly.probesPreserved).toHaveLength(2);
+
+    const apiAndProbes = selectEntriesEx(m, { api: "a", category: "probes" });
+    expect(apiAndProbes.selected).toHaveLength(2);
+    expect(apiAndProbes.probesPreserved).toHaveLength(0);
+
+    const all = selectEntriesEx(m, { all: true });
+    expect(all.selected).toHaveLength(3);
+    expect(all.probesPreserved).toHaveLength(0);
   });
 
   test("removeManifestEntries drops by relative path", () => {

@@ -133,7 +133,7 @@ tests:
 - `always: true` — step runs even if a prior step failed (use for cleanup so test data doesn't leak).
 - `skip_if: "{{var}} =="` — skip when a fixture var is unset.
 - Per-step `headers:` override the suite-level `headers:`.
-- For values you want randomised, use generators: `{{$randomEmail}}`, `{{$uuid}}`, `{{$randomString(20)}}`, `{{$randomInt(1,1000)}}`. Full list in `zond run --help`.
+- For values you want randomised, use generators: `{{$randomEmail}}`, `{{$uuid}}`, `{{$randomString}}`, `{{$randomInt}}`. Full list: `zond reference random-helpers` or `docs/random-helpers.md`.
 
 ### Multi-service flows
 
@@ -183,8 +183,11 @@ Each entry has:
 - `failure_class`: `definitely_bug` | `likely_bug` | `quirk` | `env_issue` | `cascade`.
 - `agent_directive`: literal next step.
 - `recommended_action`: `report_backend_bug` (STOP, summarise for the
-  user) | `fix_test_logic` (edit the YAML) | `update_expectation` (only
-  with the user's explicit OK).
+  user) | `fix_test_logic` (edit the YAML) | `fix_auth_config` |
+  `fix_network_config` | `fix_env` | `fix_spec` (edit OpenAPI — from
+  `check spec`) | `fix_fixture` (fill `.env.yaml` — from `prepare-fixtures`
+  miss-* output and inconclusive mass-assignment baselines) |
+  `update_spec` (status-drift surfaced by `zond run --learn`).
 
 `cascade` failures collapse under their root cause — don't chase them
 individually, fix the upstream step.
@@ -213,4 +216,4 @@ Step out of `scenarios` and load the `zond` skill when:
   `zond add api` / `zond refresh-api` directly — these are not
   scenario-skill jobs but they are dashed off in seconds).
 - The current scenario surfaced a contract bug worth a structured report
-  (`zond report case-study <failure-id>` produces a markdown draft).
+  (`zond report bundle --include case-study <run-id>` produces markdown drafts).

@@ -20,8 +20,7 @@ describe("setup-api / resolveCollectionSpec", () => {
 
   beforeEach(() => {
     workspace = realpathSync(mkdtempSync(join(tmpdir(), "zond-spec-helper-")));
-    // mark workspace via .zond-current marker file that hasMarker recognises
-    // (zond.config.yml is the cleanest)
+    // mark workspace via zond.config.yml — hasMarker recognises it (cleanest).
     writeFileSync(join(workspace, "zond.config.yml"), "version: 1\n", "utf-8");
     savedCwd = process.cwd();
     process.chdir(workspace);

@@ -1,14 +1,14 @@
 /**
  * `zond audit --api X` — macro-команда для полного pipeline (TASK-262).
  *
- * Оборачивает 8-10 ручных шагов (bootstrap → discover → generate → probes
+ * Оборачивает 8-10 ручных шагов (prepare-fixtures → generate → probes
  * → session-wrapped run → coverage → HTML report) в одну команду:
  *
- *   1. (опц.) `bootstrap --apply --seed` — если `--seed`. Без `--seed`
- *      запускается обычный idempotent `discover --apply`.
+ *   1. `prepare-fixtures --apply` (или `--cascade --seed --apply` при
+ *      `--seed`) — заполняет `.env.yaml` FK-идентификаторами.
  *   2. `generate` — пропускается если `apis/<name>/tests/` свежее, чем
  *      `spec.json` (mtime-эвристика; `--force` отключает skip).
- *   3. `probe validation` + `probe methods` (всегда). `mass-assignment` и
+ *   3. `probe static` (validation+methods, всегда). `mass-assignment` и
  *      `security` — за `--with-mass-assignment` / `--with-security`.
  *   4. `session start` → `run apis/<name>/tests` + `run apis/<name>/probes`
  *      → `session end`. Все runs наследуют один session_id.
@@ -81,15 +81,15 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
 
   if (opts.seed) {
     stages.push({
-      key: "bootstrap",
-      name: "bootstrap (cascade discover + seed)",
-      args: ["bootstrap", "--api", api, "--apply", "--seed"],
+      key: "prepare-fixtures-cascade",
+      name: "prepare-fixtures (cascade discover + seed)",
+      args: ["prepare-fixtures", "--api", api, "--apply", "--seed"],
     });
   } else {
     stages.push({
-      key: "discover",
-      name: "discover (path-FK fixtures)",
-      args: ["discover", "--api", api, "--apply"],
+      key: "prepare-fixtures",
+      name: "prepare-fixtures (path-FK fixtures)",
+      args: ["prepare-fixtures", "--api", api, "--apply"],
     });
   }
 
@@ -114,14 +114,9 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
   });
 
   stages.push({
-    key: "probe-validation",
-    name: "probe validation",
-    args: ["probe", "validation", "--api", api, "--output", join(apiDir, "probes", "validation")],
-  });
-  stages.push({
-    key: "probe-methods",
-    name: "probe methods",
-    args: ["probe", "methods", "--api", api, "--output", join(apiDir, "probes", "methods")],
+    key: "probe-static",
+    name: "probe static (validation+methods)",
+    args: ["probe", "static", "--api", api, "--output", join(apiDir, "probes", "static")],
   });
 
   if (opts.withMassAssignment) {
@@ -377,10 +372,10 @@ ${coverageBlock}
 export function registerAudit(program: Command): void {
   program
     .command("audit")
-    .description("Macro: bootstrap → discover → generate → probes → run → coverage → HTML report (TASK-262)")
+    .description("Macro: prepare-fixtures → generate → probes → run → coverage → HTML report (TASK-262)")
     .requiredOption("--api <name>", "Registered API to audit")
     .option("--db <path>", "Path to SQLite database file")
-    .option("--seed", "Use 'bootstrap --apply --seed' instead of plain 'discover --apply' for the prep stage")
+    .option("--seed", "Use 'prepare-fixtures --cascade --seed --apply' instead of the plain single-pass prep stage")
     .option("--with-mass-assignment", "Include 'probe mass-assignment' as an extra stage")
     .option("--with-security", "Include 'probe security ssrf,crlf,open-redirect' as an extra stage")
     .option("--out <path>", "HTML report output path (default: audit-report.html)")

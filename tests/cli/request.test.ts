@@ -112,8 +112,8 @@ describe("requestCommand", () => {
       expect(code).toBe(1);
       const envelope = JSON.parse(output.out);
       expect(envelope.ok).toBe(false);
-      expect(envelope.errors[0]).toMatch(/not registered/);
-      expect(envelope.errors[0]).toMatch(/zond add api/);
+      expect(envelope.errors[0].message).toMatch(/not registered/);
+      expect(envelope.errors[0].message).toMatch(/zond add api/);
     } finally {
       closeDb();
       ws.cleanup();

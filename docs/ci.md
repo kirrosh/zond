@@ -11,6 +11,31 @@ zond ci init --github   # GitHub Actions
 zond ci init --gitlab   # GitLab CI
 ```
 
+## CI mode: `zond run --all` (TASK-116)
+
+CI almost always wants **one stored run per build**, even when the
+workspace registers multiple APIs. `zond run --all` walks every registered
+API, executes its `tests/` directory, and folds the results into a single
+`runs.id` row. Combined with auto-detected CI context this gives a
+queryable, comparable history without per-API bookkeeping.
+
+```bash
+zond run --all --report junit --report-out test-results/junit.xml
+```
+
+Auto-detected env vars (no flags needed):
+
+| Variable | Effect |
+|---|---|
+| `ZOND_TRIGGER` | Stamps `runs.trigger` (`ci`, `manual`, …). `--all` defaults this to `ci` |
+| `ZOND_COMMIT_SHA` | Stamps `runs.commit_sha` for `db compare` regression diffs |
+| `ZOND_BRANCH` | Stamps `runs.branch` |
+| `ZOND_SESSION_ID` | Group multiple `zond run` calls (e.g. tests + probes) under one campaign for `coverage --union session` |
+
+`zond audit --api <name>` runs the full pipeline (prepare-fixtures →
+generate → probes → run → coverage → HTML) for nightly/scheduled CI jobs
+where breadth matters more than wall-clock time (TASK-262).
+
 ## GitHub Actions
 
 ```yaml
@@ -259,19 +284,28 @@ gh workflow run api-tests.yml --repo OWNER/zond-tests
 |------|---------|
 | 0    | All tests passed |
 | 1    | One or more tests failed |
-| 2    | Configuration or runtime error |
+| 2    | Configuration or runtime error (usage / spec / fixture / I/O) |
+| 3    | Internal zond error — uncaught throw (file an issue) |
+| ≥128 | Killed by signal — typically `137` (SIGKILL: OOM or Gatekeeper on macOS) or `143` (SIGTERM) |
+
+See `zond` exit-code taxonomy in [ZOND.md](../ZOND.md#exit-codes) for the
+full table.
 
 ## Key Flags for CI
 
 | Flag | Description |
 |------|-------------|
+| `--all` | Run every registered API in one stored run (CI canonical) |
 | `--report junit` | Output JUnit XML for CI integration |
-| `--no-db` | Skip writing to local SQLite database |
+| `--report-out <file>` | Write the report to a file instead of stdout |
+| `--no-db` | Skip writing to local SQLite database (or keep it for `db compare` history) |
 | `--env <name>` | Load `.env.<name>.yaml` from test path directory |
 | `--bail` | Stop on first suite failure |
 | `--safe` | Run only GET tests (read-only mode) |
-| `--tag <tag>` | Filter suites by tag |
+| `--tag <tag>` / `--exclude-tag <tag>` | Filter suites by tag |
 | `--auth-token <token>` | Inject bearer token as `{{auth_token}}` |
+| `--rate-limit auto` | Throttle from `Retry-After` / `X-RateLimit-*` headers (TASK-81) |
+| `--quiet` | Suppress per-step output, keep summary + report |
 
 ## Building for distribution (macOS)
 

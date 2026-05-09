@@ -294,6 +294,8 @@ describe("runMassAssignmentProbes", () => {
     expect(v.summary).toMatch(/extras-bypass/);
     expect(v.baseline?.status).toBe(422);
     expect(v.response?.status).toBe(201);
+    // TASK-294: high severity → report_backend_bug for agent routing.
+    expect(v.recommended_action).toBe("report_backend_bug");
   });
 
   it("flags accepted-and-applied (HIGH) when GET echoes our injected sentinel", async () => {

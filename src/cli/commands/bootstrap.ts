@@ -528,48 +528,6 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
   }
 }
 
-import type { Command } from "commander";
-import { globalJson, resolveSpecArg } from "../resolve.ts";
-import { parsePositiveInt } from "../argv.ts";
-import { getDb } from "../../db/schema.ts";
-import { findCollectionByNameOrId } from "../../db/queries.ts";
-
-export function registerBootstrap(program: Command): void {
-  program
-    .command("bootstrap")
-    .description("One-shot setup: cascade-discover + (optional) --seed POSTs (TASK-261)")
-    .requiredOption("--api <name>", "Registered API to bootstrap (apis/<name>/.env.yaml)")
-    .option("--db <path>", "Path to SQLite database file")
-    .option("--api-dir <path>", "Override apis/<name>/ root")
-    .option("--env <path>", "Override .env.yaml path")
-    .option("--apply", "Write discovered + seeded values to .env.yaml. Default: dry-run.")
-    .option("--seed", "POST to create endpoints when discover can't find an existing record")
-    .option("--force", "Re-discover/re-seed even if a fixture is already filled (overwrites)")
-    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
-    .option("--max-passes <n>", "Cap on cascade passes (default 8)", parsePositiveInt("--max-passes"))
-    .action(async (opts, cmd: Command) => {
-      const resolved = resolveSpecArg(undefined, opts.api, opts.db);
-      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      let apiDir = opts.apiDir as string | undefined;
-      if (!apiDir) {
-        try {
-          getDb(opts.db);
-          const col = findCollectionByNameOrId(opts.api);
-          apiDir = col?.base_dir ?? `apis/${opts.api}`;
-        } catch {
-          apiDir = `apis/${opts.api}`;
-        }
-      }
-      process.exitCode = await bootstrapCommand({
-        specPath: resolved.spec,
-        apiDir,
-        envPath: opts.env,
-        apply: opts.apply === true,
-        seed: opts.seed === true,
-        force: opts.force === true,
-        timeoutMs: opts.timeout,
-        maxPasses: opts.maxPasses,
-        json: globalJson(cmd),
-      });
-    });
-}
+// CLI registration moved to ./prepare-fixtures.ts (TASK-299, m-13 D).
+// `bootstrapCommand` above is still the imperative core for the
+// cascade branch and is consumed directly by tests.

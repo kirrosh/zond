@@ -14,6 +14,7 @@ import {
   findUnresolvedVars,
   detectCrudGroupsWithDiagnostics,
 } from "../../core/generator/suite-generator.ts";
+import { generateFromSchema, classifyFieldSource } from "../../core/generator/data-factory.ts";
 import { filterByTag, collectTags } from "../../core/generator/chunker.ts";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import { printError, printSuccess } from "../output.ts";
@@ -65,6 +66,11 @@ export interface GenerateOptions {
    *  exits — no files written. Use to debug "why didn't generate emit a
    *  CRUD chain for resource X?" on real specs. */
   explain?: boolean;
+  /** TASK-219: accepted but currently a no-op — `zond generate` already
+   *  overwrites unconditionally. Kept on the CLI so agents passing
+   *  `--force` / `--overwrite` don't see "unknown option" and bail. A
+   *  future fix will gate sha-mismatched user edits behind this flag. */
+  force?: boolean;
   json?: boolean;
 }
 
@@ -80,12 +86,33 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       let scope = endpoints;
       if (options.tag) scope = filterByTag(scope, options.tag);
       const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(scope);
+      // Per-field body sources (TASK-269) — same scope as the table below.
+      const bodyFieldSources = scope
+        .filter(ep => ep.requestBodySchema && (ep.requestBodySchema as any).type === "object" &&
+                      (ep.requestBodySchema as any).properties)
+        .map(ep => {
+          const props = (ep.requestBodySchema as any).properties as Record<string, any>;
+          const fields = Object.entries(props)
+            .filter(([k, s]) => !(s.readOnly === true) && k !== "id")
+            .map(([key, s]) => ({
+              field: key,
+              type: Array.isArray(s.type)
+                ? (s.type as string[]).find(x => x !== "null") ?? "any"
+                : (s.type ?? "any"),
+              value: generateFromSchema(s, key),
+              source: classifyFieldSource(s, key),
+            }));
+          return { method: ep.method.toUpperCase(), path: ep.path, fields };
+        })
+        .filter(e => e.fields.length > 0);
+
       if (options.json) {
         printJson(jsonOk("generate", {
           mode: "explain",
           totalCandidates: diagnostics.length,
           chains: groups.length,
           diagnostics,
+          bodyFieldSources,
         }));
       } else {
         if (diagnostics.length === 0) {
@@ -112,6 +139,33 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
           console.log(fmt(headers));
           console.log(widths.map(w => "─".repeat(w)).join("  "));
           for (const row of rows) console.log(fmt(row));
+        }
+
+        // TASK-269: per-field provenance for endpoints carrying a request
+        // body. Helps debug "why did the API 400 on field X?" without
+        // re-running with --json and inspecting the generated suite.
+        if (bodyFieldSources.length > 0) {
+          console.log("");
+          console.log("Body field sources:");
+          for (const ep of bodyFieldSources) {
+            console.log(`  ${ep.method} ${ep.path}`);
+            const fHeaders = ["field", "type", "value", "source"];
+            const rows2 = ep.fields.map(f => [
+              f.field,
+              String(f.type),
+              typeof f.value === "string" ? f.value : JSON.stringify(f.value),
+              `[${f.source}]`,
+            ]);
+            const fAll = [fHeaders, ...rows2];
+            const fWidths = fHeaders.map((h, i) =>
+              Math.max(h.length, ...fAll.map(r => r[i]!.length)),
+            );
+            const ffmt = (cells: string[]) =>
+              cells.map((c, i) => c.padEnd(fWidths[i]!)).join("  ");
+            console.log("    " + ffmt(fHeaders));
+            console.log("    " + fWidths.map(w => "─".repeat(w)).join("  "));
+            for (const r of rows2) console.log("    " + ffmt(r));
+          }
         }
       }
       return 0;
@@ -176,6 +230,36 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       specPath: options.specPath,
       includeDeprecated: options.includeDeprecated,
     });
+
+    // TASK-218: surface a one-line summary of path params without examples
+    // so users running `zond generate` (not `zond coverage`) know they need
+    // to fill `.env.yaml` for positive smoke / CRUD reads to actually run.
+    // Without this hint, the path-param `*-smoke-positive` suites silently
+    // skip via skip_if and look like phantom passes.
+    const missingPathParams = new Set<string>();
+    let endpointsMissingPathExamples = 0;
+    for (const ep of endpoints) {
+      let epHadMiss = false;
+      for (const p of ep.parameters) {
+        if (p.in !== "path" || !p.required) continue;
+        const hasExample =
+          p.example !== undefined ||
+          (p.schema && (p.schema as any).example !== undefined) ||
+          (p.schema && (p.schema as any).default !== undefined);
+        if (!hasExample) {
+          missingPathParams.add(p.name);
+          epHadMiss = true;
+        }
+      }
+      if (epHadMiss) endpointsMissingPathExamples++;
+    }
+    if (missingPathParams.size > 0) {
+      const sample = [...missingPathParams].sort().slice(0, 3).join(", ");
+      const more = missingPathParams.size > 3 ? `, +${missingPathParams.size - 3} more` : "";
+      warnings.push(
+        `${missingPathParams.size} path param(s) have no examples (${sample}${more}) on ${endpointsMissingPathExamples} endpoint(s) — fill apis/<name>/.env.yaml to enable positive/smoke-positive suites`,
+      );
+    }
 
     if (deprecatedSkipped.length > 0) {
       const head = deprecatedSkipped.slice(0, 3).join(", ");
@@ -327,14 +411,15 @@ import { globalJson, resolveSpecArg } from "../resolve.ts";
 export function registerGenerate(program: Command): void {
   program
     .command("generate [spec]")
-    .description("Generate test suites from OpenAPI spec")
+    .description("Generate test suites from OpenAPI spec (overwrites existing suite files unconditionally — re-run is safe; user-edited tests are not preserved). Body fields are filled with `{{$random*}}` helpers (slug/email/url/uuid/…) — see `zond reference random-helpers` or docs/random-helpers.md for the full list (TASK-267).")
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
     .option("--output <dir>", "Output directory for generated test files (required unless --explain)")
-    .option("--tag <tag>", "Generate only for endpoints with this tag")
+    .option("--tag <tag>", "Generate only for endpoints with this tag (accepts comma-separated list, e.g. --tag Releases,Events,Alerts — TASK-239)")
     .option("--uncovered-only", "Skip endpoints already covered by existing tests")
     .option("--include-deprecated", "Generate suites for deprecated endpoints too (filtered out by default)")
     .option("--explain", "Print the CRUD detection table (which resources became chain candidates and why) without writing files (TASK-139)")
+    .option("--force, --overwrite", "Accepted for compatibility — generate already overwrites by default (TASK-219). No-op today; will gate user-edited file overwrites in a future release.")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
@@ -350,6 +435,7 @@ export function registerGenerate(program: Command): void {
         uncoveredOnly: opts.uncoveredOnly === true,
         includeDeprecated: opts.includeDeprecated === true,
         explain: opts.explain === true,
+        force: opts.force === true || opts.overwrite === true,
         json: globalJson(cmd),
       });
     });
