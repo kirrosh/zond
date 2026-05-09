@@ -104,7 +104,7 @@ selected via `zond use`.
 | `add api <name>` | Register an API: copy spec into `apis/<name>/spec.json` and emit catalog/resources/fixtures artifacts | `--spec <path\|url>`, `--base-url`, `--force`, `--insecure`, `--db` |
 | `refresh-api <name>` | Re-snapshot spec.json + regenerate the 3 artifacts | `--spec <path\|url>`, `--insecure` |
 | `doctor` | Fixture gaps in `.env.yaml` + artifact freshness vs spec.json (exit 0/1/2) | `--api <name>` |
-| `discover` | Auto-fill `.env.yaml` FK ids by hitting list-endpoints (dry-run by default) | `--api <name>` (req), `--apply`, `--verify`, `--refresh`, `--env <path>`, `--timeout <ms>` |
+| `prepare-fixtures` | Auto-fill `.env.yaml` FK ids — single-pass discover by default; `--cascade` enables the multi-pass discover+seed flow | `--api <name>` (req), `--apply`, `--verify`, `--refresh`, `--cascade`, `--seed`, `--force`, `--max-passes <n>`, `--env <path>`, `--timeout <ms>` |
 | `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--session-id <id>`, `--learn`, `--learn-apply`, `--learn-target test\|drifts`, `--report json\|junit`, `--report-out <file>` |
 | `session start\|end\|status` | Group multiple `zond run` calls into one campaign in `/runs` Sessions view | `--label <text>`, `--id <uuid>` |
 | `check tests <path>` | Schema-validate YAML tests | `--verbose` |
@@ -410,15 +410,15 @@ SKIPPED entry instead of HIGH/LOW findings — but `tests-run → probes-run
 After `probe security` / `probe mass-assignment` runs, an FK fixture in
 `.env.yaml` may point at a resource that has been deleted (the probe created
 + deleted it as part of its cycle, or you cleaned it manually). The next
-`zond run` then 404s on every step that uses the stale id. Use `discover
---verify` to re-validate without writing:
+`zond run` then 404s on every step that uses the stale id. Use
+`prepare-fixtures --verify` to re-validate without writing:
 
 ```bash
-zond discover --api sentry --verify
+zond prepare-fixtures --api sentry --verify
 # Verify summary: 12 live, 1 stale, 0 unknown.
 # WARN: 1 stale fixture(s) detected. Re-run with --refresh to drop and re-resolve them.
 
-zond discover --api sentry --refresh   # = --verify --apply
+zond prepare-fixtures --api sentry --refresh   # = --verify --apply
 ```
 
 Classification rules:

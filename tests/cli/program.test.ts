@@ -302,7 +302,7 @@ describe("TASK-297: rich --help with related-skill footer", () => {
 
   test("`zond <leaf> --help` ends with a 'Related skill: …' footer", () => {
     const program = buildProgram();
-    const sample: Array<string | string[]> = ["doctor", "discover", ["check", "spec"], ["check", "tests"]];
+    const sample: Array<string | string[]> = ["doctor", "prepare-fixtures", ["check", "spec"], ["check", "tests"]];
     for (const entry of sample) {
       const segs = Array.isArray(entry) ? entry : [entry];
       let cmd: import("commander").Command | undefined = program;

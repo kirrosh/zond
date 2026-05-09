@@ -53,7 +53,7 @@ Run `zond --version` first; if missing:
 - For multi-suite tag filters always include `setup`: `--tag crud,setup`.
 - Re-run after each fix with `--json`; don't batch edits without verifying.
 - **NEVER run destructive ops on a shared / production org without `--dry-run`
-  first.** Why: probes, `discover --apply`, `cleanup` all hit live APIs and
+  first.** Why: probes, `prepare-fixtures --apply`, `cleanup` all hit live APIs and
   can delete user data. The dry-run path is in every command's `--help`; use
   it on first run, inspect the diff, then drop the flag.
 - **NEVER report a cleanup failure as an API bug.** A POST that 200-OKs and
@@ -64,10 +64,11 @@ Run `zond --version` first; if missing:
   the user's org without `--redact-identity`.** Why: identity-file values
   (org/member/project slugs, real ids) leak otherwise; the redaction registry
   only catches secrets, not identifying metadata.
-- **MUST timeout the bootstrap cascade at 8 passes (default).** Why:
-  `zond bootstrap` chains `add api → doctor → discover → generate` and the
-  cascade can self-trigger on partially-resolved fixtures. The CLI bounds
-  the loop; never override the cap without a written reason.
+- **MUST timeout the cascade at 8 passes (default).** Why:
+  `zond prepare-fixtures --cascade` chains discover and (with `--seed`)
+  POST-creates across passes; the cascade can self-trigger on partially-
+  resolved fixtures. The CLI bounds the loop; never override the cap
+  without a written reason.
 - **MUST run `zond doctor --api <name> --missing-only` before generating
   fixtures or touching `.env.yaml`.** Why: the diagnostic identifies the
   exact unfilled keys before the workflow blows up midway. Skipping doctor
@@ -228,27 +229,28 @@ the auto-detected list, real-API CRUD usually needs **pre-existing FK
 ids**, **verified resources**, and **valid enums** the spec doesn't
 enforce.
 
-For path-FK ids (the bulk of fixture-pack work), prefer `zond discover`
-over manual `zond request` calls — it walks `.api-resources.yaml`, hits
-each owner list-endpoint with the workspace auth, and proposes a diff:
+For path-FK ids (the bulk of fixture-pack work), prefer
+`zond prepare-fixtures` over manual `zond request` calls — it walks
+`.api-resources.yaml`, hits each owner list-endpoint with the workspace
+auth, and proposes a diff:
 
 ```bash
-zond discover --api <name>            # dry-run: prints var → discovered value
-zond discover --api <name> --apply    # writes to .env.yaml (with .bak backup)
+zond prepare-fixtures --api <name>            # dry-run: prints var → discovered value
+zond prepare-fixtures --api <name> --apply    # writes to .env.yaml (with .bak backup)
 ```
 
-For empty workspaces where parent fixtures are *also* missing, use
-`zond bootstrap` instead — it cascades discover until nested-list paths
-become reachable and (with `--seed`) POSTs to create-endpoints when the
-owner's list returns empty:
+For empty workspaces where parent fixtures are *also* missing, add
+`--cascade` — it loops discover until nested-list paths become reachable
+and (with `--seed`) POSTs to create-endpoints when the owner's list
+returns empty:
 
 ```bash
-zond bootstrap --api <name> --apply             # cascade-only
-zond bootstrap --api <name> --apply --seed      # cascade + POST seeds
-zond bootstrap --api <name> --apply --force     # re-discover even if filled
+zond prepare-fixtures --api <name> --apply --cascade           # cascade-only
+zond prepare-fixtures --api <name> --apply --seed              # cascade + POST seeds (--seed implies --cascade)
+zond prepare-fixtures --api <name> --apply --cascade --force   # re-discover even if filled
 ```
 
-Bootstrap is idempotent: a re-run skips already-set vars unless
+Cascade mode is idempotent: a re-run skips already-set vars unless
 `--force`. Cascade caps at `--max-passes` (default 8).
 
 Suffix-aware: `*_slug` captures `slug`, `*_uuid` → `uuid`, `*_id` → `id`.
@@ -259,7 +261,7 @@ reports `miss-empty` with reason `no <resource> in target API — create
 one first…`. Distinct from `miss-no-id` (response shape unrecognized:
 no `array`/`data`/`items`/`results`/`records` field). On a fresh
 workspace this usually means: trigger an event in the product (Sentry
-SDK install, Resend send, etc.) and re-run `zond discover`. For special
+SDK install, Resend send, etc.) and re-run `zond prepare-fixtures`. For special
 fixtures the spec can't describe (verified-only emails, domain-validated
 records, "real" enum values), fall back to `zond request`:
 
@@ -684,7 +686,7 @@ What happened / Why it matters; missing fields become `<TODO: ...>` placeholders
 ## One-shot full audit (TASK-262)
 
 `zond audit --api <name>` запускает весь pipeline одной командой:
-discover → generate → probe validation/methods → session-wrapped run на
+prepare-fixtures → generate → probe validation/methods → session-wrapped run на
 tests + probes → coverage → `audit-report.html`. Каждая stage печатает
 `==> Stage N/M: <name>`; failure любой stage не останавливает остальные —
 финальный exit 1 если хотя бы одна упала.
@@ -692,7 +694,7 @@ tests + probes → coverage → `audit-report.html`. Каждая stage печа
 ```bash
 zond audit --api <name> --dry-run                    # план без выполнения
 zond audit --api <name>                              # минимальный pipeline
-zond audit --api <name> --seed                       # bootstrap --apply --seed вместо discover
+zond audit --api <name> --seed                       # prepare-fixtures --cascade --seed --apply
 zond audit --api <name> --with-mass-assignment --with-security
 zond audit --api <name> --out reports/audit-<name>.html
 ```
