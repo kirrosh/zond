@@ -11,8 +11,7 @@ import { registerDescribe } from "./commands/describe.ts";
 import { registerDb } from "./commands/db.ts";
 import { registerRequest } from "./commands/request.ts";
 import { registerGenerate } from "./commands/generate.ts";
-import { registerDiscover } from "./commands/discover.ts";
-import { registerBootstrap } from "./commands/bootstrap.ts";
+import { registerPrepareFixtures } from "./commands/prepare-fixtures.ts";
 import { registerProbes } from "./commands/probe.ts";
 import { registerReport } from "./commands/report.ts";
 import { registerCatalog } from "./commands/catalog.ts";
@@ -91,8 +90,7 @@ export function buildProgram(): Command {
   registerCleanup(program);
 
   registerGenerate(program);
-  registerDiscover(program);
-  registerBootstrap(program);
+  registerPrepareFixtures(program);
   registerAudit(program);
 
   registerProbes(program);

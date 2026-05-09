@@ -1,7 +1,7 @@
 ---
 id: TASK-299
 title: consolidate discover + bootstrap into zond prepare-fixtures
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 07:00'
 labels:
@@ -22,8 +22,8 @@ discover (1254 LOC) и bootstrap имеют пересекающуюся FK-ло
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond prepare-fixtures покрывает discover и bootstrap флоу
-- [ ] #2 Старые команды deprecated с warning
-- [ ] #3 skills/, README, scenarios.md обновлены
-- [ ] #4 CHANGELOG breaking-change запись
+- [x] #1 zond prepare-fixtures покрывает discover (default) и bootstrap (--cascade) флоу
+- [x] #2 Старые команды удалены без deprecation (по решению пользователя)
+- [x] #3 skills/, README, ZOND.md, audit обновлены
+- [x] #4 CHANGELOG breaking-change запись
 <!-- AC:END -->

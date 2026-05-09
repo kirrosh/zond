@@ -655,47 +655,6 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
   }
 }
 
-import type { Command } from "commander";
-import { globalJson, resolveSpecArg } from "../resolve.ts";
-import { parsePositiveInt } from "../argv.ts";
-import { getDb } from "../../db/schema.ts";
-import { findCollectionByNameOrId } from "../../db/queries.ts";
-
-export function registerDiscover(program: Command): void {
-  program
-    .command("discover")
-    .description("Auto-fill .env.yaml FK ids by hitting list-endpoints (Phase 2.5 fixture pack — TASK-136)")
-    .requiredOption("--api <name>", "Registered API to discover against (apis/<name>/.env.yaml)")
-    .option("--db <path>", "Path to SQLite database file")
-    .option("--api-dir <path>", "Override apis/<name>/ root (defaults to the collection's base_dir)")
-    .option("--env <path>", "Override .env.yaml path (defaults to <api-dir>/.env.yaml)")
-    .option("--apply", "Write discovered values to .env.yaml (with .env.yaml.bak backup). Default: dry-run.")
-    .option("--verify", "TASK-281: GET each fixture's read-by-id endpoint and classify live/stale/unknown. Combine with --apply (or use --refresh) to drop stale fixtures and re-resolve them.")
-    .option("--refresh", "TASK-281: shortcut for --verify --apply — re-validate every fixture, then re-resolve any that 404'd.")
-    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
-    .action(async (opts, cmd: Command) => {
-      const resolved = resolveSpecArg(undefined, opts.api, opts.db);
-      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      let apiDir = opts.apiDir as string | undefined;
-      if (!apiDir) {
-        try {
-          getDb(opts.db);
-          const col = findCollectionByNameOrId(opts.api);
-          apiDir = col?.base_dir ?? `apis/${opts.api}`;
-        } catch {
-          apiDir = `apis/${opts.api}`;
-        }
-      }
-      const refresh = opts.refresh === true;
-      process.exitCode = await discoverCommand({
-        specPath: resolved.spec,
-        apiDir,
-        envPath: opts.env,
-        // --refresh implies --verify --apply.
-        apply: opts.apply === true || refresh,
-        verify: opts.verify === true || refresh,
-        timeoutMs: opts.timeout,
-        json: globalJson(cmd),
-      });
-    });
-}
+// CLI registration moved to ./prepare-fixtures.ts (TASK-299, m-13 D).
+// `discoverCommand` above is still the imperative core for the
+// single-pass branch and is consumed directly by tests.

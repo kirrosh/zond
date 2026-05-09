@@ -45,8 +45,8 @@ describe("zond audit (TASK-262)", () => {
     const code = await auditCommand({ api: "demo", dryRun: true });
     expect(code).toBe(0);
     const out = suppress.out;
-    // Discover stage (default — без --seed)
-    expect(out).toContain("zond discover --api demo --apply");
+    // Prepare-fixtures stage (default — без --seed)
+    expect(out).toContain("zond prepare-fixtures --api demo --apply");
     // Generate, probes, run, session lifecycle
     expect(out).toContain("zond generate --api demo");
     expect(out).toContain("zond probe validation --api demo");
@@ -59,7 +59,7 @@ describe("zond audit (TASK-262)", () => {
     expect(out).not.toContain("ssrf,crlf");
   });
 
-  test("--seed swaps discover for bootstrap; opt-in flags add probe stages", async () => {
+  test("--seed swaps single-pass prep for cascade+seed; opt-in flags add probe stages", async () => {
     const code = await auditCommand({
       api: "demo",
       seed: true,
@@ -69,8 +69,8 @@ describe("zond audit (TASK-262)", () => {
     });
     expect(code).toBe(0);
     const out = suppress.out;
-    expect(out).toContain("zond bootstrap --api demo --apply --seed");
-    expect(out).not.toContain("zond discover --api demo --apply");
+    expect(out).toContain("zond prepare-fixtures --api demo --apply --seed");
+    expect(out).not.toContain("zond prepare-fixtures --api demo --apply\n");
     expect(out).toContain("zond probe mass-assignment --api demo");
     expect(out).toContain("zond probe security ssrf,crlf,open-redirect --api demo");
     // 10 stages with both opt-ins
@@ -87,7 +87,7 @@ describe("zond audit (TASK-262)", () => {
     expect(env.command).toBe("audit");
     expect(env.data.plan).toBeArray();
     const keys = env.data.plan.map((s: { key: string }) => s.key);
-    expect(keys).toContain("discover");
+    expect(keys).toContain("prepare-fixtures");
     expect(keys).toContain("generate");
     expect(keys).toContain("probe-validation");
     expect(keys).toContain("session-start");

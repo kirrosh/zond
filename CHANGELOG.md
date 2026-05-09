@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Changed (breaking)
 
+- **TASK-299: `zond discover` and `zond bootstrap` are merged into `zond prepare-fixtures`.**
+  Single-pass discover is now `zond prepare-fixtures --api <name>` (the
+  former `zond discover` flow). Multi-pass cascade is `--cascade`, with
+  `--seed` / `--force` / `--max-passes` (the former `zond bootstrap`).
+  `--seed` implies `--cascade`. The old top-level commands are removed
+  without deprecation. `zond audit --seed` now spawns
+  `prepare-fixtures --apply --seed` instead of `bootstrap`.
+
 - **TASK-298: `zond validate` and `zond lint-spec` are merged into `zond check`.**
   Use `zond check tests <path>` for the YAML-test schema validator and
   `zond check spec [spec]` for the OpenAPI static analyser. The old
