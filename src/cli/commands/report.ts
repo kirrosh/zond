@@ -8,7 +8,7 @@ import {
 import { renderHtmlReport } from "../../core/exporter/html-report/index.ts";
 import { loadCoverage } from "../../core/coverage/loader.ts";
 import type { CoverageMatrix } from "../../core/coverage/reasons.ts";
-import { printError, printSuccess, printWarning } from "../output.ts";
+import { printError, printWarning } from "../output.ts";
 import { applySanitizer } from "../../core/exporter/exporter.ts";
 import { loadIdentityFromAncestor, redactIdentityIn } from "../../core/identity/identity-file.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
@@ -165,9 +165,12 @@ export async function reportExportHtmlCommand(
   } else {
     for (const w of warnings) printWarning(w);
     const failures = results.filter((r) => r.status !== "pass" && r.status !== "skip").length;
-    printSuccess(
-      `Wrote ${sizeKb} KB → ${outputPath} (${results.length} step${results.length === 1 ? "" : "s"}, ${failures} failure${failures === 1 ? "" : "s"})`,
+    // TASK-241: status → stderr; stdout carries only the artifact path so
+    // shells/agents can do `out=$(zond report export <id>)` without parsing.
+    process.stderr.write(
+      `zond: wrote ${sizeKb} KB (${results.length} step${results.length === 1 ? "" : "s"}, ${failures} failure${failures === 1 ? "" : "s"})\n`,
     );
+    process.stdout.write(`${outputPath}\n`);
   }
 
   return 0;
