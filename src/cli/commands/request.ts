@@ -1,6 +1,6 @@
 import { sendAdHocRequest } from "../../core/runner/send-request.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
-import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
+import { jsonOk, jsonError, printJson, zerr } from "../json-envelope.ts";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
@@ -120,7 +120,8 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (options.json) {
-      printJson(jsonError("request", [message]));
+      const code = /not registered/.test(message) ? "api_not_registered" : "unknown_error";
+      printJson(jsonError("request", [zerr(code, message)]));
     } else {
       printError(message);
       // TASK-272: if the failure is shaped like blocked shell-substitution in
