@@ -22,6 +22,7 @@ import { registerDoctor } from "./commands/doctor.ts";
 import { registerRefreshApi } from "./commands/refresh-api.ts";
 import { registerAdd } from "./commands/add-api.ts";
 import { registerAudit } from "./commands/audit.ts";
+import { registerReference } from "./commands/reference.ts";
 
 import { getSecretRegistry } from "../core/secrets/registry.ts";
 import { getRuntimeInfo } from "./runtime.ts";
@@ -99,6 +100,47 @@ export function buildProgram(): Command {
   registerReport(program);
 
   registerCompletions(program);
+  registerReference(program);
+
+  // TASK-267: group top-level commands by phase in `zond --help`. Without
+  // grouping, the flat 20+ command list buries the workflow shape; with it,
+  // a new tester can see "setup → generate → run → analyze → report" at a
+  // glance. Commands not listed below stay in the default group.
+  const HELP_GROUPS: Record<string, string> = {
+    // setup: register an API, prepare workspace
+    "init":         "Setup:",
+    "add":          "Setup:",
+    "use":          "Setup:",
+    "refresh-api":  "Setup:",
+    "doctor":       "Setup:",
+    "clean":        "Setup:",
+    "cleanup":      "Setup:",
+    // generate: produce suites/probes from the spec
+    "generate":         "Generate:",
+    "prepare-fixtures": "Generate:",
+    "probe":            "Generate:",
+    // run: execute suites against a live API
+    "run":     "Run:",
+    "session": "Run:",
+    "request": "Run:",
+    // analyze: post-run inspection and triage
+    "coverage": "Analyze:",
+    "db":       "Analyze:",
+    "audit":    "Analyze:",
+    "check":    "Analyze:",
+    "describe": "Analyze:",
+    // report: outbound artefacts (HTML, bundles, catalog)
+    "report":  "Report:",
+    "catalog": "Report:",
+    // other: scaffolding / shell integration
+    "ci":          "Other:",
+    "completions": "Other:",
+    "reference":   "Other:",
+  };
+  for (const sub of program.commands) {
+    const group = HELP_GROUPS[sub.name()];
+    if (group) sub.helpGroup(group);
+  }
 
   // TASK-73: previously `--json` was a top-level/global option that propagated
   // to every subcommand, which collided with `run --report json` (and broke

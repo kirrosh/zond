@@ -3,10 +3,10 @@ id: TASK-267
 title: >-
   docs/UX: группировать `zond --help` по фазам + discoverability для
   $randomSlug/Email/Url helpers
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 15:00'
-updated_date: '2026-05-09 09:06'
+updated_date: '2026-05-09 09:23'
 labels:
   - feedback-loop
   - docs
@@ -47,3 +47,9 @@ Source: feedback-12 impressions, "Документация / discovery".
 - [ ] #4 (опционально) `docs/cookbook/sentry.md` с типовым flow.
 <!-- SECTION:ACCEPTANCE:END -->
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done: 1) zond --help группирует команды по фазам Setup/Generate/Run/Analyze/Report/Other через Commander helpGroup. 2) Новая команда: zond reference random-helpers (human-readable таблица + --json для агентов). 3) docs/random-helpers.md — полный reference helper-ов и mapping для generate. 4) zond generate --help теперь упоминает helper-ы и команду reference. 5) Скиллы (zond.md, zond-triage.md, scenarios.md) обновлены: указывают на reference random-helpers, на новый default db diagnose, на TASK-258 поведение clean. AC #4 (cookbook) opt-in — отложено в backlog.
+<!-- SECTION:NOTES:END -->

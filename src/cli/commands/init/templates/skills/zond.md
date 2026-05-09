@@ -167,9 +167,10 @@ Cleanup recipe:
 
 ```bash
 zond clean --api <name>                  # dry-run: lists what would be removed
-zond clean --api <name> --force          # actually delete
+zond clean --api <name> --force          # actually delete (preserves apis/<name>/probes/ — TASK-258)
+zond clean --api <name> --probes --force # also delete probe-suites for that api
 zond clean --probes --force              # only probe-suite YAMLs (after a template fix)
-zond clean --all --force                 # nuclear: remove every tracked file
+zond clean --all --force                 # nuclear: remove every tracked file (incl. probes)
 ```
 
 Files whose sha256 no longer matches the manifest are **skipped**
@@ -391,8 +392,9 @@ When `recommended_action: fix_test_logic` and the body is rejected on format
    (Phase 2.5). Generators cannot help here.
 3. **Typed generator** — for the rest, swap `{{$randomString}}` for the
    matching format-aware generator (`{{$randomEmail}}`, `{{$randomUrl}}`,
-   `{{$uuid}}`, `{{$randomInt}}`, `{{$randomIsoDate}}`, …; full list in
-   `zond run --help`).
+   `{{$uuid}}`, `{{$randomInt}}`, `{{$randomIsoDate}}`, …; run
+   `zond reference random-helpers` for the full table or see
+   `docs/random-helpers.md`).
 4. **Hardcoded literal** — if the typed generator still fails (regex too
    strict), drop to a literal that satisfies the contract.
 5. **Runtime captures** are for resources the test itself creates (capture

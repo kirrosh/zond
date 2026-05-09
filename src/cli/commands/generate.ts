@@ -327,7 +327,7 @@ import { globalJson, resolveSpecArg } from "../resolve.ts";
 export function registerGenerate(program: Command): void {
   program
     .command("generate [spec]")
-    .description("Generate test suites from OpenAPI spec")
+    .description("Generate test suites from OpenAPI spec. Body fields are filled with `{{$random*}}` helpers (slug/email/url/uuid/…) — see `zond reference random-helpers` or docs/random-helpers.md for the full list (TASK-267).")
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
     .option("--output <dir>", "Output directory for generated test files (required unless --explain)")
