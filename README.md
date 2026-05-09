@@ -84,6 +84,21 @@ Claude Code can write pytest from scratch — but it takes 30-60 minutes per flo
 "Set up CI for API tests"
 ```
 
+## Upgrading
+
+`zond update` was removed in favour of system package managers:
+
+```bash
+# macOS / Linux — re-run the installer
+curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
+
+# npm
+npm install -g @kirrosh/zond@latest
+
+# bun
+bun install -g @kirrosh/zond@latest
+```
+
 ## Shell completions
 
 ```bash

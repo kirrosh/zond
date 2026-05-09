@@ -21,7 +21,6 @@ import {
 import { registerLintSpec } from "./commands/lint-spec.ts";
 import { registerExport } from "./commands/export.ts";
 import { registerReport } from "./commands/report.ts";
-import { registerUpdate } from "./commands/update.ts";
 import { registerCatalog } from "./commands/catalog.ts";
 import { registerCompletions } from "./commands/completions.ts";
 import { registerUse } from "./commands/use.ts";
@@ -97,7 +96,6 @@ export function buildProgram(): Command {
   registerExport(program);
   registerReport(program);
 
-  registerUpdate(program);
   registerCompletions(program);
 
   // TASK-73: previously `--json` was a top-level/global option that propagated
