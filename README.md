@@ -40,6 +40,10 @@ upstream spec changes.
 
 Then say to your agent: _"Safely cover the API from openapi.json with tests."_
 
+Want the whole pipeline at once? `zond audit --api my-api` runs
+prepare-fixtures → generate → probes → run → coverage → HTML report in a
+single shot.
+
 <details>
 <summary>Other installation methods (npx)</summary>
 

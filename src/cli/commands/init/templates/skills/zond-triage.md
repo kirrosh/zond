@@ -4,7 +4,7 @@ description: |
   Last-run triage. Use when the user asks "что упало в последнем run", "почему
   красное", "что с ralph-loop'ом сделать", "summary последнего прогона",
   "explain failures", "что мне сейчас править". Reads `recommended_action`
-  enum from `zond db diagnose`, `zond check spec`, and `zond probe-*` JSON
+  enum from `zond db diagnose`, `zond check spec`, and `zond probe <class>` JSON
   artifacts and emits an actionable summary grouped by next-step. No LLM
   classification — every line is routed by the enum value emitted by zond.
 allowed-tools: [Read, Bash(zond *), Bash(bunx zond *), Bash(jq *)]
@@ -13,7 +13,7 @@ allowed-tools: [Read, Bash(zond *), Bash(bunx zond *), Bash(jq *)]
 # zond-triage — last-run summary
 
 Narrow skill: the user already has a finished run (or a recent
-`probe-*` / `check spec` artifact) and wants to know **what failed and
+`probe <class>` / `check spec` artifact) and wants to know **what failed and
 what to do next**. Sibling `zond` does the full audit; sibling
 `zond-scenarios` writes new flows. This one only reads.
 
@@ -48,7 +48,7 @@ what to do next**. Sibling `zond` does the full audit; sibling
 | `zond probe security --json` | counts only — read the markdown digest | high / low findings (markdown table) |
 | `zond probe static --json` | `data.files[]` (suite YAMLs to run) | findings surface only after `zond run` → routed via diagnose |
 
-`probe-security` does not expose findings in `--json`; treat its
+`probe security` does not expose findings in `--json`; treat its
 markdown digest as the canonical source for that class and parse
 HIGH/LOW rows by hand.
 
@@ -111,8 +111,12 @@ priority first):
    `zond doctor --api <name> --missing-only`).
 4. `fix_env` — env_issue cluster. Print `env_issue.message` verbatim;
    point at `.env.yaml` (path is in the envelope).
-5. `fix_fixture` — discover miss-* / inconclusive-baseline. Run
-   `zond prepare-fixtures --api <name> --apply [--cascade [--seed]]`.
+5. `fix_fixture` — `prepare-fixtures` miss-* or inconclusive-baseline
+   from mass-assignment. Run
+   `zond prepare-fixtures --api <name> --apply [--cascade [--seed]]`. If
+   the run was post-probe and IDs may be stale, prefer
+   `prepare-fixtures --refresh` (TASK-281) and follow with `zond cleanup
+   --orphans` (TASK-278) before retrying.
 6. `fix_network_config` — connect-refused / DNS / TLS. Check `base_url`
    reachability; `--proxy` may be needed.
 7. `fix_test_logic` — 4xx (400/422) on stub-generated body. Phase 4a of
@@ -136,7 +140,7 @@ zond probe mass-assignment --api <name> --json
 # verdicts with recommended_action != null are the actionable subset
 ```
 
-For `probe-security`, the digest is the source. Read the file the user
+For `probe security`, the digest is the source. Read the file the user
 named (or `apis/<name>/probes/security-digest.md`) and pull HIGH rows
 plus the `## ⚠️ Cleanup failures` section if present.
 
@@ -177,7 +181,7 @@ say "all green" and exit — don't invent work.
   the run was probably aborted mid-setup. Check `env_issue` first; if
   not set, the run hit a fatal early failure — `zond db run <id>
   --status 500 --first-only --json` to find it.
-- **Cleanup failures from `probe-security`:** call out at the **top** —
+- **Cleanup failures from `probe security`:** call out at the **top** —
   this means probe mutated state it could not restore. Treat as
   blocking; do not run more probes against the same env until the
   user confirms manual cleanup.
