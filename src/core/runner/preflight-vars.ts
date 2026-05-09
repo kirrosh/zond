@@ -118,3 +118,32 @@ export function formatMissingVarLine(hit: MissingVarHit): string {
   const file = hit.file ? ` (${hit.file})` : "";
   return `Undefined variable {{${hit.variable}}} in ${where}${file}`;
 }
+
+/**
+ * TASK-248: collapse per-(suite,step,variable) hits into one summary line per
+ * unique variable. When the same {{var}} is referenced in 8–12 places (typical
+ * when running outside a workspace and `.env.yaml` is missing), per-hit emit
+ * spams stderr — the aggregated form keeps signal (the *names* of the missing
+ * vars) while dropping noise.
+ */
+export function summarizeMissingVars(hits: MissingVarHit[]): string[] {
+  if (hits.length === 0) return [];
+  const byVar = new Map<string, { refs: number; suites: Set<string> }>();
+  for (const h of hits) {
+    let entry = byVar.get(h.variable);
+    if (!entry) {
+      entry = { refs: 0, suites: new Set() };
+      byVar.set(h.variable, entry);
+    }
+    entry.refs++;
+    entry.suites.add(h.suite);
+  }
+  const names = [...byVar.keys()].sort();
+  const totalRefs = hits.length;
+  const totalSuites = new Set(hits.map((h) => h.suite)).size;
+  const head = names.slice(0, 6).map((n) => `{{${n}}}`).join(", ");
+  const tail = names.length > 6 ? `, … and ${names.length - 6} more` : "";
+  return [
+    `Undefined variables: ${head}${tail} (${totalRefs} reference${totalRefs === 1 ? "" : "s"} across ${totalSuites} suite${totalSuites === 1 ? "" : "s"})`,
+  ];
+}

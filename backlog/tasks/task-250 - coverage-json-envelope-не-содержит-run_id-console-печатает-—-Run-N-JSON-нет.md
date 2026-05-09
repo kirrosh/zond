@@ -3,10 +3,10 @@ id: TASK-250
 title: >-
   coverage --json: envelope не содержит run_id (console печатает "— Run #N",
   JSON нет)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 13:00'
-updated_date: '2026-05-09 09:06'
+updated_date: '2026-05-09 09:46'
 labels:
   - feedback-loop
   - api-sentry
