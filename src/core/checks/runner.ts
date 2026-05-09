@@ -32,6 +32,7 @@ import { selectChecks, type SelectionResult } from "./registry.ts";
 import { listStatefulChecks, makeHarness } from "./stateful.ts";
 import { caseMatchesMode, filterChecksByMode, type Mode } from "./mode.ts";
 import { buildNegativeBody } from "./checks/_negative_mutator.ts";
+import { nowIso, type NdjsonEvent } from "../reporter/ndjson.ts";
 import {
   emptySummary,
   type CaseKind,
@@ -70,6 +71,12 @@ export interface RunChecksOptions {
    *  (malicious input only), `all` (default — both). Drops both checks
    *  and cases that don't belong to the requested mode. */
   mode?: Mode;
+  /** ARV-10 — synchronous streaming hook. Fires per
+   *  `check_start` / `check_result` / `finding` / `summary` event so the
+   *  NDJSON reporter can flush each line as it happens (instead of
+   *  buffering until the run finishes). Must not throw — exceptions are
+   *  the caller's responsibility (the runner doesn't catch). */
+  onEvent?: (event: NdjsonEvent) => void;
 }
 
 export interface RunChecksResult {
@@ -271,9 +278,10 @@ function recordFinding(
   c: CheckCase,
   resp: HttpResponse,
   message: string,
-  evidence?: Record<string, unknown>,
+  evidence: Record<string, unknown> | undefined,
+  onEvent: ((event: NdjsonEvent) => void) | undefined,
 ): void {
-  out.push({
+  const finding: CheckFinding = {
     check: check.id,
     severity: check.severity,
     operation: { path: c.operation.path, method: c.operation.method, operationId: c.operation.operationId },
@@ -281,9 +289,16 @@ function recordFinding(
     response_summary: summarizeResponse(resp),
     message,
     evidence,
-  });
+  };
+  out.push(finding);
   summary.findings += 1;
   summary.by_severity[check.severity] += 1;
+  // ARV-10: stream the finding *immediately* so an NDJSON consumer
+  // doesn't wait until the whole run finishes. Snapshot via JSON
+  // round-trip would be cheaper to reason about, but a shallow copy is
+  // sufficient — `findings[]` is only mutated by push and `evidence`
+  // isn't mutated after construction here.
+  if (onEvent) onEvent({ type: "finding", ts: nowIso(), finding });
 }
 
 export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult> {
@@ -321,6 +336,15 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   const wantsCoverage = phase === "coverage" || phase === "all";
 
   for (const op of ops) {
+    // ARV-10: announce each operation once, regardless of how many cases
+    // it spawns. Consumers use this for progress UI / liveness.
+    if (opts.onEvent) {
+      opts.onEvent({
+        type: "check_start",
+        ts: nowIso(),
+        operation: { path: op.path, method: op.method, operationId: op.operationId },
+      });
+    }
     const cases: BuiltCase[] = [];
     if (wantsExamples && neededKinds.has("positive")) cases.push(buildPositive(op, opts.baseUrl));
     if (neededKinds.has("missing_required_header")) {
@@ -359,16 +383,18 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       try {
         httpResp = await executeRequest(built.req, { timeout: opts.timeoutMs ?? 30000 });
       } catch (err) {
-        findings.push({
+        const finding: CheckFinding = {
           check: "network_error",
           severity: "medium",
           operation: { path: op.path, method: op.method, operationId: op.operationId },
           request_signature: `${built.req.method} ${built.req.url}`,
           response_summary: { status: 0 },
           message: `Network error: ${(err as Error).message}`,
-        });
+        };
+        findings.push(finding);
         summary.findings += 1;
         summary.by_severity.medium += 1;
+        if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), finding });
         continue;
       }
 
@@ -389,7 +415,22 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           doc,
         });
         if (outcome.kind === "fail") {
-          recordFinding(findings, summary, check, built.case, httpResp, outcome.message, outcome.evidence);
+          recordFinding(findings, summary, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent);
+        }
+        // ARV-10: emit one check_result per (case × check) so an NDJSON
+        // consumer can compute pass-rate / progress *during* the run —
+        // skips don't count toward verdict (they're a routing decision,
+        // not a contract outcome).
+        if (opts.onEvent && (outcome.kind === "pass" || outcome.kind === "fail")) {
+          opts.onEvent({
+            type: "check_result",
+            ts: nowIso(),
+            check: check.id,
+            verdict: outcome.kind,
+            operation: { path: op.path, method: op.method, operationId: op.operationId },
+            request_signature: `${built.case.request.method} ${built.case.request.url}`,
+            response: summarizeResponse(httpResp),
+          });
         }
       }
     }
@@ -431,7 +472,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
             outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
           }
           if (outcome.kind === "fail") {
-            findings.push({
+            const finding: CheckFinding = {
               check: check.id,
               severity: check.severity,
               operation: { path: op.path, method: op.method, operationId: op.operationId },
@@ -439,9 +480,11 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
               response_summary: { status: 0 },
               message: outcome.message,
               evidence: outcome.evidence,
-            });
+            };
+            findings.push(finding);
             summary.findings += 1;
             summary.by_severity[check.severity] += 1;
+            if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), finding });
           }
         }
       } else {
@@ -455,7 +498,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           }
           if (outcome.kind === "fail") {
             const repOp = group.create ?? group.read!;
-            findings.push({
+            const finding: CheckFinding = {
               check: check.id,
               severity: check.severity,
               operation: { path: repOp.path, method: repOp.method, operationId: repOp.operationId },
@@ -463,9 +506,11 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
               response_summary: { status: 0 },
               message: outcome.message,
               evidence: outcome.evidence,
-            });
+            };
+            findings.push(finding);
             summary.findings += 1;
             summary.by_severity[check.severity] += 1;
+            if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), finding });
           }
         }
       }
@@ -475,6 +520,11 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   const highOrCritical = findings.filter(
     (f) => f.severity === "high" || f.severity === "critical",
   ).length;
+
+  // ARV-10: terminal event so downstream consumers know the run wrapped
+  // (vs. the producer crashing). Mirrors what the JSON envelope's
+  // `summary` field carries, just delivered as the final NDJSON line.
+  if (opts.onEvent) opts.onEvent({ type: "summary", ts: nowIso(), summary });
 
   return {
     data: { findings, summary },
