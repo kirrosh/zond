@@ -236,6 +236,48 @@ describe("TASK-182: zond probe umbrella + back-compat aliases", () => {
   });
 });
 
+describe("TASK-293: --json envelope coverage", () => {
+  // Walk every leaf command (action handler attached) and assert it carries
+  // the auto-attached --json flag. Two documented exclusions: `run` (uses
+  // `--report json` for its bulk output, see TASK-73) and `completions`
+  // (shell-completion text, not data).
+  function collectLeafPaths(): string[] {
+    const program = buildProgram();
+    const out: string[] = [];
+    function walk(cmd: import("commander").Command, prefix: string): void {
+      const path = prefix ? `${prefix} ${cmd.name()}` : cmd.name();
+      const hasAction = (cmd as unknown as { _actionHandler?: unknown })._actionHandler != null;
+      if (hasAction && cmd.name() !== "help") out.push(path);
+      for (const sub of cmd.commands) walk(sub, path);
+    }
+    for (const sub of program.commands) walk(sub, "");
+    return out;
+  }
+
+  test("every leaf command (except `run` / `completions`) exposes --json", () => {
+    const program = buildProgram();
+    const skip = new Set(["run", "completions"]);
+    const failures: string[] = [];
+
+    function findLeaf(path: string[]): import("commander").Command | undefined {
+      let cur: import("commander").Command | undefined = program;
+      for (const seg of path) {
+        cur = cur?.commands.find((c) => c.name() === seg);
+        if (!cur) return undefined;
+      }
+      return cur;
+    }
+
+    for (const fullPath of collectLeafPaths()) {
+      if (skip.has(fullPath)) continue;
+      const leaf = findLeaf(fullPath.split(" "));
+      const has = leaf?.options.some((o) => o.long === "--json");
+      if (!has) failures.push(fullPath);
+    }
+    expect(failures).toEqual([]);
+  });
+});
+
 describe("buildProgram — unknown command", () => {
   test("foobar surfaces commander.unknownCommand", async () => {
     const result = await tryParse(["foobar"]);
