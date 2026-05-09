@@ -13,6 +13,7 @@
 import type { Command } from "commander";
 
 import { listChecks, runChecks } from "../../core/checks/index.ts";
+import { listStatefulChecks } from "../../core/checks/stateful.ts";
 import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
@@ -25,12 +26,22 @@ interface ChecksListOptions {
 async function checksListAction(_args: unknown, cmd: Command): Promise<void> {
   const opts = cmd.opts<ChecksListOptions>();
   const json = opts.json === true || globalJson(cmd);
-  const catalog = listChecks().map((c) => ({
-    id: c.id,
-    severity: c.severity,
-    default_expected: c.defaultExpected,
-    references: c.references,
-  }));
+  const catalog = [
+    ...listChecks().map((c) => ({
+      id: c.id,
+      severity: c.severity,
+      default_expected: c.defaultExpected,
+      references: c.references,
+      phase: "response" as const,
+    })),
+    ...listStatefulChecks().map((c) => ({
+      id: c.id,
+      severity: c.severity,
+      default_expected: c.defaultExpected,
+      references: c.references,
+      phase: c.phase,
+    })),
+  ].sort((a, b) => a.id.localeCompare(b.id));
 
   if (json) {
     printJson(jsonOk("checks list", { checks: catalog }));
@@ -52,6 +63,39 @@ interface ChecksRunOptions {
   timeout?: number;
   db?: string;
   json?: boolean;
+  authHeader?: string[];
+  bootstrapCleanupFailed?: boolean;
+}
+
+function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of values ?? []) {
+    const idx = raw.indexOf(":");
+    if (idx <= 0) continue;
+    const name = raw.slice(0, idx).trim();
+    const value = raw.slice(idx + 1).trim();
+    if (name) out[name] = value;
+  }
+  return out;
+}
+
+async function deriveAuthHeadersFromApi(apiName: string | undefined, dbPath: string | undefined): Promise<Record<string, string>> {
+  if (!apiName) return {};
+  const col = resolveApiCollection(apiName, dbPath);
+  if ("error" in col || !col.baseDir) return {};
+  try {
+    const env = await loadEnvironment(undefined, col.baseDir);
+    const out: Record<string, string> = {};
+    if (typeof env.auth_token === "string" && env.auth_token.length > 0) {
+      out["Authorization"] = `Bearer ${env.auth_token}`;
+    }
+    if (typeof env.api_key === "string" && env.api_key.length > 0) {
+      out["X-API-Key"] = env.api_key;
+    }
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 function splitList(values: string[] | undefined): string[] | undefined {
@@ -101,6 +145,13 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     process.exit(2);
   }
 
+  // ARV-3: lift auth headers from --auth-header (wins) and/or the
+  // resolved --api's .env.yaml (auth_token / api_key conventions).
+  const apiName = opts.api ?? cmd.parent?.opts().api;
+  const fromEnv = await deriveAuthHeadersFromApi(apiName, opts.db);
+  const fromFlags = parseAuthHeaders(opts.authHeader);
+  const authHeaders = { ...fromEnv, ...fromFlags };
+
   try {
     const result = await runChecks({
       specPath: specRes.spec,
@@ -108,6 +159,8 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       include: splitList(opts.check),
       exclude: splitList(opts.excludeCheck),
       timeoutMs: typeof opts.timeout === "number" ? opts.timeout : undefined,
+      authHeaders: Object.keys(authHeaders).length > 0 ? authHeaders : undefined,
+      bootstrapCleanupFailed: opts.bootstrapCleanupFailed === true,
     });
     const warnings: string[] = [];
     for (const id of result.selection.unknown) {
@@ -155,6 +208,14 @@ function defineRun(parent: Command): void {
     .option("--exclude-check <ids...>", "Skip these checks (comma-separated or repeated)")
     .option("--timeout <ms>", "Per-request timeout in ms", (v) => Number.parseInt(v, 10))
     .option("--db <path>", "SQLite path (for --api lookup)")
+    .option(
+      "--auth-header <header...>",
+      "ARV-3: feed real-auth headers into stateful security checks. Format: 'Name: value'. Repeat for multiple headers. Auto-derived from apis/<name>/.env.yaml (auth_token, api_key) when --api is set.",
+    )
+    .option(
+      "--bootstrap-cleanup-failed",
+      "ARV-3: signal that bootstrap-cleanup failed before this run. Stateful security checks (ignored_auth, use_after_free, ensure_resource_availability) skip with a warning to avoid false positives on stale data.",
+    )
     .action(checksRunAction);
 }
 
