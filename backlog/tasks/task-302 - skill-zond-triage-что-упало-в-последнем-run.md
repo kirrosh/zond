@@ -1,9 +1,10 @@
 ---
 id: TASK-302
 title: 'skill: zond-triage (что упало в последнем run)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 07:00'
+updated_date: '2026-05-09 09:00'
 labels:
   - skills
   - agent-first
@@ -21,8 +22,8 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 skills/zond-triage.md создан
-- [ ] #2 Скилл использует recommended_action enum, не LLM-классификацию
-- [ ] #3 Cover скилла: db diagnose, lint-spec, probe-* findings
-- [ ] #4 skills/zond.md ссылается на zond-triage в navigator-секции
+- [x] #1 skills/zond-triage.md создан
+- [x] #2 Скилл использует recommended_action enum, не LLM-классификацию
+- [x] #3 Cover скилла: db diagnose, lint-spec, probe-* findings
+- [x] #4 skills/zond.md ссылается на zond-triage в navigator-секции
 <!-- AC:END -->
