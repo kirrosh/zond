@@ -41,7 +41,7 @@ describe("zond audit (TASK-262)", () => {
     rmSync(workdir, { recursive: true, force: true });
   });
 
-  test("--dry-run prints stage plan with default 8 stages and does not execute", async () => {
+  test("--dry-run prints stage plan with default 7 stages and does not execute", async () => {
     const code = await auditCommand({ api: "demo", dryRun: true });
     expect(code).toBe(0);
     const out = suppress.out;
@@ -49,8 +49,7 @@ describe("zond audit (TASK-262)", () => {
     expect(out).toContain("zond prepare-fixtures --api demo --apply");
     // Generate, probes, run, session lifecycle
     expect(out).toContain("zond generate --api demo");
-    expect(out).toContain("zond probe validation --api demo");
-    expect(out).toContain("zond probe methods --api demo");
+    expect(out).toContain("zond probe static --api demo");
     expect(out).toContain("zond session start");
     expect(out).toContain("zond run");
     expect(out).toContain("zond session end");
@@ -73,8 +72,8 @@ describe("zond audit (TASK-262)", () => {
     expect(out).not.toContain("zond prepare-fixtures --api demo --apply\n");
     expect(out).toContain("zond probe mass-assignment --api demo");
     expect(out).toContain("zond probe security ssrf,crlf,open-redirect --api demo");
-    // 10 stages with both opt-ins
-    expect(out).toContain("(10 stages)");
+    // 9 stages with both opt-ins (default 7 + mass-assignment + security)
+    expect(out).toContain("(9 stages)");
   });
 
   test("--dry-run --json emits envelope with stage plan", async () => {
@@ -89,7 +88,7 @@ describe("zond audit (TASK-262)", () => {
     const keys = env.data.plan.map((s: { key: string }) => s.key);
     expect(keys).toContain("prepare-fixtures");
     expect(keys).toContain("generate");
-    expect(keys).toContain("probe-validation");
+    expect(keys).toContain("probe-static");
     expect(keys).toContain("session-start");
     expect(keys).toContain("session-end");
   });

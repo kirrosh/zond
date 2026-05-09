@@ -110,8 +110,7 @@ selected via `zond use`.
 | `check tests <path>` | Schema-validate YAML tests | `--verbose` |
 | `coverage` | API test coverage. Exit 0 = full coverage (or ≥ `--fail-on-coverage`); 1 = uncovered endpoints (or below threshold); 2 = bad input/read error. Warnings (e.g. `required_params_no_examples`) never affect the exit code. | `--spec`, `--tests`, `--api`, `--fail-on-coverage <N>` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
-| `probe validation [spec]` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup`, `--use-synthetic-parents` |
-| `probe methods [spec]` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--api <name>`, `--output <dir>`, `--tag` |
+| `probe static [spec]` | Generate static-input probe suites — validation (5xx-on-bad-input) + methods (5xx/2xx on undeclared methods). Defaults to both classes; restrict via `--include` / `--exclude`. | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup`, `--use-synthetic-parents`, `--include validation,methods`, `--exclude validation,methods` |
 | `probe mass-assignment [spec]` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--no-discover`, `--timeout <ms>` |
 | `probe security <classes> [spec]` | Live SSRF / CRLF / open-redirect probes with baseline-OK gate; classes = comma-separated subset of `ssrf,crlf,open-redirect` | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--dry-run`, `--timeout <ms>` |
 | `check spec [spec]` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--api <name>`, `--strict`, `--rule <list>` (TASK-291: unified — `B1` whitelist, `!B2` disable, `B3=high` override), `--severity <list>`, `--top <N>`, `--verbose`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
@@ -230,18 +229,26 @@ future `zond db lint-diff`. Disable with `--no-db`.
 }
 ```
 
-### `probe-validation` — bug-hunting negative-input probes
+### `probe static` — bug-hunting static-input probes (validation + methods)
 
-A correctly-implemented API returns **4xx** for any malformed client input —
-never **5xx**. `probe-validation` generates a deterministic battery of
-negative-input probes from your OpenAPI spec; any 5xx response from the API
-under test is a bug candidate.
+`probe static` runs the two static-input probe classes — **validation**
+(catches 5xx on bad input) and **methods** (catches 5xx/2xx on undeclared
+HTTP methods) — from a single command. Both read the spec on disk; no HTTP
+calls are made. Defaults to running both classes; restrict via
+`--include validation,methods` (or `--exclude`).
 
 ```bash
-zond probe-validation openapi.json --output bugs/probes/
+zond probe static openapi.json --output bugs/probes/
 zond run bugs/probes/                     # any failure with 5xx response → bug
 zond db diagnose <run-id>                 # group failures by root cause
 ```
+
+#### validation class — bad-input fuzz
+
+A correctly-implemented API returns **4xx** for any malformed client input —
+never **5xx**. The validation class generates a deterministic battery of
+negative-input probes from your OpenAPI spec; any 5xx response from the API
+under test is a bug candidate.
 
 Per endpoint the generator emits probes from these classes (capped by
 `--max-per-endpoint`, default 50):
@@ -274,7 +281,7 @@ have no real parent fixture).
 **Cleanup of leaked resources.** A probe that *unexpectedly* returns 2xx on a
 mutating endpoint (POST/PUT/PATCH) means the API silently accepted bad input
 and created a resource. To keep probe runs idempotent in environments without
-namespace isolation, `probe-validation` pairs every mutating probe with a
+namespace isolation, the validation class pairs every mutating probe with a
 follow-up `DELETE` step (`always: true`) that fires only if the probe captured
 a resource id. When the API correctly rejects the probe with 4xx, the cleanup
 step is skipped automatically. If the spec defines no DELETE counterpart for a
@@ -282,16 +289,16 @@ mutating endpoint, the generator prints a warning so you can clean up by hand.
 Use `--no-cleanup` to opt out (e.g. for staging environments that dump-and-reset
 between runs).
 
-### `probe-methods` — bug-hunting HTTP method completeness sweep
+#### methods class — HTTP method completeness sweep
 
 A correctly-implemented API returns **405 Method Not Allowed** (or 404) for
 HTTP methods not declared on a path — never **5xx** (unhandled exception) and
-never **2xx** (forgotten/shadowed route). `probe-methods` generates one suite
+never **2xx** (forgotten/shadowed route). The methods class generates one suite
 per path that probes every method in `{GET, POST, PUT, PATCH, DELETE}` not
 declared in the spec.
 
 ```bash
-zond probe-methods openapi.json --output bugs/method-probes/
+zond probe static openapi.json --include methods --output bugs/method-probes/
 zond run bugs/method-probes/              # any 5xx or 2xx failure → bug
 zond db diagnose <run-id>
 ```
@@ -812,7 +819,7 @@ zond run tests/ --env staging
   - **Window-aware spacing (TASK-88):** when the response carries `RateLimit-Policy: N;w=W` (e.g. Resend's `5;w=1`), the limiter learns a per-request interval of `(W/N) * 1000 + 50ms` safety. Subsequent acquires — even from suites running in parallel — are paced one-by-one at that interval, so a burst of 10 simultaneous requests fans out to ten ~200ms steps instead of overshooting in the first 50ms. The strictest policy wins when several are advertised. `IntervalRateLimiter` (static `--rate-limit N`) tightens too if the server's policy is more restrictive than the user-supplied cap; it never loosens below the cap.
   - **Reset-window pause:** when `remaining` drops to ≤2, subsequent requests are pinned to wait until the API's `reset` window expires.
   
-  `--rate-limit auto` starts with no static cap and lets the API's headers do the throttling — useful for `zond probe-validation` and `zond probe-mass-assignment` runs against production APIs where the right cap isn't known up front.
+  `--rate-limit auto` starts with no static cap and lets the API's headers do the throttling — useful for `zond probe static` and `zond probe mass-assignment` runs against production APIs where the right cap isn't known up front.
 
 > **Tip:** prefer `--rate-limit auto` whenever the API exposes `RateLimit-Policy` — the limiter learns the right spacing on the first response. For APIs that omit the policy header, set `--rate-limit` **1 below** the documented cap (e.g. use `4` for an API that allows 5 req/s) — at exactly N, sliding-window APIs may still return 429 on boundary milliseconds.
 
@@ -1128,7 +1135,7 @@ Behaviour:
 
 ### Sessions — group multiple runs into one campaign
 
-A "session" stitches multiple `zond run` invocations under one `session_id` so the dashboard's `/runs` view collapses them into a single row instead of N scattered runs. Use it when running a typical sweep — `smoke + probe-methods + probe-validation + mass-assignment` — and you want them grouped as one campaign.
+A "session" stitches multiple `zond run` invocations under one `session_id` so the dashboard's `/runs` view collapses them into a single row instead of N scattered runs. Use it when running a typical sweep — `smoke + probe static + mass-assignment` — and you want them grouped as one campaign.
 
 ```bash
 zond session start --label "post-deploy sweep"   # writes UUID to .zond/current-session

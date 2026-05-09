@@ -403,8 +403,8 @@ When `recommended_action: fix_test_logic` and the body is rejected on format
 Run on a passing API to surface latent bugs.
 
 ```bash
-zond probe validation apis/<name>/spec.json --output apis/<name>/probes/validation
-zond probe methods    apis/<name>/spec.json --output apis/<name>/probes/methods
+zond probe static  apis/<name>/spec.json --output apis/<name>/probes/static
+# defaults to validation+methods; restrict via --include validation,methods
 zond probe mass-assignment apis/<name>/spec.json --env apis/<name>/.env.yaml \
   --output apis/<name>/probes/mass-assignment-digest.md \
   --emit-tests apis/<name>/probes/mass-assignment
@@ -425,7 +425,7 @@ and overlays the real value onto the baseline body. Eliminates most
 "unresolved body FKs: …" — the auto-discover couldn't reach the owner
 (nested list, scope-locked, etc.); add the value to `.env.yaml` manually.
 
-**Nested paths need real parent fixtures.** `probe-validation` substitutes
+**Nested paths need real parent fixtures.** `probe static` (validation class) substitutes
 non-attacked path params from `.env.yaml` at run time (`{{organization_id_or_slug}}`),
 so for any `repos/{repo_id}/commits`-style endpoint you need a real parent
 slug in env or every probe will 404 on the parent before reaching the leaf
@@ -686,7 +686,7 @@ What happened / Why it matters; missing fields become `<TODO: ...>` placeholders
 ## One-shot full audit (TASK-262)
 
 `zond audit --api <name>` запускает весь pipeline одной командой:
-prepare-fixtures → generate → probe validation/methods → session-wrapped run на
+prepare-fixtures → generate → probe static (validation+methods) → session-wrapped run на
 tests + probes → coverage → `audit-report.html`. Каждая stage печатает
 `==> Stage N/M: <name>`; failure любой stage не останавливает остальные —
 финальный exit 1 если хотя бы одна упала.
