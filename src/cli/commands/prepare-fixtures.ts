@@ -24,6 +24,8 @@ import { findCollectionByNameOrId } from "../../db/queries.ts";
 import { printError } from "../output.ts";
 import { discoverCommand } from "./discover.ts";
 import { bootstrapCommand } from "./bootstrap.ts";
+import { loadEnvMeta } from "../../core/parser/variables.ts";
+import { resolveTimeoutMs } from "../../core/workspace/config.ts";
 
 export function registerPrepareFixtures(program: Command): void {
   program
@@ -43,7 +45,7 @@ export function registerPrepareFixtures(program: Command): void {
     .option("--force", "Re-discover/re-seed even if a fixture is already filled (cascade only)")
     .option("--verify", "GET each fixture's read-by-id endpoint and classify live/stale/unknown (single-pass only). Combine with --apply (or use --refresh) to drop stale fixtures and re-resolve them. (TASK-281)")
     .option("--refresh", "Shortcut for --verify --apply (single-pass only). (TASK-281)")
-    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
+    .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--max-passes <n>", "Cap on cascade passes (default 8; cascade only)", parsePositiveInt("--max-passes"))
     .action(async (opts, cmd: Command) => {
       const cascade = opts.cascade === true || opts.seed === true;
@@ -76,6 +78,12 @@ export function registerPrepareFixtures(program: Command): void {
         }
       }
 
+      let envTimeout: number | undefined;
+      try {
+        envTimeout = (await loadEnvMeta(undefined, apiDir)).timeoutMs;
+      } catch { /* meta is best-effort */ }
+      const timeoutMs = resolveTimeoutMs(opts.timeout, envTimeout);
+
       if (cascade) {
         process.exitCode = await bootstrapCommand({
           specPath: resolved.spec,
@@ -84,7 +92,7 @@ export function registerPrepareFixtures(program: Command): void {
           apply: opts.apply === true,
           seed: opts.seed === true,
           force: opts.force === true,
-          timeoutMs: opts.timeout,
+          timeoutMs,
           maxPasses: opts.maxPasses,
           json: globalJson(cmd),
         });
@@ -97,7 +105,7 @@ export function registerPrepareFixtures(program: Command): void {
         envPath: opts.env,
         apply: opts.apply === true || refresh,
         verify,
-        timeoutMs: opts.timeout,
+        timeoutMs,
         json: globalJson(cmd),
       });
     });

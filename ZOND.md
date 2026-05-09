@@ -813,7 +813,8 @@ zond run tests/ --env staging
 `zond run` throttles outgoing requests when a limit is configured and automatically retries on `429 Too Many Requests`.
 
 - **CLI:** `--rate-limit <N>` caps the run at N requests per second across all suites.
-- **`.env.yaml`:** add a top-level `rateLimit: <N>` field — picked up automatically when no CLI flag is given. CLI takes precedence.
+- **`.env.yaml`:** add a top-level `rateLimit: <N>` field (per-API). Picked up when no CLI flag is given.
+- **`zond.config.yml` (TASK-301):** `defaults.rate_limit` sets a workspace-wide default. Resolution chain: CLI > `.env.yaml` > workspace defaults > undefined.
 - **Auto retry on 429:** the runner respects the `Retry-After` header (seconds or HTTP-date). If the header is missing, it falls back to capped exponential backoff (base = `retry_delay`, cap = 30s). Up to 5 attempts per request, then the 429 is reported as the final response.
 - **Adaptive throttling from response headers (`--rate-limit auto`):** zond reads the standard `RateLimit-Remaining` / `RateLimit-Reset` headers (RFC 9568, formerly `draft-ietf-httpapi-ratelimit-headers`) plus the GitHub/Stripe-style `X-RateLimit-*` aliases on every response. Two complementary mechanisms keep parallel suites from blowing through small windows:
   - **Window-aware spacing (TASK-88):** when the response carries `RateLimit-Policy: N;w=W` (e.g. Resend's `5;w=1`), the limiter learns a per-request interval of `(W/N) * 1000 + 50ms` safety. Subsequent acquires — even from suites running in parallel — are paced one-by-one at that interval, so a burst of 10 simultaneous requests fans out to ten ~200ms steps instead of overshooting in the first 50ms. The strictest policy wins when several are advertised. `IntervalRateLimiter` (static `--rate-limit N`) tightens too if the server's policy is more restrictive than the user-supplied cap; it never loosens below the cap.
@@ -939,6 +940,20 @@ zond resolves the workspace root via walk-up from the current directory. The fir
 The walk stops at `$HOME` to avoid accidentally adopting `~/apis` or `~/zond.db` when zond is invoked from an unrelated directory. If no marker is found, zond falls back to the current directory and prints a one-time warning to stderr — run `zond init` (or create `zond.config.yml`) to anchor the workspace explicitly.
 
 The workspace root is used as the default location for `zond.db`, the `apis/<name>/` directory created by `zond add api`, and the `.zond/current-api` file written by `zond use` (TASK-290; was `.zond-current`). Explicit `--db` and `--dir` flags always win over walk-up.
+
+### Workspace defaults (TASK-301)
+
+`zond.config.yml` carries optional defaults that apply to every command in
+the workspace. Per-command flags always win; per-API overrides live in
+`apis/<name>/.env.yaml` as `rateLimit:` / `timeoutMs:`.
+
+```yaml
+defaults:
+  timeout_ms: 30000   # cleanup / prepare-fixtures / probe / request
+  rate_limit: 5       # `zond run` (number rps, or "auto" for adaptive)
+```
+
+Resolution (highest wins): **CLI flag → `.env.yaml` meta → `defaults.*` → built-in fallback** (30000 ms / no rate limit).
 
 ### Per-API artifacts (`apis/<name>/`)
 

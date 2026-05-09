@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **TASK-301: workspace defaults for `--timeout` and `--rate-limit` in `zond.config.yml`.**
+  New `defaults.timeout_ms` and `defaults.rate_limit` (alias `timeoutMs`,
+  `rateLimit`, `rate_limit: auto`) feed `cleanup`, `prepare-fixtures`,
+  `probe mass-assignment`, `probe security`, `request`, and `run`.
+  Resolution chain: **CLI flag → `apis/<name>/.env.yaml` meta → workspace
+  defaults → built-in fallback** (30000 ms / undefined rate limit).
+  `.env.yaml` already supported `rateLimit:`; now also supports
+  `timeoutMs:`. The init template's `zond-config.yml` documents the
+  `defaults` block. New helpers: `loadWorkspaceDefaults`,
+  `resolveTimeoutMs`, `resolveRateLimit` in `core/workspace/config.ts`.
+
 ### Changed (breaking)
 
 - **TASK-300: `zond probe validation` and `zond probe methods` are merged into `zond probe static`.**
