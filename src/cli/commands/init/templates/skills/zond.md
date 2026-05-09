@@ -460,7 +460,7 @@ tests:
 ```
 
 If `is_admin: true` survives the round-trip GET → **HIGH**. File via
-`zond report case-study` (Phase 7).
+`zond report bundle --include case-study` (Phase 7).
 
 ### Phase 5.2 — Security probes (SSRF, CRLF, open-redirect)
 
@@ -620,10 +620,8 @@ After a run is in `zond.db`, materialise it as a shareable file:
 ```bash
 zond report export <run-id>                                  # default: triage/<api>/run-<id>/html-<ts>.html
 zond report export <run-id> -o triage/run-<id>.html          # explicit path
-zond report case-study <failure-id>                          # default: triage/<api>/run-<id>/case-study-<ts>.md
-zond report case-study <failure-id> --stdout                 # also pipe to gh issue create --body-file -
-zond report case-study <failure-id> --json                   # envelope with `markdown`
 zond report bundle 135..142 -o triage/sweep/                 # batch: case-study + html + diagnose for each run + index.md
+zond report bundle <run-id> --include case-study             # only case-study markdown(s) for the run
 zond report bundle 135,137,141 --include diagnose            # filter artefacts (case-study | export | diagnose)
 zond report bundle --session <id> -o triage/session/         # group by session_id (TASK-143)
 ```

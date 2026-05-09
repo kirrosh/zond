@@ -213,4 +213,4 @@ Step out of `scenarios` and load the `zond` skill when:
   `zond add api` / `zond refresh-api` directly — these are not
   scenario-skill jobs but they are dashed off in seconds).
 - The current scenario surfaced a contract bug worth a structured report
-  (`zond report case-study <failure-id>` produces a markdown draft).
+  (`zond report bundle --include case-study <run-id>` produces markdown drafts).

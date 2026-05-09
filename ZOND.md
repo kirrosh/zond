@@ -120,7 +120,6 @@ selected via `zond use`.
 | `describe [spec]` | Describe endpoints from OpenAPI spec | `--api <name>`, `--compact`, `--list-params`, `--method`, `--path` |
 | `generate [spec]` | Autogenerate test suites; combine with `--uncovered-only` to top up after `zond refresh-api`. Use `--explain` (no `--output`) to print the CRUD detection table without writing files. | `--api <name>`, `--output`, `--tag`, `--uncovered-only`, `--explain` |
 | `report export <run-id>` | Export a stored run as a single-file shareable HTML report | `-o, --output <file>`, `--db <path>` |
-| `report case-study <failure-id>` | Generate a markdown case-study draft for a single failure | `-o, --output <file>`, `--db <path>` |
 
 > **Deprecated**: `zond init --spec <path> --name <api>` (and `--with-spec`) still
 > work but print a stderr warning. Prefer `zond init` followed by
@@ -527,44 +526,23 @@ input.
 
 ---
 
-### `report case-study` — markdown draft for one failure
+### `report bundle` — case-study markdown drafts for all failures
 
-`zond report export` gives you the full HTML run; `zond report case-study
-<failure-id>` zooms in on **one** failure and produces a markdown draft
-ready to drop into a tracker, blog post, or Slack write-up. Every session
-should leave behind one such artefact — this command removes the friction
-of starting from a blank page.
+The standalone `report case-study <failure-id>` was removed (TASK-287)
+in favour of `zond report bundle`, which renders the same per-failure
+markdown drafts (one per failure) plus the HTML report and `db diagnose`
+JSON for any range of runs:
 
 ```bash
-zond report case-study 2                 # print to stdout
-zond report case-study 2 -o draft.md     # write to file
-zond report case-study 2 | gh issue create --title "POST /pets 5xx" --body-file -
+zond report bundle <run-id> --include case-study           # only the markdown drafts
+zond report bundle 135..142 -o triage/sweep/               # full sweep, all artefacts
+zond report bundle --session <id> -o triage/session/       # by session_id
 ```
 
-`<failure-id>` is the `results.id` (one row per step, not the run-id).
-Find one via `zond db run <run-id>` — failed/errored rows are the obvious
-candidates.
-
-The template fills itself from existing run data:
-
-- **TL;DR** — chosen by `failure_class` (`definitely_bug` /
-  `likely_bug` / `quirk` / `env_issue`), each gets a different one-liner.
-- **Context** — API title + version pulled from the registered
-  collection's OpenAPI `info` (best-effort: if the spec is unreachable
-  at export time the field becomes `<TODO: ...>` instead of failing).
-- **What the spec says** — JSON pointer + frozen excerpt captured at
-  run time (so later spec edits don't rewrite history).
-- **Repro** — the same `curl` block as the HTML report.
-- **What happened** — status + duration + pretty-printed response body.
-- **Why it matters** — `failure_class_reason` + every failed assertion
-  expanded as `expected vs actual`.
-- **How zond found it** — provenance (which generator, which response
-  branch, which suite).
-
-Anything zond couldn't determine becomes an explicit `<TODO: ...>`
-placeholder so you immediately see the gaps to fill in by hand. Exit
-codes match the rest of the family: `0` ok, `1` failure-id not found,
-`2` invalid input.
+The case-study renderer (`renderCaseStudy`) still fills in the same
+template from run/results/spec data: TL;DR by `failure_class`, frozen
+spec excerpt, repro `curl`, response body, expanded assertion diffs,
+and `<TODO: ...>` placeholders for anything zond couldn't determine.
 
 ---
 
@@ -1071,7 +1049,7 @@ Redaction points:
 | JSON reporter (`--report json`)       | live runner         | reporter wrap     |
 | JUnit reporter (`--report junit`)     | live runner         | reporter wrap     |
 | `report export` (HTML)                | export from DB      | defensive wrap    |
-| `report case-study` (Markdown)        | export from DB      | defensive wrap    |
+| `report bundle` (case-study Markdown) | export from DB      | defensive wrap    |
 | `probe-mass-assignment` digest        | live probe run      | digest wrap       |
 | `probe-security` digest               | live probe run      | digest wrap       |
 

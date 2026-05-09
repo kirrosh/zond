@@ -16,6 +16,10 @@ All notable changes to this project will be documented in this file.
   parallel YAML→Postman exporter (`src/cli/commands/export.ts` +
   `src/core/exporter/postman.ts`, ~963 LOC) had no measured demand;
   OpenAPI-driven tooling already covers the round-trip use case.
+- **TASK-287: `zond report case-study` standalone subcommand is removed.**
+  The case-study markdown drafts are still produced by `zond report bundle`
+  (default `--include case-study`); the per-failure CLI surface and its flags
+  collapse into the bundle path. `renderCaseStudy` core renderer is unchanged.
 
 ### Deprecated
 
