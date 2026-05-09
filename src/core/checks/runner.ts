@@ -29,6 +29,7 @@ import {
 import "./checks/index.ts"; // side-effect: register builtins
 import { selectChecks, type SelectionResult } from "./registry.ts";
 import { listStatefulChecks, makeHarness } from "./stateful.ts";
+import { buildNegativeBody } from "./checks/_negative_mutator.ts";
 import {
   emptySummary,
   type CaseKind,
@@ -147,6 +148,26 @@ function buildMissingHeader(op: EndpointInfo, baseUrl: string): BuiltCase | null
   return { req, case: c };
 }
 
+function buildNegativeData(op: EndpointInfo, baseUrl: string): BuiltCase | null {
+  if (!op.requestBodySchema) return null;
+  const m = op.method.toUpperCase();
+  if (m === "GET" || m === "DELETE") return null;
+  const mutated = buildNegativeBody(op.requestBodySchema);
+  if (!mutated) return null;
+  const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op)}`;
+  const headers = buildBaseHeaders(op, { withRequired: true });
+  const body = JSON.stringify(mutated.body);
+  const req: HttpRequest = { method: m, url, headers, body };
+  const c: CheckCase = {
+    operation: op,
+    request: { method: req.method, url: req.url, headers: req.headers, body: req.body },
+    mode: "negative",
+    kind: "negative_data",
+    meta: { ...mutated.meta },
+  };
+  return { req, case: c };
+}
+
 /** For `unsupported_method` we send a method that isn't declared on
  *  the *path bucket*. The check operates on the whole path, so we ask
  *  the runner to emit at most one probe per path (using one of the
@@ -236,6 +257,10 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     if (neededKinds.has("positive")) cases.push(buildPositive(op, opts.baseUrl));
     if (neededKinds.has("missing_required_header")) {
       const c = buildMissingHeader(op, opts.baseUrl);
+      if (c) cases.push(c);
+    }
+    if (neededKinds.has("negative_data")) {
+      const c = buildNegativeData(op, opts.baseUrl);
       if (c) cases.push(c);
     }
     if (neededKinds.has("unsupported_method") && !probedUnsupportedPaths.has(op.path)) {
