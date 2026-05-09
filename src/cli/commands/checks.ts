@@ -71,6 +71,8 @@ interface ChecksRunOptions {
   bootstrapCleanupFailed?: boolean;
   report?: string;
   output?: string;
+  phase?: string;
+  allowX00?: boolean;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -158,6 +160,14 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   const fromFlags = parseAuthHeaders(opts.authHeader);
   const authHeaders = { ...fromEnv, ...fromFlags };
 
+  const phaseRaw = typeof opts.phase === "string" ? opts.phase : "examples";
+  if (phaseRaw !== "examples" && phaseRaw !== "coverage" && phaseRaw !== "all") {
+    const msg = `Unknown --phase: "${phaseRaw}". Available: examples, coverage, all`;
+    if (json) printJson(jsonError("checks run", [msg]));
+    else printError(msg);
+    process.exit(2);
+  }
+
   try {
     const result = await runChecks({
       specPath: specRes.spec,
@@ -167,6 +177,8 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       timeoutMs: typeof opts.timeout === "number" ? opts.timeout : undefined,
       authHeaders: Object.keys(authHeaders).length > 0 ? authHeaders : undefined,
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed === true,
+      phase: phaseRaw as "examples" | "coverage" | "all",
+      allowX00: opts.allowX00 === true,
     });
     const warnings: string[] = [];
     for (const id of result.selection.unknown) {
@@ -254,6 +266,15 @@ function defineRun(parent: Command): void {
     .option(
       "--output <path>",
       "ARV-5: write the --report file here. Defaults to zond-checks.sarif when --report sarif is set.",
+    )
+    .option(
+      "--phase <phase>",
+      "ARV-6: which case-generation phase to run. examples (default — one positive + single-site negative mutation), coverage (deterministic boundary-value enumeration), all (both).",
+      "examples",
+    )
+    .option(
+      "--allow-x00",
+      "ARV-6: include the NUL byte (\\x00) in string boundaries during coverage phase. Off by default — some HTTP/JSON stacks panic on it.",
     )
     .action(checksRunAction);
 }
