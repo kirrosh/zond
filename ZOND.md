@@ -289,6 +289,9 @@ zond checks run --api myapi --phase coverage --allow-x00      # ARV-6: determini
 zond checks run --api myapi --mode positive                   # ARV-7: contract verification only
 zond checks run --api myapi --mode negative                   # ARV-7: malicious-input probes only
 zond checks run --api myapi --report sarif --output zond.sarif # ARV-5: GitHub Code Scanning
+zond checks run --api myapi --workers auto                    # ARV-8: pool over operations (min(cpus, 8))
+zond checks run --api myapi --workers 8 --rate-limit 50       # ARV-8: 8 workers, global 50 RPS budget
+zond checks run --api myapi --ndjson | jq -c '.'              # ARV-10: stream events (one JSON per line)
 zond checks list                                              # show the registered catalog
 ```
 
@@ -304,6 +307,25 @@ Flag cheat-sheet:
 | `--include <spec…>` / `--exclude <spec…>` | Unified operation filter (ARV-9). `<spec>` is `<selector>:<value>` — selectors `path:<regex>`, `method:<csv>`, `tag:<csv>`, `operation-id:<regex>`. Repeat the flag for OR semantics within a kind; combine includes + excludes for intersection. Same grammar in `zond generate`. |
 | `--auth-header 'Name: value'` | Real-auth headers fed into stateful security checks. Auto-derived from `apis/<name>/.env.yaml` (`auth_token`, `api_key`) when `--api` is set. |
 | `--bootstrap-cleanup-failed` | Skip stateful security checks with a warning when bootstrap-cleanup couldn't be confirmed (avoids FP on stale data). |
+| `--workers <n\|auto>` | ARV-8: bounded async-pool concurrency at the *operation* level (cases inside one op stay sequential — CRUD chains rely on it). `auto` = `min(cpus, 8)`; numeric is clamped to `[1, 64]`. Default `1` = pre-ARV-8 sequential behaviour. |
+| `--rate-limit <rps\|auto>` | ARV-8: global RPS budget across the worker pool. `auto` = adaptive limiter that paces from `RateLimit-*` response headers (RFC 9568). Combine with `--workers` so N workers never exceed `<rps>`. |
+| `--ndjson` | ARV-10: stream events as NDJSON on stdout (one JSON object per line — types `check_start`, `check_result`, `finding`, `summary`). Schema published at `docs/json-schema/ndjson-events.schema.json`. Mutually exclusive with `--json` and `--report`. Stderr carries the human-readable summary line; stdout stays a clean stream for `\| jq` / ajv. |
+
+Each finding carries an ARV-11 closed-enum `recommended_action` so an
+agent can route on it without parsing free-form messages:
+
+| `recommended_action` | Emitted by | What to do |
+|---|---|---|
+| `report_backend_bug` | `not_a_server_error`, `unsupported_method`, `positive_data_acceptance`, `use_after_free`, `ensure_resource_availability` | File a backend ticket — server returned 5xx, accepted bogus auth, or leaked deleted data. |
+| `fix_spec` | `status_code_conformance`, `content_type_conformance`, `response_headers_conformance`, `response_schema_conformance` | Server's behaviour is reasonable; spec doesn't predict it. Update OpenAPI + `zond refresh-api`. |
+| `tighten_validation` | `negative_data_rejection` | Server accepted invalid body — backend should reject earlier (400/422). |
+| `add_required_header` | `missing_required_header` | Spec marks header `required: true`; server didn't enforce. Either enforce or relax spec. |
+| `fix_auth_config` | `ignored_auth`, `network_error` (401/403) | Auth-related failure — verify `.env.yaml` (`auth_token`/`api_key`); never log values. |
+| `fix_network_config` | `network_error` (other) | Transport-level error (timeout/DNS/refused). Verify `base_url`. |
+| `wontfix_known_limitation` | (manual override) | Known accepted gap — don't retry, don't file a bug. |
+
+Same enum is reused by `db diagnose` (TASK-294); the closed list lives
+in `docs/json-schema/recommendedAction.schema.json`.
 
 Exit code: `0` when no HIGH/CRITICAL findings, `1` otherwise. LOW/MEDIUM
 findings are reported but don't gate CI by default — post-process the

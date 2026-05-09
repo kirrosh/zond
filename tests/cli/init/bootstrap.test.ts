@@ -35,6 +35,7 @@ describe("bootstrapWorkspace", () => {
     const r = bootstrapWorkspace({ cwd, home, writeAgents: false });
     expect(r.skills.map((s) => s.name).sort()).toEqual([
       "zond",
+      "zond-checks",
       "zond-scenarios",
     ]);
     expect(r.skills.every((s) => s.action === "created")).toBe(true);
