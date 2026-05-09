@@ -279,6 +279,36 @@ describe("formatSecurityDigest", () => {
     expect(md).toContain("# zond probe-security digest");
     expect(md).toContain("HIGH");
     expect(md).toContain("POST /webhooks");
+    // TASK-154 §N: finding line carries the actual payload that triggered it.
+    expect(md).toContain("[`http://127.0.0.1`]");
+  });
+
+  // TASK-154 §N: long payloads are truncated to keep the digest readable.
+  it("truncates payloads longer than 60 chars in finding lines", () => {
+    const longPayload = "file:///etc/passwd?" + "a".repeat(80);
+    const md = formatSecurityDigest(
+      {
+        classes: ["ssrf"],
+        totalEndpoints: 1,
+        specProbed: 1,
+        verdicts: [{
+          method: "POST",
+          path: "/x",
+          severity: "high",
+          summary: "x",
+          detectedFields: [{ field: "u", class: "ssrf" }],
+          findings: [{
+            field: "u", class: "ssrf", payload: longPayload,
+            status: 500, echoed: false, severity: "high", reason: "5xx",
+          }],
+        }],
+        warnings: [],
+      },
+      "spec.json",
+    );
+    // Truncated form ends with the ellipsis char.
+    expect(md).toMatch(/\[`[^`]{1,60}…?`\]/);
+    expect(md).not.toContain(longPayload);
   });
 });
 

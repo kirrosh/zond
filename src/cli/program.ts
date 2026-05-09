@@ -157,7 +157,11 @@ export function buildProgram(): Command {
     // on their children and `cmd.opts()` on the leaf would not see --json.
     const hasAction = (cmd as unknown as { _actionHandler?: unknown })._actionHandler != null;
     if (hasAction && !skipJson.has(path)) {
-      cmd.option("--json", "Output in JSON envelope format");
+      cmd.option(
+        "--json",
+        "Emit a `{ok, command, data, warnings, errors}` envelope on stdout. " +
+        "Distinct from `zond run --report json` (which is a per-test test-run report).",
+      );
     }
     for (const sub of cmd.commands) attachJson(sub, path);
   };

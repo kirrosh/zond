@@ -1,12 +1,13 @@
 ---
 id: TASK-134
 title: унифицировать флаг --json между run и request (+ docs)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-05 10:04'
+updated_date: '2026-05-09 09:52'
 labels: []
-dependencies: []
 milestone: m-14
+dependencies: []
 priority: low
 ---
 

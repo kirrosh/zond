@@ -236,6 +236,11 @@ export async function probeSecurityCommand(
       console.log(formatSummaryLine(counts, SEC_SUMMARY));
       if (emittedSuites.length > 0) {
         printSuccess(`Emitted ${emittedSuites.length} regression suite(s) in ${options.emitTests}`);
+        // TASK-154 §M: print one ready-to-paste command that re-runs the
+        // emitted suites against the same API. Keeps the CI handoff short
+        // (issue body / runbook entry: copy this line, not three).
+        const envFlag = options.apiName ? ` --env apis/${options.apiName}/.env.yaml` : "";
+        console.log(`Run regression suite on CI: zond run ${options.emitTests}${envFlag}`);
       } else if (options.emitTests && !options.dryRun) {
         console.log(`No 2xx findings to emit. Directory ${options.emitTests} not created.`);
       }

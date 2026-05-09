@@ -99,6 +99,20 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
 
     if (options.json) {
       printJson(jsonOk("request", validation ? { ...result, schema_validation: validation } : result));
+    } else if (options.jsonPath) {
+      // TASK-133: pipe-friendly mode — print only the extracted value.
+      // Scalars (string/number/bool) emit verbatim with no JSON quoting so
+      // shells can use the output directly (e.g. `id=$(zond request … --json-path data.id)`).
+      // null/undefined → empty line. Objects/arrays → compact JSON.
+      const v = result.body;
+      if (v === null || v === undefined) {
+        console.log("");
+      } else if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+        console.log(String(v));
+      } else {
+        console.log(JSON.stringify(v));
+      }
+      if (validation) printSchemaValidation(validation);
     } else {
       console.log(JSON.stringify(result, null, 2));
       if (validation) printSchemaValidation(validation);
@@ -292,7 +306,14 @@ export function registerRequest(program: Command): void {
     .option("--timeout <ms>", "Request timeout (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--env <name>", "Environment for variable interpolation")
     .option("--api <name>", "Collection name; auto-loads env + Authorization from apis/<name>/.secrets.yaml")
-    .option("--json-path <path>", "Extract value from response (dot notation)")
+    .option(
+      "--json-path <path>",
+      "Extract one field from the response body (dot notation, e.g. 'data.id', " +
+      "'items[0].name'). Without --json, prints the value verbatim — scalars without " +
+      "quotes for shell use (`id=$(zond request --json-path data.id ...)`), " +
+      "objects/arrays as compact JSON. With --json, embeds the extracted value as " +
+      "the envelope's `body` field.",
+    )
     .option("--db <path>", "Path to SQLite database file")
     .option("--validate-schema", "TASK-142: validate the response body against the OpenAPI response schema (requires --api). Endpoint is auto-resolved from the request method + URL.path; templated paths like /users/{id} are matched via regex. Falls back gracefully if no endpoint matches — pass --validate-against to override.")
     .option("--validate-against <method:path>", "TASK-142: explicit endpoint override for --validate-schema, e.g. \"GET:/users/{id}\". Use the spec template form (with \"{...}\" placeholders).")
