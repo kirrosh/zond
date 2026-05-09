@@ -1,28 +1,29 @@
 ---
 id: ARV-1
 title: 'checks: каркас команды zond checks + реестр + JSON envelope'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 15:45'
+updated_date: '2026-05-09 16:04'
 labels:
   - checks
   - m-15
   - depth
   - foundation
-dependencies: []
 milestone: m-15
+dependencies: []
 priority: high
 ---
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Команда zond checks list --json возвращает массив всех зарегистрированных checks с id/severity/default_expected/references
-- [ ] #2 Команда zond checks run --check NAME запускает только указанный check, --exclude-check скипает
-- [ ] #3 JSON envelope соответствует схеме docs/json-schema/checks-run.schema.json
-- [ ] #4 Unit-тест tests/core/checks/registry.test.ts: регистрация/селектор/exclude
-- [ ] #5 Integration-тест tests/cli/checks/pipeline.test.ts: mock OpenAPI с 3 ops + nock-сервер → checks вызываются на правильных ops
-- [ ] #6 Snapshot-тест JSON-shape стабилен
-- [ ] #7 exit-code 0 при отсутствии HIGH findings, 1 при наличии
+- [x] #1 Команда zond checks list --json возвращает массив всех зарегистрированных checks с id/severity/default_expected/references
+- [x] #2 Команда zond checks run --check NAME запускает только указанный check, --exclude-check скипает
+- [x] #3 JSON envelope соответствует схеме docs/json-schema/checks-run.schema.json
+- [x] #4 Unit-тест tests/core/checks/registry.test.ts: регистрация/селектор/exclude
+- [x] #5 Integration-тест tests/cli/checks/pipeline.test.ts: mock OpenAPI с 3 ops + nock-сервер → checks вызываются на правильных ops
+- [x] #6 Snapshot-тест JSON-shape стабилен
+- [x] #7 exit-code 0 при отсутствии HIGH findings, 1 при наличии
 <!-- AC:END -->
 
 ## Implementation Plan

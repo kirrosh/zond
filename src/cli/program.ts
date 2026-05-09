@@ -2,6 +2,7 @@ import { Command } from "commander";
 
 import { registerRun } from "./commands/run.ts";
 import { registerCheck } from "./commands/check.ts";
+import { registerChecks } from "./commands/checks.ts";
 import { registerCoverage } from "./commands/coverage.ts";
 import { registerCi } from "./commands/ci-init.ts";
 import { registerClean } from "./commands/clean.ts";
@@ -70,6 +71,7 @@ export function buildProgram(): Command {
   registerRun(program);
 
   registerCheck(program);
+  registerChecks(program);
 
   registerCi(program);
 
@@ -128,6 +130,7 @@ export function buildProgram(): Command {
     "db":       "Analyze:",
     "audit":    "Analyze:",
     "check":    "Analyze:",
+    "checks":   "Analyze:",
     "describe": "Analyze:",
     // report: outbound artefacts (HTML, bundles, catalog)
     "report":  "Report:",
