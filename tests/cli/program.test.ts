@@ -278,6 +278,54 @@ describe("TASK-293: --json envelope coverage", () => {
   });
 });
 
+describe("TASK-297: rich --help with related-skill footer", () => {
+  // commander's addHelpText("after", ...) is rendered via Help.formatHelp,
+  // so we capture the output from .outputHelp() (a write-to-stream call)
+  // instead of helpInformation() (which returns the synchronous help text
+  // before the after-hook is appended in some commander versions).
+  // commander only fires the after-help text through outputHelp(), not
+  // helpInformation() — capture stdout to read the full rendered help.
+  function capture(cmd: import("commander").Command): string {
+    let out = "";
+    const orig = process.stdout.write;
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      out += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      cmd.outputHelp();
+    } finally {
+      process.stdout.write = orig;
+    }
+    return out;
+  }
+
+  test("`zond <leaf> --help` ends with a 'Related skill: …' footer", () => {
+    const program = buildProgram();
+    const sample = ["doctor", "lint-spec", "discover", "validate"];
+    for (const name of sample) {
+      const cmd = program.commands.find((c) => c.name() === name);
+      expect(cmd).toBeDefined();
+      expect(capture(cmd!)).toMatch(/Related skill: skills\//);
+    }
+  });
+
+  test("probe leaves point at skills/scenarios.md", () => {
+    const program = buildProgram();
+    const probe = program.commands.find((c) => c.name() === "probe")!;
+    const security = probe.commands.find((c) => c.name() === "security")!;
+    expect(capture(security)).toContain("Related skill: skills/scenarios.md");
+    const ma = probe.commands.find((c) => c.name() === "mass-assignment")!;
+    expect(capture(ma)).toContain("Related skill: skills/scenarios.md");
+  });
+
+  test("default leaf falls back to skills/zond.md", () => {
+    const program = buildProgram();
+    const valid = program.commands.find((c) => c.name() === "validate")!;
+    expect(capture(valid)).toContain("Related skill: skills/zond.md");
+  });
+});
+
 describe("buildProgram — unknown command", () => {
   test("foobar surfaces commander.unknownCommand", async () => {
     const result = await tryParse(["foobar"]);
