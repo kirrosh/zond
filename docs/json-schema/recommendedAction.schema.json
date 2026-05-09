@@ -8,6 +8,9 @@
     "fix_network_config",
     "fix_env",
     "fix_spec",
-    "fix_fixture"
+    "fix_fixture",
+    "tighten_validation",
+    "add_required_header",
+    "wontfix_known_limitation"
   ]
 }

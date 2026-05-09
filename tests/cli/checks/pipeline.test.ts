@@ -119,6 +119,21 @@ describe("zond checks pipeline (ARV-1)", () => {
     expect(parsed.success).toBe(true);
   });
 
+  test("ARV-11 AC #2 — recommended_action is populated on every finding", async () => {
+    const result = await runChecks({ specPath, baseUrl });
+    expect(result.data.findings.length).toBeGreaterThan(0);
+    for (const f of result.data.findings) {
+      expect(f.recommended_action).toBeDefined();
+      // Must be a value the published enum knows about — guards against
+      // a string slipping past the type when someone edits in raw text.
+      expect([
+        "report_backend_bug", "fix_auth_config", "fix_test_logic",
+        "fix_network_config", "fix_env", "fix_spec", "fix_fixture",
+        "tighten_validation", "add_required_header", "wontfix_known_limitation",
+      ]).toContain(f.recommended_action);
+    }
+  });
+
   test("finding shape is stable (snapshot of envelope keys)", async () => {
     const result = await runChecks({ specPath, baseUrl, include: ["not_a_server_error"] });
     const f = result.data.findings[0]!;

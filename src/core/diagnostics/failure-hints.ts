@@ -43,11 +43,21 @@ export type RecommendedAction =
   | "fix_test_logic"
   | "fix_network_config"
   | "fix_env"
-  /** Fix the OpenAPI spec — emitted by lint-spec.Issue (TASK-294). */
+  /** Fix the OpenAPI spec — emitted by lint-spec.Issue (TASK-294) and
+   *  by `status_code_conformance` / `*_conformance` checks (ARV-11). */
   | "fix_spec"
   /** Add or correct a fixture in .env.yaml — emitted by discover for
    *  miss-* states (TASK-294). */
-  | "fix_fixture";
+  | "fix_fixture"
+  /** ARV-11 — server accepted an invalid request body. Backend should
+   *  reject earlier; the test isn't wrong. */
+  | "tighten_validation"
+  /** ARV-11 — server didn't enforce a header marked `required: true`
+   *  in the spec. Either enforce it, or drop `required` in the spec. */
+  | "add_required_header"
+  /** ARV-11 — known limitation that the team has accepted. Agents
+   *  should not retry, file a bug, or include in dashboards. */
+  | "wontfix_known_limitation";
 
 export function recommendedAction(
   failureType: "api_error" | "assertion_failed" | "network_error",
