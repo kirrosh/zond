@@ -339,6 +339,29 @@ Override autodetection with `ZOND_TRIGGER=ci|manual`,
 `ZOND_COMMIT_SHA=<sha>`, `ZOND_BRANCH=<name>` — useful when the build
 shells out from a wrapper that strips the native CI vars.
 
+## --json output (TASK-293)
+
+Every `zond` subcommand supports `--json` with two documented exclusions:
+`zond run` (use `--report json` for the bulk run report) and
+`zond completions <shell>` (shell-completion script is text). The
+envelope is uniform across commands:
+
+```jsonc
+{
+  "ok": true,
+  "command": "<name>",
+  "data": { /* command-specific payload */ },
+  "warnings": [ "string" ],
+  "errors": [ { "code": "ZondErrorCode", "message": "...", "details": {} } ],
+  "exit_code": 2  // present on errors only
+}
+```
+
+Route on `errors[].code` (TASK-296), not the message — see
+`failure-hints.ts` for the closed enum. Stdout discipline: `--json` paths
+emit only the envelope on stdout; everything else (progress, hints,
+warnings) goes to stderr.
+
 ## Phase 4 — Diagnose failures
 
 ```bash

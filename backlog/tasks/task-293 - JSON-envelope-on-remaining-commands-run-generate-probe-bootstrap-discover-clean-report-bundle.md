@@ -3,9 +3,10 @@ id: TASK-293
 title: >-
   JSON envelope on remaining commands (run, generate, probe-*, bootstrap,
   discover, clean, report-bundle)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 07:00'
+updated_date: '2026-05-09 07:50'
 labels:
   - json
   - agent-first
@@ -23,7 +24,7 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Все команды (кроме интерактивных, если такие есть) поддерживают --json
+- [x] #1 Все команды (кроме интерактивных, если такие есть) поддерживают --json
 - [ ] #2 Snapshot-тесты envelope для каждой новой команды
 - [ ] #3 ZOND.md / skills/zond.md перечисляет --json как supported
 <!-- AC:END -->
