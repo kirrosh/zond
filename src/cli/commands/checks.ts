@@ -17,6 +17,7 @@ import type { Command } from "commander";
 import { listChecks, runChecks } from "../../core/checks/index.ts";
 import { listStatefulChecks } from "../../core/checks/stateful.ts";
 import { generateSarifReport } from "../../core/checks/sarif.ts";
+import { compileOperationFilter } from "../../core/utils/operation-filter.ts";
 import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
@@ -74,6 +75,8 @@ interface ChecksRunOptions {
   phase?: string;
   allowX00?: boolean;
   mode?: string;
+  include?: string[];
+  exclude?: string[];
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -177,6 +180,17 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     process.exit(2);
   }
 
+  // ARV-9: parse the unified --include/--exclude filter specs. Bad
+  // specs surface as a friendly multi-line error (not a stack trace) and
+  // exit 2 — the same code as other CLI-input failures here.
+  const compiled = compileOperationFilter({ includes: opts.include, excludes: opts.exclude });
+  if (compiled.errors.length > 0) {
+    if (json) printJson(jsonError("checks run", compiled.errors));
+    else for (const e of compiled.errors) printError(e);
+    process.exit(2);
+  }
+  const operationFilter = (opts.include?.length || opts.exclude?.length) ? compiled.filter : undefined;
+
   try {
     const result = await runChecks({
       specPath: specRes.spec,
@@ -189,6 +203,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       phase: phaseRaw as "examples" | "coverage" | "all",
       allowX00: opts.allowX00 === true,
       mode: modeRaw as "positive" | "negative" | "all",
+      operationFilter,
     });
     const warnings: string[] = [];
     for (const id of result.selection.unknown) {
@@ -290,6 +305,14 @@ function defineRun(parent: Command): void {
       "--mode <mode>",
       "ARV-7: positive (contract verification only — drops checks/cases that send malicious input), negative (only malicious-input probes), all (default — both).",
       "all",
+    )
+    .option(
+      "--include <spec...>",
+      "ARV-9: keep only operations matching <selector>:<value>. Selectors: path:<regex>, method:<csv>, tag:<csv>, operation-id:<regex>. Repeat the flag for OR semantics.",
+    )
+    .option(
+      "--exclude <spec...>",
+      "ARV-9: drop operations matching <selector>:<value>. Same grammar as --include. Excludes evaluated after includes.",
     )
     .action(checksRunAction);
 }
