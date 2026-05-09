@@ -1,7 +1,7 @@
 import { Command } from "commander";
 
 import { registerRun } from "./commands/run.ts";
-import { registerValidate } from "./commands/validate.ts";
+import { registerCheck } from "./commands/check.ts";
 import { registerCoverage } from "./commands/coverage.ts";
 import { registerCi } from "./commands/ci-init.ts";
 import { registerClean } from "./commands/clean.ts";
@@ -14,7 +14,6 @@ import { registerGenerate } from "./commands/generate.ts";
 import { registerDiscover } from "./commands/discover.ts";
 import { registerBootstrap } from "./commands/bootstrap.ts";
 import { registerProbes } from "./commands/probe.ts";
-import { registerLintSpec } from "./commands/lint-spec.ts";
 import { registerReport } from "./commands/report.ts";
 import { registerCatalog } from "./commands/catalog.ts";
 import { registerCompletions } from "./commands/completions.ts";
@@ -70,7 +69,7 @@ export function buildProgram(): Command {
 
   registerRun(program);
 
-  registerValidate(program);
+  registerCheck(program);
 
   registerCi(program);
 
@@ -98,7 +97,6 @@ export function buildProgram(): Command {
 
   registerProbes(program);
 
-  registerLintSpec(program);
   registerCatalog(program);
   registerReport(program);
 

@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- **TASK-298: `zond validate` and `zond lint-spec` are merged into `zond check`.**
+  Use `zond check tests <path>` for the YAML-test schema validator and
+  `zond check spec [spec]` for the OpenAPI static analyser. The old
+  top-level commands are removed (no deprecation alias). Flag surface is
+  unchanged. Single mental model — both surfaces are conformance checks
+  on workspace inputs, neither makes HTTP calls.
+
 ### Removed (breaking)
 
 - **TASK-284: `zond serve` and the WebUI are removed.** Agent-first / CLI-only

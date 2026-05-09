@@ -93,7 +93,7 @@ zond ci init
 ## CLI Commands
 
 All spec-consuming commands (`catalog`, `describe`, `generate`,
-`probe-*`, `lint-spec`) accept either a positional `<spec>` path/URL
+`probe-*`, `check spec`) accept either a positional `<spec>` path/URL
 **or** `--api <name>` to use the workspace-local snapshot at
 `apis/<name>/spec.json`. If neither is given, they fall back to the API
 selected via `zond use`.
@@ -107,14 +107,14 @@ selected via `zond use`.
 | `discover` | Auto-fill `.env.yaml` FK ids by hitting list-endpoints (dry-run by default) | `--api <name>` (req), `--apply`, `--verify`, `--refresh`, `--env <path>`, `--timeout <ms>` |
 | `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--session-id <id>`, `--learn`, `--learn-apply`, `--learn-target test\|drifts`, `--report json\|junit`, `--report-out <file>` |
 | `session start\|end\|status` | Group multiple `zond run` calls into one campaign in `/runs` Sessions view | `--label <text>`, `--id <uuid>` |
-| `validate <path>` | Validate YAML tests | |
+| `check tests <path>` | Schema-validate YAML tests | `--verbose` |
 | `coverage` | API test coverage. Exit 0 = full coverage (or ≥ `--fail-on-coverage`); 1 = uncovered endpoints (or below threshold); 2 = bad input/read error. Warnings (e.g. `required_params_no_examples`) never affect the exit code. | `--spec`, `--tests`, `--api`, `--fail-on-coverage <N>` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
 | `probe validation [spec]` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup`, `--use-synthetic-parents` |
 | `probe methods [spec]` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--api <name>`, `--output <dir>`, `--tag` |
 | `probe mass-assignment [spec]` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--no-discover`, `--timeout <ms>` |
 | `probe security <classes> [spec]` | Live SSRF / CRLF / open-redirect probes with baseline-OK gate; classes = comma-separated subset of `ssrf,crlf,open-redirect` | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--dry-run`, `--timeout <ms>` |
-| `lint-spec [spec]` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--api <name>`, `--strict`, `--rule <list>` (TASK-291: unified — `B1` whitelist, `!B2` disable, `B3=high` override), `--severity <list>`, `--top <N>`, `--verbose`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
+| `check spec [spec]` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--api <name>`, `--strict`, `--rule <list>` (TASK-291: unified — `B1` whitelist, `!B2` disable, `B3=high` override), `--severity <list>`, `--top <N>`, `--verbose`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
 | `catalog [spec]` | Standalone build of `.api-catalog.yaml` (registered APIs already have one in `apis/<name>/`) | `--api <name>`, `--output <dir>` |
 | `describe [spec]` | Describe endpoints from OpenAPI spec | `--api <name>`, `--compact`, `--list-params`, `--method`, `--path` |
 | `generate [spec]` | Autogenerate test suites; combine with `--uncovered-only` to top up after `zond refresh-api`. Use `--explain` (no `--output`) to print the CRUD detection table without writing files. | `--api <name>`, `--output`, `--tag`, `--uncovered-only`, `--explain` |
@@ -124,16 +124,16 @@ selected via `zond use`.
 > work but print a stderr warning. Prefer `zond init` followed by
 > `zond add api <name> --spec <path>`.
 
-### `lint-spec` — static OpenAPI analysis (pre-flight, zero HTTP)
+### `check spec` — static OpenAPI analysis (pre-flight, zero HTTP)
 
 A lot of "API bugs" are visible in the spec itself, before any test runs.
-`zond lint-spec` walks the OpenAPI document once and reports two ortho­gonal
+`zond check spec` walks the OpenAPI document once and reports two ortho­gonal
 classes of problems:
 
 - **Group A — internal consistency.** The spec contradicts itself: an
   `example` violates its own `format`, an `enum` member is duplicated, a
   `default` falls outside `minimum`/`maximum`. Schemathesis-style fuzzing
-  would eventually hit these too — `lint-spec` finds them deterministically
+  would eventually hit these too — `check spec` finds them deterministically
   in milliseconds.
 - **Group B — strictness gaps.** The schema is too loose: a path-param has
   no `format` or `pattern`; an integer query-param (`limit`, `offset`) has
@@ -142,14 +142,14 @@ classes of problems:
   silently send invalid data and the server rejects it with 422.
 
 ```bash
-zond lint-spec openapi.json                                # rule × severity rollup (TASK-279)
-zond lint-spec openapi.json --verbose                       # legacy flat one-line-per-issue list
-zond lint-spec openapi.json --severity high                 # render only HIGH issues
-zond lint-spec openapi.json --rule B1,B6 --top 10           # whitelist + top-N rules (TASK-291)
-zond lint-spec openapi.json --json | jq '.data.summary'     # structured (issues + summary)
-zond lint-spec openapi.json --rule '!B2,!B5,!B6,!B9'        # disable heuristics
-zond lint-spec openapi.json --rule 'B8=high,B9=low'         # severity overrides + implicit whitelist
-zond lint-spec openapi.json --config .zond-lint.json        # per-project rules
+zond check spec openapi.json                                # rule × severity rollup (TASK-279)
+zond check spec openapi.json --verbose                       # legacy flat one-line-per-issue list
+zond check spec openapi.json --severity high                 # render only HIGH issues
+zond check spec openapi.json --rule B1,B6 --top 10           # whitelist + top-N rules (TASK-291)
+zond check spec openapi.json --json | jq '.data.summary'     # structured (issues + summary)
+zond check spec openapi.json --rule '!B2,!B5,!B6,!B9'        # disable heuristics
+zond check spec openapi.json --rule 'B8=high,B9=low'         # severity overrides + implicit whitelist
+zond check spec openapi.json --config .zond-lint.json        # per-project rules
 ```
 
 > **TASK-291: unified `--rule`.** A single flag now handles severity overrides
@@ -1200,7 +1200,7 @@ single uniform envelope so a downstream parser only needs one shape:
 }
 ```
 
-Holds for `db collections|runs|run|diagnose|compare`, `validate`, `coverage`,
+Holds for `db collections|runs|run|diagnose|compare`, `check tests|spec`, `coverage`,
 `generate`, `probe-*`, `request`, `init`, `add api`, `refresh-api`, `doctor`,
 `describe`, `use`, `catalog`. The `data` payload shape
 varies by command (e.g. `db run`'s `data` is `{ run, results }`); the envelope
