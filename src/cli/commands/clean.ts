@@ -14,7 +14,7 @@ import {
   inspectEntries,
   loadManifest,
   removeManifestEntries,
-  selectEntries,
+  selectEntriesEx,
   type CleanItem,
   type ManifestCategory,
 } from "../../core/workspace/manifest.ts";
@@ -57,13 +57,13 @@ export async function cleanCommand(opts: CleanOptions): Promise<number> {
 
   const manifest = loadManifest(ws.root);
   const category: ManifestCategory | undefined = opts.probes ? "probes" : undefined;
-  const entries = selectEntries(manifest, {
+  const { selected: entries, probesPreserved } = selectEntriesEx(manifest, {
     api: opts.api,
     category,
     all: opts.all && !opts.api && !opts.probes,
   });
 
-  if (entries.length === 0) {
+  if (entries.length === 0 && probesPreserved.length === 0) {
     const m = "No matching auto-generated files in manifest.";
     if (opts.json) {
       printJson(jsonOk("clean", { dryRun: true, deleted: [], modified: [], missing: [], message: m }));
@@ -100,6 +100,7 @@ export async function cleanCommand(opts: CleanOptions): Promise<number> {
       deleted: toDelete.map(itemSummary),
       modified: modified.map(itemSummary),
       missing: missing.map(itemSummary),
+      probesPreserved: probesPreserved.map((e) => ({ path: e.path, api: e.api })),
     }));
     return 0;
   }
@@ -115,6 +116,16 @@ export async function cleanCommand(opts: CleanOptions): Promise<number> {
     console.log("");
     console.log("Skipped (manually edited, sha256 mismatch):");
     for (const i of modified) console.log(`  ! ${i.entry.path}`);
+  }
+  // TASK-258: probes belong to a separate pipeline. Scoping by --api alone
+  // preserves them and surfaces the regen command so users don't lose
+  // 30s+ of probe-validation/-methods work to a typo.
+  if (probesPreserved.length > 0) {
+    console.log("");
+    console.log(`Preserved ${probesPreserved.length} probe-suite file(s) under apis/${opts.api ?? "<api>"}/probes/.`);
+    console.log("Pass --probes to also remove them, or regenerate via:");
+    console.log(`  zond probe-validation --api ${opts.api} --output apis/${opts.api}/probes`);
+    console.log(`  zond probe-methods    --api ${opts.api} --output apis/${opts.api}/probes`);
   }
   if (dryRun) {
     console.log("");
@@ -173,9 +184,9 @@ export function registerClean(program: Command): void {
   program
     .command("clean")
     .description("Remove auto-generated files tracked in .zond/manifest.json (TASK-156, m-9)")
-    .option("--api <name>", "Limit to a single API (apis/<name>/)")
-    .option("--probes", "Limit to probe-suite files only")
-    .option("--all", "Remove every tracked auto-generated file in the workspace")
+    .option("--api <name>", "Limit to a single API (apis/<name>/). Preserves probes/ unless --probes is also passed (TASK-258)")
+    .option("--probes", "Include probe-suite files (apis/<api>/probes/). Required to delete probes; combine with --api to scope to one API")
+    .option("--all", "Remove every tracked auto-generated file in the workspace (includes probes/)")
     .option("--force", "Actually delete files (default is dry-run)")
     .action(async (opts, cmd: Command) => {
       process.exitCode = await cleanCommand({

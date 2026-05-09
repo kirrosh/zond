@@ -3,10 +3,10 @@ id: TASK-258
 title: >-
   clean: `--api X --force` тихо сносит apis/<name>/probes/, пользователь теряет
   суиты без warning
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 14:30'
-updated_date: '2026-05-09 09:06'
+updated_date: '2026-05-09 09:16'
 labels:
   - feedback-loop
   - api-sentry
@@ -48,3 +48,9 @@ Actual: silent removal, никакого hint.
 - [ ] #3 Verify: после `zond clean --api sentry --force` пользователь видит чёткий путь восстановления probes.
 <!-- SECTION:ACCEPTANCE:END -->
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fix: clean --api X (без --probes) теперь сохраняет apis/X/probes/ и печатает hint с командами регенерации (zond probe-validation/-methods). Сохраняется обратная совместимость: --all и --api X --probes удаляют probes как раньше. Tests: tests/core/workspace/manifest.test.ts (selectEntries + selectEntriesEx).
+<!-- SECTION:NOTES:END -->
