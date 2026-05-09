@@ -1,7 +1,7 @@
 ---
 id: TASK-284
 title: drop zond serve command (deprecate WebUI)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 06:59'
 labels:

@@ -1,7 +1,7 @@
 ---
 id: TASK-292
 title: 'skills: 5 missing iron rules in zond.md and scenarios.md'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 06:59'
 labels:

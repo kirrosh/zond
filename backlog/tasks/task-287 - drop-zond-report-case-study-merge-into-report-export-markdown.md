@@ -1,7 +1,7 @@
 ---
 id: TASK-287
 title: drop zond report case-study (merge into report export markdown)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 06:59'
 labels:

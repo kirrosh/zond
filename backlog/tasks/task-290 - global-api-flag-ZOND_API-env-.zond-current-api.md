@@ -1,7 +1,7 @@
 ---
 id: TASK-290
 title: global --api flag + ZOND_API env + .zond/current-api
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 06:59'
 labels:

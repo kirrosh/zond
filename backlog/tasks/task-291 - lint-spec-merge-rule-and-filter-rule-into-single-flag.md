@@ -1,7 +1,7 @@
 ---
 id: TASK-291
 title: 'lint-spec: merge --rule and --filter-rule into single flag'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 06:59'
 labels:
