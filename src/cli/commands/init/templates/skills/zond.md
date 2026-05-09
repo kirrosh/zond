@@ -23,7 +23,7 @@ Run `zond --version` first; if missing:
 
 - **NEVER read raw OpenAPI/swagger** with Read/cat/grep. The workspace has
   pre-built artifacts (catalog/resources/fixtures) — use those. Drop into
-  `apis/<name>/spec.json` only when probe-* needs full schemas.
+  `apis/<name>/spec.json` only when `probe <class>` needs full schemas.
 - **NEVER `curl` or `wget`** — use `zond request <method> <url>` for ad-hoc
   HTTP so it lands in the run DB and respects auth. Pass `--api <name>` to
   auto-load `Authorization` from `apis/<name>/.secrets.yaml` — never
@@ -159,7 +159,7 @@ you assume a YAML file is hand-rolled.
 | Workspace | `zond.config.yml`, `.zond/`, `apis/` | `zond init` | yes |
 | API artifacts | `apis/<name>/spec.json`, `.api-catalog.yaml`, `.api-resources.yaml`, `.api-fixtures.yaml` | `zond add api` / `zond refresh-api` | yes |
 | Generated tests | `apis/<name>/tests/*.yaml` | `zond generate` | yes |
-| Probe suites | `apis/<name>/probes/<class>/*.yaml` | `zond probe-* --emit` | yes |
+| Probe suites | `apis/<name>/probes/<class>/*.yaml` | `zond probe <class> --emit-tests` | yes |
 | User fixtures | `apis/<name>/.env.yaml`, `.secrets.yaml`, `.identity.yaml` | the user | **no** |
 | Triage artifacts | `triage/<api>/<run-id>/*` | `zond report *` (default path) | yes |
 
@@ -379,7 +379,9 @@ zond db compare <idA> <idB> --json           # regression diff
 {`fix_test_logic` (edit YAML), `report_backend_bug` (STOP, report),
 `fix_auth_config`, `fix_network_config`, `fix_env`, `fix_spec` (edit
 OpenAPI — emitted by `check spec`), `fix_fixture` (fill `.env.yaml` —
-emitted by `discover` and inconclusive mass-assignment baselines)}.
+emitted by `prepare-fixtures` miss-* and inconclusive mass-assignment
+baselines), `update_spec` (status-drift in `zond run --learn`)}. The full
+enum is canonical (TASK-294); see `skills/zond-triage.md` for routing.
 
 ### 4a. Fixing 4xx caused by stub generators
 
@@ -418,9 +420,9 @@ zond db diagnose <run-id> --json
 
 Findings to flag: 5xx on null/empty/wrong-type body (missing validation /
 unguarded coercion), 2xx on undeclared method (contract drift), `is_admin: true`
-echoed in response (HIGH from `probe-mass-assignment`).
+echoed in response (HIGH from `probe mass-assignment`).
 
-**Body-FK auto-discovery (TASK-137).** `probe-mass-assignment` resolves
+**Body-FK auto-discovery (TASK-137).** `probe mass-assignment` resolves
 required body fields named `*_id` / `*_slug` / `*_uuid` / `*_key` by
 hitting their sibling list endpoint (e.g. `audience_id` → `GET /audiences`)
 and overlays the real value onto the baseline body. Eliminates most
@@ -440,7 +442,7 @@ Filter scope on large APIs: `--tag <spec-tag> [--max-per-endpoint 20]`.
 
 **Auto-discovery of path-param fixtures.** When a probed endpoint depends on
 `{domain_id}` / `{webhook_id}` / etc. that `.env.yaml` doesn't supply,
-`probe-mass-assignment` looks for a sibling `GET /domains` (or
+`probe mass-assignment` looks for a sibling `GET /domains` (or
 `/orgs/{org_id}/projects` for nested), calls it once per run, pulls
 `data[0].id` (also tries `items[0].id` and top-level array shapes), and
 reuses that value for every endpoint sharing the same parent. Cached, so
@@ -453,7 +455,7 @@ it.
 
 ### Phase 5.1 — Manual mass-assignment catch-up
 
-`probe-mass-assignment` digest splits findings into HIGH / MED / LOW /
+`probe mass-assignment` digest splits findings into HIGH / MED / LOW /
 **INCONCLUSIVE** / **INCONCLUSIVE-5XX**. INCONCLUSIVE = the auto-prober
 couldn't build a valid body (same fixture problem as Phase 4a).
 INCONCLUSIVE-5XX = baseline POST itself crashed with ≥500 — the endpoint is
@@ -518,7 +520,7 @@ zond probe security ssrf,crlf --api <name> --env apis/<name>/.env.yaml \
   --emit-tests apis/<name>/probes/security
 ```
 
-`probe-security` autodetects vulnerable fields by name + `format` hint
+`probe security` autodetects vulnerable fields by name + `format` hint
 (SSRF: `*_url` / `webhook` / `callback` / `redirect_uri` / `format: uri`;
 CRLF: `subject` / `*_prefix` / `name` / `description` / `title`; open-redirect:
 `redirect` / `next` / `return_to`). For each detected (field × payload) it
@@ -530,7 +532,7 @@ candidate), LOW (2xx, no echo — verify side-effects manually), OK
 (4xx). Regression YAML via `--emit-tests`.
 
 **Cleanup is state-aware (TASK-151).** On stateful PUT/PATCH endpoints
-probe-security does `GET` → snapshot → attack → `PUT` original back, so
+probe security does `GET` → snapshot → attack → `PUT` original back, so
 DSN-keys / team-names / webhook URLs aren't left with the attack
 payload. POST falls back to `DELETE`-counterpart cleanup with a short
 eventual-consistency retry (200ms / 1s) — read-replica lag on
@@ -540,7 +542,7 @@ section at the **top** of the digest (and tagged `🧹 cleanup-failure`
 inline next to each affected verdict). Pass `--no-cleanup` only in
 namespace-isolated test envs.
 
-**CI exit codes.** `zond probe-security` exits non-zero on either:
+**CI exit codes.** `zond probe security` exits non-zero on either:
 - `HIGH > 0` — at least one finding looks like an actual bug (gate the
   deploy).
 - `cleanup.error > 0` — probe mutated state it could not restore;
@@ -551,7 +553,7 @@ the second case.
 
 **Partial PUT support (TASK-152).** Sentry / Stripe / GitHub-shaped
 APIs reject the full spec body on PUT (`422 use partial PUT`). When
-that happens, probe-security retries the baseline with a single-key
+that happens, probe security retries the baseline with a single-key
 body per detected field; if any partial baseline succeeds, attacks
 proceed using that shape. Findings using the partial body are annotated
 `[partial-body]` in the digest reason. Without this, the proven-HIGH
@@ -564,7 +566,7 @@ detection on a new spec, and recommended as the **first** invocation
 on shared / prod orgs to confirm no critical-state endpoints (DSN
 rotation, billing settings) are in scope.
 
-When `probe-security` decides a field needs manual triage (e.g., the
+When `probe security` decides a field needs manual triage (e.g., the
 detected field name is unconventional, or you want a custom payload like
 `http://[::1]:80` that isn't in the built-in list), drop down to a hand
 -written YAML probe:
@@ -579,7 +581,7 @@ tests:
 
 Common bespoke payloads: `http://169.254.169.254/latest/meta-data/`
 (AWS IMDS), `http://10.0.0.1` (RFC1918), `gopher://`, `dict://`. Triage
-remains the same as `probe-security`'s automatic classification.
+remains the same as `probe security`'s automatic classification.
 
 ### Phase 5.3 — Robustness probes (content-type, idempotency)
 
@@ -634,6 +636,21 @@ tests:
 Cancel-style endpoints (`/emails/{id}/cancel`) may legitimately return `200` on
 the second call — note as *project decision*, not a bug.
 
+### Phase 5.4 — Post-probe hygiene
+
+Live probes can leave the workspace in a half-mutated state. Always run
+this triplet before the next `zond run` of regular tests:
+
+```bash
+zond prepare-fixtures --api <name> --verify   # detect stale FK ids in .env.yaml (TASK-281)
+zond prepare-fixtures --api <name> --refresh  # = --verify --apply: drop stale, re-resolve via list endpoints
+zond cleanup --orphans                        # retry DELETE for resources logged in ~/.zond/orphans/ (TASK-278)
+```
+
+Skip `--verify`/`--refresh` only with `probe security --isolated`
+(TASK-264) — isolated mode never attacks seeded-fixture endpoints, so they
+stay live.
+
 ## Phase 6 — Coverage report & spec drift
 
 ```bash
@@ -660,6 +677,29 @@ with `--run-id`. To aggregate across runs use `--union`:
 - `runs:<id1,id2,…>` — explicit list (a bare `<id1,id2,…>` is also accepted).
 
 JSON envelope carries `union_mode` and `runIds[]` for downstream tooling.
+
+**Three-bucket JSON breakdown (TASK-280).** `--json` reports every endpoint
+in one of three buckets: `covered2xx` (pass-coverage win), `coveredButNon2xx`
+(hit but never passed — 5xx-only or assertion-failed), `unhit` (no result at
+all). This is the right shape for CI dashboards: `coveredButNon2xx` is the
+fast lane to triage, `unhit` is the gap to close with `generate
+--uncovered-only`.
+
+### Spec-drift learning (`zond run --learn`, TASK-282)
+
+When a passing test asserts `200` but the server returns `201` (or vice
+versa), the test is a flake-in-waiting. `zond run --learn` detects the
+drift without failing the run; `--learn-apply` rewrites either the test
+or a `tolerated-drifts.yaml` allowlist:
+
+```bash
+zond run apis/<name>/tests --learn                           # detect, exit 0, summary in stdout
+zond run apis/<name>/tests --learn-apply --learn-target test    # rewrite expect.status in YAML
+zond run apis/<name>/tests --learn-apply --learn-target drifts  # add to apis/<name>/tolerated-drifts.yaml
+```
+
+Use this when `recommended_action: update_spec` (the spec lies, not the
+backend) or to silence a known-tolerable drift in CI.
 
 ## Phase 7 — Share findings
 

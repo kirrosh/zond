@@ -185,8 +185,9 @@ Each entry has:
 - `recommended_action`: `report_backend_bug` (STOP, summarise for the
   user) | `fix_test_logic` (edit the YAML) | `fix_auth_config` |
   `fix_network_config` | `fix_env` | `fix_spec` (edit OpenAPI — from
-  `check spec`) | `fix_fixture` (fill `.env.yaml` — from `discover` and
-  inconclusive mass-assignment baselines).
+  `check spec`) | `fix_fixture` (fill `.env.yaml` — from `prepare-fixtures`
+  miss-* output and inconclusive mass-assignment baselines) |
+  `update_spec` (status-drift surfaced by `zond run --learn`).
 
 `cascade` failures collapse under their root cause — don't chase them
 individually, fix the upstream step.
