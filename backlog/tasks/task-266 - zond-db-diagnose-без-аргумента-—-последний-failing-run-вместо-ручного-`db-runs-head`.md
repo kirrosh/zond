@@ -3,10 +3,10 @@ id: TASK-266
 title: >-
   zond db diagnose: без аргумента — последний failing run (вместо ручного `db
   runs | head`)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 15:00'
-updated_date: '2026-05-09 09:06'
+updated_date: '2026-05-09 09:17'
 labels:
   - feedback-loop
   - cli
@@ -38,3 +38,9 @@ Source: feedback-12 impressions, "QoL" #2.
 - [ ] #5 Verify: после неудачного run'а `zond db diagnose` сразу показывает диагностику без ручного поиска ID.
 <!-- SECTION:ACCEPTANCE:END -->
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fix: zond db diagnose без аргумента → последний failing run (priority failed > pass). Добавлены флаги --latest (любой последний run) и --run-id N (явный override, для агентов). Если ни один run не упал — fallback на последний run с warning 'No failing runs'. Если БД пуста — exit 1 + понятное сообщение. JSON envelope теперь содержит data.run_id и data.resolution. Tests in tests/cli/db.test.ts.
+<!-- SECTION:NOTES:END -->
