@@ -97,6 +97,7 @@ If any artifact is missing or stale (`zond doctor` flags it), run
 | "find bugs", "probe this API", "test for 5xx" | 1 then 5 (Probes) | — |
 | "только security / SSRF / CRLF", "security-only audit", "без CRUD-аудита" | `zond probe security <classes> --api <name> --dry-run` (затем без `--dry-run`) — см. Phase 5.2 | 1–4 |
 | "tests are failing", "diagnose run X", "fix failures" | 4 (Diagnose) | 1–3 |
+| "что упало в последнем run", "summary последнего прогона", "почему красное" | hand off to `zond-triage` | 1–7 |
 | "the run after my fix" | 3 (Run) → 4 (Diagnose) | 1–2 |
 | "what variables does this API need", "is auth_token set" | `zond doctor --api <name> --json` | direct file reads |
 | "workspace looks messy", "start clean", "remove auto-generated files" | `zond clean --api <name>` (dry-run) → `--force` | — |
