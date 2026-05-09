@@ -38,7 +38,13 @@ export const ZondErrorSchema = z.object({
 });
 
 /** TASK-294 closed enum — must stay in sync with `RecommendedAction` in
- *  `src/core/diagnostics/failure-hints.ts`. */
+ *  `src/core/diagnostics/failure-hints.ts` and the per-check mapping in
+ *  `src/core/checks/recommended-action.ts` (ARV-11).
+ *  ARV-11 added three values for the depth-checks framework:
+ *    - `tighten_validation` — server accepted invalid input.
+ *    - `add_required_header` — server didn't enforce a required header.
+ *    - `wontfix_known_limitation` — known/accepted gap; agent should
+ *       not retry or report. */
 export const RecommendedActionSchema = z.enum([
   "report_backend_bug",
   "fix_auth_config",
@@ -47,6 +53,9 @@ export const RecommendedActionSchema = z.enum([
   "fix_env",
   "fix_spec",
   "fix_fixture",
+  "tighten_validation",
+  "add_required_header",
+  "wontfix_known_limitation",
 ]);
 
 /** Envelope body. `data` is open (`unknown`) so this schema covers every
@@ -83,7 +92,10 @@ export const CheckFindingSchema = z.object({
   }),
   message: z.string(),
   evidence: z.record(z.string(), z.unknown()).optional(),
-  recommended_action: z.string().optional(),
+  // ARV-11: recommended_action is now a closed enum so agents can
+  // route on it without parsing free-form strings. Same enum used by
+  // `db diagnose` (TASK-294) plus three depth-check additions.
+  recommended_action: RecommendedActionSchema.optional(),
 });
 
 export const CheckRunSummarySchema = z.object({

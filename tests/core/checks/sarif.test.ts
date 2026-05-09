@@ -170,6 +170,29 @@ describe("SARIF reporter", () => {
     expect(partialFingerprintFor(ruleId, ptr, "different")).not.toBe(fp1);
   });
 
+  test("ARV-11 AC #3 — properties.recommendedAction is set when finding carries one", () => {
+    const withAction: CheckFinding[] = findings().map((f, i) => ({
+      ...f,
+      // Pretend the runner already filled this in (ARV-11 wires it
+      // through automatically; here we just verify SARIF picks it up).
+      recommended_action: ["report_backend_bug", "fix_auth_config", "tighten_validation"][i] as never,
+    }));
+    const sarif = generateSarifReport({
+      findings: withAction,
+      specContent: SPEC_CONTENT,
+      toolVersion: "0.0.0-test",
+    });
+    const actions = sarif.runs[0]!.results.map(
+      (r) => (r.properties as Record<string, unknown> | undefined)?.recommendedAction,
+    );
+    // Sorted by ruleId — same order as AC#2 above.
+    expect(actions).toEqual([
+      "report_backend_bug", // not_a_server_error
+      "tighten_validation", // negative_data_rejection
+      "fix_auth_config",    // ignored_auth
+    ]);
+  });
+
   test("driver.rules contains all registered checks", () => {
     const sarif = generateSarifReport({
       findings: [],

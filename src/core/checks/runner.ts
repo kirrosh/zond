@@ -35,6 +35,7 @@ import { buildNegativeBody } from "./checks/_negative_mutator.ts";
 import { nowIso, type NdjsonEvent } from "../reporter/ndjson.ts";
 import { runPool } from "../runner/async-pool.ts";
 import type { RateLimiter } from "../runner/rate-limiter.ts";
+import { recommendForCheck } from "./recommended-action.ts";
 import {
   emptySummary,
   type CaseKind,
@@ -304,6 +305,7 @@ function recordFinding(
     response_summary: summarizeResponse(resp),
     message,
     evidence,
+    recommended_action: recommendForCheck(check.id, resp.status),
   };
   out.push(finding);
   if (onEvent) onEvent({ type: "finding", ts: nowIso(), finding });
@@ -409,6 +411,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           request_signature: `${built.req.method} ${built.req.url}`,
           response_summary: { status: 0 },
           message: `Network error: ${(err as Error).message}`,
+          recommended_action: recommendForCheck("network_error", 0),
         };
         localFindings.push(finding);
         if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), finding });
@@ -522,6 +525,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
             response_summary: { status: 0 },
             message: outcome.message,
             evidence: outcome.evidence,
+            recommended_action: recommendForCheck(check.id),
           };
           return finding;
         });
@@ -545,6 +549,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
             response_summary: { status: 0 },
             message: outcome.message,
             evidence: outcome.evidence,
+            recommended_action: recommendForCheck(check.id),
           };
           return finding;
         });

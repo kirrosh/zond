@@ -14,6 +14,7 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo } from "../generator/types.ts";
 import type { SchemaValidator } from "../runner/schema-validator.ts";
+import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
 
 export type Severity = "low" | "medium" | "high" | "critical";
 
@@ -111,9 +112,11 @@ export interface CheckFinding {
   response_summary: { status: number; content_type?: string };
   message: string;
   evidence?: Record<string, unknown>;
-  /** Filled in by ARV-11 — kept here so the envelope shape is stable
-   *  from day one. */
-  recommended_action?: string;
+  /** ARV-11 — closed enum so agents can route on it without parsing
+   *  the message. Resolved by `recommendForCheck()` keyed on the
+   *  check id (and response status for `network_error`). Optional
+   *  because synthetic findings (e.g. unit-test fakes) may skip it. */
+  recommended_action?: RecommendedAction;
 }
 
 export interface CheckRunSummary {
