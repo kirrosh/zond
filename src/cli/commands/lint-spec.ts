@@ -156,13 +156,22 @@ export function registerLintSpec(program: Command): void {
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--strict", "Exit non-zero even on LOW-severity issues")
     .option("--ndjson", "Stream issues as one JSON per line (NDJSON), instead of the wrapped envelope")
-    .option("--rule <list>", "Comma-separated rule overrides: R1, !R2, R3=high|medium|low")
+    .option(
+      "--rule <list>",
+      "Unified rule selector (TASK-291). Comma-separated items: 'B1' (whitelist), " +
+      "'!B2' (disable), 'B3=high|medium|low' (severity override; also implicitly whitelists). " +
+      "All-plain or all-override → whitelist mode (only these rules render). All-'!' → blacklist mode " +
+      "(exclude these). Mixed → whitelist + overrides + disables together.",
+    )
+    .option(
+      "--filter-rule <list>",
+      "Deprecated alias for the whitelist subset of --rule (TASK-291). Will be removed; emits a stderr warning.",
+    )
     .option("--config <path>", "Path to .zond-lint.json")
     .option("--include-path <glob...>", "Only lint endpoints whose path matches glob (repeatable)")
     .option("--max-issues <N>", "Stop after N issues", parsePositiveInt("--max-issues"))
     .option("--verbose, --flat", "Render the legacy flat one-line-per-issue list (default is now a rule × severity rollup, TASK-279)")
     .option("--severity <list>", "Filter rendered/JSON output to severities (comma-separated: high,medium,low)")
-    .option("--filter-rule <list>", "Filter to only these rule ids (e.g. B1,B6). Note: --rule is for severity overrides, --filter-rule is for whitelisting.")
     .option("--top <N>", "In the grouped summary, show only the top-N rules by count", parsePositiveInt("--top"))
     .option("--no-db", "Don't write to lint_runs SQLite history")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
@@ -170,23 +179,104 @@ export function registerLintSpec(program: Command): void {
       const resolved = resolveSpecArg(specPos, opts.api, dbPath);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       const sevFilter = parseSeverityList(opts.severity);
-      const ruleFilter = typeof opts.filterRule === "string"
-        ? opts.filterRule.split(",").map((s: string) => s.trim()).filter(Boolean)
-        : undefined;
+
+      // TASK-291: unify --rule (severity overrides + disables) and the legacy
+      // --filter-rule (whitelist by id). The merged --rule accepts all three
+      // shapes; --filter-rule is an alias that contributes only whitelist ids
+      // and prints a deprecation warning.
+      const merged = mergeRuleFlags(opts.rule, opts.filterRule);
+
       process.exitCode = await lintSpecCommand({
         specPath: resolved.spec,
         json: globalJson(cmd),
         ndjson: opts.ndjson === true,
         strict: opts.strict === true,
-        rule: opts.rule,
+        rule: merged.cliRule,
         config: opts.config,
         includePath: opts.includePath,
         maxIssues: opts.maxIssues,
         noDb: opts.db === false,
         verbose: opts.verbose === true || opts.flat === true,
         severityFilter: sevFilter,
-        filterRule: ruleFilter,
+        filterRule: merged.whitelist,
         top: typeof opts.top === "number" ? opts.top : undefined,
       });
     });
+}
+
+/**
+ * TASK-291: parse --rule (and the deprecated --filter-rule) into the two
+ * downstream channels: cliRule (severity overrides + disables, fed to
+ * loadConfig) and whitelist (rule-id allow-list, applied post-lint).
+ *
+ * Rules:
+ *  - 'B1'         → whitelist B1.
+ *  - '!B2'        → disable B2 (also passed via cliRule to suppress the
+ *                   rule entirely so it never appears in the run).
+ *  - 'B3=high'    → severity override AND implicit whitelist of B3.
+ *  - 'B3=off'     → equivalent to '!B3'.
+ *
+ * Whitelist is applied only when at least one positive id is given; an
+ * all-negated input keeps the full rule set minus the disables.
+ */
+export function mergeRuleFlags(
+  ruleArg: unknown,
+  filterRuleArg: unknown,
+): { cliRule: string | undefined; whitelist: string[] | undefined } {
+  const ruleItems = splitCsv(ruleArg);
+  const filterItems = splitCsv(filterRuleArg);
+
+  if (filterItems.length > 0) {
+    process.stderr.write(
+      "[zond] --filter-rule is deprecated, use --rule with the same comma-separated rule ids (TASK-291).\n",
+    );
+  }
+
+  const cliRuleItems: string[] = [];
+  const whitelist = new Set<string>();
+  let anyPositive = false;
+
+  for (const raw of ruleItems) {
+    const item = raw.trim();
+    if (!item) continue;
+    if (item.startsWith("!")) {
+      cliRuleItems.push(item);
+      continue;
+    }
+    const eq = item.indexOf("=");
+    if (eq >= 0) {
+      const id = item.slice(0, eq).trim().toUpperCase();
+      const sev = item.slice(eq + 1).trim().toLowerCase();
+      if (sev === "off") {
+        cliRuleItems.push(`!${id}`);
+      } else {
+        cliRuleItems.push(`${id}=${sev}`);
+        whitelist.add(id);
+        anyPositive = true;
+      }
+      continue;
+    }
+    // Plain id → whitelist only; do not push as cliRule (loadConfig would
+    // treat a bare id as "enable at default severity" which is a no-op
+    // for already-enabled rules but adds noise for unknown ids).
+    whitelist.add(item.toUpperCase());
+    anyPositive = true;
+  }
+
+  for (const raw of filterItems) {
+    const id = raw.trim().toUpperCase();
+    if (!id) continue;
+    whitelist.add(id);
+    anyPositive = true;
+  }
+
+  return {
+    cliRule: cliRuleItems.length > 0 ? cliRuleItems.join(",") : undefined,
+    whitelist: anyPositive ? [...whitelist] : undefined,
+  };
+}
+
+function splitCsv(raw: unknown): string[] {
+  if (typeof raw !== "string") return [];
+  return raw.split(",").map(s => s.trim()).filter(Boolean);
 }

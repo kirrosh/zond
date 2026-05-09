@@ -42,6 +42,10 @@ All notable changes to this project will be documented in this file.
 - **TASK-289: `zond run --no-real-parents` → `--use-synthetic-parents`.**
   Double-negative renamed to a positive flag. The old name still works
   one release with a stderr warning, then drops.
+- **TASK-291: `zond lint-spec --filter-rule` is a deprecated alias for
+  the whitelist subset of `--rule`.** The two flags are unified: `--rule`
+  now accepts `B1` (whitelist), `!B2` (disable), `B3=high|low|off` (override).
+  `--filter-rule` still works one release with a stderr warning.
 
 ### Added
 
