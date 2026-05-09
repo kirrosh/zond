@@ -77,6 +77,9 @@ Claude Code can write pytest from scratch — but it takes 30-60 minutes per flo
 | **Coverage Tracking** | See which endpoints are tested, which aren't, and what broke since last run. |
 | **Schema Validation** | `--validate-schema` checks every JSON response against the OpenAPI schema (types, required, enum, format, `$ref`) — catches contract drift the YAML expectations miss. |
 | **Spec Linting** | `zond check spec` static-analyses the OpenAPI document for internal-consistency bugs (e.g. example violates `format: date-time`) and strictness gaps (path-params without `format`, integer params without min/max) — surfaces issues before any HTTP request. |
+| **Depth Checks (m-15)** | `zond checks run` runs a schemathesis-style catalog of conformance + security probes (`status_code_conformance`, `negative_data_rejection`, `ignored_auth`, `use_after_free`, …) — boundary-value coverage, broken-auth detection, soft-deleted resource leaks. Every finding ships with a `recommended_action` enum so the agent triages without parsing messages. |
+| **SARIF for Code Scanning** | `--report sarif` emits SARIF v2.1.0 with stable `partialFingerprints` — drop-in for `github/codeql-action/upload-sarif@v3` so depth-checks findings show up in GitHub's Security tab. |
+| **Concurrent Workers** | `--workers auto` parallelizes runs at the operation level (bounded async-pool, no threading) — runs that took minutes finish in seconds. Pair with `--rate-limit` to stay within an API's RPS budget. |
 | **CI-Ready** | One command generates GitHub Actions or GitLab CI workflow. Tests in YAML, in git, with code review. |
 
 ## Try It

@@ -57,6 +57,38 @@ Refs: TASK-5, TASK-7
 conventional-commits стиль (`feat:` / `refactor:` / `docs:` / `chore:`),
 без `TASK-`.
 
+## Depth checks (m-15)
+
+Помимо YAML smoke / CRUD-тестов, у zond есть schemathesis-style каталог
+«depth checks» — proactive conformance + security probes. Запускаются
+через отдельную команду:
+
+```bash
+zond checks list                                 # каталог: id, severity, default expected
+zond checks run --api myapi                      # examples-фаза, mode=all (default)
+zond checks run --api myapi --phase coverage     # детерминированные boundary-values
+zond checks run --api myapi --mode negative      # только malicious-input probes
+zond checks run --api myapi --report sarif --output zond.sarif
+                                                  # SARIF v2.1.0 для GitHub Code Scanning
+zond checks run --api myapi --workers auto       # параллелизм по операциям (= min(cpus, 8))
+zond checks run --api myapi --ndjson | jq -c '.' # стримить события (check_start/result/finding/summary)
+```
+
+Каждый `CheckFinding` несёт closed-enum `recommended_action` — агент
+триажит по нему, а не по тексту message:
+
+| `recommended_action` | Что делать |
+|---|---|
+| `report_backend_bug` | 5xx / leak after delete / accepted bogus auth — баг сервера. |
+| `fix_spec` | Сервер ведёт себя разумно, но spec не описывает — обновить OpenAPI и `zond refresh-api`. |
+| `tighten_validation` | Сервер принял невалидное тело — backend должен реджектить (400/422). |
+| `add_required_header` | Заголовок помечен `required: true`, сервер не enforce — починить server либо relax spec. |
+| `fix_auth_config` | Auth-проблема — проверить `apis/<name>/.env.yaml` (`auth_token`/`api_key`). |
+| `fix_network_config` | Транспорт (timeout / DNS / refused) — проверить `base_url`. |
+
+Подробный гайд для агента — в скилле `zond-checks` (создаётся при
+`zond init`). Полный CLI-референс — в [ZOND.md](ZOND.md#checks-run--schemathesis-style-depth-checks-m-15).
+
 ## Историческая справка
 
 Источник правды по задачам — `backlog/` (Backlog.md CLI). Активные

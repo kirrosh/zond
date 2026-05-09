@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 import zondSkill from "./templates/skills/zond.md" with { type: "text" };
 import scenariosSkill from "./templates/skills/scenarios.md" with { type: "text" };
+import checksSkill from "./templates/skills/zond-checks.md" with { type: "text" };
 
 export interface SkillResult {
   name: string;
@@ -18,6 +19,10 @@ interface SkillTemplate {
 const SKILLS: SkillTemplate[] = [
   { name: "zond", body: zondSkill },
   { name: "zond-scenarios", body: scenariosSkill },
+  // ARV-12 (m-15): depth-checks skill ships with a per-check
+  // recommended_action triage table so agents route on the closed
+  // enum instead of parsing finding messages.
+  { name: "zond-checks", body: checksSkill },
 ];
 
 /**

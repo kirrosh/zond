@@ -130,7 +130,7 @@ describe("zond checks pipeline (ARV-1)", () => {
         "report_backend_bug", "fix_auth_config", "fix_test_logic",
         "fix_network_config", "fix_env", "fix_spec", "fix_fixture",
         "tighten_validation", "add_required_header", "wontfix_known_limitation",
-      ]).toContain(f.recommended_action);
+      ]).toContain(f.recommended_action as string);
     }
   });
 
