@@ -2,7 +2,6 @@ import { Command } from "commander";
 
 import { registerRun } from "./commands/run.ts";
 import { registerValidate } from "./commands/validate.ts";
-import { registerServe } from "./commands/serve.ts";
 import { registerCoverage } from "./commands/coverage.ts";
 import { registerCi } from "./commands/ci-init.ts";
 import { registerClean } from "./commands/clean.ts";
@@ -65,8 +64,6 @@ export function buildProgram(): Command {
 
   registerValidate(program);
 
-  registerServe(program);
-
   registerCi(program);
 
   registerUse(program);
@@ -110,7 +107,7 @@ export function buildProgram(): Command {
   // run's only JSON output path is `--report json`.
   // Skip by fully-qualified path so `db run` (inner) keeps --json while
   // top-level `run` does not.
-  const skipJson = new Set(["run", "completions", "serve"]);
+  const skipJson = new Set(["run", "completions"]);
   const attachJson = (cmd: Command, parentPath: string): void => {
     const path = parentPath ? `${parentPath} ${cmd.name()}` : cmd.name();
     // Only leaf commands (those with action handlers) get --json — parent

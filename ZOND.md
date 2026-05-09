@@ -3,7 +3,6 @@
 **AI-native API testing tool** — OpenAPI spec → test generation → execution → diagnostics. One binary. Zero config.
 
 - **CLI** — primary interface for Claude Code agents and CI/CD
-- **WebUI** — dashboard with health strip, endpoints/suites/runs tabs, step-level details
 
 ---
 
@@ -110,7 +109,6 @@ selected via `zond use`.
 | `session start\|end\|status` | Group multiple `zond run` calls into one campaign in `/runs` Sessions view | `--label <text>`, `--id <uuid>` |
 | `validate <path>` | Validate YAML tests | |
 | `coverage` | API test coverage. Exit 0 = full coverage (or ≥ `--fail-on-coverage`); 1 = uncovered endpoints (or below threshold); 2 = bad input/read error. Warnings (e.g. `required_params_no_examples`) never affect the exit code. | `--spec`, `--tests`, `--api`, `--fail-on-coverage <N>` |
-| `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
 | `probe validation [spec]` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup`, `--no-real-parents` |
 | `probe methods [spec]` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--api <name>`, `--output <dir>`, `--tag` |
@@ -488,8 +486,7 @@ should read `totals.*` and the three bucket arrays.
 
 After a run lives in SQLite (`zond.db`), `zond report export <run-id>`
 materialises it as a self-contained HTML file you can drop into a Slack
-thread, attach to a GitHub issue, or open offline weeks later — no
-`zond serve` required.
+thread, attach to a GitHub issue, or open offline weeks later.
 
 ```bash
 zond report export 42                       # → zond-run-42.html
@@ -546,9 +543,7 @@ zond report case-study 2 | gh issue create --title "POST /pets 5xx" --body-file 
 
 `<failure-id>` is the `results.id` (one row per step, not the run-id).
 Find one via `zond db run <run-id>` — failed/errored rows are the obvious
-candidates. The same draft is also reachable from `zond serve` →
-Run detail → **Case study draft** button on each failure card (writes
-to clipboard via `GET /api/results/:id/case-study.md`).
+candidates.
 
 The template fills itself from existing run data:
 
@@ -1170,14 +1165,6 @@ zond session status                               # show what's active
 3. `.zond/current-session` file (set by `zond session start`)
 
 If none of those is set, the run is "ad-hoc" and shows up alone in `/runs`. Old runs without `session_id` continue to render in the legacy `Runs` tab.
-
-### `zond serve` port handling
-
-By default, `zond serve` is non-destructive: if the requested port (`--port` or 8080) is busy, it scans the next 10 ports and binds the first free one, printing the chosen port to stderr. If the entire 11-port range is busy, it exits 1 with instructions.
-
-Pass `--kill-existing` to restore the legacy behaviour of terminating whichever process holds the requested port. Use with care — it will kill your dev backend if it happens to listen there.
-
----
 
 ## CI/CD
 

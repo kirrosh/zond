@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed (breaking)
+
+- **TASK-284: `zond serve` and the WebUI are removed.** Agent-first / CLI-only
+  surface per vector-3. Use `zond report export` for shareable HTML reports.
+  `src/ui/` is gone along with hono / react / tanstack / tailwind dependencies.
+
 ### Deprecated
 
 - **TASK-182: `probe-validation`, `probe-methods`, `probe-mass-assignment`,
