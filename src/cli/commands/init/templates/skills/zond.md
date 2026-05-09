@@ -381,7 +381,7 @@ non-attacked path params from `.env.yaml` at run time (`{{organization_id_or_slu
 so for any `repos/{repo_id}/commits`-style endpoint you need a real parent
 slug in env or every probe will 404 on the parent before reaching the leaf
 validator. Pre-flight: `zond doctor --api <name>` and confirm parent
-fixtures are populated. Use `--no-real-parents` only when you intentionally
+fixtures are populated. Use `--use-synthetic-parents` only when you intentionally
 want fully-synthetic paths (no real account available).
 
 Filter scope on large APIs: `--tag <spec-tag> [--max-per-endpoint 20]`.

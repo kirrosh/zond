@@ -60,17 +60,27 @@ function defineProbeValidation(parent: Command, name: string): void {
     .option("--list-tags", "List available tags from spec and exit")
     .option("--max-per-endpoint <N>", "Cap probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
     .option("--no-cleanup", "Skip emission of follow-up DELETE cleanup steps for mutating probes (use in namespace-isolated test envs)")
-    .option("--no-real-parents", "Bake synthetic-by-type values into all path params (legacy). By default, non-attacked path params are emitted as {{name}} and resolved from .env.yaml at run time — needed to reach the leaf validator on nested paths (TASK-135).")
+    .option("--use-synthetic-parents", "Bake synthetic-by-type values into all path params (legacy). By default, non-attacked path params are emitted as {{name}} and resolved from .env.yaml at run time — needed to reach the leaf validator on nested paths (TASK-135). [TASK-289: replaces --no-real-parents]")
+    .option("--no-real-parents", "Deprecated alias for --use-synthetic-parents (TASK-289). Same behaviour; emits a stderr warning. Will be removed.", () => {
+      process.stderr.write(
+        "[zond] --no-real-parents is deprecated, use --use-synthetic-parents instead (TASK-289).\n",
+      );
+      return true;
+    })
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      // --no-real-parents (legacy, sets opts.realParents = false) and
+      // --use-synthetic-parents (canonical, sets opts.useSyntheticParents = true)
+      // both flip useRealParents to false.
+      const useReal = opts.useSyntheticParents !== true && opts.realParents !== false;
       process.exitCode = await probeValidationCommand({
         specPath: resolved.spec,
         output: opts.output,
         tag: opts.tag,
         maxPerEndpoint: opts.maxPerEndpoint,
         noCleanup: opts.cleanup === false,
-        useRealParents: opts.realParents !== false,
+        useRealParents: useReal,
         json: globalJson(cmd),
         listTags: opts.listTags,
       });

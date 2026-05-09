@@ -28,6 +28,12 @@ All notable changes to this project will be documented in this file.
   `probe-mass-assignment`, `probe-security` (TASK-182) is closed. Use
   `zond probe <class>` instead. `warnDeprecatedProbe` helper removed.
 
+### Deprecated
+
+- **TASK-289: `zond run --no-real-parents` → `--use-synthetic-parents`.**
+  Double-negative renamed to a positive flag. The old name still works
+  one release with a stderr warning, then drops.
+
 ### Added
 
 - **TASK-29: `zond db diagnose --json` now surfaces `suggested_fixes`.**

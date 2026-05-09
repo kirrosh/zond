@@ -110,7 +110,7 @@ selected via `zond use`.
 | `validate <path>` | Validate YAML tests | |
 | `coverage` | API test coverage. Exit 0 = full coverage (or ≥ `--fail-on-coverage`); 1 = uncovered endpoints (or below threshold); 2 = bad input/read error. Warnings (e.g. `required_params_no_examples`) never affect the exit code. | `--spec`, `--tests`, `--api`, `--fail-on-coverage <N>` |
 | `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
-| `probe validation [spec]` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup`, `--no-real-parents` |
+| `probe validation [spec]` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup`, `--use-synthetic-parents` |
 | `probe methods [spec]` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--api <name>`, `--output <dir>`, `--tag` |
 | `probe mass-assignment [spec]` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--no-discover`, `--timeout <ms>` |
 | `probe security <classes> [spec]` | Live SSRF / CRLF / open-redirect probes with baseline-OK gate; classes = comma-separated subset of `ssrf,crlf,open-redirect` | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--dry-run`, `--timeout <ms>` |
@@ -264,8 +264,9 @@ path-param is replaced with a synthetic value; non-attacked parents are
 emitted as runtime placeholders (`{{organization_id_or_slug}}`) and resolved
 from `.env.yaml` at run time. Without this, every probe would 404 on the
 parent before the leaf validator ever fires, hiding nested-path 5xx bugs.
-Pass `--no-real-parents` to keep the legacy fully-synthetic rendering (e.g.
-when you have no real parent fixture).
+Pass `--use-synthetic-parents` (TASK-289; old name `--no-real-parents` is
+deprecated) to keep the legacy fully-synthetic rendering (e.g. when you
+have no real parent fixture).
 
 **Cleanup of leaked resources.** A probe that *unexpectedly* returns 2xx on a
 mutating endpoint (POST/PUT/PATCH) means the API silently accepted bad input
