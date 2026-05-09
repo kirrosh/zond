@@ -301,6 +301,7 @@ Flag cheat-sheet:
 | `--allow-x00` | Include the NUL byte (`\x00`) in string boundaries during the coverage phase. Off by default — some HTTP/JSON stacks panic on it. |
 | `--check <ids…>` / `--exclude-check <ids…>` | Restrict the registered catalog. Combined with `--mode` (mode applied first). |
 | `--report sarif --output <path>` | Emit SARIF v2.1.0 with stable `partialFingerprints` for `github/codeql-action/upload-sarif@v3`. |
+| `--include <spec…>` / `--exclude <spec…>` | Unified operation filter (ARV-9). `<spec>` is `<selector>:<value>` — selectors `path:<regex>`, `method:<csv>`, `tag:<csv>`, `operation-id:<regex>`. Repeat the flag for OR semantics within a kind; combine includes + excludes for intersection. Same grammar in `zond generate`. |
 | `--auth-header 'Name: value'` | Real-auth headers fed into stateful security checks. Auto-derived from `apis/<name>/.env.yaml` (`auth_token`, `api_key`) when `--api` is set. |
 | `--bootstrap-cleanup-failed` | Skip stateful security checks with a warning when bootstrap-cleanup couldn't be confirmed (avoids FP on stale data). |
 

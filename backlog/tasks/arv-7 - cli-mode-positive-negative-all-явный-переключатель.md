@@ -1,10 +1,10 @@
 ---
 id: ARV-7
 title: 'cli: --mode positive/negative/all явный переключатель'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-09 15:47'
-updated_date: '2026-05-09 17:06'
+updated_date: '2026-05-09 17:32'
 labels:
   - cli
   - m-15

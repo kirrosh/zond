@@ -16,6 +16,7 @@ import {
 } from "../../core/generator/suite-generator.ts";
 import { generateFromSchema, classifyFieldSource } from "../../core/generator/data-factory.ts";
 import { filterByTag, collectTags } from "../../core/generator/chunker.ts";
+import { compileOperationFilter } from "../../core/utils/operation-filter.ts";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import { printError, printSuccess } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
@@ -72,6 +73,11 @@ export interface GenerateOptions {
    *  future fix will gate sha-mismatched user edits behind this flag. */
   force?: boolean;
   json?: boolean;
+  /** ARV-9 unified filter: path:<regex> / method:<csv> / tag:<csv> /
+   *  operation-id:<regex>. Multiple flags combine with OR; --exclude
+   *  always removes. Stacks with --tag for back-compat. */
+  include?: string[];
+  exclude?: string[];
 }
 
 export async function generateCommand(options: GenerateOptions): Promise<number> {
@@ -182,6 +188,19 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       if (coveredCount > 0) {
         warnings.push(`Skipped ${coveredCount} already-covered endpoints`);
       }
+    }
+
+    // ARV-9: unified --include/--exclude filter (applied before --tag so
+    // --tag stays a thin alias when both are passed; usually only one is).
+    if (options.include?.length || options.exclude?.length) {
+      const compiled = compileOperationFilter({ includes: options.include, excludes: options.exclude });
+      if (compiled.errors.length > 0) {
+        const message = compiled.errors.join("\n");
+        if (options.json) printJson(jsonOk("generate", { files: [], message }, compiled.errors));
+        else printError(message);
+        return 2;
+      }
+      endpoints = endpoints.filter(compiled.filter);
     }
 
     // Filter by tag
@@ -416,6 +435,14 @@ export function registerGenerate(program: Command): void {
     .option("--db <path>", "Path to SQLite database file")
     .option("--output <dir>", "Output directory for generated test files (required unless --explain)")
     .option("--tag <tag>", "Generate only for endpoints with this tag (accepts comma-separated list, e.g. --tag Releases,Events,Alerts — TASK-239)")
+    .option(
+      "--include <spec...>",
+      "ARV-9: keep only operations matching <selector>:<value>. Selectors: path:<regex>, method:<csv>, tag:<csv>, operation-id:<regex>. Repeat the flag for OR semantics.",
+    )
+    .option(
+      "--exclude <spec...>",
+      "ARV-9: drop operations matching <selector>:<value>. Same grammar as --include.",
+    )
     .option("--uncovered-only", "Skip endpoints already covered by existing tests")
     .option("--include-deprecated", "Generate suites for deprecated endpoints too (filtered out by default)")
     .option("--explain", "Print the CRUD detection table (which resources became chain candidates and why) without writing files (TASK-139)")
@@ -437,6 +464,8 @@ export function registerGenerate(program: Command): void {
         explain: opts.explain === true,
         force: opts.force === true || opts.overwrite === true,
         json: globalJson(cmd),
+        include: Array.isArray(opts.include) ? opts.include : undefined,
+        exclude: Array.isArray(opts.exclude) ? opts.exclude : undefined,
       });
     });
 }
