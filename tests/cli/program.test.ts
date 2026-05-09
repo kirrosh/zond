@@ -239,7 +239,6 @@ describe("TASK-182: zond probe umbrella + back-compat aliases", () => {
     expect(probeCmd).toBeDefined();
     const subs = probeCmd!.commands.map((c) => c.name()).sort();
     expect(subs).toEqual([
-      "by-bogus-id",
       "mass-assignment",
       "methods",
       "security",
