@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "ajv-draft-04": "^1.0.0",
     "backlog.md": "^1.44.0",
     "knip": "^6.7.0"
   },

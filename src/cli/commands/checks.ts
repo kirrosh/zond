@@ -10,14 +10,18 @@
  * Built-in checks register themselves on import via `core/checks` —
  * adding a new check (ARV-2/3/4) doesn't require touching this file.
  */
+import { writeFileSync, readFileSync } from "node:fs";
+import { resolve as resolvePath, relative as relativePath } from "node:path";
 import type { Command } from "commander";
 
 import { listChecks, runChecks } from "../../core/checks/index.ts";
 import { listStatefulChecks } from "../../core/checks/stateful.ts";
+import { generateSarifReport } from "../../core/checks/sarif.ts";
 import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
+import { VERSION } from "../version.ts";
 
 interface ChecksListOptions {
   json?: boolean;
@@ -65,6 +69,8 @@ interface ChecksRunOptions {
   json?: boolean;
   authHeader?: string[];
   bootstrapCleanupFailed?: boolean;
+  report?: string;
+  output?: string;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -166,6 +172,31 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     for (const id of result.selection.unknown) {
       warnings.push(`Unknown check: "${id}" — ignored. Run \`zond checks list\` to see registered ids.`);
     }
+    // ARV-5: optional SARIF v2.1.0 sidecar for GitHub Code Scanning.
+    // Written before any text output so a partial-write failure surfaces
+    // before the success line and the exit code.
+    if (opts.report === "sarif") {
+      const out = opts.output ?? "zond-checks.sarif";
+      const absSpec = resolvePath(specRes.spec);
+      const specContent = readFileSync(absSpec, "utf8");
+      // Make spec uri repo-relative when possible — GitHub Code Scanning
+      // links findings to a file in the repo, absolute paths break that.
+      const specUri = relativePath(process.cwd(), absSpec) || "spec.json";
+      const sarif = generateSarifReport({
+        findings: result.data.findings,
+        specContent,
+        specUri,
+        toolVersion: VERSION,
+      });
+      writeFileSync(resolvePath(out), JSON.stringify(sarif, null, 2));
+      if (!json) console.error(`SARIF report written to ${out}`);
+    } else if (typeof opts.report === "string") {
+      const msg = `Unknown --report format: "${opts.report}". Available: sarif`;
+      if (json) printJson(jsonError("checks run", [msg]));
+      else printError(msg);
+      process.exit(2);
+    }
+
     if (json) {
       printJson(jsonOk("checks run", result.data, warnings.length > 0 ? warnings : undefined));
     } else {
@@ -215,6 +246,14 @@ function defineRun(parent: Command): void {
     .option(
       "--bootstrap-cleanup-failed",
       "ARV-3: signal that bootstrap-cleanup failed before this run. Stateful security checks (ignored_auth, use_after_free, ensure_resource_availability) skip with a warning to avoid false positives on stale data.",
+    )
+    .option(
+      "--report <format>",
+      "ARV-5: emit findings in an extra format alongside the JSON envelope. Available: sarif (SARIF v2.1.0 for GitHub Code Scanning).",
+    )
+    .option(
+      "--output <path>",
+      "ARV-5: write the --report file here. Defaults to zond-checks.sarif when --report sarif is set.",
     )
     .action(checksRunAction);
 }
