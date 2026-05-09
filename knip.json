@@ -2,9 +2,6 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": [
     "src/cli/index.ts",
-    "src/ui/server/server.ts",
-    "src/ui/client/index.html",
-    "src/ui/client/src/main.tsx",
     "scripts/**/*.ts",
     "tests/**/*.{ts,tsx}",
     "benchmarks/**/*.ts"

@@ -74,18 +74,18 @@ describe("preprocessArgv (MSYS path fix)", () => {
 });
 
 describe("buildProgram — registration", () => {
-  test("does not register 'ui' command", () => {
+  test("does not register 'ui' or 'serve' commands", () => {
     const program = buildProgram();
     const names = program.commands.map((c) => c.name());
     expect(names).not.toContain("ui");
-    expect(names).toContain("serve");
+    expect(names).not.toContain("serve");
   });
 
   test("registers all user-facing commands", () => {
     const program = buildProgram();
     const names = new Set(program.commands.map((c) => c.name()));
     for (const expected of [
-      "run", "validate", "serve", "ci", "coverage", "init",
+      "run", "validate", "ci", "coverage", "init",
       "add", "refresh-api", "doctor", "session",
       "describe", "db", "request", "generate", "catalog",
       "export", "update",
@@ -195,12 +195,6 @@ describe("buildProgram — repeatable flags", () => {
 describe("buildProgram — numeric validations (exit 2 via CommanderError)", () => {
   test("--timeout=abc rejects with exit 2", async () => {
     const result = await tryParse(["run", "tests/", "--timeout", "abc"]);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe("commander.invalidArgument");
-  });
-
-  test("--port=0 rejects with exit 2", async () => {
-    const result = await tryParse(["serve", "--port", "0"]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("commander.invalidArgument");
   });

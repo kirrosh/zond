@@ -24,7 +24,7 @@ describe("completionsCommand — shells", () => {
     const { out } = captureStdout(() => completionsCommand({ shell: "bash", program }));
     expect(out).toContain("complete -F _zond_completion zond");
     expect(out).toContain("compgen -W");
-    for (const cmd of ["run", "validate", "serve"]) {
+    for (const cmd of ["run", "validate"]) {
       expect(out).toContain(cmd);
     }
   });
