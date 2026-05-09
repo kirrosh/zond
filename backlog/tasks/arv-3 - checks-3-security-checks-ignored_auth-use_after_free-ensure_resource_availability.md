@@ -3,28 +3,29 @@ id: ARV-3
 title: >-
   checks: 3 security checks (ignored_auth, use_after_free,
   ensure_resource_availability)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 15:46'
+updated_date: '2026-05-09 16:29'
 labels:
   - checks
   - m-15
   - depth
   - security
+milestone: m-15
 dependencies:
   - ARV-1
-milestone: m-15
 priority: high
 ---
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ignored_auth: 3-вариантный probe реализован с anti-FP guards (security:[] override, broken baseline)
-- [ ] #2 use_after_free / ensure_resource_availability работают на petstore mock с CRUD-chain
-- [ ] #3 Unit-таблица tests/core/checks/ignored-auth.test.ts: [scheme, baseline, no_auth, bogus, expected]
-- [ ] #4 Integration: mock с broken auth (всегда 200) → ignored_auth выдаёт HIGH finding
-- [ ] #5 Integration: mock-сценарий 'leak after delete' (200 после DELETE) → use_after_free fail
-- [ ] #6 Когда bootstrap-cleanup помечен failed — security checks автоматически skip с warning
+- [x] #1 ignored_auth: 3-вариантный probe реализован с anti-FP guards (security:[] override, broken baseline)
+- [x] #2 use_after_free / ensure_resource_availability работают на petstore mock с CRUD-chain
+- [x] #3 Unit-таблица tests/core/checks/ignored-auth.test.ts: [scheme, baseline, no_auth, bogus, expected]
+- [x] #4 Integration: mock с broken auth (всегда 200) → ignored_auth выдаёт HIGH finding
+- [x] #5 Integration: mock-сценарий 'leak after delete' (200 после DELETE) → use_after_free fail
+- [x] #6 Когда bootstrap-cleanup помечен failed — security checks автоматически skip с warning
 <!-- AC:END -->
 
 ## Implementation Plan

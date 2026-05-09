@@ -8,6 +8,7 @@
  * exactly once (Node/Bun ESM module cache guarantees idempotency).
  */
 import { registerCheck } from "../registry.ts";
+import { registerStatefulCheck } from "../stateful.ts";
 import { notAServerError } from "./not_a_server_error.ts";
 import { statusCodeConformance } from "./status_code_conformance.ts";
 import { contentTypeConformance } from "./content_type_conformance.ts";
@@ -15,6 +16,9 @@ import { responseHeadersConformance } from "./response_headers_conformance.ts";
 import { responseSchemaConformance } from "./response_schema_conformance.ts";
 import { missingRequiredHeader } from "./missing_required_header.ts";
 import { unsupportedMethod } from "./unsupported_method.ts";
+import { ignoredAuth } from "./ignored_auth.ts";
+import { useAfterFree } from "./use_after_free.ts";
+import { ensureResourceAvailability } from "./ensure_resource_availability.ts";
 
 let registered = false;
 
@@ -29,6 +33,10 @@ export function registerBuiltinChecks(): void {
   registerCheck(responseSchemaConformance);
   registerCheck(missingRequiredHeader);
   registerCheck(unsupportedMethod);
+  // ARV-3 — 3 stateful security checks.
+  registerStatefulCheck(ignoredAuth);
+  registerStatefulCheck(useAfterFree);
+  registerStatefulCheck(ensureResourceAvailability);
   registered = true;
 }
 

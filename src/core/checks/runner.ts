@@ -14,6 +14,7 @@
 import type { OpenAPIV3 } from "openapi-types";
 
 import { extractEndpoints, readOpenApiSpec } from "../generator/index.ts";
+import { detectCrudGroups } from "../generator/suite-generator.ts";
 import type { EndpointInfo } from "../generator/types.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
 import { executeRequest } from "../runner/http-client.ts";
@@ -27,6 +28,7 @@ import {
 
 import "./checks/index.ts"; // side-effect: register builtins
 import { selectChecks, type SelectionResult } from "./registry.ts";
+import { listStatefulChecks, makeHarness } from "./stateful.ts";
 import {
   emptySummary,
   type CaseKind,
@@ -46,6 +48,12 @@ export interface RunChecksOptions {
   /** Limit the operation set — used by `--include`/`--exclude` regex
    *  filtering in ARV-9. ARV-1 only exposes the hook. */
   operationFilter?: (op: EndpointInfo) => boolean;
+  /** ARV-3 — auth headers fed to stateful security checks. CLI lifts
+   *  these from `--auth-header` flags and/or the api's `.env.yaml`. */
+  authHeaders?: Record<string, string>;
+  /** ARV-3 AC #6 — when true, security checks return skip with a
+   *  warning. The CLI surfaces this as `--bootstrap-cleanup-failed`. */
+  bootstrapCleanupFailed?: boolean;
 }
 
 export interface RunChecksResult {
@@ -275,6 +283,80 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
         });
         if (outcome.kind === "fail") {
           recordFinding(findings, summary, check, built.case, httpResp, outcome.message, outcome.evidence);
+        }
+      }
+    }
+  }
+
+  // ── Stateful phase (ARV-3) ─────────────────────────────────────────
+  // Stateful checks share the same --check / --exclude-check filters as
+  // the response-phase ones. We honour `selection` ids and only run a
+  // stateful check whose id was either explicitly included or not
+  // explicitly excluded.
+  const includeSet = opts.include && opts.include.length > 0 ? new Set(opts.include) : null;
+  const excludeSet = new Set(opts.exclude ?? []);
+  const activeStateful = listStatefulChecks().filter((c) => {
+    if (excludeSet.has(c.id)) return false;
+    if (includeSet && !includeSet.has(c.id)) return false;
+    return true;
+  });
+
+  if (activeStateful.length > 0) {
+    const harness = makeHarness(opts.baseUrl, doc, {
+      authHeaders: opts.authHeaders,
+      bootstrapCleanupFailed: opts.bootstrapCleanupFailed,
+      timeoutMs: opts.timeoutMs,
+    });
+    const crudGroups = activeStateful.some((c) => c.phase === "crud") ? detectCrudGroups(allOps) : [];
+    summary.checks_run += activeStateful.length;
+
+    for (const check of activeStateful) {
+      if (check.phase === "auth") {
+        for (const op of ops) {
+          if (!check.applies(op)) continue;
+          let outcome;
+          try {
+            outcome = await check.run(op, harness);
+          } catch (err) {
+            outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
+          }
+          if (outcome.kind === "fail") {
+            findings.push({
+              check: check.id,
+              severity: check.severity,
+              operation: { path: op.path, method: op.method, operationId: op.operationId },
+              request_signature: `${op.method.toUpperCase()} ${op.path}`,
+              response_summary: { status: 0 },
+              message: outcome.message,
+              evidence: outcome.evidence,
+            });
+            summary.findings += 1;
+            summary.by_severity[check.severity] += 1;
+          }
+        }
+      } else {
+        for (const group of crudGroups) {
+          if (!check.applies(group)) continue;
+          let outcome;
+          try {
+            outcome = await check.run(group, harness);
+          } catch (err) {
+            outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
+          }
+          if (outcome.kind === "fail") {
+            const repOp = group.create ?? group.read!;
+            findings.push({
+              check: check.id,
+              severity: check.severity,
+              operation: { path: repOp.path, method: repOp.method, operationId: repOp.operationId },
+              request_signature: `${repOp.method.toUpperCase()} ${repOp.path} (chain)`,
+              response_summary: { status: 0 },
+              message: outcome.message,
+              evidence: outcome.evidence,
+            });
+            summary.findings += 1;
+            summary.by_severity[check.severity] += 1;
+          }
         }
       }
     }
