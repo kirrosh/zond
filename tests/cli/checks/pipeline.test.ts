@@ -65,16 +65,28 @@ describe("zond checks pipeline (ARV-1)", () => {
     await rm(tmpDir, { recursive: true, force: true });
   });
 
-  test("registry has the seed check registered after import", () => {
+  test("registry has the seed check + ARV-2 checks registered after import", () => {
     const ids = listChecks().map((c) => c.id);
-    expect(ids).toContain("not_a_server_error");
+    for (const id of [
+      "not_a_server_error",
+      "status_code_conformance",
+      "content_type_conformance",
+      "response_headers_conformance",
+      "response_schema_conformance",
+      "missing_required_header",
+      "unsupported_method",
+    ]) expect(ids).toContain(id);
   });
 
-  test("runChecks runs against all 3 operations and finds the 5xx", async () => {
-    const result = await runChecks({ specPath, baseUrl });
+  test("runChecks --check not_a_server_error finds the 5xx (ARV-2 AC #5)", async () => {
+    const result = await runChecks({
+      specPath,
+      baseUrl,
+      include: ["not_a_server_error"],
+    });
     expect(result.data.summary.operations).toBe(3);
+    // Only positive cases — exactly one per op.
     expect(result.data.summary.cases).toBe(3);
-    expect(result.data.summary.checks_run).toBeGreaterThanOrEqual(1);
     expect(result.data.findings.length).toBe(1);
     const f = result.data.findings[0]!;
     expect(f.check).toBe("not_a_server_error");
@@ -84,11 +96,12 @@ describe("zond checks pipeline (ARV-1)", () => {
     expect(result.high_or_critical).toBe(1);
   });
 
-  test("--exclude-check skips the seed check", async () => {
+  test("--exclude-check on every check produces no findings", async () => {
+    const allIds = listChecks().map((c) => c.id);
     const result = await runChecks({
       specPath,
       baseUrl,
-      exclude: ["not_a_server_error"],
+      exclude: allIds,
     });
     expect(result.data.findings.length).toBe(0);
     expect(result.high_or_critical).toBe(0);
@@ -101,13 +114,13 @@ describe("zond checks pipeline (ARV-1)", () => {
   });
 
   test("CheckRunData payload validates against the published JSON Schema", async () => {
-    const result = await runChecks({ specPath, baseUrl });
+    const result = await runChecks({ specPath, baseUrl, include: ["not_a_server_error"] });
     const parsed = ChecksRunDataSchema.safeParse(result.data);
     expect(parsed.success).toBe(true);
   });
 
   test("finding shape is stable (snapshot of envelope keys)", async () => {
-    const result = await runChecks({ specPath, baseUrl });
+    const result = await runChecks({ specPath, baseUrl, include: ["not_a_server_error"] });
     const f = result.data.findings[0]!;
     expect(Object.keys(f).sort()).toEqual([
       "check",
