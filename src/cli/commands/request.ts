@@ -280,6 +280,8 @@ import type { Command } from "commander";
 import { globalJson } from "../resolve.ts";
 import { collect, parsePositiveInt } from "../argv.ts";
 import { readCurrentApi } from "../../core/context/current.ts";
+import { loadEnvMeta } from "../../core/parser/variables.ts";
+import { resolveTimeoutMs } from "../../core/workspace/config.ts";
 
 export function registerRequest(program: Command): void {
   program
@@ -287,7 +289,7 @@ export function registerRequest(program: Command): void {
     .description("Send an ad-hoc HTTP request")
     .option("--header <H>", `Request header "Name: Value" (repeatable)`, collect, [])
     .option("--body <json>", "Request body (JSON string)")
-    .option("--timeout <ms>", "Request timeout", parsePositiveInt("--timeout"))
+    .option("--timeout <ms>", "Request timeout (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--env <name>", "Environment for variable interpolation")
     .option("--api <name>", "Collection name; auto-loads env + Authorization from apis/<name>/.secrets.yaml")
     .option("--json-path <path>", "Extract value from response (dot notation)")
@@ -297,12 +299,19 @@ export function registerRequest(program: Command): void {
     .action(async (method: string, url: string, opts, cmd: Command) => {
       const headers = (opts.header as string[] | undefined)?.length ? (opts.header as string[]) : undefined;
       const api = (opts.api as string | undefined) ?? readCurrentApi() ?? undefined;
+      let envTimeout: number | undefined;
+      if (api) {
+        try {
+          envTimeout = (await loadEnvMeta(opts.env, `apis/${api}`)).timeoutMs;
+        } catch { /* meta is best-effort */ }
+      }
+      const timeout = resolveTimeoutMs(opts.timeout, envTimeout);
       process.exitCode = await requestCommand({
         method,
         url,
         headers,
         body: opts.body,
-        timeout: opts.timeout,
+        timeout,
         env: opts.env,
         api,
         jsonPath: opts.jsonPath,

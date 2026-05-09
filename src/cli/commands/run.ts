@@ -23,6 +23,7 @@ import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
 import { detectStatusDrifts, formatDriftPlan, applyDriftsToTests, appendToleratedDrifts } from "../../core/runner/learn-drift.ts";
 import { detectCiContext } from "../../core/runner/ci-context.ts";
+import { resolveRateLimit } from "../../core/workspace/config.ts";
 
 export interface RunOptions {
   /**
@@ -236,14 +237,13 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
-  // 3b. Resolve rate limit: CLI flag > .env.yaml `rateLimit:` field
-  let rateLimit: number | "auto" | undefined = options.rateLimit;
-  if (rateLimit === undefined) {
-    try {
-      const envMeta = await loadEnvMeta(options.env, searchDir);
-      rateLimit = envMeta.rateLimit;
-    } catch { /* meta load failure is non-fatal */ }
-  }
+  // 3b. Resolve rate limit: CLI flag > .env.yaml `rateLimit:` > workspace
+  // `defaults.rate_limit` (TASK-301) > undefined.
+  let envRateLimit: number | "auto" | undefined;
+  try {
+    envRateLimit = (await loadEnvMeta(options.env, searchDir)).rateLimit;
+  } catch { /* meta load failure is non-fatal */ }
+  const rateLimit = resolveRateLimit(options.rateLimit, envRateLimit);
   const rateLimiter = rateLimit === "auto"
     ? createAdaptiveRateLimiter()
     : createRateLimiter(rateLimit);
@@ -593,7 +593,7 @@ export function registerRun(program: Command): void {
         .argParser(parseReporter),
     )
     .option("--timeout <ms>", "Override request timeout", parsePositiveInt("--timeout"))
-    .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers", parseRateLimit)
+    .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers (overrides .env.yaml `rateLimit` and zond.config.yml `defaults.rate_limit`)", parseRateLimit)
     .option("--bail", "Stop on first suite failure")
     .option("--sequential", "Run regular suites one after another instead of in parallel (opt-out of Promise.all)")
     .option("--all", "TASK-116: discover every apis/<name>/tests/ directory in the workspace and merge them into a single run row (one runs.id per CI invocation, even with multiple registered APIs). Implies CI-style aggregation; pairs with auto-detected commit_sha / branch / trigger=ci.")

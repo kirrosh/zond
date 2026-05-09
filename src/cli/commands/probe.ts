@@ -18,8 +18,11 @@ import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from ".
 import { probeSecurityCommand } from "./probe-security.ts";
 import { globalJson, resolveSpecArg, resolveApiEnv } from "../resolve.ts";
 import { existsSync } from "fs";
+import { dirname } from "node:path";
 import { parsePositiveInt } from "../argv.ts";
 import { printError } from "../output.ts";
+import { loadEnvMeta } from "../../core/parser/variables.ts";
+import { resolveTimeoutMs } from "../../core/workspace/config.ts";
 
 /**
  * TASK-233: pick the env file to feed live-probe commands.
@@ -47,6 +50,29 @@ function resolveProbeEnv(
     return { error: `Env file not found: ${resolved.env} (derived from --api ${apiFlag})` };
   }
   return { env: resolved.env };
+}
+
+/**
+ * Resolve `--timeout` for live-probe commands. Reads the per-API
+ * `.env.yaml` `timeoutMs:` meta when `--api` is set (or when the env
+ * file is on disk), then falls back to workspace `defaults.timeout_ms`.
+ */
+async function resolveProbeTimeout(
+  cliFlag: number | undefined,
+  apiFlag: string | undefined,
+  envFile: string | undefined,
+): Promise<number> {
+  let envTimeout: number | undefined;
+  try {
+    if (apiFlag) {
+      const meta = await loadEnvMeta(undefined, `apis/${apiFlag}`);
+      envTimeout = meta.timeoutMs;
+    } else if (envFile) {
+      const meta = await loadEnvMeta(undefined, dirname(envFile));
+      envTimeout = meta.timeoutMs;
+    }
+  } catch { /* meta is best-effort */ }
+  return resolveTimeoutMs(cliFlag, envTimeout);
 }
 
 function defineProbeStatic(parent: Command, name: string): void {
@@ -102,7 +128,7 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
     .option("--list-tags", "List available tags from spec and exit")
     .option("--no-cleanup", "Skip follow-up DELETE for resources accidentally created by 2xx probes")
     .option("--no-discover", "Disable auto-discovery of path-param fixtures via GET-on-list (TASK-92)")
-    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
+    .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
@@ -122,6 +148,7 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
 
       const envFile = resolveProbeEnv(opts.env, opts.api, opts.db);
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
+      const timeoutMs = await resolveProbeTimeout(opts.timeout, opts.api, envFile.env);
       process.exitCode = await probeMassAssignmentCommand({
         specPath: resolved.spec,
         env: envFile.env,
@@ -131,7 +158,7 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         listTags: opts.listTags,
         noCleanup: opts.cleanup === false,
         noDiscover: opts.discover === false,
-        timeoutMs: opts.timeout,
+        timeoutMs,
         overwrite: opts.overwrite === true,
         json: globalJson(cmd),
       });
@@ -154,7 +181,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
     .option("--no-cleanup", "Skip follow-up DELETE on resources created by baseline / 2xx attacks")
     .option("--isolated", "TASK-264: refuse to attack PUT/PATCH endpoints whose path-params come from .env.yaml — protects seeded fixtures from probe-induced mutation. Lower coverage in exchange for guaranteed fixture safety.")
     .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests")
-    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
+    .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .action(async (classes: string, specPos: string | undefined, opts, cmd: Command) => {
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
@@ -163,6 +190,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
       // fail when --api is given but the env file isn't on disk yet.
       const envFile = resolveProbeEnv(opts.env, opts.api, opts.db, { tolerateMissing: true });
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
+      const timeoutMs = await resolveProbeTimeout(opts.timeout, opts.api, envFile.env);
       process.exitCode = await probeSecurityCommand({
         specPath: resolved.spec,
         classes,
@@ -173,7 +201,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
         listTags: opts.listTags,
         noCleanup: opts.cleanup === false,
         dryRun: opts.dryRun === true,
-        timeoutMs: opts.timeout,
+        timeoutMs,
         overwrite: opts.overwrite === true,
         json: globalJson(cmd),
         apiName: typeof opts.api === "string" ? opts.api : undefined,

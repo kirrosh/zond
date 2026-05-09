@@ -1,7 +1,7 @@
 ---
 id: TASK-301
 title: 'zond.config.yml: defaults for --timeout and --rate-limit'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 07:00'
 labels:
@@ -21,8 +21,8 @@ priority: low
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond.config.yml поддерживает поля defaults.timeout, defaults.rate_limit
-- [ ] #2 Команды читают defaults, если флаг не передан
-- [ ] #3 Per-API override (apis/<name>/zond.config.yml или секция) работает
-- [ ] #4 Документация обновлена
+- [x] #1 zond.config.yml поддерживает defaults.timeout_ms, defaults.rate_limit (+ camelCase aliases)
+- [x] #2 cleanup / prepare-fixtures / probe mass-assignment / probe security / request / run читают defaults через resolveTimeoutMs / resolveRateLimit
+- [x] #3 Per-API override через apis/<name>/.env.yaml (`timeoutMs:` / `rateLimit:`); чейн CLI > .env.yaml > workspace defaults > fallback
+- [x] #4 ZOND.md (раздел Workspace defaults), init-template zond-config.yml, CHANGELOG, unit-тесты config.test.ts
 <!-- AC:END -->
