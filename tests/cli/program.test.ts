@@ -88,16 +88,10 @@ describe("buildProgram — registration", () => {
       "run", "validate", "ci", "coverage", "init",
       "add", "refresh-api", "doctor", "session",
       "describe", "db", "request", "generate", "catalog",
-      "export", "update",
+      "export",
     ]) {
       expect(names.has(expected)).toBe(true);
     }
-  });
-
-  test("update command has self-update alias", () => {
-    const program = buildProgram();
-    const updateCmd = program.commands.find((c) => c.name() === "update");
-    expect(updateCmd?.aliases()).toContain("self-update");
   });
 
   test("db has 5 nested subcommands", () => {
