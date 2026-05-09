@@ -203,7 +203,7 @@ confirm.
 
 ```bash
 zond generate apis/<name>/spec.json --output apis/<name>/tests [--tag <spec-tag>] [--uncovered-only]
-zond validate apis/<name>/tests
+zond check tests apis/<name>/tests
 ```
 
 `generate` fills bodies with `{{$randomString}}`. Format-strict APIs reject
@@ -374,7 +374,7 @@ zond db compare <idA> <idB> --json           # regression diff
 `agent_directive` = literal next step. `recommended_action` ∈
 {`fix_test_logic` (edit YAML), `report_backend_bug` (STOP, report),
 `fix_auth_config`, `fix_network_config`, `fix_env`, `fix_spec` (edit
-OpenAPI — emitted by `lint-spec`), `fix_fixture` (fill `.env.yaml` —
+OpenAPI — emitted by `check spec`), `fix_fixture` (fill `.env.yaml` —
 emitted by `discover` and inconclusive mass-assignment baselines)}.
 
 ### 4a. Fixing 4xx caused by stub generators

@@ -1,7 +1,7 @@
 ---
 id: TASK-298
 title: consolidate validate + lint-spec into zond check
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 07:00'
 labels:
@@ -22,8 +22,8 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Команда zond check работает на тестах и спеках (subcommand или auto-detect)
-- [ ] #2 validate / lint-spec deprecated с warning
-- [ ] #3 skills/, README обновлены на check
-- [ ] #4 CHANGELOG breaking-change запись
+- [x] #1 Команда zond check работает на тестах и спеках (subcommand `check tests` / `check spec`)
+- [x] #2 validate / lint-spec удалены без deprecation (по решению пользователя)
+- [x] #3 skills/, README, ZOND.md обновлены на check
+- [x] #4 CHANGELOG breaking-change запись
 <!-- AC:END -->

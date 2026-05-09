@@ -1,7 +1,7 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
 import { existsSync } from "fs";
 import { runCommand } from "../../src/cli/commands/run.ts";
-import { validateCommand } from "../../src/cli/commands/validate.ts";
+import { checkTestsCommand } from "../../src/cli/commands/check.ts";
 import { closeDb } from "../../src/db/schema.ts";
 import { tmpDb, unlinkDb as tryUnlink } from "../_helpers/tmp-db";
 import { captureOutput } from "../_helpers/output";
@@ -210,7 +210,7 @@ describe("runCommand", () => {
   });
 });
 
-describe("validateCommand", () => {
+describe("checkTestsCommand", () => {
   let restore: () => void;
 
   afterEach(() => {
@@ -219,25 +219,25 @@ describe("validateCommand", () => {
 
   test("returns 0 for valid YAML", async () => {
     restore = captureOutput().restore;
-    const code = await validateCommand({ path: `${FIXTURES}/simple.yaml` });
+    const code = await checkTestsCommand({ path: `${FIXTURES}/simple.yaml` });
     expect(code).toBe(0);
   });
 
   test("returns 2 for invalid YAML", async () => {
     restore = captureOutput().restore;
-    const code = await validateCommand({ path: `${FIXTURES}/invalid-missing-name.yaml` });
+    const code = await checkTestsCommand({ path: `${FIXTURES}/invalid-missing-name.yaml` });
     expect(code).toBe(2);
   });
 
   test("returns 0 for valid directory", async () => {
     restore = captureOutput().restore;
-    const code = await validateCommand({ path: `${FIXTURES}/valid` });
+    const code = await checkTestsCommand({ path: `${FIXTURES}/valid` });
     expect(code).toBe(0);
   });
 
   test("returns 2 for nonexistent path", async () => {
     restore = captureOutput().restore;
-    const code = await validateCommand({ path: `${FIXTURES}/nonexistent.yaml` });
+    const code = await checkTestsCommand({ path: `${FIXTURES}/nonexistent.yaml` });
     expect(code).toBe(2);
   });
 });

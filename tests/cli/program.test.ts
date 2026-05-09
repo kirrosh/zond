@@ -85,7 +85,7 @@ describe("buildProgram — registration", () => {
     const program = buildProgram();
     const names = new Set(program.commands.map((c) => c.name()));
     for (const expected of [
-      "run", "validate", "ci", "coverage", "init",
+      "run", "check", "ci", "coverage", "init",
       "add", "refresh-api", "doctor", "session",
       "describe", "db", "request", "generate", "catalog",
     ]) {
@@ -302,9 +302,11 @@ describe("TASK-297: rich --help with related-skill footer", () => {
 
   test("`zond <leaf> --help` ends with a 'Related skill: …' footer", () => {
     const program = buildProgram();
-    const sample = ["doctor", "lint-spec", "discover", "validate"];
-    for (const name of sample) {
-      const cmd = program.commands.find((c) => c.name() === name);
+    const sample: Array<string | string[]> = ["doctor", "discover", ["check", "spec"], ["check", "tests"]];
+    for (const entry of sample) {
+      const segs = Array.isArray(entry) ? entry : [entry];
+      let cmd: import("commander").Command | undefined = program;
+      for (const seg of segs) cmd = cmd?.commands.find((c) => c.name() === seg);
       expect(cmd).toBeDefined();
       expect(capture(cmd!)).toMatch(/Related skill: skills\//);
     }
@@ -321,8 +323,9 @@ describe("TASK-297: rich --help with related-skill footer", () => {
 
   test("default leaf falls back to skills/zond.md", () => {
     const program = buildProgram();
-    const valid = program.commands.find((c) => c.name() === "validate")!;
-    expect(capture(valid)).toContain("Related skill: skills/zond.md");
+    const check = program.commands.find((c) => c.name() === "check")!;
+    const tests = check.commands.find((c) => c.name() === "tests")!;
+    expect(capture(tests)).toContain("Related skill: skills/zond.md");
   });
 });
 

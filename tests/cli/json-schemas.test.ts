@@ -24,7 +24,7 @@ describe("TASK-295: docs/json-schema is in sync with zod source", () => {
   test("envelope schema validates a real --json envelope", () => {
     const sample = {
       ok: false,
-      command: "lint-spec",
+      command: "check spec",
       data: null,
       warnings: [],
       errors: [{ code: "spec_load_failure" as const, message: "boom" }],
