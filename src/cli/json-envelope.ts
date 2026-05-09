@@ -16,52 +16,18 @@
  * or a structured `ZondError` to keep call sites short.
  */
 
-/**
- * Closed enum of agent-routable error categories. New values land here
- * before they're emitted at any call site so the schema stays self-
- * describing. `unknown_error` is the default when a site hasn't been
- * classified yet — it is intentionally surfaced (not silent) so that
- * search-and-classify passes are easy.
- */
-export type ZondErrorCode =
-  | "unknown_error"
-  /** Required env var / .env.yaml entry missing or placeholder. */
-  | "env_missing"
-  /** Fixture id (path-param, FK) absent or unresolvable from .env.yaml. */
-  | "fixture_missing"
-  /** Live HTTP request timed out. */
-  | "network_timeout"
-  /** Generic network failure (DNS, connection refused, TLS, …). */
-  | "network_error"
-  /** Outbound request blocked by a sandbox / firewall (CI restrictions). */
-  | "sandbox_blocked"
-  /** OpenAPI spec or YAML config failed to load / parse / validate. */
-  | "spec_load_failure"
-  /** YAML test suite failed to parse. */
-  | "yaml_parse_error"
-  /** Workspace anchor (zond.config.yml / .zond/) not found. */
-  | "workspace_not_found"
-  /** Required file or directory missing. */
-  | "file_not_found"
-  /** Filesystem permission / read-only failure. */
-  | "permission_denied"
-  /** CLI argument / option invalid or missing. */
-  | "argument_invalid"
-  /** Requested API name not registered (per `zond list-apis`). */
-  | "api_not_registered"
-  /** SQLite / db layer failure. */
-  | "db_error"
-  /** Auth/credentials misconfigured (token missing, bearer format wrong, …). */
-  | "auth_config_error";
+// TASK-295: types are derived from the zod schemas in `./json-schemas.ts`
+// so the published JSON Schema (docs/json-schema/) and the runtime types
+// can never drift. Edit the enum/object there, run `bun run schemas`,
+// commit the regenerated docs.
+import type { z } from "zod";
+import {
+  ZondErrorCodeSchema,
+  ZondErrorSchema,
+} from "./json-schemas.ts";
 
-export interface ZondError {
-  code: ZondErrorCode;
-  message: string;
-  /** Optional structured payload (path, status, var name, …) — kept loose
-   *  on purpose so each call site can attach what it has without growing
-   *  the central enum. */
-  details?: Record<string, unknown>;
-}
+export type ZondErrorCode = z.infer<typeof ZondErrorCodeSchema>;
+export type ZondError = z.infer<typeof ZondErrorSchema>;
 
 export interface JsonEnvelope<T = unknown> {
   ok: boolean;

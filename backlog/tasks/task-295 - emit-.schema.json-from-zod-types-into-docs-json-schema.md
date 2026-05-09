@@ -1,9 +1,10 @@
 ---
 id: TASK-295
 title: emit *.schema.json from zod types into docs/json-schema/
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 07:00'
+updated_date: '2026-05-09 07:59'
 labels:
   - json
   - agent-first
@@ -22,7 +23,7 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Скрипт bun run schemas:emit создаёт docs/json-schema/
+- [x] #1 Скрипт bun run schemas:emit создаёт docs/json-schema/
 - [ ] #2 Schemas покрывают envelope, Issue, SecurityFinding, RunResult, CoverageReport
 - [ ] #3 CI проверяет, что schemas в репо актуальны (diff fails)
 <!-- AC:END -->

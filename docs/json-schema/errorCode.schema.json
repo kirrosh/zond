@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "string",
+  "enum": [
+    "unknown_error",
+    "env_missing",
+    "fixture_missing",
+    "network_timeout",
+    "network_error",
+    "sandbox_blocked",
+    "spec_load_failure",
+    "yaml_parse_error",
+    "workspace_not_found",
+    "file_not_found",
+    "permission_denied",
+    "argument_invalid",
+    "api_not_registered",
+    "db_error",
+    "auth_config_error"
+  ]
+}
