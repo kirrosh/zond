@@ -3,10 +3,10 @@ id: TASK-240
 title: >-
   generate: несогласованные имена suite-файлов (smoke-tag.yaml vs
   smoke-tag-negative.yaml)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 08:37'
-updated_date: '2026-05-09 09:06'
+updated_date: '2026-05-09 09:36'
 labels:
   - feedback-loop
   - api-sentry

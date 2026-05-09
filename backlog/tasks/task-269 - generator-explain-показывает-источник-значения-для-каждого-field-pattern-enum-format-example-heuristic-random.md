@@ -1,16 +1,19 @@
 ---
 id: TASK-269
-title: 'generator: --explain показывает источник значения для каждого field (pattern/enum/format/example/heuristic/random)'
-status: To Do
+title: >-
+  generator: --explain показывает источник значения для каждого field
+  (pattern/enum/format/example/heuristic/random)
+status: Done
 assignee: []
 created_date: '2026-05-08 15:30'
+updated_date: '2026-05-09 09:36'
 labels:
   - feedback-loop
   - generator
   - cli-ux
+milestone: m-14
 dependencies:
   - TASK-263
-milestone: m-14
 priority: low
 ---
 
@@ -36,10 +39,11 @@ POST /projects/
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] `generateFromSchema` (или обёртка) возвращает per-field source: `pattern` | `enum` | `format` | `example` | `examples` | `heuristic:<rule>` | `random` | `min/max`.
-- [ ] `zond generate --explain --tag <T>` (или новый флаг) печатает таблицу полей body с источником.
-- [ ] Tests: source-tracking покрыт юнит-тестами (минимум по 1 примеру на каждый источник).
-- [ ] Не ломает существующий API `generateFromSchema` (источник опционален).
+- [ ] #1 `generateFromSchema` (или обёртка) возвращает per-field source: `pattern` | `enum` | `format` | `example` | `examples` | `heuristic:<rule>` | `random` | `min/max`.
+- [ ] #2 `zond generate --explain --tag <T>` (или новый флаг) печатает таблицу полей body с источником.
+- [ ] #3 Tests: source-tracking покрыт юнит-тестами (минимум по 1 примеру на каждый источник).
+- [ ] #4 Не ломает существующий API `generateFromSchema` (источник опционален).
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->
