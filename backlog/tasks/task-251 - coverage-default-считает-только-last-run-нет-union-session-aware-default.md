@@ -4,15 +4,16 @@ title: 'coverage: default считает только last run, нет union/ses
 status: To Do
 assignee: []
 created_date: '2026-05-08 13:00'
+updated_date: '2026-05-09 09:06'
 labels:
   - feedback-loop
   - api-sentry
   - coverage
   - ux
+milestone: m-14
 dependencies:
   - TASK-242
-milestone: m-14
-priority: low
+priority: medium
 ---
 
 ## Description
@@ -35,9 +36,10 @@ Actual: пользователь думает coverage суммарный, по�
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] Решение: либо default = union последней сессии (auto-detect по timestamps/PID), либо `--session` flag, либо `--combine run1,run2`.
-- [ ] `coverage --help` явно упоминает как сложить несколько runs.
-- [ ] Verify: 2 run'а с разными тегами → coverage показывает union, не last.
+- [ ] #1 Решение: либо default = union последней сессии (auto-detect по timestamps/PID), либо `--session` flag, либо `--combine run1,run2`.
+- [ ] #2 `coverage --help` явно упоминает как сложить несколько runs.
+- [ ] #3 Verify: 2 run'а с разными тегами → coverage показывает union, не last.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->

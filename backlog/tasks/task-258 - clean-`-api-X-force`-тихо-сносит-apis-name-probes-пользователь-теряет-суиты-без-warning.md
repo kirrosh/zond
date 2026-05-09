@@ -1,17 +1,20 @@
 ---
 id: TASK-258
-title: 'clean: `--api X --force` тихо сносит apis/<name>/probes/, пользователь теряет суиты без warning'
+title: >-
+  clean: `--api X --force` тихо сносит apis/<name>/probes/, пользователь теряет
+  суиты без warning
 status: To Do
 assignee: []
 created_date: '2026-05-08 14:30'
+updated_date: '2026-05-09 09:06'
 labels:
   - feedback-loop
   - api-sentry
   - cli
   - ux
-dependencies: []
 milestone: m-14
-priority: low
+dependencies: []
+priority: high
 ---
 
 ## Description
@@ -38,9 +41,10 @@ Actual: silent removal, никакого hint.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] `clean --api X --force` либо не удаляет `probes/` по умолчанию, либо печатает явный warning с командой регенерации.
-- [ ] Решение задокументировано в `clean --help`.
-- [ ] Verify: после `zond clean --api sentry --force` пользователь видит чёткий путь восстановления probes.
+- [ ] #1 `clean --api X --force` либо не удаляет `probes/` по умолчанию, либо печатает явный warning с командой регенерации.
+- [ ] #2 Решение задокументировано в `clean --help`.
+- [ ] #3 Verify: после `zond clean --api sentry --force` пользователь видит чёткий путь восстановления probes.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->

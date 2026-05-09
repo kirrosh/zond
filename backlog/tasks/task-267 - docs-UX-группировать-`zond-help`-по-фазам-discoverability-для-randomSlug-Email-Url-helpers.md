@@ -1,17 +1,20 @@
 ---
 id: TASK-267
-title: 'docs/UX: группировать `zond --help` по фазам + discoverability для $randomSlug/Email/Url helpers'
+title: >-
+  docs/UX: группировать `zond --help` по фазам + discoverability для
+  $randomSlug/Email/Url helpers
 status: To Do
 assignee: []
 created_date: '2026-05-08 15:00'
+updated_date: '2026-05-09 09:06'
 labels:
   - feedback-loop
   - docs
   - cli
   - ux
-dependencies: []
 milestone: m-14
-priority: low
+dependencies: []
+priority: high
 ---
 
 ## Description
@@ -36,10 +39,11 @@ Source: feedback-12 impressions, "Документация / discovery".
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] `zond --help` группирует команды по фазам (setup/generate/run/analyze/report/other).
-- [ ] `zond reference random-helpers` (или эквивалент) перечисляет все `$random*` с описанием и пример output.
-- [ ] `docs/random-helpers.md` существует и упомянут в `generate --help`.
-- [ ] (опционально) `docs/cookbook/sentry.md` с типовым flow.
+- [ ] #1 `zond --help` группирует команды по фазам (setup/generate/run/analyze/report/other).
+- [ ] #2 `zond reference random-helpers` (или эквивалент) перечисляет все `$random*` с описанием и пример output.
+- [ ] #3 `docs/random-helpers.md` существует и упомянут в `generate --help`.
+- [ ] #4 (опционально) `docs/cookbook/sentry.md` с типовым flow.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->

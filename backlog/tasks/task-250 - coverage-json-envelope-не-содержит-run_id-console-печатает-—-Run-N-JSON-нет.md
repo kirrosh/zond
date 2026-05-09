@@ -1,18 +1,21 @@
 ---
 id: TASK-250
-title: 'coverage --json: envelope не содержит run_id (console печатает "— Run #N", JSON нет)'
+title: >-
+  coverage --json: envelope не содержит run_id (console печатает "— Run #N",
+  JSON нет)
 status: To Do
 assignee: []
 created_date: '2026-05-08 13:00'
+updated_date: '2026-05-09 09:06'
 labels:
   - feedback-loop
   - api-sentry
   - coverage
   - ux
+milestone: m-14
 dependencies:
   - TASK-242
-milestone: m-14
-priority: low
+priority: medium
 ---
 
 ## Description
@@ -33,9 +36,10 @@ Expected: JSON envelope содержит `run_id` (или `runId`) рядом с
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] `zond coverage --json` envelope содержит `runId` (numeric, рядом с `covered`/`total`/`percentage`).
-- [ ] При `--run-id N` поле отражает указанный run; при default — last run.
-- [ ] Regression-test: `jq '.data.runId' < json` → number, не null.
+- [ ] #1 `zond coverage --json` envelope содержит `runId` (numeric, рядом с `covered`/`total`/`percentage`).
+- [ ] #2 При `--run-id N` поле отражает указанный run; при default — last run.
+- [ ] #3 Regression-test: `jq '.data.runId' < json` → number, не null.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->
