@@ -1,0 +1,292 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "check_start"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "operation": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "method"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "ts",
+        "operation"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "check_result"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "fail"
+          ]
+        },
+        "operation": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "method": {
+              "type": "string"
+            },
+            "operationId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "method"
+          ],
+          "additionalProperties": false
+        },
+        "request_signature": {
+          "type": "string"
+        },
+        "response": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "content_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "ts",
+        "check",
+        "verdict",
+        "operation",
+        "request_signature",
+        "response"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "finding"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "finding": {
+          "type": "object",
+          "properties": {
+            "check": {
+              "type": "string"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "operation": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "method": {
+                  "type": "string"
+                },
+                "operationId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path",
+                "method"
+              ],
+              "additionalProperties": false
+            },
+            "request_signature": {
+              "type": "string"
+            },
+            "response_summary": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "content_type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            },
+            "message": {
+              "type": "string"
+            },
+            "evidence": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {}
+            },
+            "recommended_action": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "check",
+            "severity",
+            "operation",
+            "request_signature",
+            "response_summary",
+            "message"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "ts",
+        "finding"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "summary"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "operations": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "cases": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "checks_run": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "findings": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "by_severity": {
+              "type": "object",
+              "properties": {
+                "low": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "medium": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "high": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "critical": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "operations",
+            "cases",
+            "checks_run",
+            "findings",
+            "by_severity"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "ts",
+        "summary"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

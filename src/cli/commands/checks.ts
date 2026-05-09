@@ -17,6 +17,7 @@ import type { Command } from "commander";
 import { listChecks, runChecks } from "../../core/checks/index.ts";
 import { listStatefulChecks } from "../../core/checks/stateful.ts";
 import { generateSarifReport } from "../../core/checks/sarif.ts";
+import { emitToStdout } from "../../core/reporter/ndjson.ts";
 import { compileOperationFilter } from "../../core/utils/operation-filter.ts";
 import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
@@ -77,6 +78,7 @@ interface ChecksRunOptions {
   mode?: string;
   include?: string[];
   exclude?: string[];
+  ndjson?: boolean;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -142,6 +144,22 @@ async function resolveBaseUrl(
 async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   const opts = cmd.opts<ChecksRunOptions>();
   const json = opts.json === true || globalJson(cmd);
+  const ndjson = opts.ndjson === true;
+
+  // ARV-10: --ndjson and --json render fundamentally different shapes
+  // (stream of events vs. one envelope). Mixing them silently would
+  // produce malformed output — fail loudly with the same exit code as
+  // other CLI-input errors.
+  if (ndjson && json) {
+    const msg = "--ndjson and --json are mutually exclusive — pick one";
+    printError(msg);
+    process.exit(2);
+  }
+  if (ndjson && typeof opts.report === "string") {
+    const msg = "--ndjson conflicts with --report — pick one output channel";
+    printError(msg);
+    process.exit(2);
+  }
 
   const specRes = resolveSpecArg(opts.spec, opts.api ?? cmd.parent?.opts().api, opts.db);
   if ("error" in specRes) {
@@ -204,6 +222,11 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       allowX00: opts.allowX00 === true,
       mode: modeRaw as "positive" | "negative" | "all",
       operationFilter,
+      // ARV-10: in --ndjson mode, every event flushes to stdout *as it
+      // happens*. The CLI's per-finding text below is suppressed (so
+      // stdout stays a clean NDJSON stream); progress / warnings still
+      // go to stderr.
+      onEvent: ndjson ? emitToStdout : undefined,
     });
     const warnings: string[] = [];
     for (const id of result.selection.unknown) {
@@ -236,6 +259,16 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
 
     if (json) {
       printJson(jsonOk("checks run", result.data, warnings.length > 0 ? warnings : undefined));
+    } else if (ndjson) {
+      // ARV-10: stdout already carries the NDJSON stream (events were
+      // flushed inside runChecks via onEvent). Warnings ride on stderr
+      // so a `| jq` consumer never sees them; the human one-liner is
+      // also routed to stderr to keep stdout discipline (AC #5).
+      for (const w of warnings) console.error(w);
+      const s = result.data.summary;
+      console.error(
+        `${s.findings} finding(s) across ${s.cases} case(s) on ${s.operations} operation(s) — ${s.checks_run} check(s) active`,
+      );
     } else {
       for (const w of warnings) console.error(w);
       const s = result.data.summary;
@@ -313,6 +346,10 @@ function defineRun(parent: Command): void {
     .option(
       "--exclude <spec...>",
       "ARV-9: drop operations matching <selector>:<value>. Same grammar as --include. Excludes evaluated after includes.",
+    )
+    .option(
+      "--ndjson",
+      "ARV-10: stream events as NDJSON on stdout (one JSON object per line). Event types: check_start, check_result, finding, summary. Schema: docs/json-schema/ndjson-events.schema.json. Mutually exclusive with --json/--report.",
     )
     .action(checksRunAction);
 }

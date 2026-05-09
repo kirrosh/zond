@@ -104,6 +104,56 @@ export const ChecksRunDataSchema = z.object({
   summary: CheckRunSummarySchema,
 });
 
+/** ARV-10 (m-15): NDJSON streaming events emitted by `zond checks run
+ *  --ndjson`. Each event is a snapshot JSON line on stdout — agents pipe
+ *  the stream into `jq` / a validator and consume findings as they happen
+ *  rather than waiting for the run to finish. The discriminated union
+ *  below is the schema we publish — every emitted line MUST match one
+ *  branch exactly (verified by ajv in tests). */
+const OperationRefSchema = z.object({
+  path: z.string(),
+  method: z.string(),
+  operationId: z.string().optional(),
+});
+
+export const NdjsonCheckStartEventSchema = z.object({
+  type: z.literal("check_start"),
+  ts: z.string(),
+  operation: OperationRefSchema,
+});
+
+export const NdjsonCheckResultEventSchema = z.object({
+  type: z.literal("check_result"),
+  ts: z.string(),
+  check: z.string(),
+  verdict: z.enum(["pass", "fail"]),
+  operation: OperationRefSchema,
+  request_signature: z.string(),
+  response: z.object({
+    status: z.number().int(),
+    content_type: z.string().optional(),
+  }),
+});
+
+export const NdjsonFindingEventSchema = z.object({
+  type: z.literal("finding"),
+  ts: z.string(),
+  finding: CheckFindingSchema,
+});
+
+export const NdjsonSummaryEventSchema = z.object({
+  type: z.literal("summary"),
+  ts: z.string(),
+  summary: CheckRunSummarySchema,
+});
+
+export const NdjsonEventSchema = z.discriminatedUnion("type", [
+  NdjsonCheckStartEventSchema,
+  NdjsonCheckResultEventSchema,
+  NdjsonFindingEventSchema,
+  NdjsonSummaryEventSchema,
+]);
+
 export const SCHEMAS = {
   envelope: JsonEnvelopeSchema,
   error: ZondErrorSchema,
@@ -111,4 +161,5 @@ export const SCHEMAS = {
   recommendedAction: RecommendedActionSchema,
   checksRunData: ChecksRunDataSchema,
   checkFinding: CheckFindingSchema,
+  "ndjson-events": NdjsonEventSchema,
 } as const;
