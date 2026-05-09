@@ -52,6 +52,26 @@ Run `zond --version` first; if missing:
   envs.
 - For multi-suite tag filters always include `setup`: `--tag crud,setup`.
 - Re-run after each fix with `--json`; don't batch edits without verifying.
+- **NEVER run destructive ops on a shared / production org without `--dry-run`
+  first.** Why: probes, `discover --apply`, `cleanup` all hit live APIs and
+  can delete user data. The dry-run path is in every command's `--help`; use
+  it on first run, inspect the diff, then drop the flag.
+- **NEVER report a cleanup failure as an API bug.** A POST that 200-OKs and
+  then a follow-up DELETE that 5xx-es is *probably* a fixture-isolation issue
+  (orphan accumulation, race), not an API contract bug. Re-run with
+  `--no-cleanup` or in an isolated namespace before filing.
+- **NEVER share a triage artefact (case-study, html, bundle, digest) outside
+  the user's org without `--redact-identity`.** Why: identity-file values
+  (org/member/project slugs, real ids) leak otherwise; the redaction registry
+  only catches secrets, not identifying metadata.
+- **MUST timeout the bootstrap cascade at 8 passes (default).** Why:
+  `zond bootstrap` chains `add api → doctor → discover → generate` and the
+  cascade can self-trigger on partially-resolved fixtures. The CLI bounds
+  the loop; never override the cap without a written reason.
+- **MUST run `zond doctor --api <name> --missing-only` before generating
+  fixtures or touching `.env.yaml`.** Why: the diagnostic identifies the
+  exact unfilled keys before the workflow blows up midway. Skipping doctor
+  produces fixture sets with phantom keys that 404 every probe.
 
 ## Workspace assumption
 

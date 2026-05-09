@@ -30,6 +30,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **TASK-292: 5 iron rules in `skills/zond.md`.** Promotes from
+  audit-and-consolidation §6: NEVER destructive ops on shared/prod org
+  without `--dry-run`; NEVER report cleanup-failure as API bug; NEVER
+  share triage artefacts without `--redact-identity`; MUST timeout
+  bootstrap cascade (default 8 passes); MUST run
+  `zond doctor --api <name> --missing-only` first. Each has a one-line
+  rationale embedded next to the rule.
+
 - **TASK-290: global `--api` flag + `ZOND_API` env + `.zond/current-api` file.**
   `zond` now resolves the active API from a single chain (highest wins):
   per-command `--api` > root `--api` > `ZOND_API` env > `.zond/current-api`
