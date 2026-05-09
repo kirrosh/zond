@@ -1,17 +1,20 @@
 ---
 id: TASK-248
-title: 'workspace resolve: суммировать или подавить per-var Undefined-warnings когда workspace anchor не найден'
+title: >-
+  workspace resolve: суммировать или подавить per-var Undefined-warnings когда
+  workspace anchor не найден
 status: To Do
 assignee: []
 created_date: '2026-05-08 13:00'
+updated_date: '2026-05-09 09:06'
 labels:
   - feedback-loop
   - api-sentry
   - workspace
   - ux
-dependencies: []
 milestone: m-14
-priority: low
+dependencies: []
+priority: medium
 ---
 
 ## Description
@@ -36,8 +39,9 @@ Actual: 8-12 предупреждений на тест, шум.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] Когда workspace marker не найден И .env.yaml не загружен — per-var warnings сворачиваются в один line с агрегированным списком.
-- [ ] Verify: `zond run /tmp/_outside.yaml` → 1 summary-hint + 1 aggregated `Undefined: ...` line, не 8-12.
+- [ ] #1 Когда workspace marker не найден И .env.yaml не загружен — per-var warnings сворачиваются в один line с агрегированным списком.
+- [ ] #2 Verify: `zond run /tmp/_outside.yaml` → 1 summary-hint + 1 aggregated `Undefined: ...` line, не 8-12.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->

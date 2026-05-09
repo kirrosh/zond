@@ -4,12 +4,13 @@ title: 'generate: Next steps печатается N раз при batch-запу
 status: To Do
 assignee: []
 created_date: '2026-05-08 08:36'
+updated_date: '2026-05-09 09:06'
 labels:
   - feedback-loop
   - api-sentry
-dependencies: []
 milestone: m-14
-priority: low
+dependencies: []
+priority: medium
 ---
 
 ## Description

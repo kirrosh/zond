@@ -1,16 +1,19 @@
 ---
 id: TASK-266
-title: 'zond db diagnose: без аргумента — последний failing run (вместо ручного `db runs | head`)'
+title: >-
+  zond db diagnose: без аргумента — последний failing run (вместо ручного `db
+  runs | head`)
 status: To Do
 assignee: []
 created_date: '2026-05-08 15:00'
+updated_date: '2026-05-09 09:06'
 labels:
   - feedback-loop
   - cli
   - ux
-dependencies: []
 milestone: m-14
-priority: low
+dependencies: []
+priority: high
 ---
 
 ## Description
@@ -26,11 +29,12 @@ Source: feedback-12 impressions, "QoL" #2.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
+<!-- AC:BEGIN -->
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] `zond db diagnose` без аргументов = последний failing run; если все pass → последний run + сообщение «no failures».
-- [ ] `--latest` = последний run независимо от статуса.
-- [ ] `--run-id N` сохраняется как explicit override.
-- [ ] `--help` явно описывает default behaviour.
-- [ ] Verify: после неудачного run'а `zond db diagnose` сразу показывает диагностику без ручного поиска ID.
+- [ ] #1 `zond db diagnose` без аргументов = последний failing run; если все pass → последний run + сообщение «no failures».
+- [ ] #2 `--latest` = последний run независимо от статуса.
+- [ ] #3 `--run-id N` сохраняется как explicit override.
+- [ ] #4 `--help` явно описывает default behaviour.
+- [ ] #5 Verify: после неудачного run'а `zond db diagnose` сразу показывает диагностику без ручного поиска ID.
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->
