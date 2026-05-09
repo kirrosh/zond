@@ -18,6 +18,8 @@ import { listChecks, runChecks } from "../../core/checks/index.ts";
 import { listStatefulChecks } from "../../core/checks/stateful.ts";
 import { generateSarifReport } from "../../core/checks/sarif.ts";
 import { emitToStdout } from "../../core/reporter/ndjson.ts";
+import { parseWorkers } from "../../core/runner/async-pool.ts";
+import { createAdaptiveRateLimiter, createRateLimiter, type RateLimiter } from "../../core/runner/rate-limiter.ts";
 import { compileOperationFilter } from "../../core/utils/operation-filter.ts";
 import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
@@ -79,6 +81,8 @@ interface ChecksRunOptions {
   include?: string[];
   exclude?: string[];
   ndjson?: boolean;
+  workers?: string;
+  rateLimit?: string;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -209,6 +213,37 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   }
   const operationFilter = (opts.include?.length || opts.exclude?.length) ? compiled.filter : undefined;
 
+  // ARV-8: --workers <n|auto>. Errors here are CLI-input failures (exit
+  // 2) — we don't want a stack trace for a typo.
+  let workers: number;
+  try {
+    workers = parseWorkers(opts.workers);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (json) printJson(jsonError("checks run", [msg]));
+    else printError(msg);
+    process.exit(2);
+  }
+
+  // ARV-8: --rate-limit <rps|auto>. `auto` = adaptive (reacts to
+  // RateLimit-* response headers); numeric = fixed RPS budget.
+  let rateLimiter: RateLimiter | undefined;
+  if (typeof opts.rateLimit === "string" && opts.rateLimit.length > 0) {
+    const v = opts.rateLimit.trim().toLowerCase();
+    if (v === "auto") {
+      rateLimiter = createAdaptiveRateLimiter();
+    } else {
+      const rps = Number.parseFloat(v);
+      if (!Number.isFinite(rps) || rps <= 0) {
+        const msg = `Invalid --rate-limit value: "${opts.rateLimit}" (expected positive number or "auto")`;
+        if (json) printJson(jsonError("checks run", [msg]));
+        else printError(msg);
+        process.exit(2);
+      }
+      rateLimiter = createRateLimiter(rps);
+    }
+  }
+
   try {
     const result = await runChecks({
       specPath: specRes.spec,
@@ -222,11 +257,12 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       allowX00: opts.allowX00 === true,
       mode: modeRaw as "positive" | "negative" | "all",
       operationFilter,
-      // ARV-10: in --ndjson mode, every event flushes to stdout *as it
-      // happens*. The CLI's per-finding text below is suppressed (so
-      // stdout stays a clean NDJSON stream); progress / warnings still
-      // go to stderr.
       onEvent: ndjson ? emitToStdout : undefined,
+      // ARV-8: bounded concurrency at op-level + optional rate-limiter
+      // gating. workers=1 (default) preserves the pre-ARV-8 sequential
+      // path inside runPool — same observable behaviour.
+      workers,
+      rateLimiter,
     });
     const warnings: string[] = [];
     for (const id of result.selection.unknown) {
@@ -350,6 +386,14 @@ function defineRun(parent: Command): void {
     .option(
       "--ndjson",
       "ARV-10: stream events as NDJSON on stdout (one JSON object per line). Event types: check_start, check_result, finding, summary. Schema: docs/json-schema/ndjson-events.schema.json. Mutually exclusive with --json/--report.",
+    )
+    .option(
+      "--workers <n>",
+      "ARV-8: bounded concurrency at the operation level. <n> = positive integer (clamped 1..64) or `auto` (= min(cpus, 8)). Default 1 (sequential, byte-for-byte the pre-ARV-8 behaviour). Cases inside one operation always run sequentially regardless — only ops are parallelized.",
+    )
+    .option(
+      "--rate-limit <rps>",
+      "ARV-8: cap outbound RPS — positive number (fixed budget) or `auto` (adaptive — paces from RateLimit-* response headers, RFC 9568). Combined with --workers, the limiter gates *all* workers globally so N workers never exceed <rps>.",
     )
     .action(checksRunAction);
 }

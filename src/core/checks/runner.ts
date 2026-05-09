@@ -33,6 +33,8 @@ import { listStatefulChecks, makeHarness } from "./stateful.ts";
 import { caseMatchesMode, filterChecksByMode, type Mode } from "./mode.ts";
 import { buildNegativeBody } from "./checks/_negative_mutator.ts";
 import { nowIso, type NdjsonEvent } from "../reporter/ndjson.ts";
+import { runPool } from "../runner/async-pool.ts";
+import type { RateLimiter } from "../runner/rate-limiter.ts";
 import {
   emptySummary,
   type CaseKind,
@@ -77,6 +79,16 @@ export interface RunChecksOptions {
    *  buffering until the run finishes). Must not throw — exceptions are
    *  the caller's responsibility (the runner doesn't catch). */
   onEvent?: (event: NdjsonEvent) => void;
+  /** ARV-8 — bounded async-pool concurrency at the *operation* level.
+   *  `1` (default) = sequential, identical to the pre-ARV-8 behaviour.
+   *  Cases within an operation always run sequentially regardless of
+   *  this — share state (e.g. CRUD chains) lives at op-level, not
+   *  case-level, so case-parallelism would corrupt it. */
+  workers?: number;
+  /** ARV-8 — gate every outbound HTTP request through the limiter so
+   *  bursts of parallel workers respect a global RPS budget (also
+   *  reacts to RateLimit-* headers via `note()`). */
+  rateLimiter?: RateLimiter;
 }
 
 export interface RunChecksResult {
@@ -271,9 +283,12 @@ function summarizeResponse(resp: HttpResponse): { status: number; content_type?:
   return { status: resp.status, content_type: ct };
 }
 
+/** Build a finding, push it into the per-op buffer, and stream the
+ *  ARV-10 NDJSON event. Summary aggregation moved out — the caller
+ *  merges per-op buffers in input order so workers > 1 doesn't have to
+ *  contend on a shared `summary` object. */
 function recordFinding(
   out: CheckFinding[],
-  summary: CheckRunSummary,
   check: Check,
   c: CheckCase,
   resp: HttpResponse,
@@ -291,13 +306,6 @@ function recordFinding(
     evidence,
   };
   out.push(finding);
-  summary.findings += 1;
-  summary.by_severity[check.severity] += 1;
-  // ARV-10: stream the finding *immediately* so an NDJSON consumer
-  // doesn't wait until the whole run finishes. Snapshot via JSON
-  // round-trip would be cheaper to reason about, but a shallow copy is
-  // sufficient — `findings[]` is only mutated by push and `evidence`
-  // isn't mutated after construction here.
   if (onEvent) onEvent({ type: "finding", ts: nowIso(), finding });
 }
 
@@ -317,7 +325,6 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     selected: filterChecksByMode(rawSelection.selected, mode),
     unknown: rawSelection.unknown,
   };
-  const findings: CheckFinding[] = [];
   const summary = emptySummary();
   summary.operations = ops.length;
   summary.checks_run = selection.selected.length;
@@ -327,17 +334,34 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   const neededKinds = new Set<CaseKind>();
   for (const c of selection.selected) for (const k of checkKinds(c)) neededKinds.add(k);
 
-  // Track unsupported_method per path (one probe is enough) so we don't
-  // hammer the same `OPTIONS /widgets` four times for four declared ops.
-  const probedUnsupportedPaths = new Set<string>();
+  // ARV-8: pre-compute the path → "first op" assignment for the
+  // unsupported_method probe. The pre-ARV-8 code did this lazily inside
+  // the op loop (one shared Set, mutate-on-visit) — that race-conditions
+  // when ops are processed in parallel (two workers on the same path
+  // would each emit a probe). Resolving it up-front keeps "one probe
+  // per path" deterministic regardless of `--workers`.
+  const unsupportedMethodOwner = new Map<string, EndpointInfo>();
+  if (neededKinds.has("unsupported_method")) {
+    for (const op of ops) {
+      if (!unsupportedMethodOwner.has(op.path)) unsupportedMethodOwner.set(op.path, op);
+    }
+  }
 
   const phase = opts.phase ?? "examples";
   const wantsExamples = phase === "examples" || phase === "all";
   const wantsCoverage = phase === "coverage" || phase === "all";
 
-  for (const op of ops) {
-    // ARV-10: announce each operation once, regardless of how many cases
-    // it spawns. Consumers use this for progress UI / liveness.
+  /** Per-op result — workers push these and the main thread merges them
+   *  in input order so `findings[]` and `summary.cases` don't depend on
+   *  worker scheduling (matters for snapshot tests + reproducibility). */
+  interface OpReport {
+    findings: CheckFinding[];
+    cases: number;
+  }
+
+  async function processOperation(op: EndpointInfo): Promise<OpReport> {
+    const localFindings: CheckFinding[] = [];
+    let localCases = 0;
     if (opts.onEvent) {
       opts.onEvent({
         type: "check_start",
@@ -356,29 +380,24 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       if (c) cases.push(c);
     }
     if (wantsCoverage && (neededKinds.has("negative_data") || neededKinds.has("positive"))) {
-      // ARV-6: deterministic boundary-value enumeration. Filter out
-      // kinds nobody asked for so a `--check positive_data_acceptance`
-      // run doesn't pay for invalid-boundary requests.
       const boundary = buildCoverageCases(op, opts.baseUrl, { allowX00: opts.allowX00 });
       for (const b of boundary) {
         if (neededKinds.has(b.case.kind)) cases.push(b);
       }
     }
-    if (neededKinds.has("unsupported_method") && !probedUnsupportedPaths.has(op.path)) {
+    if (unsupportedMethodOwner.get(op.path) === op) {
       const declared = buckets.get(op.path)?.declared ?? new Set([op.method.toUpperCase()]);
       const c = buildUnsupportedMethod(op, declared, opts.baseUrl);
-      if (c) {
-        cases.push(c);
-        probedUnsupportedPaths.add(op.path);
-      }
+      if (c) cases.push(c);
     }
 
     for (const built of cases) {
-      // ARV-7: skip cases whose mode doesn't match the run-mode. We
-      // build them all up-front so `--mode all` and `--mode negative`
-      // share the same code path; the filter just decides which go on
-      // the wire.
       if (!caseMatchesMode(built.case.mode, mode)) continue;
+      // ARV-8: gate the request through the rate-limiter (no-op when
+      // none configured). Acquire happens *inside* the worker so a pool
+      // of N workers can't leak more requests/sec than the limiter
+      // allows.
+      if (opts.rateLimiter) await opts.rateLimiter.acquire();
       let httpResp: HttpResponse;
       try {
         httpResp = await executeRequest(built.req, { timeout: opts.timeoutMs ?? 30000 });
@@ -391,14 +410,12 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           response_summary: { status: 0 },
           message: `Network error: ${(err as Error).message}`,
         };
-        findings.push(finding);
-        summary.findings += 1;
-        summary.by_severity.medium += 1;
+        localFindings.push(finding);
         if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), finding });
         continue;
       }
 
-      summary.cases += 1;
+      localCases += 1;
       const checkResp = {
         status: httpResp.status,
         headers: httpResp.headers,
@@ -415,12 +432,8 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           doc,
         });
         if (outcome.kind === "fail") {
-          recordFinding(findings, summary, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent);
+          recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent);
         }
-        // ARV-10: emit one check_result per (case × check) so an NDJSON
-        // consumer can compute pass-rate / progress *during* the run —
-        // skips don't count toward verdict (they're a routing decision,
-        // not a contract outcome).
         if (opts.onEvent && (outcome.kind === "pass" || outcome.kind === "fail")) {
           opts.onEvent({
             type: "check_result",
@@ -433,6 +446,23 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           });
         }
       }
+    }
+    return { findings: localFindings, cases: localCases };
+  }
+
+  // ARV-8: parallelize the op-loop. workers=1 (default) preserves the
+  // sequential code path inside runPool — same microtask interleaving as
+  // before, AC #4 backward-compat.
+  const workers = opts.workers ?? 1;
+  const opReports = await runPool(ops, workers, processOperation);
+
+  const findings: CheckFinding[] = [];
+  for (const report of opReports) {
+    summary.cases += report.cases;
+    for (const f of report.findings) {
+      findings.push(f);
+      summary.findings += 1;
+      summary.by_severity[f.severity] += 1;
     }
   }
 
@@ -461,60 +491,67 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     const crudGroups = activeStateful.some((c) => c.phase === "crud") ? detectCrudGroups(allOps) : [];
     summary.checks_run += activeStateful.length;
 
+    // ARV-8: parallelize auth-phase ops and crud-phase groups via the
+     // same pool. CRUD-chain integrity stays intact because the *check*
+     // owns its own sequential within-chain logic — the pool only runs
+     // *independent* groups in parallel.
+    const statefulWorkers = opts.workers ?? 1;
+    const collected: CheckFinding[] = [];
+    function pushStateful(f: CheckFinding): void {
+      collected.push(f);
+      summary.findings += 1;
+      summary.by_severity[f.severity] += 1;
+      if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), finding: f });
+    }
     for (const check of activeStateful) {
       if (check.phase === "auth") {
-        for (const op of ops) {
-          if (!check.applies(op)) continue;
+        const applicable = ops.filter((op) => check.applies(op));
+        const findings_per_op = await runPool(applicable, statefulWorkers, async (op) => {
           let outcome;
           try {
             outcome = await check.run(op, harness);
           } catch (err) {
             outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
           }
-          if (outcome.kind === "fail") {
-            const finding: CheckFinding = {
-              check: check.id,
-              severity: check.severity,
-              operation: { path: op.path, method: op.method, operationId: op.operationId },
-              request_signature: `${op.method.toUpperCase()} ${op.path}`,
-              response_summary: { status: 0 },
-              message: outcome.message,
-              evidence: outcome.evidence,
-            };
-            findings.push(finding);
-            summary.findings += 1;
-            summary.by_severity[check.severity] += 1;
-            if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), finding });
-          }
-        }
+          if (outcome.kind !== "fail") return null;
+          const finding: CheckFinding = {
+            check: check.id,
+            severity: check.severity,
+            operation: { path: op.path, method: op.method, operationId: op.operationId },
+            request_signature: `${op.method.toUpperCase()} ${op.path}`,
+            response_summary: { status: 0 },
+            message: outcome.message,
+            evidence: outcome.evidence,
+          };
+          return finding;
+        });
+        for (const f of findings_per_op) if (f) pushStateful(f);
       } else {
-        for (const group of crudGroups) {
-          if (!check.applies(group)) continue;
+        const applicable = crudGroups.filter((g) => check.applies(g));
+        const findings_per_group = await runPool(applicable, statefulWorkers, async (group) => {
           let outcome;
           try {
             outcome = await check.run(group, harness);
           } catch (err) {
             outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
           }
-          if (outcome.kind === "fail") {
-            const repOp = group.create ?? group.read!;
-            const finding: CheckFinding = {
-              check: check.id,
-              severity: check.severity,
-              operation: { path: repOp.path, method: repOp.method, operationId: repOp.operationId },
-              request_signature: `${repOp.method.toUpperCase()} ${repOp.path} (chain)`,
-              response_summary: { status: 0 },
-              message: outcome.message,
-              evidence: outcome.evidence,
-            };
-            findings.push(finding);
-            summary.findings += 1;
-            summary.by_severity[check.severity] += 1;
-            if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), finding });
-          }
-        }
+          if (outcome.kind !== "fail") return null;
+          const repOp = group.create ?? group.read!;
+          const finding: CheckFinding = {
+            check: check.id,
+            severity: check.severity,
+            operation: { path: repOp.path, method: repOp.method, operationId: repOp.operationId },
+            request_signature: `${repOp.method.toUpperCase()} ${repOp.path} (chain)`,
+            response_summary: { status: 0 },
+            message: outcome.message,
+            evidence: outcome.evidence,
+          };
+          return finding;
+        });
+        for (const f of findings_per_group) if (f) pushStateful(f);
       }
     }
+    findings.push(...collected);
   }
 
   const highOrCritical = findings.filter(
