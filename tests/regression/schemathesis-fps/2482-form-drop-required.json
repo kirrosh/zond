@@ -1,0 +1,10 @@
+{
+  "issue": "schemathesis#2482",
+  "summary": "Form-encoded body re-validates on the wire — dropped required field default-fills server-side",
+  "case_meta": {
+    "mutation": "drop_required",
+    "field_path": "name"
+  },
+  "content_type": "application/x-www-form-urlencoded",
+  "expected_guard": "_body_negation_becomes_valid_after_serialization"
+}

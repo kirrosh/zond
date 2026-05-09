@@ -26,7 +26,8 @@ export type Phase = "examples" | "coverage" | "all";
 export type CaseKind =
   | "positive"
   | "missing_required_header"
-  | "unsupported_method";
+  | "unsupported_method"
+  | "negative_data";
 
 export interface CheckReference {
   /** CWE / OWASP / RFC identifier — free form, agent-readable. */
