@@ -88,7 +88,6 @@ describe("buildProgram — registration", () => {
       "run", "validate", "ci", "coverage", "init",
       "add", "refresh-api", "doctor", "session",
       "describe", "db", "request", "generate", "catalog",
-      "export",
     ]) {
       expect(names.has(expected)).toBe(true);
     }
@@ -102,12 +101,6 @@ describe("buildProgram — registration", () => {
     for (const expected of ["collections", "runs", "run", "diagnose", "compare"]) {
       expect(dbSubs.has(expected)).toBe(true);
     }
-  });
-
-  test("export has postman subcommand", () => {
-    const program = buildProgram();
-    const exp = program.commands.find((c) => c.name() === "export");
-    expect(exp?.commands.map((c) => c.name())).toContain("postman");
   });
 
   test("ci has init subcommand", () => {

@@ -12,6 +12,10 @@ All notable changes to this project will be documented in this file.
 - **TASK-285: `zond update` (and `self-update` alias) is removed.** Use the
   system package manager: re-run `install.sh`, or `npm install -g @kirrosh/zond@latest`,
   or `bun install -g @kirrosh/zond@latest`. README has the upgrade section.
+- **TASK-286: `zond export postman` is removed (decision-4 reversed).** The
+  parallel YAML→Postman exporter (`src/cli/commands/export.ts` +
+  `src/core/exporter/postman.ts`, ~963 LOC) had no measured demand;
+  OpenAPI-driven tooling already covers the round-trip use case.
 
 ### Deprecated
 
