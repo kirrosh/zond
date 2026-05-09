@@ -1,4 +1,8 @@
+import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
+
 export type Severity = "high" | "medium" | "low";
+
+export type { RecommendedAction };
 
 export type RuleId =
   | "A1" | "A2" | "A3" | "A4" | "A5" | "A6"
@@ -24,6 +28,9 @@ export interface Issue {
   message: string;
   fix_hint?: string;
   affects?: string[];
+  /** TASK-294: agent-routable action — always `fix_spec` for lint issues
+   *  (the spec is the source of truth and the only thing to edit). */
+  recommended_action: RecommendedAction;
 }
 
 export type RuleSetting = "off" | Severity;

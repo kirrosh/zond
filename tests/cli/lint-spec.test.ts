@@ -19,6 +19,35 @@ function ofRule(issues: Issue[], rule: string): Issue[] {
   return issues.filter(i => i.rule === rule);
 }
 
+describe("lint-spec — TASK-294: recommended_action", () => {
+  test("every emitted Issue carries recommended_action: 'fix_spec'", () => {
+    const doc = makeDoc({
+      "/widgets": {
+        get: {
+          responses: {
+            "200": {
+              description: "ok",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      created_at: { type: "string", format: "date-time", example: "2023-10-06:23:47:56.678Z" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    const issues = lint(doc);
+    expect(issues.length).toBeGreaterThan(0);
+    for (const i of issues) expect(i.recommended_action).toBe("fix_spec");
+  });
+});
+
 describe("lint-spec — Group A (consistency)", () => {
   test("A1: example violates format: date-time (Postgres-style)", () => {
     const doc = makeDoc({

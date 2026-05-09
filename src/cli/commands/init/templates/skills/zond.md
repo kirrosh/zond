@@ -348,7 +348,9 @@ zond db compare <idA> <idB> --json           # regression diff
 
 `agent_directive` = literal next step. `recommended_action` ∈
 {`fix_test_logic` (edit YAML), `report_backend_bug` (STOP, report),
-`update_expectation` (only on user confirmation)}.
+`fix_auth_config`, `fix_network_config`, `fix_env`, `fix_spec` (edit
+OpenAPI — emitted by `lint-spec`), `fix_fixture` (fill `.env.yaml` —
+emitted by `discover` and inconclusive mass-assignment baselines)}.
 
 ### 4a. Fixing 4xx caused by stub generators
 

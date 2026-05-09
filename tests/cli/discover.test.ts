@@ -235,6 +235,20 @@ describe("zond discover", () => {
     expect(empty.status).toBe("miss-empty");
     expect(empty.reason).toMatch(/no empties in target API/);
     expect(empty.reason).toMatch(/create one first/);
+
+    // TASK-294: every miss-* item carries a recommended_action for agent routing.
+    type Item = { varName: string; status: string; recommended_action?: string };
+    const items = env.data.items as Item[];
+    const misses = items.filter(i => i.status.startsWith("miss-"));
+    expect(misses.length).toBeGreaterThan(0);
+    for (const i of misses) {
+      const expected = i.status === "miss-network" ? "fix_network_config" : "fix_fixture";
+      expect(i.recommended_action).toBe(expected);
+    }
+    // Successful writes do not carry a recommended_action.
+    for (const i of items.filter(i => i.status === "write")) {
+      expect(i.recommended_action).toBeUndefined();
+    }
   });
 
   test("missing base_url returns exit 2", async () => {
