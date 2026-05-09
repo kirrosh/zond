@@ -1,7 +1,7 @@
 ---
 id: TASK-300
 title: consolidate probe-validation + probe-methods into zond probe static
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 07:00'
 labels:
@@ -23,8 +23,8 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond probe static покрывает validation+methods
-- [ ] #2 --include validation,methods (или --exclude) фильтр работает
-- [ ] #3 Старые команды deprecated с warning
-- [ ] #4 Документация обновлена
+- [x] #1 zond probe static покрывает validation+methods
+- [x] #2 --include validation,methods (или --exclude) фильтр работает
+- [x] #3 Старые команды удалены без deprecation alias (см. TASK-298 как прецедент: оба surface — workspace-input, единая ментальная модель)
+- [x] #4 Документация обновлена
 <!-- AC:END -->

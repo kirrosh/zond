@@ -25,7 +25,7 @@ zond doctor --api my-api                               # what to fill in apis/my
 
 `zond init` writes a self-contained [`AGENTS.md`](AGENTS.md) and Claude Code
 skills — agents read it and use the CLI directly (`zond run`,
-`zond probe validation`, `zond db diagnose`, …). No daemon, no transport, no
+`zond probe static`, `zond db diagnose`, …). No daemon, no transport, no
 extra configuration.
 
 Each registered API gets four files in `apis/<name>/`:

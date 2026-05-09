@@ -1,10 +1,11 @@
 /**
- * Probe umbrella + back-compat aliases.
+ * Probe umbrella.
  *
- * TASK-182 (m-11) introduced `zond probe <class>` as the canonical way to
- * run validation / methods / mass-assignment / security probes. The four
- * standalone top-level probe-* names are kept as deprecated aliases for
- * one release with a stderr warning.
+ * TASK-182 (m-11) introduced `zond probe <class>` as the canonical entry
+ * point. TASK-300 (m-13) consolidated the two static-input classes —
+ * validation and methods — under `zond probe static [--include …]`; the
+ * old `probe validation` / `probe methods` subcommands were removed
+ * outright (no deprecation alias).
  *
  * Extracted from program.ts (TASK-190 round 2e) so the registration tree
  * lives next to the action functions it dispatches into.
@@ -12,8 +13,7 @@
 
 import type { Command } from "commander";
 
-import { probeValidationCommand } from "./probe-validation.ts";
-import { probeMethodsCommand } from "./probe-methods.ts";
+import { probeStaticCommand, resolveStaticClasses } from "./probe-static.ts";
 import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from "./probe-mass-assignment.ts";
 import { probeSecurityCommand } from "./probe-security.ts";
 import { globalJson, resolveSpecArg, resolveApiEnv } from "../resolve.ts";
@@ -49,40 +49,40 @@ function resolveProbeEnv(
   return { env: resolved.env };
 }
 
-function defineProbeValidation(parent: Command, name: string): void {
+function defineProbeStatic(parent: Command, name: string): void {
   parent
     .command(`${name} [spec]`)
-    .description("Generate negative-input probe suites (catches 5xx-on-bad-input bugs)")
+    .description(
+      "Generate static-input probe suites (validation: bogus types/values; methods: undeclared HTTP methods). Defaults to both; restrict via --include or --exclude.",
+    )
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
     .requiredOption("--output <dir>", "Output directory for generated probe files")
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .option("--list-tags", "List available tags from spec and exit")
-    .option("--max-per-endpoint <N>", "Cap probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
+    .option("--max-per-endpoint <N>", "Cap negative-input probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
     .option("--no-cleanup", "Skip emission of follow-up DELETE cleanup steps for mutating probes (use in namespace-isolated test envs)")
-    .option("--use-synthetic-parents", "Bake synthetic-by-type values into all path params (legacy). By default, non-attacked path params are emitted as {{name}} and resolved from .env.yaml at run time — needed to reach the leaf validator on nested paths (TASK-135). [TASK-289: replaces --no-real-parents]")
-    .option("--no-real-parents", "Deprecated alias for --use-synthetic-parents (TASK-289). Same behaviour; emits a stderr warning. Will be removed.", () => {
-      process.stderr.write(
-        "[zond] --no-real-parents is deprecated, use --use-synthetic-parents instead (TASK-289).\n",
-      );
-      return true;
-    })
-    .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+    .option("--use-synthetic-parents", "Bake synthetic-by-type values into all path params (legacy). By default, non-attacked path params are emitted as {{name}} and resolved from .env.yaml at run time — needed to reach the leaf validator on nested paths (TASK-135).")
+    .option("--include <classes>", "Comma-separated subset of {validation, methods} (default: both)")
+    .option("--exclude <classes>", "Comma-separated subset to skip (mutually exclusive with --include)")
+    .action(async (specPos: string | undefined, optsArg, cmdRef: Command) => {
+      const resolved = resolveSpecArg(specPos, optsArg.api, optsArg.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      // --no-real-parents (legacy, sets opts.realParents = false) and
-      // --use-synthetic-parents (canonical, sets opts.useSyntheticParents = true)
-      // both flip useRealParents to false.
-      const useReal = opts.useSyntheticParents !== true && opts.realParents !== false;
-      process.exitCode = await probeValidationCommand({
+
+      const r = resolveStaticClasses(optsArg.include, optsArg.exclude);
+      if ("error" in r) { printError(r.error); process.exitCode = 2; return; }
+
+      const useReal = optsArg.useSyntheticParents !== true;
+      process.exitCode = await probeStaticCommand({
         specPath: resolved.spec,
-        output: opts.output,
-        tag: opts.tag,
-        maxPerEndpoint: opts.maxPerEndpoint,
-        noCleanup: opts.cleanup === false,
+        output: optsArg.output,
+        tag: optsArg.tag,
+        maxPerEndpoint: optsArg.maxPerEndpoint,
+        noCleanup: optsArg.cleanup === false,
         useRealParents: useReal,
-        json: globalJson(cmd),
-        listTags: opts.listTags,
+        json: globalJson(cmdRef),
+        listTags: optsArg.listTags,
+        include: r.classes,
       });
     });
 }
@@ -182,32 +182,12 @@ function defineProbeSecurity(parent: Command, name: string): void {
     });
 }
 
-function defineProbeMethods(parent: Command, name: string): void {
-  parent
-    .command(`${name} [spec]`)
-    .description("Generate negative-method probe suites (catches 5xx/2xx on undeclared HTTP methods)")
-    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
-    .option("--db <path>", "Path to SQLite database file")
-    .requiredOption("--output <dir>", "Output directory for generated probe files")
-    .option("--tag <tag>", "Probe only endpoints with this tag")
-    .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
-      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      process.exitCode = await probeMethodsCommand({
-        specPath: resolved.spec,
-        output: opts.output,
-        tag: opts.tag,
-        json: globalJson(cmd),
-      });
-    });
-}
-
 export function registerProbes(program: Command): void {
   const probeCmd = program
     .command("probe")
-    .description("Run a probe class — pick one of: validation, methods, mass-assignment, security");
-  defineProbeValidation(probeCmd, "validation");
-  defineProbeMethods(probeCmd, "methods");
+    .description("Run a probe class — pick one of: static, mass-assignment, security");
+
+  defineProbeStatic(probeCmd, "static");
   defineProbeMassAssignment(probeCmd, "mass-assignment");
   defineProbeSecurity(probeCmd, "security");
 }

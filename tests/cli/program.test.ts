@@ -213,17 +213,17 @@ describe("buildProgram — numeric validations (exit 2 via CommanderError)", () 
   });
 });
 
-describe("TASK-182: zond probe umbrella + back-compat aliases", () => {
+describe("TASK-182 / TASK-300: zond probe umbrella", () => {
   test("`zond probe --help` lists every probe class", async () => {
     const program = buildProgram();
     const probeCmd = program.commands.find((c) => c.name() === "probe");
     expect(probeCmd).toBeDefined();
     const subs = probeCmd!.commands.map((c) => c.name()).sort();
+    // TASK-300: `validation` and `methods` collapsed into `static` — no aliases.
     expect(subs).toEqual([
       "mass-assignment",
-      "methods",
       "security",
-      "validation",
+      "static",
     ]);
   });
 

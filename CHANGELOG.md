@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Changed (breaking)
 
+- **TASK-300: `zond probe validation` and `zond probe methods` are merged into `zond probe static`.**
+  Both classes are static-input checks (no HTTP) and now share one entry
+  point: `zond probe static --output <dir>` runs both by default. Filter
+  via `--include validation,methods` (or `--exclude`). The old subcommands
+  are removed without a deprecation alias — same model as TASK-298
+  (`validate` + `lint-spec` → `check`). `zond audit` now spawns a single
+  `probe static` stage (output dir `apis/<name>/probes/static/`) in place
+  of the two former stages.
+
 - **TASK-299: `zond discover` and `zond bootstrap` are merged into `zond prepare-fixtures`.**
   Single-pass discover is now `zond prepare-fixtures --api <name>` (the
   former `zond discover` flow). Multi-pass cascade is `--cascade`, with
