@@ -28,7 +28,26 @@ All notable changes to this project will be documented in this file.
   `probe-mass-assignment`, `probe-security` (TASK-182) is closed. Use
   `zond probe <class>` instead. `warnDeprecatedProbe` helper removed.
 
+### Changed (breaking)
+
+- **TASK-296: `--json` envelope `errors[]` is now structured.** Every
+  error is `{ code: ZondErrorCode, message: string, details?: object }`
+  instead of a flat string. `code` is a closed enum
+  (`unknown_error`, `env_missing`, `fixture_missing`, `network_timeout`,
+  `network_error`, `sandbox_blocked`, `spec_load_failure`,
+  `yaml_parse_error`, `workspace_not_found`, `file_not_found`,
+  `permission_denied`, `argument_invalid`, `api_not_registered`,
+  `db_error`, `auth_config_error`) so an agent can route on `code`
+  without parsing the human message. Agents that previously did
+  `errors[0]` now read `errors[0].message`. Sites not yet classified
+  emit `code: "unknown_error"` (still structured, still routable).
+
 ### Added
+
+- **TASK-294: `recommended_action` field on every Issue / SecurityFinding /
+  mass-assignment / discover finding.** Closes the agent-routing gap
+  for findings outside `db diagnose`. New enum values: `fix_spec`,
+  `fix_fixture`. See `skills/zond.md` for the full table.
 
 - **TASK-292: 5 iron rules in `skills/zond.md`.** Promotes from
   audit-and-consolidation §6: NEVER destructive ops on shared/prod org

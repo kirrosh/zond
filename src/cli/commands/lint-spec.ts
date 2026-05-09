@@ -3,7 +3,7 @@ import { lintSpec, loadConfig, formatHuman, formatNdjson, formatGrouped, buildRu
 import type { Issue, Severity } from "../../core/lint/index.ts";
 import { getDb } from "../../db/schema.ts";
 import { createLintRun, finalizeLintRun } from "../../db/lint-runs.ts";
-import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
+import { jsonOk, jsonError, printJson, zerr } from "../json-envelope.ts";
 import { printError } from "../output.ts";
 
 export interface LintSpecOptions {
@@ -36,7 +36,9 @@ export async function lintSpecCommand(opts: LintSpecOptions): Promise<number> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (opts.json || opts.ndjson) {
-      printJson(jsonError("lint-spec", [`Failed to load spec: ${message}`]));
+      printJson(jsonError("lint-spec", [
+        zerr("spec_load_failure", `Failed to load spec: ${message}`, { specPath: opts.specPath }),
+      ]));
     } else {
       printError(`Failed to load spec: ${message}`);
     }
@@ -54,7 +56,7 @@ export async function lintSpecCommand(opts: LintSpecOptions): Promise<number> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (opts.json || opts.ndjson) {
-      printJson(jsonError("lint-spec", [message]));
+      printJson(jsonError("lint-spec", [zerr("argument_invalid", message)]));
     } else {
       printError(message);
     }

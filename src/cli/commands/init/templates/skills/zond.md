@@ -124,7 +124,9 @@ base_url: "${SENTRY_BASE_URL:-https://us.sentry.io}"  # from shell env
 ```
 
 Iron rule: do not `cat` `.secrets.yaml`. `zond doctor --api <name> --json`
-exposes the canonical envelope `{ ok, command, data, ... }` with the
+exposes the canonical envelope `{ ok, command, data, warnings,
+errors: [{code, message, details?}] }` (TASK-296: route on
+`errors[].code`, not on the message string) with the
 fixture rows under `.data.fixtures.required[]` /
 `.data.fixtures.optional[]`. Each row has `{ name, set, length, source,
 description, secret?, identity?, value? }` — `value` is omitted for

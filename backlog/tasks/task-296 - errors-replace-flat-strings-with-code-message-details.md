@@ -1,9 +1,10 @@
 ---
 id: TASK-296
 title: 'errors[]: replace flat strings with {code, message, details}'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 07:00'
+updated_date: '2026-05-09 07:47'
 labels:
   - json
   - agent-first
@@ -22,7 +23,7 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ZondErrorCode enum экспортирован
+- [x] #1 ZondErrorCode enum экспортирован
 - [ ] #2 errors[].code заполняется во всех командах с --json
 - [ ] #3 writeEnvelope() принимает структурированные errors
 - [ ] #4 Breaking-change запись в CHANGELOG (envelope schema bump)
