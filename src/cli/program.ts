@@ -1,8 +1,7 @@
 import { Command } from "commander";
 
 import { registerRun } from "./commands/run.ts";
-import { registerValidate } from "./commands/validate.ts";
-import { registerServe } from "./commands/serve.ts";
+import { registerCheck } from "./commands/check.ts";
 import { registerCoverage } from "./commands/coverage.ts";
 import { registerCi } from "./commands/ci-init.ts";
 import { registerClean } from "./commands/clean.ts";
@@ -12,17 +11,9 @@ import { registerDescribe } from "./commands/describe.ts";
 import { registerDb } from "./commands/db.ts";
 import { registerRequest } from "./commands/request.ts";
 import { registerGenerate } from "./commands/generate.ts";
-import { registerDiscover } from "./commands/discover.ts";
-import { registerBootstrap } from "./commands/bootstrap.ts";
-import {
-  registerProbes,
-  registerProbeAliasesEarly,
-  registerProbeMethodsAlias,
-} from "./commands/probe.ts";
-import { registerLintSpec } from "./commands/lint-spec.ts";
-import { registerExport } from "./commands/export.ts";
+import { registerPrepareFixtures } from "./commands/prepare-fixtures.ts";
+import { registerProbes } from "./commands/probe.ts";
 import { registerReport } from "./commands/report.ts";
-import { registerUpdate } from "./commands/update.ts";
 import { registerCatalog } from "./commands/catalog.ts";
 import { registerCompletions } from "./commands/completions.ts";
 import { registerUse } from "./commands/use.ts";
@@ -31,6 +22,7 @@ import { registerDoctor } from "./commands/doctor.ts";
 import { registerRefreshApi } from "./commands/refresh-api.ts";
 import { registerAdd } from "./commands/add-api.ts";
 import { registerAudit } from "./commands/audit.ts";
+import { registerReference } from "./commands/reference.ts";
 
 import { getSecretRegistry } from "../core/secrets/registry.ts";
 import { getRuntimeInfo } from "./runtime.ts";
@@ -53,19 +45,31 @@ export function buildProgram(): Command {
     // exporters, stdout). Default is redact-on. Hook is read from the
     // env var so it survives across nested subcommand parsers.
     .option("--no-redact", "Disable auto-redaction of registered secret values (debug only)")
+    .option(
+      "--api <name>",
+      "TASK-290: Select the active API for this invocation. Resolution order: per-command --api > global --api (this flag) > ZOND_API env > .zond/current-api file (set via `zond use <name>`).",
+    )
     .hook("preAction", (thisCommand) => {
       const enabled = thisCommand.opts().redact !== false;
       // Mirror the flag into env so deeply-nested code that doesn't have
       // access to `cmd` (e.g. setup-api, exporters) can still consult it.
       process.env.ZOND_REDACT = enabled ? "1" : "0";
       getSecretRegistry().setEnabled(enabled);
+      // TASK-290: mirror the global --api flag into env so the resolution
+      // chain in core/context/current.ts (which has no `cmd` ref) sees it.
+      // Per-command --api still wins because it is passed positionally to
+      // resolveSpecArg / resolveApiCollection.
+      const apiGlobal = thisCommand.opts().api;
+      if (typeof apiGlobal === "string" && apiGlobal.length > 0) {
+        process.env.ZOND_API_GLOBAL = apiGlobal;
+      } else {
+        delete process.env.ZOND_API_GLOBAL;
+      }
     });
 
   registerRun(program);
 
-  registerValidate(program);
-
-  registerServe(program);
+  registerCheck(program);
 
   registerCi(program);
 
@@ -87,21 +91,56 @@ export function buildProgram(): Command {
   registerCleanup(program);
 
   registerGenerate(program);
-  registerDiscover(program);
-  registerBootstrap(program);
+  registerPrepareFixtures(program);
   registerAudit(program);
 
   registerProbes(program);
-  registerProbeAliasesEarly(program);
 
-  registerLintSpec(program);
-  registerProbeMethodsAlias(program);
   registerCatalog(program);
-  registerExport(program);
   registerReport(program);
 
-  registerUpdate(program);
   registerCompletions(program);
+  registerReference(program);
+
+  // TASK-267: group top-level commands by phase in `zond --help`. Without
+  // grouping, the flat 20+ command list buries the workflow shape; with it,
+  // a new tester can see "setup → generate → run → analyze → report" at a
+  // glance. Commands not listed below stay in the default group.
+  const HELP_GROUPS: Record<string, string> = {
+    // setup: register an API, prepare workspace
+    "init":         "Setup:",
+    "add":          "Setup:",
+    "use":          "Setup:",
+    "refresh-api":  "Setup:",
+    "doctor":       "Setup:",
+    "clean":        "Setup:",
+    "cleanup":      "Setup:",
+    // generate: produce suites/probes from the spec
+    "generate":         "Generate:",
+    "prepare-fixtures": "Generate:",
+    "probe":            "Generate:",
+    // run: execute suites against a live API
+    "run":     "Run:",
+    "session": "Run:",
+    "request": "Run:",
+    // analyze: post-run inspection and triage
+    "coverage": "Analyze:",
+    "db":       "Analyze:",
+    "audit":    "Analyze:",
+    "check":    "Analyze:",
+    "describe": "Analyze:",
+    // report: outbound artefacts (HTML, bundles, catalog)
+    "report":  "Report:",
+    "catalog": "Report:",
+    // other: scaffolding / shell integration
+    "ci":          "Other:",
+    "completions": "Other:",
+    "reference":   "Other:",
+  };
+  for (const sub of program.commands) {
+    const group = HELP_GROUPS[sub.name()];
+    if (group) sub.helpGroup(group);
+  }
 
   // TASK-73: previously `--json` was a top-level/global option that propagated
   // to every subcommand, which collided with `run --report json` (and broke
@@ -110,7 +149,7 @@ export function buildProgram(): Command {
   // run's only JSON output path is `--report json`.
   // Skip by fully-qualified path so `db run` (inner) keeps --json while
   // top-level `run` does not.
-  const skipJson = new Set(["run", "completions", "serve"]);
+  const skipJson = new Set(["run", "completions"]);
   const attachJson = (cmd: Command, parentPath: string): void => {
     const path = parentPath ? `${parentPath} ${cmd.name()}` : cmd.name();
     // Only leaf commands (those with action handlers) get --json — parent
@@ -118,11 +157,39 @@ export function buildProgram(): Command {
     // on their children and `cmd.opts()` on the leaf would not see --json.
     const hasAction = (cmd as unknown as { _actionHandler?: unknown })._actionHandler != null;
     if (hasAction && !skipJson.has(path)) {
-      cmd.option("--json", "Output in JSON envelope format");
+      cmd.option(
+        "--json",
+        "Emit a `{ok, command, data, warnings, errors}` envelope on stdout. " +
+        "Distinct from `zond run --report json` (which is a per-test test-run report).",
+      );
     }
     for (const sub of cmd.commands) attachJson(sub, path);
   };
   for (const sub of program.commands) attachJson(sub, "");
+
+  // TASK-297: stamp every leaf with a "related skill" footer so `zond <cmd>
+  // --help` is a single-stop entry point for an agent: discover the flag
+  // surface AND know which skill file to open for the workflow context.
+  // Mapped by fully-qualified path; `*` matches any unnamed leaf and is
+  // tried last.
+  const skillFor: Record<string, string> = {
+    // probes → audit playbook (skills/scenarios.md drills auth/RBAC chains).
+    "probe security": "skills/scenarios.md",
+    "probe mass-assignment": "skills/scenarios.md",
+    "audit": "skills/scenarios.md",
+    // db family — failure triage workflow. Will point at skills/zond-triage.md
+    // once TASK-302 lands; for now Phase 4 of skills/zond.md covers it.
+  };
+  const attachHelp = (cmd: Command, parentPath: string): void => {
+    const path = parentPath ? `${parentPath} ${cmd.name()}` : cmd.name();
+    const hasAction = (cmd as unknown as { _actionHandler?: unknown })._actionHandler != null;
+    if (hasAction) {
+      const skill = skillFor[path] ?? "skills/zond.md";
+      cmd.addHelpText("after", `\nRelated skill: ${skill}`);
+    }
+    for (const sub of cmd.commands) attachHelp(sub, path);
+  };
+  for (const sub of program.commands) attachHelp(sub, "");
 
   return program;
 }

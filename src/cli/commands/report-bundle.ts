@@ -21,7 +21,7 @@ import { diagnoseRun } from "../../core/diagnostics/db-analysis.ts";
 import { applySanitizer } from "../../core/exporter/exporter.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
-import { printError, printSuccess, printWarning } from "../output.ts";
+import { printError, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
 
@@ -220,7 +220,9 @@ export async function reportBundleCommand(options: ReportBundleOptions): Promise
     if (skipped.length > 0) {
       for (const s of skipped) printWarning(`Run #${s.runId} skipped: ${s.reason}`);
     }
-    printSuccess(`Bundle written to ${outDir} (${entries.length} run(s), index: ${indexPath})`);
+    // TASK-241: status → stderr; stdout carries only the bundle dir path.
+    process.stderr.write(`zond: bundle written (${entries.length} run(s), index: ${indexPath})\n`,);
+    process.stdout.write(`${outDir}\n`);
   }
   return 0;
 }

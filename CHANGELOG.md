@@ -4,16 +4,114 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **TASK-301: workspace defaults for `--timeout` and `--rate-limit` in `zond.config.yml`.**
+  New `defaults.timeout_ms` and `defaults.rate_limit` (alias `timeoutMs`,
+  `rateLimit`, `rate_limit: auto`) feed `cleanup`, `prepare-fixtures`,
+  `probe mass-assignment`, `probe security`, `request`, and `run`.
+  Resolution chain: **CLI flag → `apis/<name>/.env.yaml` meta → workspace
+  defaults → built-in fallback** (30000 ms / undefined rate limit).
+  `.env.yaml` already supported `rateLimit:`; now also supports
+  `timeoutMs:`. The init template's `zond-config.yml` documents the
+  `defaults` block. New helpers: `loadWorkspaceDefaults`,
+  `resolveTimeoutMs`, `resolveRateLimit` in `core/workspace/config.ts`.
+
+### Changed (breaking)
+
+- **TASK-300: `zond probe validation` and `zond probe methods` are merged into `zond probe static`.**
+  Both classes are static-input checks (no HTTP) and now share one entry
+  point: `zond probe static --output <dir>` runs both by default. Filter
+  via `--include validation,methods` (or `--exclude`). The old subcommands
+  are removed without a deprecation alias — same model as TASK-298
+  (`validate` + `lint-spec` → `check`). `zond audit` now spawns a single
+  `probe static` stage (output dir `apis/<name>/probes/static/`) in place
+  of the two former stages.
+
+- **TASK-299: `zond discover` and `zond bootstrap` are merged into `zond prepare-fixtures`.**
+  Single-pass discover is now `zond prepare-fixtures --api <name>` (the
+  former `zond discover` flow). Multi-pass cascade is `--cascade`, with
+  `--seed` / `--force` / `--max-passes` (the former `zond bootstrap`).
+  `--seed` implies `--cascade`. The old top-level commands are removed
+  without deprecation. `zond audit --seed` now spawns
+  `prepare-fixtures --apply --seed` instead of `bootstrap`.
+
+- **TASK-298: `zond validate` and `zond lint-spec` are merged into `zond check`.**
+  Use `zond check tests <path>` for the YAML-test schema validator and
+  `zond check spec [spec]` for the OpenAPI static analyser. The old
+  top-level commands are removed (no deprecation alias). Flag surface is
+  unchanged. Single mental model — both surfaces are conformance checks
+  on workspace inputs, neither makes HTTP calls.
+
+### Removed (breaking)
+
+- **TASK-284: `zond serve` and the WebUI are removed.** Agent-first / CLI-only
+  surface per vector-3. Use `zond report export` for shareable HTML reports.
+  `src/ui/` is gone along with hono / react / tanstack / tailwind dependencies.
+- **TASK-285: `zond update` (and `self-update` alias) is removed.** Use the
+  system package manager: re-run `install.sh`, or `npm install -g @kirrosh/zond@latest`,
+  or `bun install -g @kirrosh/zond@latest`. README has the upgrade section.
+- **TASK-286: `zond export postman` is removed (decision-4 reversed).** The
+  parallel YAML→Postman exporter (`src/cli/commands/export.ts` +
+  `src/core/exporter/postman.ts`, ~963 LOC) had no measured demand;
+  OpenAPI-driven tooling already covers the round-trip use case.
+- **TASK-287: `zond report case-study` standalone subcommand is removed.**
+  The case-study markdown drafts are still produced by `zond report bundle`
+  (default `--include case-study`); the per-failure CLI surface and its flags
+  collapse into the bundle path. `renderCaseStudy` core renderer is unchanged.
+
+### Removed (breaking)
+
+- **TASK-288: deprecated top-level `probe-*` aliases removed.** The
+  one-release deprecation window for `probe-validation`, `probe-methods`,
+  `probe-mass-assignment`, `probe-security` (TASK-182) is closed. Use
+  `zond probe <class>` instead. `warnDeprecatedProbe` helper removed.
+
+### Changed (breaking)
+
+- **TASK-296: `--json` envelope `errors[]` is now structured.** Every
+  error is `{ code: ZondErrorCode, message: string, details?: object }`
+  instead of a flat string. `code` is a closed enum
+  (`unknown_error`, `env_missing`, `fixture_missing`, `network_timeout`,
+  `network_error`, `sandbox_blocked`, `spec_load_failure`,
+  `yaml_parse_error`, `workspace_not_found`, `file_not_found`,
+  `permission_denied`, `argument_invalid`, `api_not_registered`,
+  `db_error`, `auth_config_error`) so an agent can route on `code`
+  without parsing the human message. Agents that previously did
+  `errors[0]` now read `errors[0].message`. Sites not yet classified
+  emit `code: "unknown_error"` (still structured, still routable).
+
+### Added
+
+- **TASK-294: `recommended_action` field on every Issue / SecurityFinding /
+  mass-assignment / discover finding.** Closes the agent-routing gap
+  for findings outside `db diagnose`. New enum values: `fix_spec`,
+  `fix_fixture`. See `skills/zond.md` for the full table.
+
+- **TASK-292: 5 iron rules in `skills/zond.md`.** Promotes from
+  audit-and-consolidation §6: NEVER destructive ops on shared/prod org
+  without `--dry-run`; NEVER report cleanup-failure as API bug; NEVER
+  share triage artefacts without `--redact-identity`; MUST timeout
+  bootstrap cascade (default 8 passes); MUST run
+  `zond doctor --api <name> --missing-only` first. Each has a one-line
+  rationale embedded next to the rule.
+
+- **TASK-290: global `--api` flag + `ZOND_API` env + `.zond/current-api` file.**
+  `zond` now resolves the active API from a single chain (highest wins):
+  per-command `--api` > root `--api` > `ZOND_API` env > `.zond/current-api`
+  (set by `zond use <name>`; was `.zond-current` at workspace root).
+  The root `--api` value is mirrored into `ZOND_API_GLOBAL` by a preAction
+  hook so deeply-nested code can read it without a `cmd` reference.
+
 ### Deprecated
 
-- **TASK-182: `probe-validation`, `probe-methods`, `probe-mass-assignment`,
-  `probe-security` are now aliases for `zond probe <class>`.** The four
-  parallel top-level commands have been collapsed under a single
-  `zond probe` umbrella (`zond probe validation`, `zond probe methods`,
-  `zond probe mass-assignment`, `zond probe security`). Old names
-  continue to work for one release and emit a one-line deprecation
-  warning to stderr; flags and behaviour are unchanged. The umbrella
-  trims top-level `--help` from four lookalike entries to one.
+- **TASK-289: `zond run --no-real-parents` → `--use-synthetic-parents`.**
+  Double-negative renamed to a positive flag. The old name still works
+  one release with a stderr warning, then drops.
+- **TASK-291: `zond lint-spec --filter-rule` is a deprecated alias for
+  the whitelist subset of `--rule`.** The two flags are unified: `--rule`
+  now accepts `B1` (whitelist), `!B2` (disable), `B3=high|low|off` (override).
+  `--filter-rule` still works one release with a stderr warning.
 
 ### Added
 

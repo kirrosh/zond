@@ -621,3 +621,53 @@ describe("generateMultipartFromSchema", () => {
     expect(result).toEqual({});
   });
 });
+
+// TASK-269 — per-field source classification for `zond generate --explain`
+describe("classifyFieldSource (TASK-269)", () => {
+  test("returns 'example' when schema has explicit example", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(classifyFieldSource({ type: "string", example: "v1.0.0" } as OpenAPIV3.SchemaObject, "version")).toBe("example");
+  });
+
+  test("returns 'examples' for OpenAPI 3.1 examples array", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    const schema = { type: "string", examples: ["foo"] } as unknown as OpenAPIV3.SchemaObject;
+    expect(classifyFieldSource(schema, "name")).toBe("examples");
+  });
+
+  test("returns 'enum' over format/heuristic", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(classifyFieldSource({ type: "string", enum: ["a", "b"] } as OpenAPIV3.SchemaObject, "x")).toBe("enum");
+  });
+
+  test("returns 'format' for known formats", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(classifyFieldSource({ type: "string", format: "email" } as OpenAPIV3.SchemaObject, "contact")).toBe("format");
+    expect(classifyFieldSource({ type: "string", format: "uuid" } as OpenAPIV3.SchemaObject, "id")).toBe("format");
+  });
+
+  test("returns 'pattern' for lowercase-only regex", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(classifyFieldSource({ type: "string", pattern: "^[a-z0-9_-]+$" } as OpenAPIV3.SchemaObject, "x")).toBe("pattern");
+  });
+
+  test("returns 'heuristic:<rule>' for name-based dispatch", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(classifyFieldSource({ type: "string" } as OpenAPIV3.SchemaObject, "name")).toBe("heuristic:name");
+    expect(classifyFieldSource({ type: "string" } as OpenAPIV3.SchemaObject, "platform")).toBe("heuristic:platform");
+    expect(classifyFieldSource({ type: "string" } as OpenAPIV3.SchemaObject, "user_email")).toBe("heuristic:email");
+    expect(classifyFieldSource({ type: "string" } as OpenAPIV3.SchemaObject, "slug")).toBe("heuristic:slug");
+  });
+
+  test("returns 'random' fallback for unrecognised string", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(classifyFieldSource({ type: "string" } as OpenAPIV3.SchemaObject, "memo")).toBe("random");
+  });
+
+  test("returns 'min'/'max' for bounded integers", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(classifyFieldSource({ type: "integer", maximum: 10 } as OpenAPIV3.SchemaObject, "n")).toBe("max");
+    expect(classifyFieldSource({ type: "integer", minimum: 5 } as OpenAPIV3.SchemaObject, "n")).toBe("min");
+    expect(classifyFieldSource({ type: "integer" } as OpenAPIV3.SchemaObject, "n")).toBe("random");
+  });
+});

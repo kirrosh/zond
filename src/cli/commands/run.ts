@@ -3,7 +3,7 @@ import { stat } from "node:fs/promises";
 import { parseSafe } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
-import { preflightCheckVars, formatMissingVarLine } from "../../core/runner/preflight-vars.ts";
+import { preflightCheckVars, formatMissingVarLine, summarizeMissingVars } from "../../core/runner/preflight-vars.ts";
 import { runSuite } from "../../core/runner/executor.ts";
 import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
 import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
@@ -23,6 +23,7 @@ import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
 import { detectStatusDrifts, formatDriftPlan, applyDriftsToTests, appendToleratedDrifts } from "../../core/runner/learn-drift.ts";
 import { detectCiContext } from "../../core/runner/ci-context.ts";
+import { resolveRateLimit } from "../../core/workspace/config.ts";
 
 export interface RunOptions {
   /**
@@ -74,6 +75,8 @@ export interface RunOptions {
   /** TASK-282: where to record the drift — rewrite YAML (`test`) or append to
    *  apis/<name>/tolerated-drifts.yaml (`drifts`). */
   learnTarget?: "test" | "drifts";
+  /** TASK-265: console reporter emits only the grand-total summary line. */
+  quiet?: boolean;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -236,14 +239,13 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
-  // 3b. Resolve rate limit: CLI flag > .env.yaml `rateLimit:` field
-  let rateLimit: number | "auto" | undefined = options.rateLimit;
-  if (rateLimit === undefined) {
-    try {
-      const envMeta = await loadEnvMeta(options.env, searchDir);
-      rateLimit = envMeta.rateLimit;
-    } catch { /* meta load failure is non-fatal */ }
-  }
+  // 3b. Resolve rate limit: CLI flag > .env.yaml `rateLimit:` > workspace
+  // `defaults.rate_limit` (TASK-301) > undefined.
+  let envRateLimit: number | "auto" | undefined;
+  try {
+    envRateLimit = (await loadEnvMeta(options.env, searchDir)).rateLimit;
+  } catch { /* meta load failure is non-fatal */ }
+  const rateLimit = resolveRateLimit(options.rateLimit, envRateLimit);
   const rateLimiter = rateLimit === "auto"
     ? createAdaptiveRateLimiter()
     : createRateLimiter(rateLimit);
@@ -315,7 +317,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
   //     (their captures don't exist yet).
   {
     const setupHits = preflightCheckVars(setupSuites, env);
-    for (const hit of setupHits) printWarning(formatMissingVarLine(hit));
+    emitMissingVarWarnings(setupHits);
     if (options.strictVars && setupHits.length > 0) {
       printError(`--strict-vars: ${setupHits.length} undefined variable reference(s) in setup suites`);
       return 2;
@@ -338,7 +340,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
   //     are known producers; per-suite captures/sets/parameterize handled inside.
   {
     const hits = preflightCheckVars(regularSuites, enrichedEnv);
-    for (const hit of hits) printWarning(formatMissingVarLine(hit));
+    emitMissingVarWarnings(hits);
     if (options.strictVars && hits.length > 0) {
       printError(`--strict-vars: ${hits.length} undefined variable reference(s)`);
       return 2;
@@ -411,9 +413,15 @@ export async function runCommand(options: RunOptions): Promise<number> {
       }
     } else {
       const reporter = getReporter(options.report);
-      reporter.report(results);
-      for (const w of warnings) {
-        printWarning(w);
+      reporter.report(results, options.quiet ? { quiet: true } : undefined);
+      // TASK-265: --quiet drops the warnings tail too — they are non-essential
+      // run hints (deprecation, timing). Errors still reach stderr via the
+      // dedicated path; --strict-vars still aborts on undefined refs before
+      // we get here.
+      if (!options.quiet) {
+        for (const w of warnings) {
+          printWarning(w);
+        }
       }
     }
   }
@@ -548,6 +556,20 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
+ * TASK-248: when 4+ hits collapse them into one summary line per unique
+ * variable name. Below threshold the per-(suite,step) form still helps
+ * users locate the missing reference.
+ */
+function emitMissingVarWarnings(hits: import("../../core/runner/preflight-vars.ts").MissingVarHit[]): void {
+  if (hits.length === 0) return;
+  if (hits.length < 4) {
+    for (const hit of hits) printWarning(formatMissingVarLine(hit));
+    return;
+  }
+  for (const line of summarizeMissingVars(hits)) printWarning(line);
+}
+
+/**
  * TASK-116: discover every `apis/<name>/tests/` directory in the workspace
  * for `zond run --all`. Skips entries without a tests/ subdir (some APIs
  * may have probes only). Returns absolute paths so the run command resolves
@@ -583,7 +605,14 @@ function discoverWorkspaceTestPaths(): { paths: string[] } | { error: string } {
 export function registerRun(program: Command): void {
   program
     .command("run [paths...]")
-    .description("Run API tests. Accepts one or more file/dir paths (shell-glob friendly: zond run tests/*.yaml).")
+    .description(
+      "Run API tests. Accepts one or more file/dir paths (shell-glob friendly: zond run tests/*.yaml). " +
+      "TASK-134: this command does NOT accept `--json` (which would collide with `--report json`). " +
+      "For JSON-envelope-style output use `--report json` (per-test breakdown) or `--report junit`. " +
+      "Other commands (`request`, `coverage`, `db diagnose`, etc.) DO accept `--json` — there it returns " +
+      "a small `{ok, data, errors}` envelope. The two flags are intentionally distinct: " +
+      "`run --report json` is a test-run report, `<cmd> --json` is a query-result envelope.",
+    )
     .option("--env <name>", "Use environment file (.env.<name>.yaml)")
     .option("--api <name>", "Use API collection (resolves test path automatically)")
     .addOption(
@@ -593,7 +622,7 @@ export function registerRun(program: Command): void {
         .argParser(parseReporter),
     )
     .option("--timeout <ms>", "Override request timeout", parsePositiveInt("--timeout"))
-    .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers", parseRateLimit)
+    .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers (overrides .env.yaml `rateLimit` and zond.config.yml `defaults.rate_limit`)", parseRateLimit)
     .option("--bail", "Stop on first suite failure")
     .option("--sequential", "Run regular suites one after another instead of in parallel (opt-out of Promise.all)")
     .option("--all", "TASK-116: discover every apis/<name>/tests/ directory in the workspace and merge them into a single run row (one runs.id per CI invocation, even with multiple registered APIs). Implies CI-style aggregation; pairs with auto-detected commit_sha / branch / trigger=ci.")
@@ -607,6 +636,10 @@ export function registerRun(program: Command): void {
     .option("--env-var <KEY=VALUE>", "Inject env variable (repeatable, overrides env file)", collect, [])
     .option("--strict-vars", "Hard-fail (exit 2) when a {{var}} reference has no producer (default: warn and continue)")
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
+    .option(
+      "--quiet",
+      "TASK-265: emit only the grand-total summary line — drops per-suite/per-test detail and warning footers. Exit code (0/1) still differentiates pass/fail. For CI logs and watcher loops where step-level output is noise.",
+    )
     .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
     .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
@@ -660,7 +693,7 @@ export function registerRun(program: Command): void {
         paths = [resolved.testPath];
       }
       if (paths.length === 0) {
-        printError("No path given and .zond-current not set; run `zond use <api>` or pass path explicitly (or use --api <name>)");
+        printError("No path given and no current API set; run `zond use <api>`, set ZOND_API, pass --api <name>, or pass path explicitly");
         process.exitCode = 2;
         return;
       }
@@ -687,6 +720,7 @@ export function registerRun(program: Command): void {
         envVars,
         strictVars: opts.strictVars === true,
         dryRun: opts.dryRun === true,
+        quiet: opts.quiet === true,
         reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
         validateSchema: opts.validateSchema === true,
         specPath: typeof opts.spec === "string" ? opts.spec : undefined,

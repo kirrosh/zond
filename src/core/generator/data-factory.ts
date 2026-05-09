@@ -234,6 +234,99 @@ function pickExampleValue(schema: OpenAPIV3.SchemaObject): unknown {
 }
 
 /**
+ * TASK-269 — per-field provenance for `zond generate --explain`.
+ *
+ * Returns a label describing *why* `generateFromSchema` would emit the
+ * value it does for a given (schema, propertyName). Mirrors the dispatch
+ * priority in `generateFromSchema` without producing the value, so
+ * `--explain` can show "name → {{$randomName}} [heuristic:name]" without
+ * re-executing generation.
+ *
+ * Kept as a parallel function instead of refactoring `generateFromSchema`
+ * to record sources — the recursion path-tracking complexity would
+ * outweigh the value for what is currently a debug-only surface. The
+ * heuristic order here MUST stay in lockstep with the function above; a
+ * unit test (data-factory.test.ts) pins the labels for each branch.
+ */
+export type FieldSource =
+  | "example"
+  | "examples"
+  | "enum"
+  | "format"
+  | "pattern"
+  | "min"
+  | "max"
+  | "random"
+  | "default"
+  | `heuristic:${string}`;
+
+export function classifyFieldSource(
+  schema: OpenAPIV3.SchemaObject,
+  propertyName?: string,
+): FieldSource {
+  // example > examples (3.1) — same FK-UUID guard as generateFromSchema.
+  if (schema.example !== undefined && schema.example !== null) {
+    if (!isLikelyForeignFKExample(schema, propertyName, schema.example)) {
+      return "example";
+    }
+  }
+  const examples = (schema as { examples?: unknown }).examples;
+  if (Array.isArray(examples)) {
+    for (const ex of examples) {
+      if (ex === null || ex === undefined) continue;
+      if (!isLikelyForeignFKExample(schema, propertyName, ex)) return "examples";
+      break;
+    }
+  }
+  if (schema.enum && schema.enum.length > 0) return "enum";
+  if (formatToPlaceholder(schema.format) !== undefined) return "format";
+
+  const t = Array.isArray(schema.type)
+    ? (schema.type as string[]).find(x => x !== "null")
+    : schema.type;
+
+  if (t === "string") {
+    if (isLowercaseOnlyPattern(schema.pattern)) return "pattern";
+    if (schema.description && /\b(domain|hostname|fqdn)\b/i.test(schema.description)) {
+      return "heuristic:domain-from-description";
+    }
+    if (propertyName) {
+      const lower = propertyName.toLowerCase();
+      if (lower === "slug" || lower.endsWith("_slug")) return "heuristic:slug";
+      if (lower === "domain" || lower === "hostname" || lower === "fqdn" || lower.endsWith("_domain")) return "heuristic:domain";
+      if (lower === "platform") return "heuristic:platform";
+      if (lower === "language" || lower === "lang" || lower === "locale") return "heuristic:locale";
+      if (lower === "country" || lower === "country_code") return "heuristic:country";
+      if (lower === "timezone" || lower === "time_zone" || lower === "tz") return "heuristic:timezone";
+      if (lower === "currency" || lower === "currency_code") return "heuristic:currency";
+      if (
+        lower === "email" || lower === "from" || lower === "to" || lower === "cc" ||
+        lower === "bcc" || lower === "sender" || lower === "recipient" ||
+        lower === "reply_to" || lower === "replyto" ||
+        lower.endsWith("_email") || lower.endsWith("Email") ||
+        lower.endsWith("_reply_to") || lower.endsWith("_from") ||
+        lower.endsWith("_to") || lower.endsWith("_cc") || lower.endsWith("_bcc")
+      ) return "heuristic:email";
+      if (lower === "id" || lower === "uuid" || lower.endsWith("_id") || lower.endsWith("id")) return "heuristic:id";
+      if (lower === "name" || lower.endsWith("_name") || lower.endsWith("Name")) return "heuristic:name";
+      if (lower === "url" || lower.endsWith("_url") || lower === "uri" || lower === "href" || lower === "website") return "heuristic:url";
+      if (lower === "password" || lower.endsWith("_password")) return "heuristic:password";
+      if (lower === "phone" || lower === "telephone" || lower.endsWith("_phone")) return "heuristic:phone";
+    }
+    return "random";
+  }
+
+  if (t === "integer") {
+    if (schema.maximum !== undefined) return "max";
+    if (schema.minimum !== undefined && schema.minimum > 0) return "min";
+    return "random";
+  }
+
+  if (t === "number" || t === "boolean") return "default";
+  return "default";
+}
+
+/**
  * Map an OpenAPI `format` value to a zond generator placeholder. Returns
  * undefined when the format is unknown or absent so callers can fall back
  * to type / property-name heuristics. Exported for tests.

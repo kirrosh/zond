@@ -70,7 +70,8 @@ export function resolveApiEnv(apiName: string, dbPath: string | undefined):
  *   1. Explicit positional/flag value — used as-is (URL or filesystem path).
  *   2. --api <name> — look up the workspace-local snapshot via
  *      `resolveCollectionSpec`.
- *   3. .zond-current — same lookup using the currently-selected API.
+ *   3. ZOND_API env / .zond/current-api — same lookup using the currently-selected API
+ *      (TASK-290; resolution chain implemented in core/context/current.ts).
  *
  * Returns `{ spec }` on success, `{ error }` on failure. Centralised here
  * so commands stay thin and skill/CI prompts can rely on either form.
@@ -102,12 +103,3 @@ export function resolveSpecArg(
   return { spec: resolved.spec };
 }
 
-/**
- * TASK-182 (m-11): one-release deprecation warning on the old top-level
- * probe-* names. Remove the alias + this helper in the next minor.
- */
-export function warnDeprecatedProbe(oldName: string, newName: string): void {
-  process.stderr.write(
-    `[zond] '${oldName}' is deprecated, use 'zond probe ${newName}' instead. The alias will be removed in the next release.\n`,
-  );
-}

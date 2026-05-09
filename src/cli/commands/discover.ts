@@ -104,6 +104,7 @@ export function isEmptyListBody(body: unknown): boolean {
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../core/generator/types.ts";
+import type { RecommendedAction } from "../../core/diagnostics/failure-hints.ts";
 
 export interface DiscoverOptions {
   specPath: string;
@@ -158,6 +159,20 @@ export interface DiscoveryItem {
     | "verify-no-read"
     | "verify-skip-empty";
   reason?: string;
+  /** TASK-294: agent-routable action for items the user must fix.
+   *  miss-* / verify-stale / verify-unknown → `fix_fixture`.
+   *  miss-network → `fix_network_config`.
+   *  write / skip-* / verify-live → undefined. */
+  recommended_action?: RecommendedAction;
+}
+
+/** TASK-294: derive recommended_action from a DiscoveryItem's status. */
+export function discoveryAction(status: DiscoveryItem["status"]): RecommendedAction | undefined {
+  if (status === "miss-network") return "fix_network_config";
+  if (status.startsWith("miss-") || status === "verify-stale" || status === "verify-unknown") {
+    return "fix_fixture";
+  }
+  return undefined;
 }
 
 export function isPlaceholder(value: string | undefined): boolean {
@@ -538,6 +553,13 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
       }
     }
 
+    // TASK-294: stamp every item with recommended_action before consumers
+    // (--json envelope, summary printer) read it.
+    for (const it of items) {
+      const action = discoveryAction(it.status);
+      if (action) it.recommended_action = action;
+    }
+
     const writes = items.filter(i => i.status === "write");
     let applied = false;
     let backupPath: string | null = null;
@@ -633,47 +655,6 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
   }
 }
 
-import type { Command } from "commander";
-import { globalJson, resolveSpecArg } from "../resolve.ts";
-import { parsePositiveInt } from "../argv.ts";
-import { getDb } from "../../db/schema.ts";
-import { findCollectionByNameOrId } from "../../db/queries.ts";
-
-export function registerDiscover(program: Command): void {
-  program
-    .command("discover")
-    .description("Auto-fill .env.yaml FK ids by hitting list-endpoints (Phase 2.5 fixture pack — TASK-136)")
-    .requiredOption("--api <name>", "Registered API to discover against (apis/<name>/.env.yaml)")
-    .option("--db <path>", "Path to SQLite database file")
-    .option("--api-dir <path>", "Override apis/<name>/ root (defaults to the collection's base_dir)")
-    .option("--env <path>", "Override .env.yaml path (defaults to <api-dir>/.env.yaml)")
-    .option("--apply", "Write discovered values to .env.yaml (with .env.yaml.bak backup). Default: dry-run.")
-    .option("--verify", "TASK-281: GET each fixture's read-by-id endpoint and classify live/stale/unknown. Combine with --apply (or use --refresh) to drop stale fixtures and re-resolve them.")
-    .option("--refresh", "TASK-281: shortcut for --verify --apply — re-validate every fixture, then re-resolve any that 404'd.")
-    .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
-    .action(async (opts, cmd: Command) => {
-      const resolved = resolveSpecArg(undefined, opts.api, opts.db);
-      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
-      let apiDir = opts.apiDir as string | undefined;
-      if (!apiDir) {
-        try {
-          getDb(opts.db);
-          const col = findCollectionByNameOrId(opts.api);
-          apiDir = col?.base_dir ?? `apis/${opts.api}`;
-        } catch {
-          apiDir = `apis/${opts.api}`;
-        }
-      }
-      const refresh = opts.refresh === true;
-      process.exitCode = await discoverCommand({
-        specPath: resolved.spec,
-        apiDir,
-        envPath: opts.env,
-        // --refresh implies --verify --apply.
-        apply: opts.apply === true || refresh,
-        verify: opts.verify === true || refresh,
-        timeoutMs: opts.timeout,
-        json: globalJson(cmd),
-      });
-    });
-}
+// CLI registration moved to ./prepare-fixtures.ts (TASK-299, m-13 D).
+// `discoverCommand` above is still the imperative core for the
+// single-pass branch and is consumed directly by tests.

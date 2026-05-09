@@ -1,12 +1,12 @@
 import { describe, test, expect, afterEach, beforeEach } from "bun:test";
-import { writeFileSync } from "fs";
+import { mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { buildProgram } from "../../src/cli/program.ts";
 import { closeDb } from "../../src/db/schema.ts";
 import { captureOutput } from "../_helpers/output";
 import { makeWorkspace } from "../_helpers/workspace";
 
-describe("zond run — .zond-current fallback (TASK-68)", () => {
+describe("zond run — .zond/current-api fallback (TASK-68 / TASK-290)", () => {
   let workRoot: string;
   let cleanupWs: () => void;
   let suppress: ReturnType<typeof captureOutput>;
@@ -25,19 +25,21 @@ describe("zond run — .zond-current fallback (TASK-68)", () => {
     cleanupWs();
   });
 
-  test("no path + no .zond-current → clear error mentioning .zond-current (not 'got boolean')", async () => {
+  test("no path + no current API → clear error (not 'got boolean')", async () => {
     const program = buildProgram();
     await program.parseAsync(["bun", "script.ts", "run", "--safe"]);
 
     const stderr = suppress.errChunks.join("");
     expect(stderr).not.toContain("got boolean");
     expect(stderr).not.toContain("paths[0]");
-    expect(stderr).toContain(".zond-current");
+    // TASK-290: error message points at the new resolution chain.
+    expect(stderr).toMatch(/zond use|ZOND_API|--api/);
     expect(process.exitCode).toBe(2);
   });
 
-  test("no path + .zond-current set but unknown api → 'API ... not found' (not boolean crash)", async () => {
-    writeFileSync(join(workRoot, ".zond-current"), "resend\n", "utf-8");
+  test("no path + .zond/current-api set but unknown api → 'API ... not found' (not boolean crash)", async () => {
+    mkdirSync(join(workRoot, ".zond"), { recursive: true });
+    writeFileSync(join(workRoot, ".zond/current-api"), "resend\n", "utf-8");
 
     const program = buildProgram();
     await program.parseAsync(["bun", "script.ts", "run", "--safe"]);

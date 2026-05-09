@@ -481,8 +481,13 @@ export function detectCrudGroupsWithDiagnostics(
       diagnostics.push(diag);
       continue;
     }
-    if (!read) {
-      diag.reason = "item endpoint exists but no GET-by-id (minimum is POST + GET/{id})";
+    // TASK-260: accept headless chains — POST + (GET/PUT/PATCH/DELETE on /{id}).
+    // Resources with no GET-by-id (e.g. external-teams, some user-binding endpoints)
+    // were previously skipped entirely, even though POST captures the ID and PUT/DELETE
+    // can drive the chain on their own. The Read/Verify steps in the suite generator
+    // are already conditional on `group.read`, so headless chains generate cleanly.
+    if (!read && !update && !del) {
+      diag.reason = "item endpoint exists but no GET/PUT/PATCH/DELETE on /{id}";
       diagnostics.push(diag);
       continue;
     }
@@ -497,7 +502,14 @@ export function detectCrudGroupsWithDiagnostics(
     const idParam = idMatch[1]!;
 
     diag.verdict = "chain";
-    diag.reason = "POST + GET/{id} matched";
+    if (read) {
+      diag.reason = "POST + GET/{id} matched";
+    } else {
+      // TASK-260: explicit headless reason so `--explain` differentiates the
+      // two chain shapes — useful for debugging fixture flow.
+      const partner = update ? `${update.method.toUpperCase()}/{id}` : `DELETE/{id}`;
+      diag.reason = `POST + ${partner} matched (headless: no GET-by-id)`;
+    }
     diagnostics.push(diag);
 
     groups.push({
@@ -906,27 +918,52 @@ export function generateSuites(opts: {
     const paramlessGets = getEndpoints.filter(ep => !endpointHasPathParams(ep));
     const pathParamGets = getEndpoints.filter(ep => endpointHasPathParams(ep));
 
-    // Regular smoke: paramless GETs (e.g. list endpoints, health checks)
-    if (paramlessGets.length > 0) {
-      const tests = paramlessGets.map(ep => {
+    // Positive smoke: paramless GETs (no env needed) + path-param GETs
+    // (with skip_if guards). TASK-240 — unified naming convention:
+    // always emit `smoke-<tag>-positive.yaml`, never the bare
+    // `smoke-<tag>.yaml`, so file listings don't have to explain why a
+    // tag has only `-negative` (e.g. Sentry's Explore tag) or why two
+    // siblings differ in suffix shape.
+    const positiveTests = [
+      ...paramlessGets.map(ep => {
         const step = generateStep(ep, securitySchemes);
         const seededPath = convertPathWithSeeds(ep.path, ep);
         (step as any)[ep.method.toUpperCase()] = seededPath;
         return step;
-      });
-      const headers = getSuiteHeaders(paramlessGets, securitySchemes);
+      }),
+      ...pathParamGets.map(ep => {
+        const step = generateStep(ep, securitySchemes);
+        // Path stays as {{param}} so user-provided env values flow in.
+        // skip_if guards an unset path-param without skipping paramless
+        // siblings that don't need a fixture.
+        const firstPathParam = ep.parameters.find(p => p.in === "path");
+        if (firstPathParam) {
+          step.skip_if = `{{${firstPathParam.name}}} ==`;
+        }
+        return step;
+      }),
+    ];
+
+    if (positiveTests.length > 0) {
+      const positiveEndpoints = [...paramlessGets, ...pathParamGets];
+      const headers = getSuiteHeaders(positiveEndpoints, securitySchemes);
+      // needs-id only when at least one test depends on a path-param
+      // fixture — coverage downgrades these suites when env is empty.
+      const tags = pathParamGets.length > 0
+        ? ["smoke", "positive", "needs-id"]
+        : ["smoke", "positive"];
 
       const suite: RawSuite = {
-        name: `${tagSlug}-smoke`,
-        tags: ["smoke"],
-        fileStem: `smoke-${tagSlug}`,
+        name: `${tagSlug}-smoke-positive`,
+        tags,
+        fileStem: `smoke-${tagSlug}-positive`,
         base_url: "{{base_url}}",
-        tests,
+        tests: positiveTests,
       };
 
       if (headers) {
         suite.headers = headers;
-        for (const t of tests) {
+        for (const t of positiveTests) {
           if (t.headers && JSON.stringify(t.headers) === JSON.stringify(headers)) {
             delete (t as any).headers;
           }
@@ -951,40 +988,6 @@ export function generateSuites(opts: {
         name: `${tagSlug}-smoke-negative`,
         tags: ["smoke", "negative"],
         fileStem: `smoke-${tagSlug}-negative`,
-        base_url: "{{base_url}}",
-        tests,
-      };
-
-      if (headers) {
-        suite.headers = headers;
-        for (const t of tests) {
-          if (t.headers && JSON.stringify(t.headers) === JSON.stringify(headers)) {
-            delete (t as any).headers;
-          }
-        }
-      }
-
-      suites.push(suite);
-    }
-
-    // Positive smoke: path-param GETs with {{var}} placeholders + skip_if for unset env
-    if (pathParamGets.length > 0) {
-      const tests = pathParamGets.map(ep => {
-        const step = generateStep(ep, securitySchemes);
-        // Path stays as {{param}} so user-provided env values flow in
-        // Pick the first path param for skip_if guard (the resource ID)
-        const firstPathParam = ep.parameters.find(p => p.in === "path");
-        if (firstPathParam) {
-          step.skip_if = `{{${firstPathParam.name}}} ==`;
-        }
-        return step;
-      });
-      const headers = getSuiteHeaders(pathParamGets, securitySchemes);
-
-      const suite: RawSuite = {
-        name: `${tagSlug}-smoke-positive`,
-        tags: ["smoke", "positive", "needs-id"],
-        fileStem: `smoke-${tagSlug}-positive`,
         base_url: "{{base_url}}",
         tests,
       };

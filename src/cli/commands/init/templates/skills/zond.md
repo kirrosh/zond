@@ -23,7 +23,7 @@ Run `zond --version` first; if missing:
 
 - **NEVER read raw OpenAPI/swagger** with Read/cat/grep. The workspace has
   pre-built artifacts (catalog/resources/fixtures) — use those. Drop into
-  `apis/<name>/spec.json` only when probe-* needs full schemas.
+  `apis/<name>/spec.json` only when `probe <class>` needs full schemas.
 - **NEVER `curl` or `wget`** — use `zond request <method> <url>` for ad-hoc
   HTTP so it lands in the run DB and respects auth. Pass `--api <name>` to
   auto-load `Authorization` from `apis/<name>/.secrets.yaml` — never
@@ -52,6 +52,27 @@ Run `zond --version` first; if missing:
   envs.
 - For multi-suite tag filters always include `setup`: `--tag crud,setup`.
 - Re-run after each fix with `--json`; don't batch edits without verifying.
+- **NEVER run destructive ops on a shared / production org without `--dry-run`
+  first.** Why: probes, `prepare-fixtures --apply`, `cleanup` all hit live APIs and
+  can delete user data. The dry-run path is in every command's `--help`; use
+  it on first run, inspect the diff, then drop the flag.
+- **NEVER report a cleanup failure as an API bug.** A POST that 200-OKs and
+  then a follow-up DELETE that 5xx-es is *probably* a fixture-isolation issue
+  (orphan accumulation, race), not an API contract bug. Re-run with
+  `--no-cleanup` or in an isolated namespace before filing.
+- **NEVER share a triage artefact (case-study, html, bundle, digest) outside
+  the user's org without `--redact-identity`.** Why: identity-file values
+  (org/member/project slugs, real ids) leak otherwise; the redaction registry
+  only catches secrets, not identifying metadata.
+- **MUST timeout the cascade at 8 passes (default).** Why:
+  `zond prepare-fixtures --cascade` chains discover and (with `--seed`)
+  POST-creates across passes; the cascade can self-trigger on partially-
+  resolved fixtures. The CLI bounds the loop; never override the cap
+  without a written reason.
+- **MUST run `zond doctor --api <name> --missing-only` before generating
+  fixtures or touching `.env.yaml`.** Why: the diagnostic identifies the
+  exact unfilled keys before the workflow blows up midway. Skipping doctor
+  produces fixture sets with phantom keys that 404 every probe.
 
 ## Workspace assumption
 
@@ -76,6 +97,7 @@ If any artifact is missing or stale (`zond doctor` flags it), run
 | "find bugs", "probe this API", "test for 5xx" | 1 then 5 (Probes) | — |
 | "только security / SSRF / CRLF", "security-only audit", "без CRUD-аудита" | `zond probe security <classes> --api <name> --dry-run` (затем без `--dry-run`) — см. Phase 5.2 | 1–4 |
 | "tests are failing", "diagnose run X", "fix failures" | 4 (Diagnose) | 1–3 |
+| "что упало в последнем run", "summary последнего прогона", "почему красное" | hand off to `zond-triage` | 1–7 |
 | "the run after my fix" | 3 (Run) → 4 (Diagnose) | 1–2 |
 | "what variables does this API need", "is auth_token set" | `zond doctor --api <name> --json` | direct file reads |
 | "workspace looks messy", "start clean", "remove auto-generated files" | `zond clean --api <name>` (dry-run) → `--force` | — |
@@ -104,7 +126,9 @@ base_url: "${SENTRY_BASE_URL:-https://us.sentry.io}"  # from shell env
 ```
 
 Iron rule: do not `cat` `.secrets.yaml`. `zond doctor --api <name> --json`
-exposes the canonical envelope `{ ok, command, data, ... }` with the
+exposes the canonical envelope `{ ok, command, data, warnings,
+errors: [{code, message, details?}] }` (TASK-296: route on
+`errors[].code`, not on the message string) with the
 fixture rows under `.data.fixtures.required[]` /
 `.data.fixtures.optional[]`. Each row has `{ name, set, length, source,
 description, secret?, identity?, value? }` — `value` is omitted for
@@ -135,7 +159,7 @@ you assume a YAML file is hand-rolled.
 | Workspace | `zond.config.yml`, `.zond/`, `apis/` | `zond init` | yes |
 | API artifacts | `apis/<name>/spec.json`, `.api-catalog.yaml`, `.api-resources.yaml`, `.api-fixtures.yaml` | `zond add api` / `zond refresh-api` | yes |
 | Generated tests | `apis/<name>/tests/*.yaml` | `zond generate` | yes |
-| Probe suites | `apis/<name>/probes/<class>/*.yaml` | `zond probe-* --emit` | yes |
+| Probe suites | `apis/<name>/probes/<class>/*.yaml` | `zond probe <class> --emit-tests` | yes |
 | User fixtures | `apis/<name>/.env.yaml`, `.secrets.yaml`, `.identity.yaml` | the user | **no** |
 | Triage artifacts | `triage/<api>/<run-id>/*` | `zond report *` (default path) | yes |
 
@@ -143,9 +167,10 @@ Cleanup recipe:
 
 ```bash
 zond clean --api <name>                  # dry-run: lists what would be removed
-zond clean --api <name> --force          # actually delete
+zond clean --api <name> --force          # actually delete (preserves apis/<name>/probes/ — TASK-258)
+zond clean --api <name> --probes --force # also delete probe-suites for that api
 zond clean --probes --force              # only probe-suite YAMLs (after a template fix)
-zond clean --all --force                 # nuclear: remove every tracked file
+zond clean --all --force                 # nuclear: remove every tracked file (incl. probes)
 ```
 
 Files whose sha256 no longer matches the manifest are **skipped**
@@ -181,7 +206,7 @@ confirm.
 
 ```bash
 zond generate apis/<name>/spec.json --output apis/<name>/tests [--tag <spec-tag>] [--uncovered-only]
-zond validate apis/<name>/tests
+zond check tests apis/<name>/tests
 ```
 
 `generate` fills bodies with `{{$randomString}}`. Format-strict APIs reject
@@ -206,27 +231,28 @@ the auto-detected list, real-API CRUD usually needs **pre-existing FK
 ids**, **verified resources**, and **valid enums** the spec doesn't
 enforce.
 
-For path-FK ids (the bulk of fixture-pack work), prefer `zond discover`
-over manual `zond request` calls — it walks `.api-resources.yaml`, hits
-each owner list-endpoint with the workspace auth, and proposes a diff:
+For path-FK ids (the bulk of fixture-pack work), prefer
+`zond prepare-fixtures` over manual `zond request` calls — it walks
+`.api-resources.yaml`, hits each owner list-endpoint with the workspace
+auth, and proposes a diff:
 
 ```bash
-zond discover --api <name>            # dry-run: prints var → discovered value
-zond discover --api <name> --apply    # writes to .env.yaml (with .bak backup)
+zond prepare-fixtures --api <name>            # dry-run: prints var → discovered value
+zond prepare-fixtures --api <name> --apply    # writes to .env.yaml (with .bak backup)
 ```
 
-For empty workspaces where parent fixtures are *also* missing, use
-`zond bootstrap` instead — it cascades discover until nested-list paths
-become reachable and (with `--seed`) POSTs to create-endpoints when the
-owner's list returns empty:
+For empty workspaces where parent fixtures are *also* missing, add
+`--cascade` — it loops discover until nested-list paths become reachable
+and (with `--seed`) POSTs to create-endpoints when the owner's list
+returns empty:
 
 ```bash
-zond bootstrap --api <name> --apply             # cascade-only
-zond bootstrap --api <name> --apply --seed      # cascade + POST seeds
-zond bootstrap --api <name> --apply --force     # re-discover even if filled
+zond prepare-fixtures --api <name> --apply --cascade           # cascade-only
+zond prepare-fixtures --api <name> --apply --seed              # cascade + POST seeds (--seed implies --cascade)
+zond prepare-fixtures --api <name> --apply --cascade --force   # re-discover even if filled
 ```
 
-Bootstrap is idempotent: a re-run skips already-set vars unless
+Cascade mode is idempotent: a re-run skips already-set vars unless
 `--force`. Cascade caps at `--max-passes` (default 8).
 
 Suffix-aware: `*_slug` captures `slug`, `*_uuid` → `uuid`, `*_id` → `id`.
@@ -237,7 +263,7 @@ reports `miss-empty` with reason `no <resource> in target API — create
 one first…`. Distinct from `miss-no-id` (response shape unrecognized:
 no `array`/`data`/`items`/`results`/`records` field). On a fresh
 workspace this usually means: trigger an event in the product (Sentry
-SDK install, Resend send, etc.) and re-run `zond discover`. For special
+SDK install, Resend send, etc.) and re-run `zond prepare-fixtures`. For special
 fixtures the spec can't describe (verified-only emails, domain-validated
 records, "real" enum values), fall back to `zond request`:
 
@@ -317,6 +343,29 @@ Override autodetection with `ZOND_TRIGGER=ci|manual`,
 `ZOND_COMMIT_SHA=<sha>`, `ZOND_BRANCH=<name>` — useful when the build
 shells out from a wrapper that strips the native CI vars.
 
+## --json output (TASK-293)
+
+Every `zond` subcommand supports `--json` with two documented exclusions:
+`zond run` (use `--report json` for the bulk run report) and
+`zond completions <shell>` (shell-completion script is text). The
+envelope is uniform across commands:
+
+```jsonc
+{
+  "ok": true,
+  "command": "<name>",
+  "data": { /* command-specific payload */ },
+  "warnings": [ "string" ],
+  "errors": [ { "code": "ZondErrorCode", "message": "...", "details": {} } ],
+  "exit_code": 2  // present on errors only
+}
+```
+
+Route on `errors[].code` (TASK-296), not the message — see
+`failure-hints.ts` for the closed enum. Stdout discipline: `--json` paths
+emit only the envelope on stdout; everything else (progress, hints,
+warnings) goes to stderr.
+
 ## Phase 4 — Diagnose failures
 
 ```bash
@@ -328,7 +377,11 @@ zond db compare <idA> <idB> --json           # regression diff
 
 `agent_directive` = literal next step. `recommended_action` ∈
 {`fix_test_logic` (edit YAML), `report_backend_bug` (STOP, report),
-`update_expectation` (only on user confirmation)}.
+`fix_auth_config`, `fix_network_config`, `fix_env`, `fix_spec` (edit
+OpenAPI — emitted by `check spec`), `fix_fixture` (fill `.env.yaml` —
+emitted by `prepare-fixtures` miss-* and inconclusive mass-assignment
+baselines), `update_spec` (status-drift in `zond run --learn`)}. The full
+enum is canonical (TASK-294); see `skills/zond-triage.md` for routing.
 
 ### 4a. Fixing 4xx caused by stub generators
 
@@ -341,8 +394,9 @@ When `recommended_action: fix_test_logic` and the body is rejected on format
    (Phase 2.5). Generators cannot help here.
 3. **Typed generator** — for the rest, swap `{{$randomString}}` for the
    matching format-aware generator (`{{$randomEmail}}`, `{{$randomUrl}}`,
-   `{{$uuid}}`, `{{$randomInt}}`, `{{$randomIsoDate}}`, …; full list in
-   `zond run --help`).
+   `{{$uuid}}`, `{{$randomInt}}`, `{{$randomIsoDate}}`, …; run
+   `zond reference random-helpers` for the full table or see
+   `docs/random-helpers.md`).
 4. **Hardcoded literal** — if the typed generator still fails (regex too
    strict), drop to a literal that satisfies the contract.
 5. **Runtime captures** are for resources the test itself creates (capture
@@ -354,9 +408,8 @@ When `recommended_action: fix_test_logic` and the body is rejected on format
 Run on a passing API to surface latent bugs.
 
 ```bash
-zond probe validation apis/<name>/spec.json --output apis/<name>/probes/validation
-zond probe methods    apis/<name>/spec.json --output apis/<name>/probes/methods
-zond probe by-bogus-id apis/<name>/spec.json --output apis/<name>/probes/negative-by-id
+zond probe static  apis/<name>/spec.json --output apis/<name>/probes/static
+# defaults to validation+methods; restrict via --include validation,methods
 zond probe mass-assignment apis/<name>/spec.json --env apis/<name>/.env.yaml \
   --output apis/<name>/probes/mass-assignment-digest.md \
   --emit-tests apis/<name>/probes/mass-assignment
@@ -365,21 +418,11 @@ zond run apis/<name>/probes/<class> --report json
 zond db diagnose <run-id> --json
 ```
 
-`probe by-bogus-id` (TASK-275): для каждого пути с `{id|slug|uuid}` шлёт один
-запрос с заведомо несуществующим значением (`00000000-…` для uuid, `999999999`
-для int, `zond-bogus-slug` для slug). Ожидание `[400, 404, 410]` — любой 5xx
-или 2xx — bug-кандидат. Закрывает 60+ хитов negative-coverage без ручного
-YAML; объединяй с positive-сьютом через `zond coverage --union tag:negative-by-id`.
-
-> Старые имена `zond probe-validation` / `probe-methods` / `probe-mass-assignment` /
-> `probe-security` оставлены как алиасы на 1 релиз и пишут deprecation warning
-> в stderr. Используйте `zond probe <class>`.
-
 Findings to flag: 5xx on null/empty/wrong-type body (missing validation /
 unguarded coercion), 2xx on undeclared method (contract drift), `is_admin: true`
-echoed in response (HIGH from `probe-mass-assignment`).
+echoed in response (HIGH from `probe mass-assignment`).
 
-**Body-FK auto-discovery (TASK-137).** `probe-mass-assignment` resolves
+**Body-FK auto-discovery (TASK-137).** `probe mass-assignment` resolves
 required body fields named `*_id` / `*_slug` / `*_uuid` / `*_key` by
 hitting their sibling list endpoint (e.g. `audience_id` → `GET /audiences`)
 and overlays the real value onto the baseline body. Eliminates most
@@ -387,19 +430,19 @@ and overlays the real value onto the baseline body. Eliminates most
 "unresolved body FKs: …" — the auto-discover couldn't reach the owner
 (nested list, scope-locked, etc.); add the value to `.env.yaml` manually.
 
-**Nested paths need real parent fixtures.** `probe-validation` substitutes
+**Nested paths need real parent fixtures.** `probe static` (validation class) substitutes
 non-attacked path params from `.env.yaml` at run time (`{{organization_id_or_slug}}`),
 so for any `repos/{repo_id}/commits`-style endpoint you need a real parent
 slug in env or every probe will 404 on the parent before reaching the leaf
 validator. Pre-flight: `zond doctor --api <name>` and confirm parent
-fixtures are populated. Use `--no-real-parents` only when you intentionally
+fixtures are populated. Use `--use-synthetic-parents` only when you intentionally
 want fully-synthetic paths (no real account available).
 
 Filter scope on large APIs: `--tag <spec-tag> [--max-per-endpoint 20]`.
 
 **Auto-discovery of path-param fixtures.** When a probed endpoint depends on
 `{domain_id}` / `{webhook_id}` / etc. that `.env.yaml` doesn't supply,
-`probe-mass-assignment` looks for a sibling `GET /domains` (or
+`probe mass-assignment` looks for a sibling `GET /domains` (or
 `/orgs/{org_id}/projects` for nested), calls it once per run, pulls
 `data[0].id` (also tries `items[0].id` and top-level array shapes), and
 reuses that value for every endpoint sharing the same parent. Cached, so
@@ -412,7 +455,7 @@ it.
 
 ### Phase 5.1 — Manual mass-assignment catch-up
 
-`probe-mass-assignment` digest splits findings into HIGH / MED / LOW /
+`probe mass-assignment` digest splits findings into HIGH / MED / LOW /
 **INCONCLUSIVE** / **INCONCLUSIVE-5XX**. INCONCLUSIVE = the auto-prober
 couldn't build a valid body (same fixture problem as Phase 4a).
 INCONCLUSIVE-5XX = baseline POST itself crashed with ≥500 — the endpoint is
@@ -467,7 +510,7 @@ tests:
 ```
 
 If `is_admin: true` survives the round-trip GET → **HIGH**. File via
-`zond report case-study` (Phase 7).
+`zond report bundle --include case-study` (Phase 7).
 
 ### Phase 5.2 — Security probes (SSRF, CRLF, open-redirect)
 
@@ -477,7 +520,7 @@ zond probe security ssrf,crlf --api <name> --env apis/<name>/.env.yaml \
   --emit-tests apis/<name>/probes/security
 ```
 
-`probe-security` autodetects vulnerable fields by name + `format` hint
+`probe security` autodetects vulnerable fields by name + `format` hint
 (SSRF: `*_url` / `webhook` / `callback` / `redirect_uri` / `format: uri`;
 CRLF: `subject` / `*_prefix` / `name` / `description` / `title`; open-redirect:
 `redirect` / `next` / `return_to`). For each detected (field × payload) it
@@ -489,7 +532,7 @@ candidate), LOW (2xx, no echo — verify side-effects manually), OK
 (4xx). Regression YAML via `--emit-tests`.
 
 **Cleanup is state-aware (TASK-151).** On stateful PUT/PATCH endpoints
-probe-security does `GET` → snapshot → attack → `PUT` original back, so
+probe security does `GET` → snapshot → attack → `PUT` original back, so
 DSN-keys / team-names / webhook URLs aren't left with the attack
 payload. POST falls back to `DELETE`-counterpart cleanup with a short
 eventual-consistency retry (200ms / 1s) — read-replica lag on
@@ -499,7 +542,7 @@ section at the **top** of the digest (and tagged `🧹 cleanup-failure`
 inline next to each affected verdict). Pass `--no-cleanup` only in
 namespace-isolated test envs.
 
-**CI exit codes.** `zond probe-security` exits non-zero on either:
+**CI exit codes.** `zond probe security` exits non-zero on either:
 - `HIGH > 0` — at least one finding looks like an actual bug (gate the
   deploy).
 - `cleanup.error > 0` — probe mutated state it could not restore;
@@ -510,7 +553,7 @@ the second case.
 
 **Partial PUT support (TASK-152).** Sentry / Stripe / GitHub-shaped
 APIs reject the full spec body on PUT (`422 use partial PUT`). When
-that happens, probe-security retries the baseline with a single-key
+that happens, probe security retries the baseline with a single-key
 body per detected field; if any partial baseline succeeds, attacks
 proceed using that shape. Findings using the partial body are annotated
 `[partial-body]` in the digest reason. Without this, the proven-HIGH
@@ -523,7 +566,7 @@ detection on a new spec, and recommended as the **first** invocation
 on shared / prod orgs to confirm no critical-state endpoints (DSN
 rotation, billing settings) are in scope.
 
-When `probe-security` decides a field needs manual triage (e.g., the
+When `probe security` decides a field needs manual triage (e.g., the
 detected field name is unconventional, or you want a custom payload like
 `http://[::1]:80` that isn't in the built-in list), drop down to a hand
 -written YAML probe:
@@ -538,7 +581,7 @@ tests:
 
 Common bespoke payloads: `http://169.254.169.254/latest/meta-data/`
 (AWS IMDS), `http://10.0.0.1` (RFC1918), `gopher://`, `dict://`. Triage
-remains the same as `probe-security`'s automatic classification.
+remains the same as `probe security`'s automatic classification.
 
 ### Phase 5.3 — Robustness probes (content-type, idempotency)
 
@@ -593,6 +636,21 @@ tests:
 Cancel-style endpoints (`/emails/{id}/cancel`) may legitimately return `200` on
 the second call — note as *project decision*, not a bug.
 
+### Phase 5.4 — Post-probe hygiene
+
+Live probes can leave the workspace in a half-mutated state. Always run
+this triplet before the next `zond run` of regular tests:
+
+```bash
+zond prepare-fixtures --api <name> --verify   # detect stale FK ids in .env.yaml (TASK-281)
+zond prepare-fixtures --api <name> --refresh  # = --verify --apply: drop stale, re-resolve via list endpoints
+zond cleanup --orphans                        # retry DELETE for resources logged in ~/.zond/orphans/ (TASK-278)
+```
+
+Skip `--verify`/`--refresh` only with `probe security --isolated`
+(TASK-264) — isolated mode never attacks seeded-fixture endpoints, so they
+stay live.
+
 ## Phase 6 — Coverage report & spec drift
 
 ```bash
@@ -620,6 +678,29 @@ with `--run-id`. To aggregate across runs use `--union`:
 
 JSON envelope carries `union_mode` and `runIds[]` for downstream tooling.
 
+**Three-bucket JSON breakdown (TASK-280).** `--json` reports every endpoint
+in one of three buckets: `covered2xx` (pass-coverage win), `coveredButNon2xx`
+(hit but never passed — 5xx-only or assertion-failed), `unhit` (no result at
+all). This is the right shape for CI dashboards: `coveredButNon2xx` is the
+fast lane to triage, `unhit` is the gap to close with `generate
+--uncovered-only`.
+
+### Spec-drift learning (`zond run --learn`, TASK-282)
+
+When a passing test asserts `200` but the server returns `201` (or vice
+versa), the test is a flake-in-waiting. `zond run --learn` detects the
+drift without failing the run; `--learn-apply` rewrites either the test
+or a `tolerated-drifts.yaml` allowlist:
+
+```bash
+zond run apis/<name>/tests --learn                           # detect, exit 0, summary in stdout
+zond run apis/<name>/tests --learn-apply --learn-target test    # rewrite expect.status in YAML
+zond run apis/<name>/tests --learn-apply --learn-target drifts  # add to apis/<name>/tolerated-drifts.yaml
+```
+
+Use this when `recommended_action: update_spec` (the spec lies, not the
+backend) or to silence a known-tolerable drift in CI.
+
 ## Phase 7 — Share findings
 
 After a run is in `zond.db`, materialise it as a shareable file:
@@ -627,10 +708,8 @@ After a run is in `zond.db`, materialise it as a shareable file:
 ```bash
 zond report export <run-id>                                  # default: triage/<api>/run-<id>/html-<ts>.html
 zond report export <run-id> -o triage/run-<id>.html          # explicit path
-zond report case-study <failure-id>                          # default: triage/<api>/run-<id>/case-study-<ts>.md
-zond report case-study <failure-id> --stdout                 # also pipe to gh issue create --body-file -
-zond report case-study <failure-id> --json                   # envelope with `markdown`
 zond report bundle 135..142 -o triage/sweep/                 # batch: case-study + html + diagnose for each run + index.md
+zond report bundle <run-id> --include case-study             # only case-study markdown(s) for the run
 zond report bundle 135,137,141 --include diagnose            # filter artefacts (case-study | export | diagnose)
 zond report bundle --session <id> -o triage/session/         # group by session_id (TASK-143)
 ```
@@ -650,7 +729,7 @@ What happened / Why it matters; missing fields become `<TODO: ...>` placeholders
 ## One-shot full audit (TASK-262)
 
 `zond audit --api <name>` запускает весь pipeline одной командой:
-discover → generate → probe validation/methods → session-wrapped run на
+prepare-fixtures → generate → probe static (validation+methods) → session-wrapped run на
 tests + probes → coverage → `audit-report.html`. Каждая stage печатает
 `==> Stage N/M: <name>`; failure любой stage не останавливает остальные —
 финальный exit 1 если хотя бы одна упала.
@@ -658,7 +737,7 @@ tests + probes → coverage → `audit-report.html`. Каждая stage печа
 ```bash
 zond audit --api <name> --dry-run                    # план без выполнения
 zond audit --api <name>                              # минимальный pipeline
-zond audit --api <name> --seed                       # bootstrap --apply --seed вместо discover
+zond audit --api <name> --seed                       # prepare-fixtures --cascade --seed --apply
 zond audit --api <name> --with-mass-assignment --with-security
 zond audit --api <name> --out reports/audit-<name>.html
 ```

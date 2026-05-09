@@ -42,7 +42,12 @@ export type RecommendedAction =
   | "fix_auth_config"
   | "fix_test_logic"
   | "fix_network_config"
-  | "fix_env";
+  | "fix_env"
+  /** Fix the OpenAPI spec — emitted by lint-spec.Issue (TASK-294). */
+  | "fix_spec"
+  /** Add or correct a fixture in .env.yaml — emitted by discover for
+   *  miss-* states (TASK-294). */
+  | "fix_fixture";
 
 export function recommendedAction(
   failureType: "api_error" | "assertion_failed" | "network_error",

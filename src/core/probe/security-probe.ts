@@ -13,6 +13,7 @@
  */
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
+import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
 import { executeRequest } from "../runner/http-client.ts";
@@ -67,6 +68,9 @@ export interface SecurityFinding {
   /** PASS / FAIL classification per finding. */
   severity: SecuritySeverity;
   reason: string;
+  /** TASK-294: agent-routable action. FAIL/WARN → `report_backend_bug`;
+   *  PASS → undefined (no action needed). */
+  recommended_action?: RecommendedAction;
 }
 
 export interface SecurityVerdict {
@@ -635,7 +639,23 @@ async function restoreOriginal(
   };
 }
 
+/** TASK-294: stamp `recommended_action` on every finding before returning. */
+function stampAction(f: SecurityFinding): SecurityFinding {
+  if (f.severity === "high" || f.severity === "low") {
+    f.recommended_action = "report_backend_bug";
+  }
+  return f;
+}
+
 function classify(
+  hit: SecurityFieldHit,
+  payload: string,
+  resp: { status: number; body?: unknown; body_parsed?: unknown },
+): SecurityFinding {
+  return stampAction(classifyInner(hit, payload, resp));
+}
+
+function classifyInner(
   hit: SecurityFieldHit,
   payload: string,
   resp: { status: number; body?: unknown; body_parsed?: unknown },
@@ -939,6 +959,14 @@ function skipped(ep: EndpointInfo, reason: string): SecurityVerdict {
 // Markdown digest
 // ──────────────────────────────────────────────
 
+/** TASK-154 §N: clip noisy payloads (some SSRF/CRLF/redirect strings are URL-
+ *  encoded blobs > 60 chars). Keep the leading prefix users recognise plus an
+ *  ellipsis, so the digest line stays readable. */
+function truncatePayload(payload: string, max: number): string {
+  if (payload.length <= max) return payload;
+  return payload.slice(0, max - 1) + "…";
+}
+
 export function formatSecurityDigest(
   result: SecurityProbeResult,
   specPath: string,
@@ -989,7 +1017,12 @@ export function formatSecurityDigest(
       const cleanupTag = v.cleanup?.error ? " 🧹 cleanup-failure" : "";
       lines.push(`- **${v.method} ${v.path}**${cleanupTag} — ${v.summary}`);
       for (const f of v.findings) {
-        lines.push(`  - \`${f.field}\` / ${f.class} → ${f.status} (${f.severity}) — ${f.reason}`);
+        // TASK-154 §N: surface the actual payload that triggered the finding
+        // — without it the digest is useless for case-study writing (which
+        // SSRF target? which CRLF shape?). Truncate long payloads so the
+        // line stays readable.
+        const payload = truncatePayload(f.payload, 60);
+        lines.push(`  - \`${f.field}\` / ${f.class} [\`${payload}\`] → ${f.status} (${f.severity}) — ${f.reason}`);
       }
     }
     lines.push("");

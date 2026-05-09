@@ -1,6 +1,6 @@
 import { sendAdHocRequest } from "../../core/runner/send-request.ts";
 import { printError, printSuccess, printWarning } from "../output.ts";
-import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
+import { jsonOk, jsonError, printJson, zerr } from "../json-envelope.ts";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
@@ -99,6 +99,20 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
 
     if (options.json) {
       printJson(jsonOk("request", validation ? { ...result, schema_validation: validation } : result));
+    } else if (options.jsonPath) {
+      // TASK-133: pipe-friendly mode — print only the extracted value.
+      // Scalars (string/number/bool) emit verbatim with no JSON quoting so
+      // shells can use the output directly (e.g. `id=$(zond request … --json-path data.id)`).
+      // null/undefined → empty line. Objects/arrays → compact JSON.
+      const v = result.body;
+      if (v === null || v === undefined) {
+        console.log("");
+      } else if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+        console.log(String(v));
+      } else {
+        console.log(JSON.stringify(v));
+      }
+      if (validation) printSchemaValidation(validation);
     } else {
       console.log(JSON.stringify(result, null, 2));
       if (validation) printSchemaValidation(validation);
@@ -120,7 +134,8 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     if (options.json) {
-      printJson(jsonError("request", [message]));
+      const code = /not registered/.test(message) ? "api_not_registered" : "unknown_error";
+      printJson(jsonError("request", [zerr(code, message)]));
     } else {
       printError(message);
       // TASK-272: if the failure is shaped like blocked shell-substitution in
@@ -279,6 +294,8 @@ import type { Command } from "commander";
 import { globalJson } from "../resolve.ts";
 import { collect, parsePositiveInt } from "../argv.ts";
 import { readCurrentApi } from "../../core/context/current.ts";
+import { loadEnvMeta } from "../../core/parser/variables.ts";
+import { resolveTimeoutMs } from "../../core/workspace/config.ts";
 
 export function registerRequest(program: Command): void {
   program
@@ -286,22 +303,36 @@ export function registerRequest(program: Command): void {
     .description("Send an ad-hoc HTTP request")
     .option("--header <H>", `Request header "Name: Value" (repeatable)`, collect, [])
     .option("--body <json>", "Request body (JSON string)")
-    .option("--timeout <ms>", "Request timeout", parsePositiveInt("--timeout"))
+    .option("--timeout <ms>", "Request timeout (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--env <name>", "Environment for variable interpolation")
     .option("--api <name>", "Collection name; auto-loads env + Authorization from apis/<name>/.secrets.yaml")
-    .option("--json-path <path>", "Extract value from response (dot notation)")
+    .option(
+      "--json-path <path>",
+      "Extract one field from the response body (dot notation, e.g. 'data.id', " +
+      "'items[0].name'). Without --json, prints the value verbatim — scalars without " +
+      "quotes for shell use (`id=$(zond request --json-path data.id ...)`), " +
+      "objects/arrays as compact JSON. With --json, embeds the extracted value as " +
+      "the envelope's `body` field.",
+    )
     .option("--db <path>", "Path to SQLite database file")
     .option("--validate-schema", "TASK-142: validate the response body against the OpenAPI response schema (requires --api). Endpoint is auto-resolved from the request method + URL.path; templated paths like /users/{id} are matched via regex. Falls back gracefully if no endpoint matches — pass --validate-against to override.")
     .option("--validate-against <method:path>", "TASK-142: explicit endpoint override for --validate-schema, e.g. \"GET:/users/{id}\". Use the spec template form (with \"{...}\" placeholders).")
     .action(async (method: string, url: string, opts, cmd: Command) => {
       const headers = (opts.header as string[] | undefined)?.length ? (opts.header as string[]) : undefined;
       const api = (opts.api as string | undefined) ?? readCurrentApi() ?? undefined;
+      let envTimeout: number | undefined;
+      if (api) {
+        try {
+          envTimeout = (await loadEnvMeta(opts.env, `apis/${api}`)).timeoutMs;
+        } catch { /* meta is best-effort */ }
+      }
+      const timeout = resolveTimeoutMs(opts.timeout, envTimeout);
       process.exitCode = await requestCommand({
         method,
         url,
         headers,
         body: opts.body,
-        timeout: opts.timeout,
+        timeout,
         env: opts.env,
         api,
         jsonPath: opts.jsonPath,

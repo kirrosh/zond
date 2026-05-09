@@ -3,7 +3,6 @@
 **AI-native API testing tool** — OpenAPI spec → test generation → execution → diagnostics. One binary. Zero config.
 
 - **CLI** — primary interface for Claude Code agents and CI/CD
-- **WebUI** — dashboard with health strip, endpoints/suites/runs tabs, step-level details
 
 ---
 
@@ -94,50 +93,91 @@ zond ci init
 ## CLI Commands
 
 All spec-consuming commands (`catalog`, `describe`, `generate`,
-`probe-*`, `lint-spec`) accept either a positional `<spec>` path/URL
+`probe <class>`, `check spec`) accept either a positional `<spec>` path/URL
 **or** `--api <name>` to use the workspace-local snapshot at
 `apis/<name>/spec.json`. If neither is given, they fall back to the API
 selected via `zond use`.
 
+### Active-API resolution (TASK-290)
+
+Every command that accepts `--api <name>` resolves the active API in this order:
+
+1. Per-command `--api <name>` (highest precedence).
+2. Global `--api <name>` passed before the subcommand (`zond --api sentry run …`).
+3. `ZOND_API` env var (CI-friendly).
+4. `.zond/current-api` file, set by `zond use <name>` (workspace default).
+
+If none is set and the workspace has exactly one registered API, that API is
+auto-selected; otherwise the command fails with a usage error listing the
+registered APIs. Run `zond use` (no args) to see what is currently active.
+
+Commands group around the lifecycle phase they belong to (mirrors `zond --help`):
+
+**Setup**
 | Command | Description | Key flags |
 |---------|-------------|-----------|
 | `init` | Bootstrap a workspace (`zond.config.yml`, `apis/`, `AGENTS.md`, `.claude/skills/`) | `--no-agents-md`, `--no-skills` |
 | `add api <name>` | Register an API: copy spec into `apis/<name>/spec.json` and emit catalog/resources/fixtures artifacts | `--spec <path\|url>`, `--base-url`, `--force`, `--insecure`, `--db` |
+| `use [api]` | Set/show the active API (writes `.zond/current-api`); see resolution chain above | — |
 | `refresh-api <name>` | Re-snapshot spec.json + regenerate the 3 artifacts | `--spec <path\|url>`, `--insecure` |
-| `doctor` | Fixture gaps in `.env.yaml` + artifact freshness vs spec.json (exit 0/1/2) | `--api <name>` |
-| `discover` | Auto-fill `.env.yaml` FK ids by hitting list-endpoints (dry-run by default) | `--api <name>` (req), `--apply`, `--verify`, `--refresh`, `--env <path>`, `--timeout <ms>` |
-| `run <path>` | Run tests | `--env`, `--safe`, `--tag`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--rate-limit <N>`, `--validate-schema`, `--spec <path>`, `--session-id <id>`, `--learn`, `--learn-apply`, `--learn-target test\|drifts`, `--report json\|junit`, `--report-out <file>` |
-| `session start\|end\|status` | Group multiple `zond run` calls into one campaign in `/runs` Sessions view | `--label <text>`, `--id <uuid>` |
-| `validate <path>` | Validate YAML tests | |
-| `coverage` | API test coverage. Exit 0 = full coverage (or ≥ `--fail-on-coverage`); 1 = uncovered endpoints (or below threshold); 2 = bad input/read error. Warnings (e.g. `required_params_no_examples`) never affect the exit code. | `--spec`, `--tests`, `--api`, `--fail-on-coverage <N>` |
-| `serve` | Web dashboard (health strip, endpoints/suites/runs tabs) | `--port`, `--watch`, `--kill-existing` |
-| `ci init` | Generate CI/CD workflow | `--github`, `--gitlab`, `--dir`, `--force` |
-| `probe validation [spec]` | Generate negative-input probe suites (catch 5xx-on-bad-input) | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup`, `--no-real-parents` |
-| `probe methods [spec]` | Generate negative-method probe suites (catch 5xx/2xx on undeclared methods) | `--api <name>`, `--output <dir>`, `--tag` |
-| `probe mass-assignment [spec]` | Live probe for privilege-escalation via extra payload fields (`is_admin`, `role`, …) | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--no-discover`, `--timeout <ms>` |
-| `probe security <classes> [spec]` | Live SSRF / CRLF / open-redirect probes with baseline-OK gate; classes = comma-separated subset of `ssrf,crlf,open-redirect` | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--dry-run`, `--timeout <ms>` |
-| `probe-validation` / `probe-methods` / `probe-mass-assignment` / `probe-security` | **Deprecated aliases** for the four `probe <class>` commands. Removed in next release; emits warning to stderr. | (same as above) |
-| `lint-spec [spec]` | Static analysis of OpenAPI for internal-consistency and strictness gaps (zero HTTP) | `--api <name>`, `--strict`, `--rule <list>`, `--filter-rule <list>`, `--severity <list>`, `--top <N>`, `--verbose`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db` |
-| `catalog [spec]` | Standalone build of `.api-catalog.yaml` (registered APIs already have one in `apis/<name>/`) | `--api <name>`, `--output <dir>` |
-| `describe [spec]` | Describe endpoints from OpenAPI spec | `--api <name>`, `--compact`, `--list-params`, `--method`, `--path` |
-| `generate [spec]` | Autogenerate test suites; combine with `--uncovered-only` to top up after `zond refresh-api`. Use `--explain` (no `--output`) to print the CRUD detection table without writing files. | `--api <name>`, `--output`, `--tag`, `--uncovered-only`, `--explain` |
-| `report export <run-id>` | Export a stored run as a single-file shareable HTML report | `-o, --output <file>`, `--db <path>` |
-| `report case-study <failure-id>` | Generate a markdown case-study draft for a single failure | `-o, --output <file>`, `--db <path>` |
+| `doctor` | Fixture gaps in `.env.yaml` + artifact freshness vs spec.json (exit 0/1/2) | `--api <name>`, `--json` |
+| `prepare-fixtures` | Auto-fill `.env.yaml` FK ids — single-pass discover by default; `--cascade` enables the multi-pass discover+seed flow | `--api <name>`, `--apply`, `--verify`, `--refresh`, `--cascade`, `--seed`, `--force`, `--max-passes <n>`, `--env <path>`, `--timeout <ms>`, `--json` |
+| `clean` | Remove auto-generated files tracked in `.zond/manifest.json` | `--api <name>`, `--probes`, `--dry-run`, `--force` |
+| `cleanup` | Retry probe leftovers; currently only `--orphans` re-issues DELETE for resources captured in `~/.zond/orphans/` | `--orphans`, `--db <path>`, `--json` |
+
+**Run**
+| Command | Description | Key flags |
+|---------|-------------|-----------|
+| `run [paths…]` | Run tests; multi-path/glob OK | `--all`, `--api <name>`, `--env`, `--safe`, `--tag`, `--exclude-tag`, `--method <list>`, `--bail`, `--dry-run`, `--env-var KEY=VAL`, `--auth-token`, `--rate-limit <N\|auto>`, `--timeout <ms>`, `--validate-schema`, `--spec <path>`, `--strict-vars`, `--sequential`, `--quiet`, `--no-db`, `--session-id <id>`, `--learn`, `--learn-apply`, `--learn-target test\|drifts`, `--report json\|junit`, `--report-out <file>` |
+| `request <method> <url>` | Ad-hoc HTTP request (also stored in DB) | `--api <name>`, `--header`, `--body`, `--env`, `--auth-token`, `--validate-schema`, `--validate-against`, `--timeout <ms>`, `--json` |
+| `session start\|end\|status\|list` | Group multiple `zond run` calls under one `session_id` | `--label <text>`, `--id <uuid>` |
+| `audit` | One-shot macro: prepare-fixtures → generate → probes → run → coverage → HTML report | `--api <name>`, `--no-probes`, `--no-html`, `--output <dir>` |
+
+**Analyze**
+| Command | Description | Key flags |
+|---------|-------------|-----------|
+| `check tests <path>` | Schema-validate YAML test files | `--verbose`, `--json` |
+| `check spec [spec]` | Static OpenAPI analysis (no HTTP); see [check spec](#check-spec--static-openapi-analysis-pre-flight-zero-http) below | `--api <name>`, `--strict`, `--rule <list>`, `--severity <list>`, `--top <N>`, `--verbose`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db`, `--json` |
+| `coverage` | Pass-coverage and hit-coverage side-by-side. Exit 0 = full coverage (or ≥ `--fail-on-coverage`); 1 = uncovered/below threshold; 2 = bad input | `--api <name>`, `--spec`, `--tests`, `--run-id`, `--session-id`, `--union <selector>` (`session\|since:<dur>\|tag:<name>\|runs:<ids>`), `--fail-on-coverage <N>`, `--db <path>`, `--json` |
+| `db collections\|runs\|run\|diagnose\|compare` | Query the SQLite history; `db diagnose` is the triage workhorse | `--db <path>`, `--api`, `--limit`, `--status`, `--since`, `--json` |
+| `describe [spec]` | List endpoints from a spec | `--api <name>`, `--compact`, `--list-params`, `--method`, `--path` |
+
+**Generate**
+| Command | Description | Key flags |
+|---------|-------------|-----------|
+| `generate [spec]` | Autogenerate test suites; combine with `--uncovered-only` to top up after `refresh-api`. `--explain` prints the CRUD-detection table without writing files | `--api <name>`, `--output`, `--tag`, `--uncovered-only`, `--include-deprecated`, `--force`, `--explain` |
+| `probe static [spec]` | Static probes (no HTTP at generation time) — validation (5xx-on-bad-input) + methods (undeclared verbs). Defaults to both classes | `--api <name>`, `--output <dir>`, `--tag`, `--max-per-endpoint <N>`, `--no-cleanup`, `--use-synthetic-parents`, `--include validation,methods`, `--exclude validation,methods` |
+| `probe mass-assignment [spec]` | **Live** probe for privilege-escalation via extra payload fields | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--emit-template <method:path>`, `--tag`, `--no-cleanup`, `--no-discover`, `--timeout <ms>`, `--json` |
+| `probe security <classes> [spec]` | **Live** SSRF / CRLF / open-redirect probes with baseline-OK gate; classes = subset of `ssrf,crlf,open-redirect` | `--api <name>`, `--env <file>`, `--output <md>`, `--emit-tests <dir>`, `--tag`, `--no-cleanup`, `--dry-run`, `--isolated`, `--timeout <ms>` |
+
+**Report**
+| Command | Description | Key flags |
+|---------|-------------|-----------|
+| `report export <run-id>` | Export a single stored run as a self-contained HTML (or markdown) | `--format html\|markdown`, `-o, --output <file>`, `--db <path>` |
+| `report bundle <range>` | Batch exporter: HTML + markdown digest + diagnose JSON + index for a run-id range | `--include <list>`, `--output <dir>`, `--db <path>` |
+| `catalog [spec]` | Standalone build of `.api-catalog.yaml` (registered APIs already carry one) | `--api <name>`, `--output <dir>`, `--json` |
+
+**Other**
+| Command | Description | Key flags |
+|---------|-------------|-----------|
+| `ci init` | Generate GitHub Actions / GitLab CI workflow | `--github`, `--gitlab`, `--dir`, `--force` |
+| `completions <shell>` | Print bash/zsh/fish completion script | — |
+| `reference <topic>` | Printable references for built-ins; today: `random-helpers` (TASK-267) | — |
 
 > **Deprecated**: `zond init --spec <path> --name <api>` (and `--with-spec`) still
 > work but print a stderr warning. Prefer `zond init` followed by
 > `zond add api <name> --spec <path>`.
 
-### `lint-spec` — static OpenAPI analysis (pre-flight, zero HTTP)
+### `check spec` — static OpenAPI analysis (pre-flight, zero HTTP)
 
 A lot of "API bugs" are visible in the spec itself, before any test runs.
-`zond lint-spec` walks the OpenAPI document once and reports two ortho­gonal
+`zond check spec` walks the OpenAPI document once and reports two ortho­gonal
 classes of problems:
 
 - **Group A — internal consistency.** The spec contradicts itself: an
   `example` violates its own `format`, an `enum` member is duplicated, a
   `default` falls outside `minimum`/`maximum`. Schemathesis-style fuzzing
-  would eventually hit these too — `lint-spec` finds them deterministically
+  would eventually hit these too — `check spec` finds them deterministically
   in milliseconds.
 - **Group B — strictness gaps.** The schema is too loose: a path-param has
   no `format` or `pattern`; an integer query-param (`limit`, `offset`) has
@@ -146,20 +186,23 @@ classes of problems:
   silently send invalid data and the server rejects it with 422.
 
 ```bash
-zond lint-spec openapi.json                                # rule × severity rollup (TASK-279)
-zond lint-spec openapi.json --verbose                       # legacy flat one-line-per-issue list
-zond lint-spec openapi.json --severity high                 # render only HIGH issues
-zond lint-spec openapi.json --filter-rule B1,B6 --top 10    # whitelist + top-N rules
-zond lint-spec openapi.json --json | jq '.data.summary'     # structured (issues + summary)
-zond lint-spec openapi.json --rule '!B2,!B5,!B6,!B9'        # disable heuristics (severity overrides)
-zond lint-spec openapi.json --config .zond-lint.json        # per-project rules
+zond check spec openapi.json                                # rule × severity rollup (TASK-279)
+zond check spec openapi.json --verbose                       # legacy flat one-line-per-issue list
+zond check spec openapi.json --severity high                 # render only HIGH issues
+zond check spec openapi.json --rule B1,B6 --top 10           # whitelist + top-N rules (TASK-291)
+zond check spec openapi.json --json | jq '.data.summary'     # structured (issues + summary)
+zond check spec openapi.json --rule '!B2,!B5,!B6,!B9'        # disable heuristics
+zond check spec openapi.json --rule 'B8=high,B9=low'         # severity overrides + implicit whitelist
+zond check spec openapi.json --config .zond-lint.json        # per-project rules
 ```
 
-> **`--rule` vs `--filter-rule`.** `--rule` overrides severity (`R1=low`,
-> `!R2` to disable). `--filter-rule` is post-lint whitelisting — it shows
-> only the listed rules without changing how they're scored. Exit codes are
-> always computed against the unfiltered run, so a `--severity low` view
-> won't accidentally hide a HIGH issue from a CI script reading `$?`.
+> **TASK-291: unified `--rule`.** A single flag now handles severity overrides
+> *and* whitelisting. Comma-separated items: `B1` (whitelist), `!B2` (disable),
+> `B3=high|medium|low` (override severity, also whitelists `B3`), `B3=off`
+> (alias for `!B3`). Exit codes are always computed against the unfiltered run,
+> so a `--severity low` view won't accidentally hide a HIGH issue from a CI
+> script reading `$?`. The legacy `--filter-rule` is a deprecated alias and
+> emits a stderr warning.
 
 | Group | Rule | Severity (default) | What it checks |
 |---|---|---|---|
@@ -231,18 +274,26 @@ future `zond db lint-diff`. Disable with `--no-db`.
 }
 ```
 
-### `probe-validation` — bug-hunting negative-input probes
+### `probe static` — bug-hunting static-input probes (validation + methods)
 
-A correctly-implemented API returns **4xx** for any malformed client input —
-never **5xx**. `probe-validation` generates a deterministic battery of
-negative-input probes from your OpenAPI spec; any 5xx response from the API
-under test is a bug candidate.
+`probe static` runs the two static-input probe classes — **validation**
+(catches 5xx on bad input) and **methods** (catches 5xx/2xx on undeclared
+HTTP methods) — from a single command. Both read the spec on disk; no HTTP
+calls are made. Defaults to running both classes; restrict via
+`--include validation,methods` (or `--exclude`).
 
 ```bash
-zond probe-validation openapi.json --output bugs/probes/
+zond probe static openapi.json --output bugs/probes/
 zond run bugs/probes/                     # any failure with 5xx response → bug
 zond db diagnose <run-id>                 # group failures by root cause
 ```
+
+#### validation class — bad-input fuzz
+
+A correctly-implemented API returns **4xx** for any malformed client input —
+never **5xx**. The validation class generates a deterministic battery of
+negative-input probes from your OpenAPI spec; any 5xx response from the API
+under test is a bug candidate.
 
 Per endpoint the generator emits probes from these classes (capped by
 `--max-per-endpoint`, default 50):
@@ -268,13 +319,14 @@ path-param is replaced with a synthetic value; non-attacked parents are
 emitted as runtime placeholders (`{{organization_id_or_slug}}`) and resolved
 from `.env.yaml` at run time. Without this, every probe would 404 on the
 parent before the leaf validator ever fires, hiding nested-path 5xx bugs.
-Pass `--no-real-parents` to keep the legacy fully-synthetic rendering (e.g.
-when you have no real parent fixture).
+Pass `--use-synthetic-parents` (TASK-289; old name `--no-real-parents` is
+deprecated) to keep the legacy fully-synthetic rendering (e.g. when you
+have no real parent fixture).
 
 **Cleanup of leaked resources.** A probe that *unexpectedly* returns 2xx on a
 mutating endpoint (POST/PUT/PATCH) means the API silently accepted bad input
 and created a resource. To keep probe runs idempotent in environments without
-namespace isolation, `probe-validation` pairs every mutating probe with a
+namespace isolation, the validation class pairs every mutating probe with a
 follow-up `DELETE` step (`always: true`) that fires only if the probe captured
 a resource id. When the API correctly rejects the probe with 4xx, the cleanup
 step is skipped automatically. If the spec defines no DELETE counterpart for a
@@ -282,16 +334,16 @@ mutating endpoint, the generator prints a warning so you can clean up by hand.
 Use `--no-cleanup` to opt out (e.g. for staging environments that dump-and-reset
 between runs).
 
-### `probe-methods` — bug-hunting HTTP method completeness sweep
+#### methods class — HTTP method completeness sweep
 
 A correctly-implemented API returns **405 Method Not Allowed** (or 404) for
 HTTP methods not declared on a path — never **5xx** (unhandled exception) and
-never **2xx** (forgotten/shadowed route). `probe-methods` generates one suite
+never **2xx** (forgotten/shadowed route). The methods class generates one suite
 per path that probes every method in `{GET, POST, PUT, PATCH, DELETE}` not
 declared in the spec.
 
 ```bash
-zond probe-methods openapi.json --output bugs/method-probes/
+zond probe static openapi.json --include methods --output bugs/method-probes/
 zond run bugs/method-probes/              # any 5xx or 2xx failure → bug
 zond db diagnose <run-id>
 ```
@@ -303,18 +355,18 @@ being rejected purely on path syntax. Body-bearing methods carry a minimal
 else is a test failure. Probes are deterministic — same spec → same suites —
 so generated YAML can be committed as a regression test.
 
-### `probe-mass-assignment` — privilege-escalation hunt
+### `probe mass-assignment` — privilege-escalation hunt
 
 Mass assignment is the class where an API silently accepts client-supplied
 fields that should be server-controlled — `is_admin`, `role`, `account_id`,
 `owner_id` — and either *applies* them (privilege escalation) or *ignores*
 them (silent acceptance, latent risk). Unlike the other probes,
-`probe-mass-assignment` runs **live** against a real API: the only way to
+`probe mass-assignment` runs **live** against a real API: the only way to
 distinguish "applied" from "ignored" is to read back the resource via a
 follow-up GET.
 
 ```bash
-zond probe-mass-assignment openapi.json \
+zond probe mass-assignment openapi.json \
   --env .env.yaml \
   --output digest.md \
   --emit-tests probes/mass-assignment/
@@ -386,14 +438,15 @@ SKIPPED but the digest spells out *why*
 the generic missing-env message. Use `--no-discover` to disable when GET
 side-effects are unwanted.
 
-**Isolated mode (`--isolated`, TASK-264).** Probes mutate live data — by
-default, a `PUT /teams/{team_slug}` attack can scribble over the team you
-just bootstrapped via `.env.yaml`, breaking the next `zond run`. Pass
-`--isolated` and the probe will refuse to attack PUT/PATCH endpoints whose
-path-params resolve from `.env.yaml` (it skips them with `skipReason:
-"--isolated mode protects seeded fixtures"`). POST endpoints still run —
-they create their own throwaway resource and the existing
-DELETE-counterpart + orphan-tracker (TASK-278) clean it up.
+**Isolated mode (`probe security --isolated`, TASK-264).** Live probes
+mutate state — by default, a `PUT /teams/{team_slug}` attack can scribble
+over the team you just bootstrapped via `.env.yaml`, breaking the next
+`zond run`. The flag lives on `probe security`: pass `--isolated` and the
+probe refuses to attack PUT/PATCH endpoints whose path-params resolve from
+`.env.yaml` (skipped with `skipReason: "--isolated mode protects seeded
+fixtures"`). POST endpoints still run — they create their own throwaway
+resource and the existing DELETE-counterpart + orphan-tracker (TASK-278)
+clean it up.
 
 ```bash
 zond probe security --api sentry --isolated
@@ -403,22 +456,24 @@ zond probe security --api sentry --isolated
 
 The trade-off is lower coverage — the seeded-fixture endpoints get a
 SKIPPED entry instead of HIGH/LOW findings — but `tests-run → probes-run
-→ tests-run` round-trips on the same fixtures stop 404'ing.
+→ tests-run` round-trips on the same fixtures stop 404'ing. (For mass-
+assignment, isolation is achieved by giving the probe scratch fixtures via
+`prepare-fixtures --cascade --seed` instead of seeded ones.)
 
 #### Stale fixture re-validation (`--verify` / `--refresh`)
 
 After `probe security` / `probe mass-assignment` runs, an FK fixture in
 `.env.yaml` may point at a resource that has been deleted (the probe created
 + deleted it as part of its cycle, or you cleaned it manually). The next
-`zond run` then 404s on every step that uses the stale id. Use `discover
---verify` to re-validate without writing:
+`zond run` then 404s on every step that uses the stale id. Use
+`prepare-fixtures --verify` to re-validate without writing:
 
 ```bash
-zond discover --api sentry --verify
+zond prepare-fixtures --api sentry --verify
 # Verify summary: 12 live, 1 stale, 0 unknown.
 # WARN: 1 stale fixture(s) detected. Re-run with --refresh to drop and re-resolve them.
 
-zond discover --api sentry --refresh   # = --verify --apply
+zond prepare-fixtures --api sentry --refresh   # = --verify --apply
 ```
 
 Classification rules:
@@ -488,8 +543,7 @@ should read `totals.*` and the three bucket arrays.
 
 After a run lives in SQLite (`zond.db`), `zond report export <run-id>`
 materialises it as a self-contained HTML file you can drop into a Slack
-thread, attach to a GitHub issue, or open offline weeks later — no
-`zond serve` required.
+thread, attach to a GitHub issue, or open offline weeks later.
 
 ```bash
 zond report export 42                       # → zond-run-42.html
@@ -530,46 +584,23 @@ input.
 
 ---
 
-### `report case-study` — markdown draft for one failure
+### `report bundle` — case-study markdown drafts for all failures
 
-`zond report export` gives you the full HTML run; `zond report case-study
-<failure-id>` zooms in on **one** failure and produces a markdown draft
-ready to drop into a tracker, blog post, or Slack write-up. Every session
-should leave behind one such artefact — this command removes the friction
-of starting from a blank page.
+The standalone `report case-study <failure-id>` was removed (TASK-287)
+in favour of `zond report bundle`, which renders the same per-failure
+markdown drafts (one per failure) plus the HTML report and `db diagnose`
+JSON for any range of runs:
 
 ```bash
-zond report case-study 2                 # print to stdout
-zond report case-study 2 -o draft.md     # write to file
-zond report case-study 2 | gh issue create --title "POST /pets 5xx" --body-file -
+zond report bundle <run-id> --include case-study           # only the markdown drafts
+zond report bundle 135..142 -o triage/sweep/               # full sweep, all artefacts
+zond report bundle --session <id> -o triage/session/       # by session_id
 ```
 
-`<failure-id>` is the `results.id` (one row per step, not the run-id).
-Find one via `zond db run <run-id>` — failed/errored rows are the obvious
-candidates. The same draft is also reachable from `zond serve` →
-Run detail → **Case study draft** button on each failure card (writes
-to clipboard via `GET /api/results/:id/case-study.md`).
-
-The template fills itself from existing run data:
-
-- **TL;DR** — chosen by `failure_class` (`definitely_bug` /
-  `likely_bug` / `quirk` / `env_issue`), each gets a different one-liner.
-- **Context** — API title + version pulled from the registered
-  collection's OpenAPI `info` (best-effort: if the spec is unreachable
-  at export time the field becomes `<TODO: ...>` instead of failing).
-- **What the spec says** — JSON pointer + frozen excerpt captured at
-  run time (so later spec edits don't rewrite history).
-- **Repro** — the same `curl` block as the HTML report.
-- **What happened** — status + duration + pretty-printed response body.
-- **Why it matters** — `failure_class_reason` + every failed assertion
-  expanded as `expected vs actual`.
-- **How zond found it** — provenance (which generator, which response
-  branch, which suite).
-
-Anything zond couldn't determine becomes an explicit `<TODO: ...>`
-placeholder so you immediately see the gaps to fill in by hand. Exit
-codes match the rest of the family: `0` ok, `1` failure-id not found,
-`2` invalid input.
+The case-study renderer (`renderCaseStudy`) still fills in the same
+template from run/results/spec data: TL;DR by `failure_class`, frozen
+spec excerpt, repro `curl`, response body, expanded assertion diffs,
+and `<TODO: ...>` placeholders for anything zond couldn't determine.
 
 ---
 
@@ -830,13 +861,14 @@ zond run tests/ --env staging
 `zond run` throttles outgoing requests when a limit is configured and automatically retries on `429 Too Many Requests`.
 
 - **CLI:** `--rate-limit <N>` caps the run at N requests per second across all suites.
-- **`.env.yaml`:** add a top-level `rateLimit: <N>` field — picked up automatically when no CLI flag is given. CLI takes precedence.
+- **`.env.yaml`:** add a top-level `rateLimit: <N>` field (per-API). Picked up when no CLI flag is given.
+- **`zond.config.yml` (TASK-301):** `defaults.rate_limit` sets a workspace-wide default. Resolution chain: CLI > `.env.yaml` > workspace defaults > undefined.
 - **Auto retry on 429:** the runner respects the `Retry-After` header (seconds or HTTP-date). If the header is missing, it falls back to capped exponential backoff (base = `retry_delay`, cap = 30s). Up to 5 attempts per request, then the 429 is reported as the final response.
 - **Adaptive throttling from response headers (`--rate-limit auto`):** zond reads the standard `RateLimit-Remaining` / `RateLimit-Reset` headers (RFC 9568, formerly `draft-ietf-httpapi-ratelimit-headers`) plus the GitHub/Stripe-style `X-RateLimit-*` aliases on every response. Two complementary mechanisms keep parallel suites from blowing through small windows:
   - **Window-aware spacing (TASK-88):** when the response carries `RateLimit-Policy: N;w=W` (e.g. Resend's `5;w=1`), the limiter learns a per-request interval of `(W/N) * 1000 + 50ms` safety. Subsequent acquires — even from suites running in parallel — are paced one-by-one at that interval, so a burst of 10 simultaneous requests fans out to ten ~200ms steps instead of overshooting in the first 50ms. The strictest policy wins when several are advertised. `IntervalRateLimiter` (static `--rate-limit N`) tightens too if the server's policy is more restrictive than the user-supplied cap; it never loosens below the cap.
   - **Reset-window pause:** when `remaining` drops to ≤2, subsequent requests are pinned to wait until the API's `reset` window expires.
   
-  `--rate-limit auto` starts with no static cap and lets the API's headers do the throttling — useful for `zond probe-validation` and `zond probe-mass-assignment` runs against production APIs where the right cap isn't known up front.
+  `--rate-limit auto` starts with no static cap and lets the API's headers do the throttling — useful for `zond probe static` and `zond probe mass-assignment` runs against production APIs where the right cap isn't known up front.
 
 > **Tip:** prefer `--rate-limit auto` whenever the API exposes `RateLimit-Policy` — the limiter learns the right spacing on the first response. For APIs that omit the policy header, set `--rate-limit` **1 below** the documented cap (e.g. use `4` for an API that allows 5 req/s) — at exactly N, sliding-window APIs may still return 429 on boundary milliseconds.
 
@@ -955,7 +987,21 @@ zond resolves the workspace root via walk-up from the current directory. The fir
 
 The walk stops at `$HOME` to avoid accidentally adopting `~/apis` or `~/zond.db` when zond is invoked from an unrelated directory. If no marker is found, zond falls back to the current directory and prints a one-time warning to stderr — run `zond init` (or create `zond.config.yml`) to anchor the workspace explicitly.
 
-The workspace root is used as the default location for `zond.db`, the `apis/<name>/` directory created by `zond add api`, and the `.zond-current` file written by `zond use`. Explicit `--db` and `--dir` flags always win over walk-up.
+The workspace root is used as the default location for `zond.db`, the `apis/<name>/` directory created by `zond add api`, and the `.zond/current-api` file written by `zond use` (TASK-290; was `.zond-current`). Explicit `--db` and `--dir` flags always win over walk-up.
+
+### Workspace defaults (TASK-301)
+
+`zond.config.yml` carries optional defaults that apply to every command in
+the workspace. Per-command flags always win; per-API overrides live in
+`apis/<name>/.env.yaml` as `rateLimit:` / `timeoutMs:`.
+
+```yaml
+defaults:
+  timeout_ms: 30000   # cleanup / prepare-fixtures / probe / request
+  rate_limit: 5       # `zond run` (number rps, or "auto" for adaptive)
+```
+
+Resolution (highest wins): **CLI flag → `.env.yaml` meta → `defaults.*` → built-in fallback** (30000 ms / no rate limit).
 
 ### Per-API artifacts (`apis/<name>/`)
 
@@ -1076,9 +1122,9 @@ Redaction points:
 | JSON reporter (`--report json`)       | live runner         | reporter wrap     |
 | JUnit reporter (`--report junit`)     | live runner         | reporter wrap     |
 | `report export` (HTML)                | export from DB      | defensive wrap    |
-| `report case-study` (Markdown)        | export from DB      | defensive wrap    |
-| `probe-mass-assignment` digest        | live probe run      | digest wrap       |
-| `probe-security` digest               | live probe run      | digest wrap       |
+| `report bundle` (case-study Markdown) | export from DB      | defensive wrap    |
+| `probe mass-assignment` digest        | live probe run      | digest wrap       |
+| `probe security` digest               | live probe run      | digest wrap       |
 
 The `results`-table redaction (TASK-167) is the main barrier — anything
 read back from the DB is already clean. The exporter wraps are defensive
@@ -1152,7 +1198,7 @@ Behaviour:
 
 ### Sessions — group multiple runs into one campaign
 
-A "session" stitches multiple `zond run` invocations under one `session_id` so the dashboard's `/runs` view collapses them into a single row instead of N scattered runs. Use it when running a typical sweep — `smoke + probe-methods + probe-validation + mass-assignment` — and you want them grouped as one campaign.
+A "session" stitches multiple `zond run` invocations under one `session_id` so `db runs` and `coverage --union session` see them as a single campaign. Use it when running a typical sweep — `smoke + probe static + mass-assignment` — and you want them grouped instead of N scattered runs.
 
 ```bash
 zond session start --label "post-deploy sweep"   # writes UUID to .zond/current-session
@@ -1169,15 +1215,7 @@ zond session status                               # show what's active
 2. `ZOND_SESSION_ID` env var (CI-friendly)
 3. `.zond/current-session` file (set by `zond session start`)
 
-If none of those is set, the run is "ad-hoc" and shows up alone in `/runs`. Old runs without `session_id` continue to render in the legacy `Runs` tab.
-
-### `zond serve` port handling
-
-By default, `zond serve` is non-destructive: if the requested port (`--port` or 8080) is busy, it scans the next 10 ports and binds the first free one, printing the chosen port to stderr. If the entire 11-port range is busy, it exits 1 with instructions.
-
-Pass `--kill-existing` to restore the legacy behaviour of terminating whichever process holds the requested port. Use with care — it will kill your dev backend if it happens to listen there.
-
----
+If none of those is set, the run is "ad-hoc" and stays standalone — `coverage --union session` skips it.
 
 ## CI/CD
 
@@ -1224,19 +1262,24 @@ single uniform envelope so a downstream parser only needs one shape:
 
 ```jsonc
 {
-  "ok": true,            // false on errors[].length > 0
+  "ok": true,                            // false on errors[].length > 0
   "command": "db diagnose",
   "data": { /* command-specific payload */ },
   "warnings": [ /* string[], non-fatal */ ],
-  "errors":   [ /* string[], populated when ok=false */ ]
+  "errors":   [
+    // TASK-296: structured ZondError, not bare strings
+    { "code": "MISSING_FIXTURE", "message": "…", "details": { /* optional */ } }
+  ]
 }
 ```
 
-Holds for `db collections|runs|run|diagnose|compare`, `validate`, `coverage`,
-`generate`, `probe-*`, `request`, `init`, `add api`, `refresh-api`, `doctor`,
-`describe`, `use`, `update`, `postman`, `catalog`. The `data` payload shape
-varies by command (e.g. `db run`'s `data` is `{ run, results }`); the envelope
-itself does not.
+Holds for `db collections|runs|run|diagnose|compare`, `check tests|spec`,
+`coverage`, `generate`, `probe <class>`, `request`, `init`, `add api`,
+`refresh-api`, `doctor`, `describe`, `use`, `catalog`, `cleanup`,
+`report bundle`, `prepare-fixtures`. The `data` payload shape varies by
+command (e.g. `db run`'s `data` is `{ run, results }`); the envelope itself
+does not. Error codes follow the `ZondErrorCode` enum (see
+`docs/json-schema/error.schema.json`).
 
 `run` (test execution) is the exception — historically `--json` collided with
 `--report json`. Use `--report json` for the report payload; `--report-out

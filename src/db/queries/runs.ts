@@ -174,6 +174,30 @@ export function listRuns(limit = 20, offset = 0, filters?: RunFilters): RunSumma
   `).all(limit, offset) as RunSummary[];
 }
 
+/** TASK-266: latest run with at least one failure (for `zond db diagnose`
+ *  default and `zond-triage` skill). Returns null when no failing run exists. */
+export function getLatestFailingRunId(): number | null {
+  const db = getDb();
+  const row = db.query(`
+    SELECT id FROM runs
+    WHERE failed > 0
+    ORDER BY started_at DESC
+    LIMIT 1
+  `).get() as { id: number } | undefined;
+  return row?.id ?? null;
+}
+
+/** TASK-266: latest run regardless of status (for `--latest`). */
+export function getLatestRunId(): number | null {
+  const db = getDb();
+  const row = db.query(`
+    SELECT id FROM runs
+    ORDER BY started_at DESC
+    LIMIT 1
+  `).get() as { id: number } | undefined;
+  return row?.id ?? null;
+}
+
 export function deleteRun(runId: number): boolean {
   const db = getDb();
   // results are cascade-deleted via FK; but SQLite FK delete cascade requires explicit config

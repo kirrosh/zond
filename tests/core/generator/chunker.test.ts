@@ -22,6 +22,24 @@ describe("filterByTag", () => {
     const eps = [ep(["Other"])];
     expect(filterByTag(eps, "Audiences")).toEqual([]);
   });
+
+  test("TASK-239 — accepts comma-separated tags as union", () => {
+    const eps = [
+      ep(["Releases"], "/r"),
+      ep(["Events"], "/e"),
+      ep(["Alerts"], "/a"),
+      ep(["Other"], "/o"),
+    ];
+    expect(filterByTag(eps, "Releases,Events").length).toBe(2);
+    expect(filterByTag(eps, "releases, alerts").length).toBe(2);
+    // Unknown tag in list is silently dropped; matching ones still pass.
+    expect(filterByTag(eps, "Releases,Nope").length).toBe(1);
+  });
+
+  test("TASK-239 — comma list with 'untagged' includes both untagged + named", () => {
+    const eps = [ep([], "/x"), ep(["Releases"], "/r"), ep(["Other"], "/o")];
+    expect(filterByTag(eps, "untagged,Releases").length).toBe(2);
+  });
 });
 
 describe("collectTags", () => {

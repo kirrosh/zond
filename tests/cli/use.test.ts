@@ -22,19 +22,19 @@ describe("useCommand", () => {
     cleanupWs();
   });
 
-  test("zond use <api> writes .zond-current", async () => {
+  test("zond use <api> writes .zond/current-api", async () => {
     const code = await useCommand({ api: "petstore" });
     expect(code).toBe(0);
-    const path = join(cwd, ".zond-current");
+    const path = join(cwd, ".zond/current-api");
     expect(existsSync(path)).toBe(true);
     expect(readFileSync(path, "utf-8").trim()).toBe("petstore");
   });
 
-  test("zond use --clear removes .zond-current", async () => {
+  test("zond use --clear removes .zond/current-api", async () => {
     await useCommand({ api: "petstore" });
     const code = await useCommand({ clear: true });
     expect(code).toBe(0);
-    expect(existsSync(join(cwd, ".zond-current"))).toBe(false);
+    expect(existsSync(join(cwd, ".zond/current-api"))).toBe(false);
   });
 
   test("zond use (no args) prints current value", async () => {
