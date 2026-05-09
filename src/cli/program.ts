@@ -46,12 +46,26 @@ export function buildProgram(): Command {
     // exporters, stdout). Default is redact-on. Hook is read from the
     // env var so it survives across nested subcommand parsers.
     .option("--no-redact", "Disable auto-redaction of registered secret values (debug only)")
+    .option(
+      "--api <name>",
+      "TASK-290: Select the active API for this invocation. Resolution order: per-command --api > global --api (this flag) > ZOND_API env > .zond/current-api file (set via `zond use <name>`).",
+    )
     .hook("preAction", (thisCommand) => {
       const enabled = thisCommand.opts().redact !== false;
       // Mirror the flag into env so deeply-nested code that doesn't have
       // access to `cmd` (e.g. setup-api, exporters) can still consult it.
       process.env.ZOND_REDACT = enabled ? "1" : "0";
       getSecretRegistry().setEnabled(enabled);
+      // TASK-290: mirror the global --api flag into env so the resolution
+      // chain in core/context/current.ts (which has no `cmd` ref) sees it.
+      // Per-command --api still wins because it is passed positionally to
+      // resolveSpecArg / resolveApiCollection.
+      const apiGlobal = thisCommand.opts().api;
+      if (typeof apiGlobal === "string" && apiGlobal.length > 0) {
+        process.env.ZOND_API_GLOBAL = apiGlobal;
+      } else {
+        delete process.env.ZOND_API_GLOBAL;
+      }
     });
 
   registerRun(program);

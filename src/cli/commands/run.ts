@@ -660,7 +660,7 @@ export function registerRun(program: Command): void {
         paths = [resolved.testPath];
       }
       if (paths.length === 0) {
-        printError("No path given and .zond-current not set; run `zond use <api>` or pass path explicitly (or use --api <name>)");
+        printError("No path given and no current API set; run `zond use <api>`, set ZOND_API, pass --api <name>, or pass path explicitly");
         process.exitCode = 2;
         return;
       }
