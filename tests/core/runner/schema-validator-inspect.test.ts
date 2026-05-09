@@ -75,7 +75,7 @@ describe("SchemaValidator.inspect (TASK-142)", () => {
   it("validate() flags missing required fields against /users/{id} 200", () => {
     const errs = v.validate("GET", "/users/9", 200, { id: "x" });
     expect(errs.length).toBeGreaterThan(0);
-    expect(errs[0].rule).toContain("schema.required");
+    expect(errs[0]!.rule).toContain("schema.required");
   });
 
   it("validate() returns [] when body matches", () => {

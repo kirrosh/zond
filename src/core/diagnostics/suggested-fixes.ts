@@ -60,7 +60,7 @@ export function detectPlaceholderSegments(url: string | null): Array<{ segment: 
   if (!url) return [];
   let pathname: string;
   try {
-    pathname = url.startsWith("http") ? new URL(url).pathname : url.split("?")[0];
+    pathname = url.startsWith("http") ? new URL(url).pathname : url.split("?")[0]!;
   } catch {
     pathname = url;
   }

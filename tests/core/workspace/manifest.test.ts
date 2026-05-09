@@ -49,7 +49,7 @@ describe("manifest", () => {
     const m = loadManifest(root);
     expect(m.generated).toHaveLength(1);
     expect(m.generated[0]!.path).toBe("apis/sentry/.api-catalog.yaml");
-    expect(m.generated[0]!.sha256).toBe(sha256OfFile(abs));
+    expect(m.generated[0]!.sha256).toBe(sha256OfFile(abs)!);
     expect(m.generated[0]!.api).toBe("sentry");
     expect(m.generated[0]!.category).toBe("catalog");
   });
@@ -62,7 +62,7 @@ describe("manifest", () => {
 
     const m = loadManifest(root);
     expect(m.generated).toHaveLength(1);
-    expect(m.generated[0]!.sha256).toBe(sha256OfFile(abs));
+    expect(m.generated[0]!.sha256).toBe(sha256OfFile(abs)!);
   });
 
   test("inspectEntries flags modified vs delete vs missing", () => {
@@ -80,16 +80,19 @@ describe("manifest", () => {
     expect(items[2]!.verdict).toBe("missing");
   });
 
-  test("selectEntries filters by api/category/all", () => {
+  test("selectEntries filters by api/category/all (spec entries are never selected)", () => {
     recordGeneratedFiles(root, [
       { path: writeFile("apis/a/spec.json", "1"), by: "t", api: "a", category: "spec" },
       { path: writeFile("apis/a/probes/p1.yaml", "1"), by: "t", api: "a", category: "probes" },
+      { path: writeFile("apis/a/.api-catalog.yaml", "1"), by: "t", api: "a", category: "catalog" },
       { path: writeFile("apis/b/spec.json", "1"), by: "t", api: "b", category: "spec" },
+      { path: writeFile("apis/b/probes/p1.yaml", "1"), by: "t", api: "b", category: "probes" },
     ]);
     const m = loadManifest(root);
+    // spec.json is source-of-truth — never returned (TASK-226).
     expect(selectEntries(m, { api: "a" })).toHaveLength(2);
     expect(selectEntries(m, { api: "b" })).toHaveLength(1);
-    expect(selectEntries(m, { category: "probes" })).toHaveLength(1);
+    expect(selectEntries(m, { category: "probes" })).toHaveLength(2);
     expect(selectEntries(m, { all: true })).toHaveLength(3);
   });
 

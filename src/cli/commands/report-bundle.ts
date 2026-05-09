@@ -58,8 +58,8 @@ export function parseBundleRange(input: string): number[] | { error: string } {
 
   const rangeMatch = trimmed.match(/^(\d+)\.\.(\d+)$/);
   if (rangeMatch) {
-    const a = parseInt(rangeMatch[1], 10);
-    const b = parseInt(rangeMatch[2], 10);
+    const a = parseInt(rangeMatch[1]!, 10);
+    const b = parseInt(rangeMatch[2]!, 10);
     if (a > b) return { error: `range start ${a} is greater than end ${b}` };
     const out: number[] = [];
     for (let i = a; i <= b; i++) out.push(i);

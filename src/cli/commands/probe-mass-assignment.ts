@@ -298,6 +298,6 @@ export async function emitMassAssignmentTemplateCommand(
 function parseMethodPath(s: string): { method: string; path: string } | null {
   const m = s.match(/^\s*([A-Za-z]+)\s*[: ]\s*(\/.*?)\s*$/);
   if (!m) return null;
-  return { method: m[1].toUpperCase(), path: m[2] };
+  return { method: m[1]!.toUpperCase(), path: m[2]! };
 }
 

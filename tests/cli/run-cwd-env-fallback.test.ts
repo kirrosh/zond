@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach, beforeEach } from "bun:test";
+import { describe, test, expect, afterEach, beforeEach, mock } from "bun:test";
 import { join } from "path";
 import { mkdirSync, rmSync, writeFileSync } from "fs";
 import { runCommand } from "../../src/cli/commands/run.ts";

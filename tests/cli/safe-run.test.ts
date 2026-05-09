@@ -1,4 +1,4 @@
-import { describe, test, expect, afterEach, beforeEach } from "bun:test";
+import { describe, test, expect, afterEach, beforeEach, mock } from "bun:test";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { closeDb } from "../../src/db/schema.ts";
 import { captureOutput } from "../_helpers/output";
@@ -29,6 +29,9 @@ describe("--safe mode", () => {
     const code = await runCommand({
       paths: [`${FIXTURES}/crud.yaml`],
       env: undefined,
+      // Pre-seed fixtures normally captured by the (skipped) POST step so the
+      // GET step's path is resolvable in safe mode.
+      envVars: ["base=http://localhost", "token=t", "user_id=42"],
       report: "json",
       bail: false,
       noDb: true,
