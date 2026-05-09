@@ -1,7 +1,7 @@
 ---
 id: TASK-289
 title: rename run --no-real-parents to --use-synthetic-parents
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 06:59'
 labels:

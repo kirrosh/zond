@@ -1,7 +1,7 @@
 ---
 id: TASK-283
 title: drop unused probe-by-bogus-id.ts file
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 06:59'
 labels:
