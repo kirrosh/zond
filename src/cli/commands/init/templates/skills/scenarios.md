@@ -217,3 +217,8 @@ Step out of `scenarios` and load the `zond` skill when:
   scenario-skill jobs but they are dashed off in seconds).
 - The current scenario surfaced a contract bug worth a structured report
   (`zond report bundle --include case-study <run-id>` produces markdown drafts).
+- After a green scenario, the user wants **boundary / security depth on
+  the same endpoints**: hand off to `zond-checks` and run
+  `zond checks run --api <name> --include 'path:<the-flow-paths>' --workers auto`.
+  Same op set, deeper probes (boundary values, ignored auth, schema
+  drift) without writing more YAML.

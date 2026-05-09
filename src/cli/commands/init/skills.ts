@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import zondSkill from "./templates/skills/zond.md" with { type: "text" };
 import scenariosSkill from "./templates/skills/scenarios.md" with { type: "text" };
 import checksSkill from "./templates/skills/zond-checks.md" with { type: "text" };
+import triageSkill from "./templates/skills/zond-triage.md" with { type: "text" };
 
 export interface SkillResult {
   name: string;
@@ -23,6 +24,10 @@ const SKILLS: SkillTemplate[] = [
   // recommended_action triage table so agents route on the closed
   // enum instead of parsing finding messages.
   { name: "zond-checks", body: checksSkill },
+  // Last-run triage skill — referenced from CLI hints, ZOND.md and
+  // docs since TASK-294. Was orphan-template until m-15 cleanup;
+  // ships under .claude/skills/ on `zond init` now.
+  { name: "zond-triage", body: triageSkill },
 ];
 
 /**

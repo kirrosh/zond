@@ -22,8 +22,11 @@ what to do next**. Sibling `zond` does the full audit; sibling
 - **Route on `recommended_action`, not on the message string.** Every zond
   artifact stamps a closed enum: `report_backend_bug | fix_test_logic |
   fix_auth_config | fix_network_config | fix_env | fix_spec |
-  fix_fixture`. Group by enum, then summarise. Never re-classify with
-  prose heuristics.
+  fix_fixture | tighten_validation | add_required_header |
+  wontfix_known_limitation`. The last three (m-15 ARV-11) carry
+  depth-check findings from `zond checks run` — same triage rules
+  apply, route by enum value. Group by enum, then summarise. Never
+  re-classify with prose heuristics.
 - **One actionable line per group.** The agent-directive *is* the next
   command — don't pad with "consider checking...".
 - **`report_backend_bug` / 5xx → STOP, surface, do not edit `expect:`.**

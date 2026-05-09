@@ -37,6 +37,7 @@ describe("bootstrapWorkspace", () => {
       "zond",
       "zond-checks",
       "zond-scenarios",
+      "zond-triage",
     ]);
     expect(r.skills.every((s) => s.action === "created")).toBe(true);
     for (const s of r.skills) {
