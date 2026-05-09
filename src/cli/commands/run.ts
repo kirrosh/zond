@@ -75,6 +75,8 @@ export interface RunOptions {
   /** TASK-282: where to record the drift — rewrite YAML (`test`) or append to
    *  apis/<name>/tolerated-drifts.yaml (`drifts`). */
   learnTarget?: "test" | "drifts";
+  /** TASK-265: console reporter emits only the grand-total summary line. */
+  quiet?: boolean;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -411,9 +413,15 @@ export async function runCommand(options: RunOptions): Promise<number> {
       }
     } else {
       const reporter = getReporter(options.report);
-      reporter.report(results);
-      for (const w of warnings) {
-        printWarning(w);
+      reporter.report(results, options.quiet ? { quiet: true } : undefined);
+      // TASK-265: --quiet drops the warnings tail too — they are non-essential
+      // run hints (deprecation, timing). Errors still reach stderr via the
+      // dedicated path; --strict-vars still aborts on undefined refs before
+      // we get here.
+      if (!options.quiet) {
+        for (const w of warnings) {
+          printWarning(w);
+        }
       }
     }
   }
@@ -628,6 +636,10 @@ export function registerRun(program: Command): void {
     .option("--env-var <KEY=VALUE>", "Inject env variable (repeatable, overrides env file)", collect, [])
     .option("--strict-vars", "Hard-fail (exit 2) when a {{var}} reference has no producer (default: warn and continue)")
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
+    .option(
+      "--quiet",
+      "TASK-265: emit only the grand-total summary line — drops per-suite/per-test detail and warning footers. Exit code (0/1) still differentiates pass/fail. For CI logs and watcher loops where step-level output is noise.",
+    )
     .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
     .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
@@ -708,6 +720,7 @@ export function registerRun(program: Command): void {
         envVars,
         strictVars: opts.strictVars === true,
         dryRun: opts.dryRun === true,
+        quiet: opts.quiet === true,
         reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
         validateSchema: opts.validateSchema === true,
         specPath: typeof opts.spec === "string" ? opts.spec : undefined,

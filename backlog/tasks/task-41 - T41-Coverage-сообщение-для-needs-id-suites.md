@@ -1,9 +1,10 @@
 ---
 id: TASK-41
 title: 'T41: Coverage сообщение для needs-id suites'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-27 15:28'
+updated_date: '2026-05-09 10:02'
 labels:
   - coverage
   - ux

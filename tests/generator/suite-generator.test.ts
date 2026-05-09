@@ -269,10 +269,11 @@ describe("detectCrudGroups", () => {
     expect(groups).toHaveLength(0);
   });
 
-  test("requires GET on item path (POST alone not enough)", () => {
+  test("requires SOME item endpoint (POST alone, no item path → skipped)", () => {
+    // TASK-260: POST + DELETE/{id} now produces a headless chain. Pure POST
+    // without any item endpoint still skips.
     const endpoints = [
       makeEndpoint({ path: "/pets", method: "POST" }),
-      makeEndpoint({ path: "/pets/{petId}", method: "DELETE" }),
     ];
     const groups = detectCrudGroups(endpoints);
     expect(groups).toHaveLength(0);
@@ -324,19 +325,54 @@ describe("detectCrudGroups", () => {
   test("TASK-139: diagnostics report skipped POSTs with reason", () => {
     const endpoints = [
       makeEndpoint({ path: "/alerts", method: "POST" }), // no item endpoint
-      makeEndpoint({ path: "/audit", method: "POST" }),
-      makeEndpoint({ path: "/audit/{id}", method: "DELETE" }), // has item, but no GET
     ];
     const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
     expect(groups).toHaveLength(0);
-    expect(diagnostics).toHaveLength(2);
+    expect(diagnostics).toHaveLength(1);
     const alerts = diagnostics.find(d => d.basePath === "/alerts")!;
     expect(alerts.verdict).toBe("skipped");
     expect(alerts.reason).toMatch(/no item endpoint/);
+  });
+
+  // TASK-260: accept headless chains — POST + DELETE/{id} or POST + PUT/{id}
+  // without GET-by-id. The captured ID still flows from POST response into
+  // the update/delete steps; the read/verify steps just won't be emitted.
+  test("TASK-260: POST + DELETE/{id} without GET → headless chain", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/audit", method: "POST" }),
+      makeEndpoint({ path: "/audit/{id}", method: "DELETE" }),
+    ];
+    const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.read).toBeUndefined();
+    expect(groups[0]!.delete).toBeDefined();
     const audit = diagnostics.find(d => d.basePath === "/audit")!;
-    expect(audit.verdict).toBe("skipped");
-    expect(audit.reason).toMatch(/no GET-by-id/);
-    expect(audit.hasDelete).toBe(true);
+    expect(audit.verdict).toBe("chain");
+    expect(audit.reason).toMatch(/headless: no GET-by-id/);
+  });
+
+  test("TASK-260: POST + PUT/{id} without GET → headless chain", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/external-teams", method: "POST" }),
+      makeEndpoint({ path: "/external-teams/{id}", method: "PUT" }),
+    ];
+    const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.update).toBeDefined();
+    const ext = diagnostics.find(d => d.basePath === "/external-teams")!;
+    expect(ext.reason).toMatch(/PUT\/\{id\} matched/);
+  });
+
+  test("TASK-260: POST with item endpoint that has only unsupported methods → still skipped", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/x", method: "POST" }),
+      makeEndpoint({ path: "/x/{id}", method: "HEAD" }),
+    ];
+    const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
+    expect(groups).toHaveLength(0);
+    const x = diagnostics.find(d => d.basePath === "/x")!;
+    expect(x.verdict).toBe("skipped");
+    expect(x.reason).toMatch(/no GET\/PUT\/PATCH\/DELETE on \/\{id\}/);
   });
 });
 

@@ -1,9 +1,10 @@
 ---
 id: TASK-204
 title: 'tests: edge cases for transforms.ts and expr-eval.ts (string ordering)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 10:12'
+updated_date: '2026-05-09 10:02'
 labels:
   - tests
   - runner

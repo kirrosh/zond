@@ -214,7 +214,15 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
     if (cov.matrix.totals.byReason["no-fixtures"] > 0 || cov.matrix.totals.byReason["auth-scope-mismatch"] > 0) {
       console.log("");
       if (cov.matrix.totals.byReason["no-fixtures"] > 0) {
-        console.log(`  ${color ? DIM : ""}↳ ${cov.matrix.totals.byReason["no-fixtures"]} cells blocked by no-fixtures${color ? RESET : ""}`);
+        // TASK-41: clarify what "blocked by no-fixtures" means — these are
+        // endpoints whose smoke/CRUD suite is *generated* but `skip_if`-gated
+        // on an empty path-param fixture. The fix is a one-shot env edit, not
+        // suite regeneration. Point users at the actual remedy.
+        console.log(
+          `  ${color ? DIM : ""}↳ ${cov.matrix.totals.byReason["no-fixtures"]} ` +
+          `cells blocked by no-fixtures (suite generated, awaiting IDs in .env.yaml — ` +
+          `run \`zond discover --api ${cov.apiName}\` or seed manually).${color ? RESET : ""}`,
+        );
       }
       if (cov.matrix.totals.byReason["auth-scope-mismatch"] > 0) {
         console.log(`  ${color ? DIM : ""}↳ ${cov.matrix.totals.byReason["auth-scope-mismatch"]} cells blocked by auth-scope-mismatch${color ? RESET : ""}`);

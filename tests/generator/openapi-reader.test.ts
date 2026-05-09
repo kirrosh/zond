@@ -37,16 +37,19 @@ describe("extractEndpoints", () => {
     const doc = await readOpenApiSpec(FIXTURE);
     const endpoints = extractEndpoints(doc);
 
-    expect(endpoints.length).toBe(7); // login + 5 pet routes + health
-
-    const methods = endpoints.map((e) => `${e.method} ${e.path}`);
-    expect(methods).toContain("POST /auth/login");
-    expect(methods).toContain("GET /pets");
-    expect(methods).toContain("POST /pets");
-    expect(methods).toContain("GET /pets/{id}");
-    expect(methods).toContain("PUT /pets/{id}");
-    expect(methods).toContain("DELETE /pets/{id}");
-    expect(methods).toContain("GET /health");
+    // TASK-208 AC#3: assert by content (sorted set), not by length — adding
+    // a route to the fixture shouldn't break this test, only "missing
+    // expected route" should.
+    const methods = endpoints.map((e) => `${e.method} ${e.path}`).sort();
+    expect(methods).toEqual([
+      "DELETE /pets/{id}",
+      "GET /health",
+      "GET /pets",
+      "GET /pets/{id}",
+      "POST /auth/login",
+      "POST /pets",
+      "PUT /pets/{id}",
+    ]);
   });
 
   test("extracts operationId and summary", async () => {

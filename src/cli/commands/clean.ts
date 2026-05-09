@@ -185,7 +185,13 @@ export function registerClean(program: Command): void {
     .command("clean")
     .description("Remove auto-generated files tracked in .zond/manifest.json (TASK-156, m-9)")
     .option("--api <name>", "Limit to a single API (apis/<name>/). Preserves probes/ unless --probes is also passed (TASK-258)")
-    .option("--probes", "Include probe-suite files (apis/<api>/probes/). Required to delete probes; combine with --api to scope to one API")
+    .option(
+      "--probes",
+      "Scope deletion to probe-suite files only (apis/<api>/probes/). " +
+      "TASK-265: this is effectively `--probes-only` — `tests/`, `spec.json`, " +
+      "and `.api-catalog.yaml` are NEVER touched in this mode. Combine with " +
+      "--api <name> to limit to one API; alone, removes probes for every API.",
+    )
     .option("--all", "Remove every tracked auto-generated file in the workspace (includes probes/)")
     .option("--force", "Actually delete files (default is dry-run)")
     .action(async (opts, cmd: Command) => {

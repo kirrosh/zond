@@ -207,6 +207,14 @@ export const consoleReporter: Reporter = {
       return;
     }
 
+    // TASK-265: --quiet collapses output to one summary line. Exit code
+    // still differentiates pass/fail; this is for CI logs and `run --watch`
+    // where per-test detail is noise between iterations.
+    if (options?.quiet) {
+      console.log(formatGrandTotal(results, color));
+      return;
+    }
+
     const blocks: string[] = [];
     for (const result of results) {
       blocks.push(formatSuiteResult(result, color));
