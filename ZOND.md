@@ -928,7 +928,7 @@ zond resolves the workspace root via walk-up from the current directory. The fir
 
 The walk stops at `$HOME` to avoid accidentally adopting `~/apis` or `~/zond.db` when zond is invoked from an unrelated directory. If no marker is found, zond falls back to the current directory and prints a one-time warning to stderr — run `zond init` (or create `zond.config.yml`) to anchor the workspace explicitly.
 
-The workspace root is used as the default location for `zond.db`, the `apis/<name>/` directory created by `zond add api`, and the `.zond-current` file written by `zond use`. Explicit `--db` and `--dir` flags always win over walk-up.
+The workspace root is used as the default location for `zond.db`, the `apis/<name>/` directory created by `zond add api`, and the `.zond/current-api` file written by `zond use` (TASK-290; was `.zond-current`). Explicit `--db` and `--dir` flags always win over walk-up.
 
 ### Per-API artifacts (`apis/<name>/`)
 

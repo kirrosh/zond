@@ -28,6 +28,15 @@ All notable changes to this project will be documented in this file.
   `probe-mass-assignment`, `probe-security` (TASK-182) is closed. Use
   `zond probe <class>` instead. `warnDeprecatedProbe` helper removed.
 
+### Added
+
+- **TASK-290: global `--api` flag + `ZOND_API` env + `.zond/current-api` file.**
+  `zond` now resolves the active API from a single chain (highest wins):
+  per-command `--api` > root `--api` > `ZOND_API` env > `.zond/current-api`
+  (set by `zond use <name>`; was `.zond-current` at workspace root).
+  The root `--api` value is mirrored into `ZOND_API_GLOBAL` by a preAction
+  hook so deeply-nested code can read it without a `cmd` reference.
+
 ### Deprecated
 
 - **TASK-289: `zond run --no-real-parents` → `--use-synthetic-parents`.**
