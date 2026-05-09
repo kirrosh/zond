@@ -21,16 +21,12 @@ All notable changes to this project will be documented in this file.
   (default `--include case-study`); the per-failure CLI surface and its flags
   collapse into the bundle path. `renderCaseStudy` core renderer is unchanged.
 
-### Deprecated
+### Removed (breaking)
 
-- **TASK-182: `probe-validation`, `probe-methods`, `probe-mass-assignment`,
-  `probe-security` are now aliases for `zond probe <class>`.** The four
-  parallel top-level commands have been collapsed under a single
-  `zond probe` umbrella (`zond probe validation`, `zond probe methods`,
-  `zond probe mass-assignment`, `zond probe security`). Old names
-  continue to work for one release and emit a one-line deprecation
-  warning to stderr; flags and behaviour are unchanged. The umbrella
-  trims top-level `--help` from four lookalike entries to one.
+- **TASK-288: deprecated top-level `probe-*` aliases removed.** The
+  one-release deprecation window for `probe-validation`, `probe-methods`,
+  `probe-mass-assignment`, `probe-security` (TASK-182) is closed. Use
+  `zond probe <class>` instead. `warnDeprecatedProbe` helper removed.
 
 ### Added
 

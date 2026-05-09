@@ -364,10 +364,6 @@ zond run apis/<name>/probes/<class> --report json
 zond db diagnose <run-id> --json
 ```
 
-> Старые имена `zond probe-validation` / `probe-methods` / `probe-mass-assignment` /
-> `probe-security` оставлены как алиасы на 1 релиз и пишут deprecation warning
-> в stderr. Используйте `zond probe <class>`.
-
 Findings to flag: 5xx on null/empty/wrong-type body (missing validation /
 unguarded coercion), 2xx on undeclared method (contract drift), `is_admin: true`
 echoed in response (HIGH from `probe-mass-assignment`).

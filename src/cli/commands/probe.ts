@@ -16,7 +16,7 @@ import { probeValidationCommand } from "./probe-validation.ts";
 import { probeMethodsCommand } from "./probe-methods.ts";
 import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from "./probe-mass-assignment.ts";
 import { probeSecurityCommand } from "./probe-security.ts";
-import { globalJson, resolveSpecArg, resolveApiEnv, warnDeprecatedProbe } from "../resolve.ts";
+import { globalJson, resolveSpecArg, resolveApiEnv } from "../resolve.ts";
 import { existsSync } from "fs";
 import { parsePositiveInt } from "../argv.ts";
 import { printError } from "../output.ts";
@@ -49,7 +49,7 @@ function resolveProbeEnv(
   return { env: resolved.env };
 }
 
-function defineProbeValidation(parent: Command, name: string, deprecated: boolean): void {
+function defineProbeValidation(parent: Command, name: string): void {
   parent
     .command(`${name} [spec]`)
     .description("Generate negative-input probe suites (catches 5xx-on-bad-input bugs)")
@@ -62,7 +62,6 @@ function defineProbeValidation(parent: Command, name: string, deprecated: boolea
     .option("--no-cleanup", "Skip emission of follow-up DELETE cleanup steps for mutating probes (use in namespace-isolated test envs)")
     .option("--no-real-parents", "Bake synthetic-by-type values into all path params (legacy). By default, non-attacked path params are emitted as {{name}} and resolved from .env.yaml at run time — needed to reach the leaf validator on nested paths (TASK-135).")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      if (deprecated) warnDeprecatedProbe("probe-validation", "validation");
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       process.exitCode = await probeValidationCommand({
@@ -78,7 +77,7 @@ function defineProbeValidation(parent: Command, name: string, deprecated: boolea
     });
 }
 
-function defineProbeMassAssignment(parent: Command, name: string, deprecated: boolean): void {
+function defineProbeMassAssignment(parent: Command, name: string): void {
   parent
     .command(`${name} [spec]`)
     .description(
@@ -97,7 +96,6 @@ function defineProbeMassAssignment(parent: Command, name: string, deprecated: bo
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      if (deprecated) warnDeprecatedProbe("probe-mass-assignment", "mass-assignment");
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
 
@@ -130,7 +128,7 @@ function defineProbeMassAssignment(parent: Command, name: string, deprecated: bo
     });
 }
 
-function defineProbeSecurity(parent: Command, name: string, deprecated: boolean): void {
+function defineProbeSecurity(parent: Command, name: string): void {
   parent
     .command(`${name} <classes> [spec]`)
     .description(
@@ -149,7 +147,6 @@ function defineProbeSecurity(parent: Command, name: string, deprecated: boolean)
     .option("--timeout <ms>", "Per-request timeout in ms (default 30000)", parsePositiveInt("--timeout"))
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .action(async (classes: string, specPos: string | undefined, opts, cmd: Command) => {
-      if (deprecated) warnDeprecatedProbe("probe-security", "security");
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       // probe-security tolerates a missing env (--dry-run path), so don't
@@ -175,7 +172,7 @@ function defineProbeSecurity(parent: Command, name: string, deprecated: boolean)
     });
 }
 
-function defineProbeMethods(parent: Command, name: string, deprecated: boolean): void {
+function defineProbeMethods(parent: Command, name: string): void {
   parent
     .command(`${name} [spec]`)
     .description("Generate negative-method probe suites (catches 5xx/2xx on undeclared HTTP methods)")
@@ -184,7 +181,6 @@ function defineProbeMethods(parent: Command, name: string, deprecated: boolean):
     .requiredOption("--output <dir>", "Output directory for generated probe files")
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      if (deprecated) warnDeprecatedProbe("probe-methods", "methods");
       const resolved = resolveSpecArg(specPos, opts.api, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       process.exitCode = await probeMethodsCommand({
@@ -200,22 +196,8 @@ export function registerProbes(program: Command): void {
   const probeCmd = program
     .command("probe")
     .description("Run a probe class — pick one of: validation, methods, mass-assignment, security");
-  defineProbeValidation(probeCmd, "validation", false);
-  defineProbeMethods(probeCmd, "methods", false);
-  defineProbeMassAssignment(probeCmd, "mass-assignment", false);
-  defineProbeSecurity(probeCmd, "security", false);
-
-  // Deprecated top-level aliases — preserve the original registration order
-  // (validation, mass-assignment, security inserted before lint-spec, then
-  // methods after lint-spec) so help output stays byte-identical.
-}
-
-export function registerProbeAliasesEarly(program: Command): void {
-  defineProbeValidation(program, "probe-validation", true);
-  defineProbeMassAssignment(program, "probe-mass-assignment", true);
-  defineProbeSecurity(program, "probe-security", true);
-}
-
-export function registerProbeMethodsAlias(program: Command): void {
-  defineProbeMethods(program, "probe-methods", true);
+  defineProbeValidation(probeCmd, "validation");
+  defineProbeMethods(probeCmd, "methods");
+  defineProbeMassAssignment(probeCmd, "mass-assignment");
+  defineProbeSecurity(probeCmd, "security");
 }

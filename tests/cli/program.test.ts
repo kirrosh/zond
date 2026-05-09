@@ -227,34 +227,12 @@ describe("TASK-182: zond probe umbrella + back-compat aliases", () => {
     ]);
   });
 
-  test("legacy probe-* names are still registered as top-level aliases", () => {
+  test("legacy probe-* top-level aliases are gone (TASK-288)", () => {
     const program = buildProgram();
     const top = program.commands.map((c) => c.name());
     for (const name of ["probe-validation", "probe-methods", "probe-mass-assignment", "probe-security"]) {
-      expect(top).toContain(name);
+      expect(top).not.toContain(name);
     }
-  });
-
-  test("legacy probe-methods alias prints deprecation warning to stderr", async () => {
-    const program = buildProgram();
-    let stderrCapture = "";
-    const origErr = process.stderr.write;
-    process.stderr.write = ((chunk: string | Uint8Array) => {
-      stderrCapture += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
-      return true;
-    }) as typeof process.stderr.write;
-    const origExitCode = process.exitCode;
-    try {
-      // missing --output triggers exit 2, but the deprecation warning fires
-      // first inside the action handler.
-      await program.parseAsync(["bun", "script.ts", "probe-methods", "spec.json", "--output", "/tmp/zond-deprec-test"])
-        .catch(() => {});
-    } finally {
-      process.stderr.write = origErr;
-      process.exitCode = origExitCode;
-    }
-    expect(stderrCapture).toContain("'probe-methods' is deprecated");
-    expect(stderrCapture).toContain("zond probe methods");
   });
 });
 

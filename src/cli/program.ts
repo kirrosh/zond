@@ -13,11 +13,7 @@ import { registerRequest } from "./commands/request.ts";
 import { registerGenerate } from "./commands/generate.ts";
 import { registerDiscover } from "./commands/discover.ts";
 import { registerBootstrap } from "./commands/bootstrap.ts";
-import {
-  registerProbes,
-  registerProbeAliasesEarly,
-  registerProbeMethodsAlias,
-} from "./commands/probe.ts";
+import { registerProbes } from "./commands/probe.ts";
 import { registerLintSpec } from "./commands/lint-spec.ts";
 import { registerReport } from "./commands/report.ts";
 import { registerCatalog } from "./commands/catalog.ts";
@@ -87,10 +83,8 @@ export function buildProgram(): Command {
   registerAudit(program);
 
   registerProbes(program);
-  registerProbeAliasesEarly(program);
 
   registerLintSpec(program);
-  registerProbeMethodsAlias(program);
   registerCatalog(program);
   registerReport(program);
 
