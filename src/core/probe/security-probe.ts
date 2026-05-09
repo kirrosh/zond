@@ -959,6 +959,14 @@ function skipped(ep: EndpointInfo, reason: string): SecurityVerdict {
 // Markdown digest
 // ──────────────────────────────────────────────
 
+/** TASK-154 §N: clip noisy payloads (some SSRF/CRLF/redirect strings are URL-
+ *  encoded blobs > 60 chars). Keep the leading prefix users recognise plus an
+ *  ellipsis, so the digest line stays readable. */
+function truncatePayload(payload: string, max: number): string {
+  if (payload.length <= max) return payload;
+  return payload.slice(0, max - 1) + "…";
+}
+
 export function formatSecurityDigest(
   result: SecurityProbeResult,
   specPath: string,
@@ -1009,7 +1017,12 @@ export function formatSecurityDigest(
       const cleanupTag = v.cleanup?.error ? " 🧹 cleanup-failure" : "";
       lines.push(`- **${v.method} ${v.path}**${cleanupTag} — ${v.summary}`);
       for (const f of v.findings) {
-        lines.push(`  - \`${f.field}\` / ${f.class} → ${f.status} (${f.severity}) — ${f.reason}`);
+        // TASK-154 §N: surface the actual payload that triggered the finding
+        // — without it the digest is useless for case-study writing (which
+        // SSRF target? which CRLF shape?). Truncate long payloads so the
+        // line stays readable.
+        const payload = truncatePayload(f.payload, 60);
+        lines.push(`  - \`${f.field}\` / ${f.class} [\`${payload}\`] → ${f.status} (${f.severity}) — ${f.reason}`);
       }
     }
     lines.push("");

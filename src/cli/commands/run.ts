@@ -597,7 +597,14 @@ function discoverWorkspaceTestPaths(): { paths: string[] } | { error: string } {
 export function registerRun(program: Command): void {
   program
     .command("run [paths...]")
-    .description("Run API tests. Accepts one or more file/dir paths (shell-glob friendly: zond run tests/*.yaml).")
+    .description(
+      "Run API tests. Accepts one or more file/dir paths (shell-glob friendly: zond run tests/*.yaml). " +
+      "TASK-134: this command does NOT accept `--json` (which would collide with `--report json`). " +
+      "For JSON-envelope-style output use `--report json` (per-test breakdown) or `--report junit`. " +
+      "Other commands (`request`, `coverage`, `db diagnose`, etc.) DO accept `--json` — there it returns " +
+      "a small `{ok, data, errors}` envelope. The two flags are intentionally distinct: " +
+      "`run --report json` is a test-run report, `<cmd> --json` is a query-result envelope.",
+    )
     .option("--env <name>", "Use environment file (.env.<name>.yaml)")
     .option("--api <name>", "Use API collection (resolves test path automatically)")
     .addOption(

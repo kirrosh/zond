@@ -1,8 +1,10 @@
 ---
 id: TASK-154
 title: 'probe-security digest: payload в HIGH-строке + run-cmd в конце'
-status: To Do
+status: Done
 assignee: []
+created_date: ''
+updated_date: '2026-05-09 09:52'
 labels:
   - probe
   - probe-security
@@ -15,6 +17,7 @@ priority: low
 
 ## Description
 
+<!-- SECTION:DESCRIPTION:BEGIN -->
 ## Контекст
 
 Источник: [m-8 feedback round 3 §M+§N](../notes/m-8-audit-cli-gaps/feedback-round3.md).
@@ -58,11 +61,13 @@ Run regression suite on CI: zond run apis/<name>/probes/security-emit/ --env api
 3. Учитывать, что `--env` может быть не задан (тогда подставлять
    `--env apis/<api>/.env.yaml` если резолвится apiDir, иначе просто
    `zond run <emit-dir>`).
+<!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
-
-- [ ] HIGH/LOW-строка содержит `[<payload>]` (truncated к 60 символам).
-- [ ] При `--emit-tests` после digest'а печатается одна строка с
+<!-- AC:BEGIN -->
+- [ ] #1 HIGH/LOW-строка содержит `[<payload>]` (truncated к 60 символам).
+- [ ] #2 При `--emit-tests` после digest'а печатается одна строка с
       готовой командой `zond run`.
-- [ ] Тесты на формат (snapshot или substring match).
-- [ ] CHANGELOG.
+- [ ] #3 Тесты на формат (snapshot или substring match).
+- [ ] #4 CHANGELOG.
+<!-- AC:END -->
