@@ -158,14 +158,32 @@ export interface CleanFilter {
   all?: boolean;
 }
 
+export interface SelectEntriesResult {
+  selected: ManifestEntry[];
+  /** Entries that match `api` filter but were excluded because the user
+   *  did not explicitly opt into the `probes` category. Surfaced so the
+   *  CLI can hint at how to reach them (TASK-258). */
+  probesPreserved: ManifestEntry[];
+}
+
 export function selectEntries(manifest: Manifest, filter: CleanFilter): ManifestEntry[] {
-  const out: ManifestEntry[] = [];
+  return selectEntriesEx(manifest, filter).selected;
+}
+
+export function selectEntriesEx(manifest: Manifest, filter: CleanFilter): SelectEntriesResult {
+  const selected: ManifestEntry[] = [];
+  const probesPreserved: ManifestEntry[] = [];
+  // TASK-258: when scoping by --api alone (no explicit --probes / --all),
+  // probes/ belongs to a separate pipeline (zond probe-validation/-methods)
+  // and re-generating it costs ~30s on a 200-endpoint spec. Treat it as
+  // out-of-scope and surface a hint instead of silently nuking suites.
+  const protectProbes = !!filter.api && filter.category !== "probes" && !filter.all;
   for (const e of manifest.generated) {
     // spec.json is the source-of-truth snapshot downloaded from the network.
     // It is never auto-deleted — removal requires manual action or re-adding the API.
     if (e.category === "spec") continue;
     if (filter.all) {
-      out.push(e);
+      selected.push(e);
       continue;
     }
     if (filter.api) {
@@ -174,9 +192,13 @@ export function selectEntries(manifest: Manifest, filter: CleanFilter): Manifest
       if (!matchesApi) continue;
     }
     if (filter.category && e.category !== filter.category) continue;
-    out.push(e);
+    if (protectProbes && e.category === "probes") {
+      probesPreserved.push(e);
+      continue;
+    }
+    selected.push(e);
   }
-  return out;
+  return { selected, probesPreserved };
 }
 
 export type CleanVerdict = "delete" | "modified" | "missing";
