@@ -104,6 +104,7 @@ export function isEmptyListBody(body: unknown): boolean {
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../core/generator/types.ts";
+import type { RecommendedAction } from "../../core/diagnostics/failure-hints.ts";
 
 export interface DiscoverOptions {
   specPath: string;
@@ -158,6 +159,20 @@ export interface DiscoveryItem {
     | "verify-no-read"
     | "verify-skip-empty";
   reason?: string;
+  /** TASK-294: agent-routable action for items the user must fix.
+   *  miss-* / verify-stale / verify-unknown → `fix_fixture`.
+   *  miss-network → `fix_network_config`.
+   *  write / skip-* / verify-live → undefined. */
+  recommended_action?: RecommendedAction;
+}
+
+/** TASK-294: derive recommended_action from a DiscoveryItem's status. */
+export function discoveryAction(status: DiscoveryItem["status"]): RecommendedAction | undefined {
+  if (status === "miss-network") return "fix_network_config";
+  if (status.startsWith("miss-") || status === "verify-stale" || status === "verify-unknown") {
+    return "fix_fixture";
+  }
+  return undefined;
 }
 
 export function isPlaceholder(value: string | undefined): boolean {
@@ -536,6 +551,13 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
         );
         items.push(item);
       }
+    }
+
+    // TASK-294: stamp every item with recommended_action before consumers
+    // (--json envelope, summary printer) read it.
+    for (const it of items) {
+      const action = discoveryAction(it.status);
+      if (action) it.recommended_action = action;
     }
 
     const writes = items.filter(i => i.status === "write");

@@ -13,6 +13,7 @@
  */
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
+import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
 import { executeRequest } from "../runner/http-client.ts";
@@ -67,6 +68,9 @@ export interface SecurityFinding {
   /** PASS / FAIL classification per finding. */
   severity: SecuritySeverity;
   reason: string;
+  /** TASK-294: agent-routable action. FAIL/WARN → `report_backend_bug`;
+   *  PASS → undefined (no action needed). */
+  recommended_action?: RecommendedAction;
 }
 
 export interface SecurityVerdict {
@@ -635,7 +639,23 @@ async function restoreOriginal(
   };
 }
 
+/** TASK-294: stamp `recommended_action` on every finding before returning. */
+function stampAction(f: SecurityFinding): SecurityFinding {
+  if (f.severity === "high" || f.severity === "low") {
+    f.recommended_action = "report_backend_bug";
+  }
+  return f;
+}
+
 function classify(
+  hit: SecurityFieldHit,
+  payload: string,
+  resp: { status: number; body?: unknown; body_parsed?: unknown },
+): SecurityFinding {
+  return stampAction(classifyInner(hit, payload, resp));
+}
+
+function classifyInner(
   hit: SecurityFieldHit,
   payload: string,
   resp: { status: number; body?: unknown; body_parsed?: unknown },

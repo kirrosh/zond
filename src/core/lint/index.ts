@@ -42,6 +42,7 @@ export function lintSpec(doc: OpenAPIV3.Document, config: LintConfig): LintResul
         severity: setting as Severity,
         jsonpointer: opts.jsonpointer,
         message,
+        recommended_action: "fix_spec",
       };
       if (opts.path) issue.path = opts.path;
       if (opts.method && opts.method !== "*") issue.method = opts.method;

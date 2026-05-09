@@ -7,7 +7,7 @@ import type { Issue, LintStats } from "../../src/core/lint/types.ts";
 // many issues into a compact summary.
 
 function issue(rule: string, severity: "high" | "medium" | "low", path: string, message: string): Issue {
-  return { rule: rule as Issue["rule"], severity, path, method: "GET", jsonpointer: `#/paths/${path}/get`, message };
+  return { rule: rule as Issue["rule"], severity, path, method: "GET", jsonpointer: `#/paths/${path}/get`, message, recommended_action: "fix_spec" };
 }
 
 describe("buildRuleSummary (TASK-279)", () => {

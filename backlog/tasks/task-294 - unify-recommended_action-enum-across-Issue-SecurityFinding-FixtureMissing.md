@@ -1,9 +1,10 @@
 ---
 id: TASK-294
 title: 'unify recommended_action enum across Issue, SecurityFinding, FixtureMissing'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 07:00'
+updated_date: '2026-05-09 07:43'
 labels:
   - json
   - agent-first
@@ -21,7 +22,7 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Тип RecommendedAction экспортирован одним enum
+- [x] #1 Тип RecommendedAction экспортирован одним enum
 - [ ] #2 Issue / SecurityFinding / FixtureMissing содержат поле recommended_action
 - [ ] #3 Snapshot-тесты подтверждают enum в --json
 <!-- AC:END -->

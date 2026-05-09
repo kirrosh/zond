@@ -100,6 +100,9 @@ describe("runSecurityProbes — happy path", () => {
     const high = v.findings.filter(f => f.severity === "high");
     expect(high.length).toBeGreaterThan(0);
     expect(high[0]!.echoed).toBe(true);
+    // TASK-294: high/low findings carry recommended_action so an agent can route
+    // straight to "report_backend_bug" without re-classifying severity.
+    expect(high[0]!.recommended_action).toBe("report_backend_bug");
   });
 
   it("classifies OK when API rejects payload with 4xx", async () => {
@@ -125,6 +128,8 @@ describe("runSecurityProbes — happy path", () => {
     const v = result.verdicts[0]!;
     expect(v.severity).toBe("ok");
     expect(v.findings.every(f => f.severity === "ok")).toBe(true);
+    // TASK-294: ok-severity findings carry no recommended_action.
+    expect(v.findings.every(f => f.recommended_action === undefined)).toBe(true);
   });
 
   it("dry-run lists detected fields without sending requests", async () => {

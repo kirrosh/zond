@@ -24,6 +24,7 @@
  */
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
+import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { executeRequest } from "../runner/http-client.ts";
 import type { HttpRequest } from "../runner/types.ts";
@@ -144,6 +145,12 @@ export interface EndpointVerdict {
   /** Reason this endpoint was skipped (only set when severity === "skipped"). */
   skipReason?: string;
   notes?: string[];
+  /** TASK-294: agent-routable action.
+   *  high/medium → `report_backend_bug` (privilege escalation).
+   *  inconclusive-baseline → `fix_fixture` (broken request body, retry).
+   *  inconclusive-5xx → `report_backend_bug` (server crashed).
+   *  low/ok/skipped → undefined. */
+  recommended_action?: RecommendedAction;
 }
 
 export interface MassAssignmentOptions {
@@ -342,6 +349,7 @@ export async function runMassAssignmentProbes(
       bodyFkMisses,
       bodyFkOverlay,
     });
+    stampRecommendedAction(verdict);
     verdicts.push(verdict);
   }
 
@@ -624,7 +632,23 @@ async function probeEndpoint(
   // Preserve "high" already set by the extras-bypass branch; otherwise
   // derive severity from per-field outcomes.
   if (verdict.severity !== "high") finaliseSeverity(verdict, strict);
+  stampRecommendedAction(verdict);
   return verdict;
+}
+
+/** TASK-294: agent-routable action derived from final severity. */
+function stampRecommendedAction(verdict: EndpointVerdict): void {
+  switch (verdict.severity) {
+    case "high":
+    case "medium":
+    case "inconclusive-5xx":
+      verdict.recommended_action = "report_backend_bug";
+      break;
+    case "inconclusive-baseline":
+      verdict.recommended_action = "fix_fixture";
+      break;
+    // low / ok / skipped → no action
+  }
 }
 
 async function tryCleanupBaseline(
