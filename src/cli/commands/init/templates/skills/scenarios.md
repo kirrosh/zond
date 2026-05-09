@@ -133,7 +133,7 @@ tests:
 - `always: true` — step runs even if a prior step failed (use for cleanup so test data doesn't leak).
 - `skip_if: "{{var}} =="` — skip when a fixture var is unset.
 - Per-step `headers:` override the suite-level `headers:`.
-- For values you want randomised, use generators: `{{$randomEmail}}`, `{{$uuid}}`, `{{$randomString(20)}}`, `{{$randomInt(1,1000)}}`. Full list in `zond run --help`.
+- For values you want randomised, use generators: `{{$randomEmail}}`, `{{$uuid}}`, `{{$randomString}}`, `{{$randomInt}}`. Full list: `zond reference random-helpers` or `docs/random-helpers.md`.
 
 ### Multi-service flows
 

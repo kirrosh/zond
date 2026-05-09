@@ -54,21 +54,24 @@ HIGH/LOW rows by hand.
 
 ## Phase 1 — locate the run
 
-If the user did not name a run id, take the latest:
+If the user did not name a run id, the default of `zond db diagnose`
+already targets the most recent failing run (TASK-266). Skip straight to
+Phase 2 unless you specifically need an older run:
 
 ```bash
-zond db runs --limit 5 --json
+zond db runs --limit 5 --json   # pick a non-default run id
 ```
 
-Look for `data.runs[0].id`. If `trigger=ci`, mention the CI build in
-the summary. If the user said "после моего фикса", take the second-most-
-recent and pair with `zond db compare <prev> <curr> --json` for a
-regression diff.
+If `trigger=ci`, mention the CI build in the summary. If the user said
+"после моего фикса", take the second-most-recent and pair with
+`zond db compare <prev> <curr> --json` for a regression diff.
 
 ## Phase 2 — pull the diagnose envelope
 
 ```bash
-zond db diagnose <run-id> --json
+zond db diagnose --json              # last failing run (default — TASK-266)
+zond db diagnose <run-id> --json     # explicit run
+zond db diagnose --latest --json     # last run, even if it passed
 ```
 
 The shape (relevant fields only):
