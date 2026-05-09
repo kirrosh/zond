@@ -274,6 +274,40 @@ future `zond db lint-diff`. Disable with `--no-db`.
 }
 ```
 
+### `checks run` — schemathesis-style depth checks (m-15)
+
+`zond checks run` exercises a registered catalog of conformance and
+security checks against a live API. Names mirror schemathesis V4 1-to-1
+(`status_code_conformance`, `negative_data_rejection`, `ignored_auth`,
+`use_after_free`, …). Use it after the spec/CRUD smoke when you want
+boundary-value coverage and SARIF output for GitHub Code Scanning.
+
+```bash
+zond checks run --api myapi                                   # default: examples phase, mode=all
+zond checks run --api myapi --check ignored_auth,use_after_free
+zond checks run --api myapi --phase coverage --allow-x00      # ARV-6: deterministic boundary values
+zond checks run --api myapi --mode positive                   # ARV-7: contract verification only
+zond checks run --api myapi --mode negative                   # ARV-7: malicious-input probes only
+zond checks run --api myapi --report sarif --output zond.sarif # ARV-5: GitHub Code Scanning
+zond checks list                                              # show the registered catalog
+```
+
+Flag cheat-sheet:
+
+| Flag | What it does |
+|------|--------------|
+| `--mode positive\|negative\|all` | Drops checks/cases that don't belong to the requested mode. `positive` runs only contract-verification probes (status, schema, content-type, `positive_data_acceptance`); `negative` runs only malicious-input probes (`negative_data_rejection`, `ignored_auth`, `use_after_free`, missing-header / unsupported-method probes). Default `all`. |
+| `--phase examples\|coverage\|all` | `examples` (default) emits one positive + one single-site negative per op; `coverage` enumerates deterministic boundary values per body field; `all` does both. |
+| `--allow-x00` | Include the NUL byte (`\x00`) in string boundaries during the coverage phase. Off by default — some HTTP/JSON stacks panic on it. |
+| `--check <ids…>` / `--exclude-check <ids…>` | Restrict the registered catalog. Combined with `--mode` (mode applied first). |
+| `--report sarif --output <path>` | Emit SARIF v2.1.0 with stable `partialFingerprints` for `github/codeql-action/upload-sarif@v3`. |
+| `--auth-header 'Name: value'` | Real-auth headers fed into stateful security checks. Auto-derived from `apis/<name>/.env.yaml` (`auth_token`, `api_key`) when `--api` is set. |
+| `--bootstrap-cleanup-failed` | Skip stateful security checks with a warning when bootstrap-cleanup couldn't be confirmed (avoids FP on stale data). |
+
+Exit code: `0` when no HIGH/CRITICAL findings, `1` otherwise. LOW/MEDIUM
+findings are reported but don't gate CI by default — post-process the
+JSON envelope (or SARIF) for stricter gating.
+
 ### `probe static` — bug-hunting static-input probes (validation + methods)
 
 `probe static` runs the two static-input probe classes — **validation**

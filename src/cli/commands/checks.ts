@@ -73,6 +73,7 @@ interface ChecksRunOptions {
   output?: string;
   phase?: string;
   allowX00?: boolean;
+  mode?: string;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -168,6 +169,14 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     process.exit(2);
   }
 
+  const modeRaw = typeof opts.mode === "string" ? opts.mode : "all";
+  if (modeRaw !== "positive" && modeRaw !== "negative" && modeRaw !== "all") {
+    const msg = `Unknown --mode: "${modeRaw}". Available: positive, negative, all`;
+    if (json) printJson(jsonError("checks run", [msg]));
+    else printError(msg);
+    process.exit(2);
+  }
+
   try {
     const result = await runChecks({
       specPath: specRes.spec,
@@ -179,6 +188,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed === true,
       phase: phaseRaw as "examples" | "coverage" | "all",
       allowX00: opts.allowX00 === true,
+      mode: modeRaw as "positive" | "negative" | "all",
     });
     const warnings: string[] = [];
     for (const id of result.selection.unknown) {
@@ -275,6 +285,11 @@ function defineRun(parent: Command): void {
     .option(
       "--allow-x00",
       "ARV-6: include the NUL byte (\\x00) in string boundaries during coverage phase. Off by default — some HTTP/JSON stacks panic on it.",
+    )
+    .option(
+      "--mode <mode>",
+      "ARV-7: positive (contract verification only — drops checks/cases that send malicious input), negative (only malicious-input probes), all (default — both).",
+      "all",
     )
     .action(checksRunAction);
 }

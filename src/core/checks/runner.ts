@@ -30,6 +30,7 @@ import {
 import "./checks/index.ts"; // side-effect: register builtins
 import { selectChecks, type SelectionResult } from "./registry.ts";
 import { listStatefulChecks, makeHarness } from "./stateful.ts";
+import { caseMatchesMode, filterChecksByMode, type Mode } from "./mode.ts";
 import { buildNegativeBody } from "./checks/_negative_mutator.ts";
 import {
   emptySummary,
@@ -65,6 +66,10 @@ export interface RunChecksOptions {
   /** ARV-6 AC #5 — gate the NUL byte (\x00) in string boundaries.
    *  Off by default because some HTTP/JSON stacks panic on it. */
   allowX00?: boolean;
+  /** ARV-7 — `positive` (contract verification only), `negative`
+   *  (malicious input only), `all` (default — both). Drops both checks
+   *  and cases that don't belong to the requested mode. */
+  mode?: Mode;
 }
 
 export interface RunChecksResult {
@@ -288,7 +293,15 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   const buckets = bucketEndpointsByPath(allOps);
   const schemaValidator: SchemaValidator = createSchemaValidator(doc);
 
-  const selection = selectChecks({ include: opts.include, exclude: opts.exclude });
+  const mode: Mode = opts.mode ?? "all";
+  const rawSelection = selectChecks({ include: opts.include, exclude: opts.exclude });
+  // ARV-7: drop checks the active mode doesn't care about — `selection`
+  // is what the runner sends to checks; `rawSelection` is what the user
+  // *asked for* (kept on the result so warnings still surface unknown ids).
+  const selection: SelectionResult = {
+    selected: filterChecksByMode(rawSelection.selected, mode),
+    unknown: rawSelection.unknown,
+  };
   const findings: CheckFinding[] = [];
   const summary = emptySummary();
   summary.operations = ops.length;
@@ -337,6 +350,11 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     }
 
     for (const built of cases) {
+      // ARV-7: skip cases whose mode doesn't match the run-mode. We
+      // build them all up-front so `--mode all` and `--mode negative`
+      // share the same code path; the filter just decides which go on
+      // the wire.
+      if (!caseMatchesMode(built.case.mode, mode)) continue;
       let httpResp: HttpResponse;
       try {
         httpResp = await executeRequest(built.req, { timeout: opts.timeoutMs ?? 30000 });
@@ -384,11 +402,14 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   // explicitly excluded.
   const includeSet = opts.include && opts.include.length > 0 ? new Set(opts.include) : null;
   const excludeSet = new Set(opts.exclude ?? []);
-  const activeStateful = listStatefulChecks().filter((c) => {
-    if (excludeSet.has(c.id)) return false;
-    if (includeSet && !includeSet.has(c.id)) return false;
-    return true;
-  });
+  const activeStateful = filterChecksByMode(
+    listStatefulChecks().filter((c) => {
+      if (excludeSet.has(c.id)) return false;
+      if (includeSet && !includeSet.has(c.id)) return false;
+      return true;
+    }),
+    mode,
+  );
 
   if (activeStateful.length > 0) {
     const harness = makeHarness(opts.baseUrl, doc, {
