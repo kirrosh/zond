@@ -3,15 +3,15 @@ id: TASK-219
 title: >-
   zond generate: support --force/--overwrite flag to regenerate over existing
   tests
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 14:53'
-updated_date: '2026-05-07 15:29'
+updated_date: '2026-05-09 09:36'
 labels:
   - feedback-loop
   - api-resend
-dependencies: []
 milestone: m-14
+dependencies: []
 priority: low
 ---
 

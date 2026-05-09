@@ -52,13 +52,24 @@ function planChunks(endpoints: EndpointInfo[]): ChunkPlan {
   };
 }
 
-/** Filter endpoints that have the given tag (case-insensitive) */
+/**
+ * Filter endpoints by tag (case-insensitive). Accepts a single tag or a
+ * comma-separated list (TASK-239) so callers can run one generate pass for
+ * multiple tags instead of looping in the shell — looping prints
+ * "Next steps" N times and drowns real warnings.
+ */
 export function filterByTag(endpoints: EndpointInfo[], tag: string): EndpointInfo[] {
-  const lower = tag.trim().toLowerCase();
-  if (lower === "untagged") {
-    return endpoints.filter(ep => ep.tags.length === 0);
-  }
-  return endpoints.filter(ep => ep.tags.some(t => t.trim().toLowerCase() === lower));
+  const wanted = tag
+    .split(",")
+    .map(t => t.trim().toLowerCase())
+    .filter(t => t.length > 0);
+  if (wanted.length === 0) return [];
+  const includeUntagged = wanted.includes("untagged");
+  const explicit = wanted.filter(t => t !== "untagged");
+  return endpoints.filter(ep => {
+    if (includeUntagged && ep.tags.length === 0) return true;
+    return ep.tags.some(t => explicit.includes(t.trim().toLowerCase()));
+  });
 }
 
 /** Collect the unique set of tags across all endpoints (sorted, original casing). */

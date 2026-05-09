@@ -1,10 +1,10 @@
 ---
 id: TASK-218
 title: 'zond generate/add api: summary ''X path params have no examples'' в stdout'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 14:21'
-updated_date: '2026-05-09 09:06'
+updated_date: '2026-05-09 09:36'
 labels:
   - feedback-loop
   - api-resend

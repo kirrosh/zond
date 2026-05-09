@@ -1,10 +1,10 @@
 ---
 id: TASK-239
 title: 'generate: Next steps печатается N раз при batch-запуске по тегам'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 08:36'
-updated_date: '2026-05-09 09:06'
+updated_date: '2026-05-09 09:36'
 labels:
   - feedback-loop
   - api-sentry
