@@ -16,9 +16,10 @@ import type { Command } from "commander";
 import { probeStaticCommand, resolveStaticClasses } from "./probe-static.ts";
 import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from "./probe-mass-assignment.ts";
 import { probeSecurityCommand } from "./probe-security.ts";
-import { globalJson, resolveSpecArg, resolveApiEnv } from "../resolve.ts";
+import { globalJson, resolveSpecArg, resolveApiEnv, resolveApiCollection } from "../resolve.ts";
+import { readCurrentApi } from "../../core/context/current.ts";
 import { existsSync } from "fs";
-import { dirname } from "node:path";
+import { join, dirname } from "node:path";
 import { parsePositiveInt } from "../argv.ts";
 import { printError } from "../output.ts";
 import { loadEnvMeta } from "../../core/parser/variables.ts";
@@ -83,7 +84,10 @@ function defineProbeStatic(parent: Command, name: string): void {
     )
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
-    .requiredOption("--output <dir>", "Output directory for generated probe files")
+    // ARV-30: --output is optional when --api (or current-api) is set —
+    // probes land in apis/<name>/probes/static/ alongside generate's tests/.
+    // Required only when probing a bare spec with no registered collection.
+    .option("--output <dir>", "Output directory for generated probe files (default: apis/<api>/probes/static when --api / current-api is set)")
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .option("--list-tags", "List available tags from spec and exit")
     .option("--max-per-endpoint <N>", "Cap negative-input probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
@@ -98,10 +102,27 @@ function defineProbeStatic(parent: Command, name: string): void {
       const r = resolveStaticClasses(optsArg.include, optsArg.exclude);
       if ("error" in r) { printError(r.error); process.exitCode = 2; return; }
 
+      // ARV-30: derive --output from the registered API's base_dir when the
+      // user didn't pass one. Bare-spec invocations (positional only, no --api,
+      // no current-api) still must pass --output explicitly.
+      let outputDir: string | undefined = optsArg.output;
+      if (!outputDir) {
+        const apiName = (optsArg.api as string | undefined) ?? readCurrentApi() ?? undefined;
+        if (apiName) {
+          const col = resolveApiCollection(apiName, optsArg.db);
+          if (!("error" in col) && col.baseDir) outputDir = join(col.baseDir, "probes", "static");
+        }
+      }
+      if (!outputDir) {
+        printError("--output <dir> is required when no --api / current-api can resolve apis/<name>/probes/static.");
+        process.exitCode = 2;
+        return;
+      }
+
       const useReal = optsArg.useSyntheticParents !== true;
       process.exitCode = await probeStaticCommand({
         specPath: resolved.spec,
-        output: optsArg.output,
+        output: outputDir,
         tag: optsArg.tag,
         maxPerEndpoint: optsArg.maxPerEndpoint,
         noCleanup: optsArg.cleanup === false,
