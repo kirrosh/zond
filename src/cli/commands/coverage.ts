@@ -19,6 +19,9 @@ export interface CoverageOptions {
   /** TASK-274: union across all runs of the API tagged <tag>. */
   tag?: string;
   json?: boolean;
+  /** ARV-28: list not-covered (and partial) endpoints inline so users
+   *  don't need `--json | jq` to see what's missing. */
+  verbose?: boolean;
 }
 
 const RESET = "\x1b[0m";
@@ -213,6 +216,21 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
     }
     if (uncoveredRows.length > 0) {
       console.log(`  ${color ? DIM : ""}⬜ ${uncoveredRows.length} not covered${color ? RESET : ""}`);
+    }
+
+    // ARV-28: --verbose lists not-covered endpoints (and partial) inline,
+    // so users don't have to pipe through `--json | jq` for that detail.
+    if (options.verbose && (uncoveredRows.length > 0 || partialRows.length > 0)) {
+      if (partialRows.length > 0) {
+        console.log("");
+        console.log(`${color ? YELLOW : ""}Partial (only non-2xx responses):${color ? RESET : ""}`);
+        for (const row of partialRows) console.log(`  ◐ ${row.endpoint}`);
+      }
+      if (uncoveredRows.length > 0) {
+        console.log("");
+        console.log(`${color ? DIM : ""}Not covered:${color ? RESET : ""}`);
+        for (const row of uncoveredRows) console.log(`  ⬜ ${row.endpoint}`);
+      }
     }
 
     if (cov.matrix.totals.byReason["no-fixtures"] > 0 || cov.matrix.totals.byReason["auth-scope-mismatch"] > 0) {
@@ -480,6 +498,7 @@ export function registerCoverage(program: Command): void {
       "Combine multiple runs. Selector: 'session', 'since:<dur>' (e.g. since:24h), 'tag:<name>', or 'runs:<id1,id2,…>' (bare comma-list also accepted)",
     )
     .option("--db <path>", "Path to SQLite database file")
+    .option("--verbose", "List not-covered (and partial) endpoints inline — same data as `--json` but human-readable")
     .action(async (opts, cmd: Command) => {
       const apiFlag = (opts.api as string | undefined) ?? (opts.spec ? undefined : readCurrentApi() ?? undefined);
       let apiName: string | undefined;
@@ -565,6 +584,7 @@ export function registerCoverage(program: Command): void {
         ...(sinceIso ? { sinceIso } : {}),
         ...(tag ? { tag } : {}),
         json: globalJson(cmd),
+        verbose: opts.verbose === true,
       });
     });
 }
