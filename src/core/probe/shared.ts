@@ -181,7 +181,7 @@ export function printMutationBanner(
     `⚠  ${probeName} mutates live data on the target API.\n` +
     `   It creates and (by default) deletes resources via POST/PUT/PATCH/DELETE.\n` +
     `${fixtureLine}` +
-    `   Recovery if FK fixtures change: re-run \`zond discover --api <name>\` to refresh \`.env.yaml\`.\n` +
+    `   Recovery if FK fixtures change: re-run \`zond prepare-fixtures --api <name>\` to refresh \`.env.yaml\`.\n` +
     `   Pass \`--no-cleanup\` to keep probe-created resources for inspection.\n` +
     `\n`,
   );

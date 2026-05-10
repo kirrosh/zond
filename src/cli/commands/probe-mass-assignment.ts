@@ -202,7 +202,7 @@ export async function probeMassAssignmentCommand(
       const cleanedCount = result.verdicts.filter(v => v.cleanup?.attempted && v.cleanup.status != null && v.cleanup.status < 400).length;
       if (cleanedCount > 0) {
         printWarning(
-          `${cleanedCount} resource(s) created and deleted by probes. FK fixtures in .env.yaml may be stale — re-run \`zond discover --api <name>\` before next CRUD run.`,
+          `${cleanedCount} resource(s) created and deleted by probes. FK fixtures in .env.yaml may be stale — re-run \`zond prepare-fixtures --api <name>\` before next CRUD run.`,
         );
       }
     }
