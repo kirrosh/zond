@@ -260,13 +260,14 @@ Suffix-aware: `*_slug` captures `slug`, `*_uuid` → `uuid`, `*_id` → `id`.
 Skips vars already filled with a non-placeholder value.
 
 If a list-endpoint returns `200 []` (well-shaped but empty), discover
-reports `miss-empty` with reason `no <resource> in target API — create
-one first…`. Distinct from `miss-no-id` (response shape unrecognized:
-no `array`/`data`/`items`/`results`/`records` field). On a fresh
-workspace this usually means: trigger an event in the product (Sentry
-SDK install, Resend send, etc.) and re-run `zond prepare-fixtures`. For special
-fixtures the spec can't describe (verified-only emails, domain-validated
-records, "real" enum values), fall back to `zond request`:
+reports `miss-empty` and points at the auto-create path: re-run with
+`zond prepare-fixtures --api <name> --seed --apply` and the cascade
+will POST one record itself (using a schema-derived body) so the FK
+gets captured. Distinct from `miss-no-id` (response shape unrecognized:
+no `array`/`data`/`items`/`results`/`records` field). For resources
+the spec can't describe well (verified-only emails, domain-validated
+records, "real" enum values) — trigger the resource in the product UI
+or fall back to `zond request`:
 
 ```bash
 zond request GET /domains | jq '.data[] | select(.status=="verified") | .id'
