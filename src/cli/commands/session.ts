@@ -8,6 +8,9 @@ import {
 } from "../../core/context/session.ts";
 import { jsonError, jsonOk, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
+import { listSessions, countSessions } from "../../db/queries.ts";
+import { getDb } from "../../db/schema.ts";
+import { parsePositiveInt } from "../argv.ts";
 
 export interface SessionStartOptions {
   label?: string;
@@ -132,6 +135,52 @@ export async function sessionStatusCommand(opts: SessionStatusOptions): Promise<
   return 0;
 }
 
+// ARV-43: list past sessions surfaced from the runs table so users can
+// discover session_ids for `zond coverage --union session --session-id <id>`
+// without dropping into sqlite. Labels live only in .zond/current-session
+// (not persisted per run), so we only show what's stored in the DB.
+export interface SessionListOptions {
+  limit?: number;
+  json?: boolean;
+  dbPath?: string;
+}
+
+export async function sessionListCommand(opts: SessionListOptions): Promise<number> {
+  const limit = opts.limit ?? 20;
+  let sessions: ReturnType<typeof listSessions>;
+  let total: number;
+  try {
+    getDb(opts.dbPath);
+    sessions = listSessions(limit);
+    total = countSessions();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (opts.json) printJson(jsonError("session", [message]));
+    else printError(message);
+    return 1;
+  }
+
+  if (opts.json) {
+    printJson(jsonOk("session", { action: "list", limit, total, sessions }));
+    return 0;
+  }
+
+  if (sessions.length === 0) {
+    process.stdout.write("No sessions recorded yet. Run 'zond session start' before 'zond run' to group runs.\n");
+    return 0;
+  }
+  process.stdout.write(`Showing ${sessions.length} of ${total} session(s):\n\n`);
+  process.stdout.write("session_id                            started_at            finished_at           runs   pass/fail/skip\n");
+  for (const s of sessions) {
+    const started = s.started_at ? s.started_at.replace("T", " ").slice(0, 19) : "—".padEnd(19);
+    const finished = s.finished_at ? s.finished_at.replace("T", " ").slice(0, 19) : "(open)".padEnd(19);
+    const runs = String(s.run_count).padStart(4);
+    const counts = `${s.passed}/${s.failed}/${s.skipped}`;
+    process.stdout.write(`${s.session_id}  ${started}   ${finished}   ${runs}   ${counts}\n`);
+  }
+  return 0;
+}
+
 import type { Command } from "commander";
 import { globalJson } from "../resolve.ts";
 
@@ -164,5 +213,19 @@ export function registerSession(program: Command): void {
     .description("Show the active session (if any)")
     .action(async (_opts, cmd: Command) => {
       process.exitCode = await sessionStatusCommand({ json: globalJson(cmd) });
+    });
+  // ARV-43: complete the start/end/status/list quartet so coverage --union
+  // session --session-id <id> is discoverable without sqlite spelunking.
+  session
+    .command("list")
+    .description("List recent sessions (id, started_at, finished_at, run counts) so coverage --session-id is discoverable")
+    .option("--limit <n>", "Max sessions to print (default 20)", parsePositiveInt("--limit"))
+    .option("--db <path>", "Path to SQLite database file")
+    .action(async (opts, cmd: Command) => {
+      process.exitCode = await sessionListCommand({
+        limit: opts.limit,
+        dbPath: opts.db,
+        json: globalJson(cmd),
+      });
     });
 }
