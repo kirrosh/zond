@@ -221,7 +221,7 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
         console.log(
           `  ${color ? DIM : ""}↳ ${cov.matrix.totals.byReason["no-fixtures"]} ` +
           `cells blocked by no-fixtures (suite generated, awaiting IDs in .env.yaml — ` +
-          `run \`zond discover --api ${cov.apiName}\` or seed manually).${color ? RESET : ""}`,
+          `run \`zond prepare-fixtures --api ${cov.apiName}\` or seed manually).${color ? RESET : ""}`,
         );
       }
       if (cov.matrix.totals.byReason["auth-scope-mismatch"] > 0) {

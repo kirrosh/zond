@@ -144,7 +144,7 @@ export function buildSuggestedFixes(input: BuildSuggestedFixesInput): SuggestedF
         key: ph.segment,
         message:
           `404 on \`${f.request_url}\` — path segment \`${ph.segment}\` is a ${ph.reason}. ` +
-          `Replace with a real id from the live API (e.g. \`zond discover --apply\`) ` +
+          `Replace with a real id from the live API (e.g. \`zond prepare-fixtures --apply\`) ` +
           `or set the corresponding fixture in ${input.envFilePath ?? ".env.yaml"}.`,
         source: input.envFilePath,
       });
