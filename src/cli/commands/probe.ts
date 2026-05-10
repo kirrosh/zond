@@ -206,10 +206,12 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         return;
       }
 
-      // m-17 / ARV-52: dry-run path tolerates a missing env file the way
-      // probe-security does — the user wants to inspect the plan, not
-      // hit a live API.
-      const envFile = resolveProbeEnv(opts.env, apiName, opts.db, { tolerateMissing: opts.dryRun === true });
+      // m-17 / ARV-52 + ARV-58: dry-run and list-tags paths tolerate a
+      // missing env file the way probe-security does — the user wants
+      // to inspect the plan / available tags, not hit a live API.
+      const envFile = resolveProbeEnv(opts.env, apiName, opts.db, {
+        tolerateMissing: opts.dryRun === true || opts.listTags === true,
+      });
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
       const timeoutMs = await resolveProbeTimeout(opts.timeout, apiName, envFile.env);
       const reportFmt = opts.report === "json" ? "json" : "markdown";

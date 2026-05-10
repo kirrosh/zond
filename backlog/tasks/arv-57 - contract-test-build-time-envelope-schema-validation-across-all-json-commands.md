@@ -3,17 +3,18 @@ id: ARV-57
 title: >-
   contract-test: build-time envelope schema validation across all --json
   commands
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 18:45'
+updated_date: '2026-05-10 20:22'
 labels:
   - m-17
   - contract-test
   - ci
   - agent-contract
+milestone: m-17
 dependencies: []
 priority: medium
-milestone: m-17
 ---
 
 ## Description
@@ -24,11 +25,11 @@ TASK-184 codified --json envelope policy в один модуль, но это c
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 tests/contracts/envelope-compliance.test.ts: для каждой команды с --json в src/cli/commands/ есть smoke-run на mock fixture; envelope валидируется ajv по docs/json-schema/<cmd>.schema.json
-- [ ] #2 Команда без schema файла → test fail с понятным сообщением 'add docs/json-schema/<cmd>.schema.json or document why command does not implement envelope'
-- [ ] #3 Команда с envelope нарушающим schema → test fail с ajv error path
-- [ ] #4 Покрытие >= 80% --json команд (некоторые могут быть deferred с allow-list, но allow-list виден в коде)
-- [ ] #5 После ARV-50/51 probe-команды попадают в test и проходят
+- [x] #1 tests/contracts/envelope-compliance.test.ts: для каждой команды с --json в src/cli/commands/ есть smoke-run на mock fixture; envelope валидируется ajv по docs/json-schema/<cmd>.schema.json
+- [x] #2 Команда без schema файла → test fail с понятным сообщением 'add docs/json-schema/<cmd>.schema.json or document why command does not implement envelope'
+- [x] #3 Команда с envelope нарушающим schema → test fail с ajv error path
+- [x] #4 Покрытие >= 80% --json команд (некоторые могут быть deferred с allow-list, но allow-list виден в коде)
+- [x] #5 После ARV-50/51 probe-команды попадают в test и проходят
 <!-- AC:END -->
 
 ## Implementation Plan

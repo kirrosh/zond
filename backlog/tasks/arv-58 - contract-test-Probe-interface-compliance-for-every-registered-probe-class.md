@@ -1,22 +1,23 @@
 ---
 id: ARV-58
 title: 'contract-test: Probe interface compliance for every registered probe class'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 18:45'
+updated_date: '2026-05-10 20:22'
 labels:
   - m-17
   - contract-test
   - probe
   - ci
   - agent-contract
+milestone: m-17
 dependencies:
   - ARV-49
   - ARV-50
   - ARV-51
   - ARV-52
 priority: medium
-milestone: m-17
 ---
 
 ## Description
@@ -27,12 +28,12 @@ milestone: m-17
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 tests/contracts/probe-interface.test.ts table-driven: для каждого entry в core/probe/registry.ts → 4 sub-tests
-- [ ] #2 Sub-test 1: --help содержит все обязательные флаги (--dry-run, --list-tags, --api, --tag, --include, --exclude, --json, --report, --output)
-- [ ] #3 Sub-test 2: --list-tags --json возвращает {tags: string[]} (envelope-compliant)
-- [ ] #4 Sub-test 3: --dry-run --json на mock spec (3 endpoints) возвращает data.endpoints[] с planned/skipped enum (закрывает F1-15 fixture)
-- [ ] #5 Sub-test 4: --report json (real run, mocked HTTP) возвращает endpoints[].findings[] structured (закрывает F3-15 fixture)
-- [ ] #6 Adding new Probe class without matching contract → test fail at boot
+- [x] #1 tests/contracts/probe-interface.test.ts table-driven: для каждого entry в core/probe/registry.ts → 4 sub-tests
+- [x] #2 Sub-test 1: --help содержит все обязательные флаги (--dry-run, --list-tags, --api, --tag, --include, --exclude, --json, --report, --output)
+- [x] #3 Sub-test 2: --list-tags --json возвращает {tags: string[]} (envelope-compliant)
+- [x] #4 Sub-test 3: --dry-run --json на mock spec (3 endpoints) возвращает data.endpoints[] с planned/skipped enum (закрывает F1-15 fixture)
+- [x] #5 Sub-test 4: --report json (real run, mocked HTTP) возвращает endpoints[].findings[] structured (закрывает F3-15 fixture)
+- [x] #6 Adding new Probe class without matching contract → test fail at boot
 <!-- AC:END -->
 
 ## Implementation Plan
