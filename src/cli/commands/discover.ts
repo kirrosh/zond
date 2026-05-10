@@ -374,9 +374,13 @@ export async function probeOne(
 
   let resp;
   try {
+    // ARV-48: 1 network-class retry with exp+jitter backoff. Transient
+    // DNS/connection-reset blips on shared CI runners must not cost the
+    // user a whole prepare-fixtures rerun. Only network errors retry —
+    // 4xx/5xx HTTP statuses keep their existing branches (miss-status).
     resp = await executeRequest(
       { method: "GET", url, headers },
-      { timeout: timeoutMs, retries: 0 },
+      { timeout: timeoutMs, retries: 0, network_retries: 1 },
     );
   } catch (err) {
     item.status = "miss-network";
@@ -477,7 +481,8 @@ export async function verifyOne(
   };
   let resp;
   try {
-    resp = await executeRequest({ method: "GET", url, headers }, { timeout: timeoutMs, retries: 0 });
+    // ARV-48: same single network-class retry as the discover probe.
+    resp = await executeRequest({ method: "GET", url, headers }, { timeout: timeoutMs, retries: 0, network_retries: 1 });
   } catch (err) {
     item.status = "verify-unknown";
     item.reason = `network error: ${err instanceof Error ? err.message : String(err)}`;
