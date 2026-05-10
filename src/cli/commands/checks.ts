@@ -25,6 +25,7 @@ import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts"
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
+import { readCurrentApi } from "../../core/context/current.ts";
 import { VERSION } from "../version.ts";
 
 interface ChecksListOptions {
@@ -129,13 +130,19 @@ async function resolveBaseUrl(
   if (typeof baseUrlFlag === "string" && baseUrlFlag.length > 0) {
     return { baseUrl: baseUrlFlag };
   }
-  if (!apiName) {
+  // Fall back to the same resolution chain as resolveSpecArg / `zond use`:
+  // global --api flag (mirrored into ZOND_API_GLOBAL by program.ts preAction),
+  // ZOND_API env, or .zond/current-api file. Without this the subcommand-local
+  // --api flag is the only path that wins, so `zond checks run --api foo`
+  // (parsed by the program-level --api option) silently loses the value.
+  const effectiveApi = apiName ?? readCurrentApi() ?? undefined;
+  if (!effectiveApi) {
     return { error: "Need --base-url <url> (or --api <name> with base_url in apis/<name>/.env.yaml)" };
   }
-  const col = resolveApiCollection(apiName, dbPath);
+  const col = resolveApiCollection(effectiveApi, dbPath);
   if ("error" in col) return col;
   if (!col.baseDir) {
-    return { error: `API '${apiName}' has no base_dir registered — pass --base-url <url>` };
+    return { error: `API '${effectiveApi}' has no base_dir registered — pass --base-url <url>` };
   }
   const env = await loadEnvironment(undefined, col.baseDir);
   const v = env.base_url;
@@ -181,7 +188,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
 
   // ARV-3: lift auth headers from --auth-header (wins) and/or the
   // resolved --api's .env.yaml (auth_token / api_key conventions).
-  const apiName = opts.api ?? cmd.parent?.opts().api;
+  const apiName = opts.api ?? cmd.parent?.opts().api ?? readCurrentApi() ?? undefined;
   const fromEnv = await deriveAuthHeadersFromApi(apiName, opts.db);
   const fromFlags = parseAuthHeaders(opts.authHeader);
   const authHeaders = { ...fromEnv, ...fromFlags };
