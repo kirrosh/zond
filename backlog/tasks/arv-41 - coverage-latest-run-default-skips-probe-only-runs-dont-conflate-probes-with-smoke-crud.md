@@ -3,9 +3,10 @@ id: ARV-41
 title: >-
   coverage: latest-run default skips probe-only runs (don't conflate /probes/
   with smoke/crud)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 11:36'
+updated_date: '2026-05-10 11:43'
 labels:
   - feedback-loop
   - api-resend
@@ -23,3 +24,12 @@ Expected: when the latest stored run is probe-only (run-source path under apis/<
 Actual: audit pipeline that ends with probe-run → coverage looks like a regression; --fail-on-coverage thresholds break for cosmetic reasons. Tester thinks the DB is broken.
 Log: /Users/kirrotech/Projects/zond-test/.fb-loop/rounds/raw-11.log:222 (39/83 pre), :241 (probe-run), :248 (17/83 post)
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 When the latest run is probe-only and the user invokes 'zond coverage' with no selector, emit a warning suggesting --union session (or naming the most recent non-probe run) so the apparent regression is explained
+- [x] #2 Probe-only detection looks at results' suite_file paths — every result must reside under apis/<api>/probes/ to qualify
+- [x] #3 Warning is suppressed in --json mode (envelope unchanged)
+- [x] #4 Regression test exercises probe-only-latest scenario
+- [x] #5 bun run check passes
+<!-- AC:END -->
