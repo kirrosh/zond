@@ -1,9 +1,10 @@
 ---
 id: ARV-30
 title: 'zond probe static: --output optional with apis/<api>/probes/static default'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 08:38'
+updated_date: '2026-05-10 08:42'
 labels:
   - feedback-loop
   - api-resend
