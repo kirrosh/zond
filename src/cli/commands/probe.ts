@@ -169,8 +169,22 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
     .option("--list-tags", "List available tags from spec and exit")
     .option("--no-cleanup", "Skip follow-up DELETE for resources accidentally created by 2xx probes")
     .option("--no-discover", "Disable auto-discovery of path-param fixtures via GET-on-list (TASK-92)")
+    .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests (m-17 ARV-52)")
+    .option(
+      "--include <selector>",
+      "Filter operations (m-15 ARV-9 grammar: path:/users/.* | tag:Webhooks | method:POST,PATCH | operation-id:create.*). Repeatable.",
+      (v: string, prev: string[] = []) => prev.concat(v),
+      [] as string[],
+    )
+    .option(
+      "--exclude <selector>",
+      "Drop operations matching <selector>. Repeatable. Same grammar as --include.",
+      (v: string, prev: string[] = []) => prev.concat(v),
+      [] as string[],
+    )
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
+    .option("--report <format>", "Format for --output / non-json stdout (markdown|json). --json envelope is always structured (m-17 ARV-51). Default markdown.", "markdown")
     .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       // ARV-33: resolve --api via the same fallback chain as prepare-fixtures /
@@ -192,9 +206,13 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         return;
       }
 
-      const envFile = resolveProbeEnv(opts.env, apiName, opts.db);
+      // m-17 / ARV-52: dry-run path tolerates a missing env file the way
+      // probe-security does — the user wants to inspect the plan, not
+      // hit a live API.
+      const envFile = resolveProbeEnv(opts.env, apiName, opts.db, { tolerateMissing: opts.dryRun === true });
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
       const timeoutMs = await resolveProbeTimeout(opts.timeout, apiName, envFile.env);
+      const reportFmt = opts.report === "json" ? "json" : "markdown";
       process.exitCode = await probeMassAssignmentCommand({
         specPath: resolved.spec,
         env: envFile.env,
@@ -207,6 +225,10 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         timeoutMs,
         overwrite: opts.overwrite === true,
         json: globalJson(cmd),
+        dryRun: opts.dryRun === true,
+        include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
+        exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
+        report: reportFmt,
       });
     });
 }
@@ -226,9 +248,22 @@ function defineProbeSecurity(parent: Command, name: string): void {
     .option("--list-tags", "List available tags from spec and exit")
     .option("--no-cleanup", "Skip follow-up DELETE on resources created by baseline / 2xx attacks")
     .option("--isolated", "TASK-264: refuse to attack PUT/PATCH endpoints whose path-params come from .env.yaml — protects seeded fixtures from probe-induced mutation. Lower coverage in exchange for guaranteed fixture safety.")
+    .option(
+      "--include <selector>",
+      "Filter operations (m-15 ARV-9 grammar: path:/users/.* | tag:Webhooks | method:POST,PATCH). Repeatable.",
+      (v: string, prev: string[] = []) => prev.concat(v),
+      [] as string[],
+    )
+    .option(
+      "--exclude <selector>",
+      "Drop operations matching <selector>. Repeatable.",
+      (v: string, prev: string[] = []) => prev.concat(v),
+      [] as string[],
+    )
     .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests")
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
+    .option("--report <format>", "Format for --output / non-json stdout (markdown|json). --json envelope is always structured (m-17 ARV-51). Default markdown.", "markdown")
     .action(async (classes: string, specPos: string | undefined, opts, cmd: Command) => {
       // ARV-33: same fallback chain as mass-assignment so `zond probe security
       // ssrf --api foo` doesn't fall through to a confusing "base_url is
@@ -241,6 +276,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
       const envFile = resolveProbeEnv(opts.env, apiName, opts.db, { tolerateMissing: true });
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
       const timeoutMs = await resolveProbeTimeout(opts.timeout, apiName, envFile.env);
+      const reportFmt = opts.report === "json" ? "json" : "markdown";
       process.exitCode = await probeSecurityCommand({
         specPath: resolved.spec,
         classes,
@@ -256,6 +292,9 @@ function defineProbeSecurity(parent: Command, name: string): void {
         json: globalJson(cmd),
         apiName,
         isolated: opts.isolated === true,
+        report: reportFmt,
+        include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
+        exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
       });
     });
 }

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "endpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "planned": {
+            "type": "boolean"
+          },
+          "classes_planned": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "fields_planned": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "skip_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "method",
+          "planned",
+          "classes_planned",
+          "fields_planned",
+          "skip_reason"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "totalEndpoints": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "planned": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "totalEndpoints",
+        "planned",
+        "skipped"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "endpoints",
+    "summary"
+  ],
+  "additionalProperties": false
+}

@@ -173,6 +173,65 @@ export const NdjsonEventSchema = z.discriminatedUnion("type", [
   NdjsonSummaryEventSchema,
 ]);
 
+/** m-17 / ARV-50: shape of `data` for `zond probe <class> --dry-run --json`.
+ *  Severity is intentionally absent — nothing is classified yet, so
+ *  reusing the run-time bucket would mislead CI gates (F1-15). The
+ *  `skip_reason` enum is open across probe families (e.g. security has
+ *  `isolated-protected`, mass-assignment has its own subset); we keep
+ *  it as a string with documented values rather than a closed enum
+ *  that needs to be rev'd every time a new class lands. */
+export const ProbeEndpointPlanSchema = z.object({
+  path: z.string(),
+  method: z.string(),
+  planned: z.boolean(),
+  classes_planned: z.array(z.string()),
+  fields_planned: z.array(z.string()),
+  skip_reason: z.string().nullable(),
+});
+
+export const ProbeDryRunDataSchema = z.object({
+  endpoints: z.array(ProbeEndpointPlanSchema),
+  summary: z.object({
+    totalEndpoints: z.number().int().nonnegative(),
+    planned: z.number().int().nonnegative(),
+    skipped: z.number().int().nonnegative(),
+  }),
+});
+
+/** m-17 / ARV-51: shape of `data` for live probe runs (`zond probe <class>
+ *  --report json` or the default `--json`). One entry per endpoint with
+ *  structured findings — no markdown blob. The legacy `data.digest.stdout`
+ *  field is gone (F3-15 / F4-15). */
+export const ProbeFindingSchema = z.object({
+  class: z.string(),
+  severity: z.enum(["high", "low", "inconclusive", "ok"]),
+  evidence: z.record(z.string(), z.unknown()),
+});
+
+export const ProbeEndpointResultSchema = z.object({
+  path: z.string(),
+  method: z.string(),
+  classes_run: z.array(z.string()),
+  findings: z.array(ProbeFindingSchema),
+  status: z.enum(["ok", "high", "low", "inconclusive", "skipped"]),
+  skip_reason: z.string().optional(),
+});
+
+export const ProbeRunDataSchema = z.object({
+  endpoints: z.array(ProbeEndpointResultSchema),
+  summary: z.object({
+    totalEndpoints: z.number().int().nonnegative(),
+    probed: z.number().int().nonnegative(),
+    by_status: z.object({
+      ok: z.number().int().nonnegative(),
+      high: z.number().int().nonnegative(),
+      low: z.number().int().nonnegative(),
+      inconclusive: z.number().int().nonnegative(),
+      skipped: z.number().int().nonnegative(),
+    }),
+  }),
+});
+
 export const SCHEMAS = {
   envelope: JsonEnvelopeSchema,
   error: ZondErrorSchema,
@@ -181,4 +240,6 @@ export const SCHEMAS = {
   checksRunData: ChecksRunDataSchema,
   checkFinding: CheckFindingSchema,
   "ndjson-events": NdjsonEventSchema,
+  probeDryRun: ProbeDryRunDataSchema,
+  probeRun: ProbeRunDataSchema,
 } as const;

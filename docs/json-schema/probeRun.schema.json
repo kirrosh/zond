@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "endpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "method": {
+            "type": "string"
+          },
+          "classes_run": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "class": {
+                  "type": "string"
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "high",
+                    "low",
+                    "inconclusive",
+                    "ok"
+                  ]
+                },
+                "evidence": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
+              "required": [
+                "class",
+                "severity",
+                "evidence"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "high",
+              "low",
+              "inconclusive",
+              "skipped"
+            ]
+          },
+          "skip_reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "method",
+          "classes_run",
+          "findings",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "totalEndpoints": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "probed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "by_status": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "high": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "low": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "inconclusive": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "skipped": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "ok",
+            "high",
+            "low",
+            "inconclusive",
+            "skipped"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "totalEndpoints",
+        "probed",
+        "by_status"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "endpoints",
+    "summary"
+  ],
+  "additionalProperties": false
+}

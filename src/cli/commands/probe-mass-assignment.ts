@@ -14,6 +14,11 @@ import { applySanitizer } from "../../core/exporter/exporter.ts";
 import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
 import { tallyBySeverity, formatSummaryLine } from "../../core/probe/verdict-aggregator.ts";
 import { printMutationBanner, countCleanupFailures } from "../../core/probe/shared.ts";
+import { MassAssignmentProbe } from "../../core/probe/mass-assignment-probe-class.ts";
+import { summarizeDryRun, formatDryRunDigest } from "../../core/probe/dry-run-envelope.ts";
+import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
+import type { EndpointVerdict, MassAssignmentResult } from "../../core/probe/mass-assignment-probe.ts";
+import type { ProbeEndpointResult, ProbeEndpointStatus, ProbeFindingSeverity } from "../../core/probe/types.ts";
 
 interface BucketCounts {
   high: number;
@@ -63,6 +68,14 @@ export interface ProbeMassAssignmentOptions {
   json?: boolean;
   listTags?: boolean;
   overwrite?: boolean;
+  /** m-17 / ARV-52: list which endpoints + fields would be attacked
+   *  without sending live traffic. */
+  dryRun?: boolean;
+  /** m-17 / ARV-52: m-15 ARV-9 selector grammar (`path:`/`method:`/`tag:`/`operation-id:`). */
+  include?: string[];
+  exclude?: string[];
+  /** m-17 / ARV-51: format for --output / non-json stdout. */
+  report?: "markdown" | "json";
 }
 
 export async function probeMassAssignmentCommand(
@@ -92,7 +105,23 @@ export async function probeMassAssignmentCommand(
       else printWarning(msg);
       return 2;
     }
-    const { endpoints, securitySchemes } = loaded;
+    const { endpoints: rawEndpoints, securitySchemes } = loaded;
+
+    // m-17 / ARV-52: apply --include / --exclude through the unified
+    // operation filter (m-15 ARV-9). probe-family was deferred at AC#6;
+    // wiring it here closes that and gives mass-assignment parity with
+    // probe-static / probe-security.
+    let endpoints = rawEndpoints;
+    if (options.include?.length || options.exclude?.length) {
+      const compiled = compileOperationFilter({ includes: options.include, excludes: options.exclude });
+      if (compiled.errors.length > 0) {
+        const message = compiled.errors.join("\n");
+        if (options.json) printJson(jsonError("probe-mass-assignment", [message]));
+        else printError(message);
+        return 2;
+      }
+      endpoints = endpoints.filter(compiled.filter);
+    }
 
     // Load env vars (base_url, auth_token, api_key, path-param overrides).
     let vars: Record<string, string> = {};
@@ -107,6 +136,27 @@ export async function probeMassAssignmentCommand(
       vars = fromFile;
     } else {
       vars = await loadEnvironment();
+    }
+
+    // m-17 / ARV-52: --dry-run lists which endpoints + suspect fields the
+    // probe would touch without sending live traffic. base_url is not
+    // required on this path (mirrors probe-security).
+    if (options.dryRun) {
+      const probe = new MassAssignmentProbe();
+      const plan = await probe.dryRun({
+        specPath: options.specPath,
+        endpoints,
+        securitySchemes,
+        vars,
+        options: {},
+      });
+      const data = summarizeDryRun(plan);
+      if (options.json) {
+        printJson(jsonOk("probe-mass-assignment", data));
+      } else {
+        console.log(formatDryRunDigest(plan));
+      }
+      return 0;
     }
 
     if (!vars["base_url"]) {
@@ -134,12 +184,20 @@ export async function probeMassAssignmentCommand(
     // echoed token (URL, body, header) gets redacted in the digest.
     getSecretRegistry().registerAll(vars);
     const md = applySanitizer(formatDigestMarkdown(result, options.specPath));
+
+    // m-17 / ARV-51: --output writes whichever format `--report` selected
+    // (default markdown). `--json` envelope is always structured.
+    const reportFmt: "markdown" | "json" = options.report ?? "markdown";
+    const structuredEndpoints = buildMaStructuredEndpoints(result);
     if (options.output) {
       await mkdir(join(options.output, "..").replace(/\/\.$/, ""), { recursive: true }).catch(() => {});
       // TASK-162 (m-9 P6): rotate previous digest to <stem>-vN.md instead
       // of silent overwrite. --overwrite opts back into the old behaviour.
       rotateOutputTarget(options.output, { overwrite: options.overwrite });
-      await writeFile(options.output, md, "utf-8");
+      const payload = reportFmt === "json"
+        ? JSON.stringify(maStructuredReport(result, structuredEndpoints), null, 2) + "\n"
+        : md;
+      await writeFile(options.output, payload, "utf-8");
     }
 
     let emittedSuites: Array<{ file: string; suite: string; tests: number }> = [];
@@ -158,20 +216,28 @@ export async function probeMassAssignmentCommand(
     const orphans = countCleanupFailures(result.verdicts);
 
     if (options.json) {
+      // m-17 / ARV-51: structured envelope; no `data.digest.stdout`.
       printJson(
         jsonOk("probe-mass-assignment", {
-          digest: options.output ? { file: options.output } : { stdout: md },
-          totalEndpoints: result.totalEndpoints,
-          probed: result.specProbed,
-          severity: counts,
+          endpoints: structuredEndpoints,
+          summary: {
+            totalEndpoints: result.totalEndpoints,
+            probed: result.specProbed,
+            by_status: maByStatus(structuredEndpoints),
+          },
           orphans,
           warnings: result.warnings,
           emittedTests: emittedSuites,
         }),
       );
     } else {
-      if (!options.output) console.log(md);
-      else printSuccess(`Digest written to ${options.output}`);
+      if (!options.output) {
+        if (reportFmt === "json") {
+          process.stdout.write(JSON.stringify(maStructuredReport(result, structuredEndpoints), null, 2) + "\n");
+        } else {
+          console.log(md);
+        }
+      } else printSuccess(`${reportFmt === "json" ? "Structured report" : "Digest"} written to ${options.output}`);
       console.log("");
       console.log(formatSummaryLine(counts, MA_SUMMARY));
       if (emittedSuites.length > 0) {
@@ -299,5 +365,70 @@ function parseMethodPath(s: string): { method: string; path: string } | null {
   const m = s.match(/^\s*([A-Za-z]+)\s*[: ]\s*(\/.*?)\s*$/);
   if (!m) return null;
   return { method: m[1]!.toUpperCase(), path: m[2]! };
+}
+
+// m-17 / ARV-51: structured per-endpoint shape for mass-assignment.
+
+function maStatusFromSeverity(s: EndpointVerdict["severity"]): ProbeEndpointStatus {
+  switch (s) {
+    case "high": return "high";
+    case "low":
+    case "medium":
+      return "low";
+    case "ok": return "ok";
+    case "skipped": return "skipped";
+    case "inconclusive-baseline":
+    case "inconclusive-5xx":
+      return "inconclusive";
+  }
+}
+
+function maFindingSeverity(s: EndpointVerdict["severity"]): ProbeFindingSeverity {
+  if (s === "high") return "high";
+  if (s === "low" || s === "medium") return "low";
+  if (s === "ok") return "ok";
+  return "inconclusive";
+}
+
+function buildMaStructuredEndpoints(result: MassAssignmentResult): ProbeEndpointResult[] {
+  return result.verdicts.map((v) => ({
+    path: v.path,
+    method: v.method,
+    classes_run: ["mass-assignment"],
+    findings: v.severity === "skipped" || v.severity === "ok"
+      ? []
+      : [{
+          class: "mass-assignment",
+          severity: maFindingSeverity(v.severity),
+          evidence: {
+            summary: v.summary,
+            request: { url: v.request.url, injectedFields: v.request.injectedFields },
+            ...(v.response ? { response: { status: v.response.status } } : {}),
+            ...(v.fields ? { fields: v.fields } : {}),
+            ...(v.recommended_action ? { recommended_action: v.recommended_action } : {}),
+          },
+        }],
+    status: maStatusFromSeverity(v.severity),
+    ...(v.severity === "skipped" ? { skip_reason: v.skipReason ?? v.summary } : {}),
+  }));
+}
+
+function maByStatus(endpoints: ProbeEndpointResult[]): Record<ProbeEndpointStatus, number> {
+  const out: Record<ProbeEndpointStatus, number> = {
+    ok: 0, high: 0, low: 0, inconclusive: 0, skipped: 0,
+  };
+  for (const e of endpoints) out[e.status]++;
+  return out;
+}
+
+function maStructuredReport(result: MassAssignmentResult, endpoints: ProbeEndpointResult[]): object {
+  return {
+    endpoints,
+    summary: {
+      totalEndpoints: result.totalEndpoints,
+      probed: result.specProbed,
+      by_status: maByStatus(endpoints),
+    },
+  };
 }
 
