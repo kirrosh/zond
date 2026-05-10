@@ -14,6 +14,7 @@ import { registerRequest } from "./commands/request.ts";
 import { registerGenerate } from "./commands/generate.ts";
 import { registerPrepareFixtures } from "./commands/prepare-fixtures.ts";
 import { registerProbes } from "./commands/probe.ts";
+import { bootstrapProbes } from "../core/probe/bootstrap.ts";
 import { registerReport } from "./commands/report.ts";
 import { registerCatalog } from "./commands/catalog.ts";
 import { registerCompletions } from "./commands/completions.ts";
@@ -98,6 +99,10 @@ export function buildProgram(): Command {
   registerPrepareFixtures(program);
   registerAudit(program);
 
+  // m-17 / ARV-49: validate registered probes implement the Probe
+  // contract before commander gets to wire them up. Boot-throws on a
+  // missing slot, so a regression can't slip past CI.
+  bootstrapProbes();
   registerProbes(program);
 
   registerCatalog(program);

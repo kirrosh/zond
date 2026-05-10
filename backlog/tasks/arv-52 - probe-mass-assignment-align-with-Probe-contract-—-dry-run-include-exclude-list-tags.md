@@ -3,19 +3,20 @@ id: ARV-52
 title: >-
   probe-mass-assignment: align with Probe contract — --dry-run,
   --include/--exclude, --list-tags
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 18:44'
+updated_date: '2026-05-10 19:55'
 labels:
   - m-17
   - probe
   - mass-assignment
   - agent-contract
+milestone: m-17
 dependencies:
   - ARV-49
   - ARV-50
 priority: medium
-milestone: m-17
 ---
 
 ## Description
@@ -26,10 +27,10 @@ Source: feedback-15 F2 (medium) + ARV-9 AC#6 deferred. zond probe mass-assignmen
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond probe mass-assignment --help содержит --dry-run, --list-tags, --include, --exclude (как у probe security)
-- [ ] #2 zond probe mass-assignment --dry-run --json возвращает data.endpoints[] с {path, method, fields_planned: ['is_admin', 'role', ...], target_method: POST|PATCH|PUT, skip_reason: null | 'no-body' | 'isolated-protected'}
-- [ ] #3 F2-15 fixture-test: на resend dry-run возвращает all POST/PATCH endpoints с suspect fields enum
-- [ ] #4 ARV-9 AC#6 закрывается (probe-семейство wired в --include/--exclude через harness)
+- [x] #1 zond probe mass-assignment --help содержит --dry-run, --list-tags, --include, --exclude (как у probe security)
+- [x] #2 zond probe mass-assignment --dry-run --json возвращает data.endpoints[] с {path, method, fields_planned: ['is_admin', 'role', ...], target_method: POST|PATCH|PUT, skip_reason: null | 'no-body' | 'isolated-protected'}
+- [x] #3 F2-15 fixture-test: на resend dry-run возвращает all POST/PATCH endpoints с suspect fields enum
+- [x] #4 ARV-9 AC#6 закрывается (probe-семейство wired в --include/--exclude через harness)
 <!-- AC:END -->
 
 ## Implementation Plan

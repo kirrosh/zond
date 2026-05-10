@@ -3,18 +3,19 @@ id: ARV-51
 title: >-
   probe: --report json emits structured per-endpoint findings (no markdown blobs
   in envelope)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 18:44'
+updated_date: '2026-05-10 19:55'
 labels:
   - m-17
   - probe
   - json-envelope
   - agent-contract
+milestone: m-17
 dependencies:
   - ARV-49
 priority: high
-milestone: m-17
 ---
 
 ## Description
@@ -25,11 +26,11 @@ Source: feedback-15 F3+F4 (low). probe security --json упаковывает ma
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond probe security --report json возвращает endpoints[{path, method, classes_run, findings: [{class, severity, evidence: {request_signature, response_signature, baseline_diff}}], status: 'ok'|'high'|'low'|'inconclusive'}]
-- [ ] #2 data.digest.stdout НЕ существует ни в одном envelope probe-команды
-- [ ] #3 Markdown digest доступен через --report markdown ИЛИ --output <file> (как сейчас), но не в --json envelope
-- [ ] #4 Schema published в docs/json-schema/probe-security.schema.json (и mass-assignment.schema.json после ARV-52)
-- [ ] #5 F4-15 fixture-test: zond run --report json и zond probe security --report json возвращают одинаковую структурную глубину (endpoints[].findings[])
+- [x] #1 zond probe security --report json возвращает endpoints[{path, method, classes_run, findings: [{class, severity, evidence: {request_signature, response_signature, baseline_diff}}], status: 'ok'|'high'|'low'|'inconclusive'}]
+- [x] #2 data.digest.stdout НЕ существует ни в одном envelope probe-команды
+- [x] #3 Markdown digest доступен через --report markdown ИЛИ --output <file> (как сейчас), но не в --json envelope
+- [x] #4 Schema published в docs/json-schema/probe-security.schema.json (и mass-assignment.schema.json после ARV-52)
+- [x] #5 F4-15 fixture-test: zond run --report json и zond probe security --report json возвращают одинаковую структурную глубину (endpoints[].findings[])
 <!-- AC:END -->
 
 ## Implementation Plan
