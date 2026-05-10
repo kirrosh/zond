@@ -314,6 +314,9 @@ export function classifyFieldSource(
     : schema.type;
 
   if (t === "string") {
+    // ARV-38: keep --explain in sync with guessStringPlaceholder — when a
+    // default is consumed, label the source as "default", not "random".
+    if (typeof schema.default === "string" && schema.default.length > 0) return "default";
     if (isLowercaseOnlyPattern(schema.pattern)) return "pattern";
     if (
       schema.description &&
@@ -407,6 +410,15 @@ export function generateMultipartFromSchema(
 function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): string {
   // Format-based dispatch already happened earlier in generateFromSchema;
   // this branch only sees strings whose format is empty or unrecognised.
+
+  // ARV-38: when the spec declares a JSON-Schema `default` for a string-typed
+  // field with no enum, prefer it over heuristics. PATCH endpoints in
+  // particular rely on this — e.g. Resend `PATCH /domains/{id}` has
+  // `tls: { type: string, default: "opportunistic" }` and the random fallback
+  // produced a guaranteed 422 every run.
+  if (typeof schema.default === "string" && schema.default.length > 0) {
+    return schema.default;
+  }
 
   // Pattern-aware: many specs constrain slugs via regex like
   // `^(?![0-9]+$)[a-z0-9_\-]+$` without setting `format`. Default
