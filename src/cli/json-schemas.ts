@@ -53,6 +53,9 @@ export const RecommendedActionSchema = z.enum([
   "fix_env",
   "fix_spec",
   "fix_fixture",
+  // ARV-42 — re-run `zond generate` for failures rooted in generator-emitted
+  // bodies; editing the YAML directly is overwritten by the next regenerate.
+  "regenerate_suite",
   "tighten_validation",
   "add_required_header",
   "wontfix_known_limitation",
