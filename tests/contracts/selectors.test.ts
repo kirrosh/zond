@@ -8,9 +8,9 @@ import { describe, test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { compileOperationFilter, parseFilterSpec } from "../../../src/core/utils/operation-filter.ts";
-import type { EndpointInfo } from "../../../src/core/generator/types.ts";
-import { extractEndpoints, readOpenApiSpec } from "../../../src/core/generator/index.ts";
+import { compileOperationFilter, parseFilterSpec } from "../../src/core/selectors/operation-filter.ts";
+import type { EndpointInfo } from "../../src/core/generator/types.ts";
+import { extractEndpoints, readOpenApiSpec } from "../../src/core/generator/index.ts";
 
 function op(over: Partial<EndpointInfo>): EndpointInfo {
   return {
@@ -143,7 +143,7 @@ describe("AC#4 — friendly errors on malformed specs", () => {
 
 describe("AC#2 — e2e on the petstore fixture", () => {
   test("tag + method + path filters resolve real petstore ops", async () => {
-    const specPath = resolve(import.meta.dir, "../../fixtures/petstore-simple.json");
+    const specPath = resolve(import.meta.dir, "../fixtures/petstore-simple.json");
     const doc = await readOpenApiSpec(specPath);
     const ops = extractEndpoints(doc);
 

@@ -23,6 +23,7 @@ import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
 import { detectStatusDrifts, formatDriftPlan, applyDriftsToTests, appendToleratedDrifts } from "../../core/runner/learn-drift.ts";
 import { detectCiContext } from "../../core/runner/ci-context.ts";
+import { detectRunKind } from "../../core/runner/run-kind.ts";
 import { resolveRateLimit } from "../../core/workspace/config.ts";
 
 export interface RunOptions {
@@ -524,6 +525,10 @@ export async function runCommand(options: RunOptions): Promise<number> {
       // `--trigger ci`). Manual runs default to trigger=manual with no
       // commit/branch — preserving prior behaviour.
       const ci = detectCiContext();
+      // ARV-55: classify the run by what kinds of suite files it executed
+      // *before* INSERT, so coverage's default query becomes a simple
+      // run_kind='regular' compare instead of a per-result regex scan.
+      const runKind = detectRunKind(suites.map((s) => s.filePath ?? null));
       savedRunId = createRun({
         started_at: results[0]?.started_at ?? new Date().toISOString(),
         environment: options.env,
@@ -533,6 +538,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
         commit_sha: ci.commit_sha ?? undefined,
         branch: ci.branch ?? undefined,
         ...(tags.length > 0 ? { tags } : {}),
+        run_kind: runKind,
       });
       finalizeRun(savedRunId, results);
       saveResults(savedRunId, results);
@@ -581,7 +587,7 @@ import { Option } from "commander";
 import { resolveApiCollection } from "../resolve.ts";
 import { collect, flatSplit, parseNonNegativeInt, parsePositiveInt, parseRateLimit, parseReporter } from "../argv.ts";
 import { resolveSessionId } from "../../core/context/session.ts";
-import { readCurrentApi } from "../../core/context/current.ts";
+import { getApi } from "../util/api-context.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -712,9 +718,14 @@ export function registerRun(program: Command): void {
       parseNonNegativeInt("--retry-on-network"),
       1,
     )
-    .action(async (pathArgs: string[] | undefined, opts, _cmd: Command) => {
+    .action(async (pathArgs: string[] | undefined, opts, cmd: Command) => {
       let paths = pathArgs ?? [];
-      const apiFlag = (opts.api as string | undefined) ?? (paths.length > 0 || opts.all === true ? undefined : readCurrentApi() ?? undefined);
+      // ARV-53: explicit paths or --all suppress the current-API fallback —
+      // `run path/to/test.yaml` should never silently pick up `.zond/current-api`.
+      // Otherwise resolve via cli/util/api-context.ts.
+      const apiFlag = (paths.length > 0 || opts.all === true)
+        ? (opts.api as string | undefined)
+        : getApi(cmd, opts);
       const dbPath = typeof opts.db === "string" ? opts.db : undefined;
 
       // TASK-116: --all expands to every apis/<name>/tests/ directory in the

@@ -3,6 +3,8 @@
  * Extracted from query-db.ts for reuse in Web UI.
  */
 
+import { classify } from "../classifier/recommended-action.ts";
+
 export function statusHint(status: number | null | undefined): string | null {
   if (!status) return null;
   if (status >= 500) return "Server-side error — inspect response_body for errorMessage/errorDetail; likely a backend bug";
@@ -68,14 +70,16 @@ export function recommendedAction(
   failureType: "api_error" | "assertion_failed" | "network_error",
   responseStatus: number | null,
 ): RecommendedAction {
-  if (failureType === "api_error") return "report_backend_bug";
-  if (failureType === "network_error") {
-    if (responseStatus === 401 || responseStatus === 403) return "fix_auth_config";
-    return "fix_network_config";
-  }
-  // assertion_failed
-  if (responseStatus === 401 || responseStatus === 403) return "fix_auth_config";
-  return "fix_test_logic";
+  // ARV-56: delegate to the single classifier.
+  const action = classify({
+    finding_class: failureType === "api_error" ? "test:api_error" :
+      failureType === "network_error" ? "test:network_error" : "test:assertion_failed",
+    status: responseStatus,
+  });
+  // The three failure_type classes are total in the classifier — a missing
+  // branch means a future refactor stripped one; surface loudly.
+  if (!action) throw new Error(`classifier returned no action for failure_type=${failureType} status=${responseStatus}`);
+  return action;
 }
 
 /**
@@ -102,12 +106,16 @@ export function recommendedActionForGenerated(
   responseStatus: number | null,
   isGenerated: boolean,
 ): RecommendedAction {
-  const base = recommendedAction(failureType, responseStatus);
-  if (!isGenerated) return base;
-  if (base !== "fix_test_logic") return base;
-  if (responseStatus === 404) return "fix_fixture";
-  if (responseStatus === 400 || responseStatus === 422) return "regenerate_suite";
-  return base;
+  // ARV-56: delegate to classifier. `isGenerated` is encoded via a
+  // synthetic suite_path so the same logic flows through classify().
+  const action = classify({
+    finding_class: failureType === "api_error" ? "test:api_error" :
+      failureType === "network_error" ? "test:network_error" : "test:assertion_failed",
+    status: responseStatus,
+    ...(isGenerated ? { suite_path: "apis/_/tests/_.yaml" } : {}),
+  });
+  if (!action) throw new Error(`classifier returned no action for failure_type=${failureType} status=${responseStatus}`);
+  return action;
 }
 
 /** ARV-42: classify a failing result row as generator-emitted. The two

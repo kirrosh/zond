@@ -67,7 +67,7 @@ function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -85,7 +85,11 @@ const SCHEMA = `
     duration_ms   INTEGER,
     collection_id INTEGER REFERENCES collections(id),
     session_id    TEXT,
-    tags          TEXT
+    tags          TEXT,
+    -- ARV-55: classify a run once at INSERT time so coverage / diagnose
+    -- queries don't have to re-derive "is this a probe-only run?" from
+    -- the results' suite_file paths.
+    run_kind      TEXT NOT NULL DEFAULT 'regular' CHECK (run_kind IN ('regular','probe','check'))
   );
 
   CREATE TABLE IF NOT EXISTS results (
@@ -216,6 +220,33 @@ function runMigrations(db: Database): void {
       // of suite-level tags actually executed in the run, plus any explicit
       // --tag filters). Powers `coverage --union tag:<name>` (TASK-274).
       db.exec("ALTER TABLE runs ADD COLUMN tags TEXT");
+    }
+    if (ver >= 9 && ver < 10) {
+      // Migration v9→v10 (ARV-55): classify each historical run by suite
+      // kind so coverage's default query becomes a column compare. The
+      // CHECK constraint can't be added retroactively without a table
+      // rebuild — accept the looser column for legacy rows; new INSERTs
+      // go through `createRun()` which only emits known kinds.
+      db.exec("ALTER TABLE runs ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'regular'");
+      // Backfill: derive kind per existing run from its stored results.
+      // `every` semantics mirror the runtime `detectRunKind` helper —
+      // pure-probe / pure-check vs anything else.
+      db.exec(`
+        UPDATE runs SET run_kind = 'probe'
+        WHERE id IN (
+          SELECT r.id FROM runs r
+          WHERE EXISTS (SELECT 1 FROM results WHERE run_id = r.id AND suite_file IS NOT NULL AND suite_file LIKE '%probes/%')
+            AND NOT EXISTS (SELECT 1 FROM results WHERE run_id = r.id AND suite_file IS NOT NULL AND suite_file NOT LIKE '%probes/%')
+        )
+      `);
+      db.exec(`
+        UPDATE runs SET run_kind = 'check'
+        WHERE id IN (
+          SELECT r.id FROM runs r
+          WHERE EXISTS (SELECT 1 FROM results WHERE run_id = r.id AND suite_file IS NOT NULL AND suite_file LIKE '%checks/%')
+            AND NOT EXISTS (SELECT 1 FROM results WHERE run_id = r.id AND suite_file IS NOT NULL AND suite_file NOT LIKE '%checks/%')
+        )
+      `);
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

@@ -293,7 +293,7 @@ function extractPath(url: string): string {
 import type { Command } from "commander";
 import { globalJson } from "../resolve.ts";
 import { collect, parsePositiveInt } from "../argv.ts";
-import { readCurrentApi } from "../../core/context/current.ts";
+import { getApi } from "../util/api-context.ts";
 import { loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
 
@@ -319,7 +319,8 @@ export function registerRequest(program: Command): void {
     .option("--validate-against <method:path>", "TASK-142: explicit endpoint override for --validate-schema, e.g. \"GET:/users/{id}\". Use the spec template form (with \"{...}\" placeholders).")
     .action(async (method: string, url: string, opts, cmd: Command) => {
       const headers = (opts.header as string[] | undefined)?.length ? (opts.header as string[]) : undefined;
-      const api = (opts.api as string | undefined) ?? readCurrentApi() ?? undefined;
+      // ARV-53.
+      const api = getApi(cmd, opts);
       let envTimeout: number | undefined;
       if (api) {
         try {

@@ -20,12 +20,12 @@ import { generateSarifReport } from "../../core/checks/sarif.ts";
 import { emitToStdout } from "../../core/reporter/ndjson.ts";
 import { parseWorkers } from "../../core/runner/async-pool.ts";
 import { createAdaptiveRateLimiter, createRateLimiter, type RateLimiter } from "../../core/runner/rate-limiter.ts";
-import { compileOperationFilter } from "../../core/utils/operation-filter.ts";
+import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
 import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
-import { readCurrentApi } from "../../core/context/current.ts";
+import { getApi } from "../util/api-context.ts";
 import { VERSION } from "../version.ts";
 
 interface ChecksListOptions {
@@ -149,12 +149,10 @@ async function resolveBaseUrl(
   if (typeof baseUrlFlag === "string" && baseUrlFlag.length > 0) {
     return { baseUrl: baseUrlFlag };
   }
-  // Fall back to the same resolution chain as resolveSpecArg / `zond use`:
-  // global --api flag (mirrored into ZOND_API_GLOBAL by program.ts preAction),
-  // ZOND_API env, or .zond/current-api file. Without this the subcommand-local
-  // --api flag is the only path that wins, so `zond checks run --api foo`
-  // (parsed by the program-level --api option) silently loses the value.
-  const effectiveApi = apiName ?? readCurrentApi() ?? undefined;
+  // ARV-53: caller already resolved --api through cli/util/api-context.ts;
+  // we only widen here when nothing reached us (allows --base-url to be the
+  // sole input). Keep readCurrentApi() inline-free.
+  const effectiveApi = apiName;
   if (!effectiveApi) {
     return { error: "Need --base-url <url> (or --api <name> with base_url in apis/<name>/.env.yaml)" };
   }
@@ -191,14 +189,17 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     process.exit(2);
   }
 
-  const specRes = resolveSpecArg(opts.spec, opts.api ?? cmd.parent?.opts().api, opts.db);
+  // ARV-53: one resolver for --api across all of `checks run`'s sub-lookups
+  // (spec, base_url, auth-header derivation).
+  const apiName = getApi(cmd, opts as unknown as Record<string, unknown>);
+  const specRes = resolveSpecArg(opts.spec, apiName, opts.db);
   if ("error" in specRes) {
     if (json) printJson(jsonError("checks run", [specRes.error]));
     else printError(specRes.error);
     process.exit(2);
   }
 
-  const baseRes = await resolveBaseUrl(opts.api ?? cmd.parent?.opts().api, opts.baseUrl, opts.db);
+  const baseRes = await resolveBaseUrl(apiName, opts.baseUrl, opts.db);
   if ("error" in baseRes) {
     if (json) printJson(jsonError("checks run", [baseRes.error]));
     else printError(baseRes.error);
@@ -207,7 +208,6 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
 
   // ARV-3: lift auth headers from --auth-header (wins) and/or the
   // resolved --api's .env.yaml (auth_token / api_key conventions).
-  const apiName = opts.api ?? cmd.parent?.opts().api ?? readCurrentApi() ?? undefined;
   const fromEnv = await deriveAuthHeadersFromApi(apiName, opts.db);
   const fromFlags = parseAuthHeaders(opts.authHeader);
   const authHeaders = { ...fromEnv, ...fromFlags };

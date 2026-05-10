@@ -28,14 +28,24 @@ export function getCollectionById(id: number): CollectionRecord | null {
   return db.query("SELECT * FROM collections WHERE id = ?").get(id) as CollectionRecord | null;
 }
 
-export function getLatestRunByCollection(collectionId: number): RunRecord | null {
+export function getLatestRunByCollection(
+  collectionId: number,
+  opts: { runKind?: "regular" | "probe" | "check" | "any" } = {},
+): RunRecord | null {
   const db = getDb();
+  // ARV-55: 'regular' is the default so coverage skips probe-only runs
+  // without an explicit predicate. 'any' opts back into the legacy
+  // behaviour (used by `coverage`'s probe-run hint logic).
+  const kind = opts.runKind ?? "regular";
+  const kindClause = kind === "any" ? "" : "AND run_kind = ?";
+  const params: (string | number)[] = [collectionId];
+  if (kind !== "any") params.push(kind);
   const row = db.query(`
     SELECT * FROM runs
-    WHERE collection_id = ? AND finished_at IS NOT NULL
+    WHERE collection_id = ? AND finished_at IS NOT NULL ${kindClause}
     ORDER BY started_at DESC
     LIMIT 1
-  `).get(collectionId) as (Record<string, unknown> & { tags?: unknown }) | null;
+  `).get(...params) as (Record<string, unknown> & { tags?: unknown }) | null;
   if (!row) return null;
   let tags: string[] | null = null;
   if (typeof row.tags === "string") {
@@ -46,7 +56,11 @@ export function getLatestRunByCollection(collectionId: number): RunRecord | null
       // legacy/corrupt — leave null
     }
   }
-  return { ...(row as unknown as RunRecord), tags };
+  // ARV-55: normalise run_kind alongside tags so RunRecord stays consistent.
+  const rk = row.run_kind;
+  const run_kind: import("../../core/runner/run-kind.ts").RunKind =
+    rk === "probe" || rk === "check" ? rk : "regular";
+  return { ...(row as unknown as RunRecord), tags, run_kind };
 }
 
 export function listCollections(): CollectionSummary[] {

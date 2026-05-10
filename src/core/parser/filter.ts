@@ -1,5 +1,5 @@
 import type { TestSuite } from "./types.ts";
-import { compileOperationFilter } from "../utils/operation-filter.ts";
+import { compileOperationFilter } from "../selectors/operation-filter.ts";
 import type { EndpointInfo } from "../generator/types.ts";
 
 /**
