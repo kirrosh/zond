@@ -8,6 +8,38 @@
 `zond` — AI-native API testing tool. См. [README.md](README.md), полный CLI-референс
 в [ZOND.md](ZOND.md), внутренние документы — в `docs/`.
 
+## Workspace contract (читай перед любым изменением fixture-pipeline)
+
+`apis/<name>/` содержит четыре артефакта с **разными ролями**. Путать
+их — это #1 источник багов в discover/seed/generate (см. feedback-13/14
+finding'и). Источник правды — [decision-7](backlog/decisions/decision-7%20-%20API-artifacts-and-skill-split.md).
+
+| Файл | Роль | Кто пишет | Кто читает |
+|---|---|---|---|
+| `spec.json` | Авторитет про **shape** API (dereferenced OpenAPI). | `add api` / `refresh-api` | `probe-*`, `generate`, `data-factory` |
+| `.api-catalog.yaml` | Human/agent-readable **индекс** endpoint'ов с compressed schemas. | `add api` / `refresh-api` | skills, `describe` |
+| `.api-resources.yaml` | CRUD-цепочки + FK + ETag/soft-delete. | `add api` / `refresh-api` | `generate`, `prepare-fixtures`, scenarios skill |
+| **`.api-fixtures.yaml`** | **MANIFEST: список required vars** (path / auth / server / header / body-fk) с источником каждой. **Read-only**, regenerated. | `add api` / `refresh-api` / `generate` (расширяет список) | `prepare-fixtures` (итерируется по entries), `doctor`, scenarios skill |
+| **`.env.yaml`** | **VALUES: значения** для переменных из manifest'а. **User-editable**, seeded из manifest'а. | user, `prepare-fixtures` (заполняет values) | runner, `executor`, `request` |
+
+### Главное правило
+
+**`.api-fixtures.yaml` — единственный источник правды о *списке*
+переменных. `.env.yaml` хранит только *значения*.**
+
+- `generate` обнаружил новый `{{var}}` в request-body? → расширить
+  **manifest**, не env.
+- `prepare-fixtures` хочет узнать, какие vars заполнять? → читать
+  **manifest entries**, не env keys.
+- В env есть ключ, которого нет в manifest? → это legacy/теневой
+  ключ, печатается warning'ом и игнорируется.
+- В тесте есть `{{var}}`, которой нет в manifest? → это **баг** в
+  manifest builder'е или generator'е, не «надо добавить в env».
+
+Любое предложение «generate должна синхронизировать .env.yaml» или
+«discover ходит по env-keys» — **отвергнутый дизайн**, ведущий к двум
+расходящимся источникам правды (см. feedback-13 F1+F2 как иллюстрацию).
+
 ## Backlog (project tasks)
 
 Все задачи проекта живут в `backlog/` и управляются [Backlog.md](https://backlog.md).
