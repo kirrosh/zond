@@ -120,6 +120,10 @@ export async function runCommand(options: RunOptions): Promise<number> {
     return 0;
   }
 
+  // ARV-37: when a selector matches zero suites (typo'd --tag, dead --include
+  // pattern, etc.), exit non-zero. Previous fail-open let CI builds go green
+  // for `--tag smok` instead of `smoke`. For --tag we also surface the tags
+  // actually available so the user can correct without re-reading help.
   // 1b0. ARV-25: unified --include/--exclude filter (parity with generate/checks).
   //      Applied before tag/method filters so it can narrow the scope first.
   if ((options.include && options.include.length > 0) || (options.exclude && options.exclude.length > 0)) {
@@ -133,23 +137,27 @@ export async function runCommand(options: RunOptions): Promise<number> {
       const parts: string[] = [];
       if (options.include?.length) parts.push(`--include [${options.include.join(", ")}]`);
       if (options.exclude?.length) parts.push(`--exclude [${options.exclude.join(", ")}]`);
-      printWarning(`No tests match ${parts.join(" / ")}`);
-      return 0;
+      printError(`No tests match ${parts.join(" / ")}`);
+      return 1;
     }
   }
 
   // 1b. Tag filter
   if (options.tag && options.tag.length > 0) {
+    const availableTags = collectAvailableTags(suites);
     suites = filterSuitesByTags(suites, options.tag);
     if (suites.length === 0) {
+      const tagHint = availableTags.length > 0
+        ? ` Available tags: ${availableTags.join(", ")}.`
+        : " (loaded suites declare no tags.)";
       if (parseErrors.length > 0) {
         printError(
-          `No suites match tags [${options.tag.join(", ")}] — but ${parseErrors.length} file(s) failed to parse (see warnings above). Fix parse errors and retry.`
+          `No suites match tags [${options.tag.join(", ")}] — but ${parseErrors.length} file(s) failed to parse (see warnings above). Fix parse errors and retry.${tagHint}`
         );
         return 1;
       }
-      printWarning("No suites match the specified tags");
-      return 0;
+      printError(`No suites match tags [${options.tag.join(", ")}].${tagHint}`);
+      return 1;
     }
   }
 
@@ -157,8 +165,8 @@ export async function runCommand(options: RunOptions): Promise<number> {
   if (options.excludeTag && options.excludeTag.length > 0) {
     suites = excludeSuitesByTags(suites, options.excludeTag);
     if (suites.length === 0) {
-      printWarning("All suites excluded by --exclude-tag");
-      return 0;
+      printError(`All suites excluded by --exclude-tag [${options.excludeTag.join(", ")}]`);
+      return 1;
     }
   }
 
@@ -166,8 +174,8 @@ export async function runCommand(options: RunOptions): Promise<number> {
   if (options.method) {
     suites = filterSuitesByMethod(suites, options.method);
     if (suites.length === 0) {
-      printWarning(`No tests found with method ${options.method.toUpperCase()}`);
-      return 0;
+      printError(`No tests found with method ${options.method.toUpperCase()}`);
+      return 1;
     }
   }
 
@@ -590,6 +598,23 @@ function emitMissingVarWarnings(hits: import("../../core/runner/preflight-vars.t
     return;
   }
   for (const line of summarizeMissingVars(hits)) printWarning(line);
+}
+
+/**
+ * ARV-37: list distinct tags across loaded suites so a fail-loud `--tag`
+ * mismatch can suggest the user-facing values without forcing them into
+ * `--help`. Order is alphabetical for stable output across runs.
+ */
+function collectAvailableTags(suites: { tags?: string[] }[]): string[] {
+  const seen = new Set<string>();
+  for (const s of suites) {
+    if (!s.tags) continue;
+    for (const t of s.tags) {
+      const trimmed = t.trim();
+      if (trimmed) seen.add(trimmed);
+    }
+  }
+  return [...seen].sort();
 }
 
 /**
