@@ -113,6 +113,44 @@ describe("formatFailures", () => {
     expect(out).toContain("expected required: [id, slug, name]");
   });
 
+  test("schema-rule format failure shows the offending primitive (ARV-27)", () => {
+    const step = makeStep({
+      status: "fail",
+      assertions: [
+        {
+          field: "body.data.0.created_at",
+          rule: "schema.format",
+          passed: false,
+          actual: "2026-04-28 07:18:18.314+00",
+          expected: 'format "date-time"',
+          kind: "schema",
+        },
+      ],
+    });
+    const out = formatFailures(step, false);
+    expect(out).toContain('format "date-time"');
+    expect(out).toContain('(got "2026-04-28 07:18:18.314+00")');
+  });
+
+  test("schema-rule with object actual still skips the JSON dump (TASK-277 holds)", () => {
+    const step = makeStep({
+      status: "fail",
+      assertions: [
+        {
+          field: "body",
+          rule: "schema.required",
+          passed: false,
+          actual: { plugins: [] },
+          expected: 'missing required field "name"',
+          kind: "schema",
+        },
+      ],
+    });
+    const out = formatFailures(step, false);
+    expect(out).not.toContain("(got ");
+    expect(out).toContain('missing required field "name"');
+  });
+
   test("non-schema actual objects render as JSON, not [object Object]", () => {
     const step = makeStep({
       status: "fail",
