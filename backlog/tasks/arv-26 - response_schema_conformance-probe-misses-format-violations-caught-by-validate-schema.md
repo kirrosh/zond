@@ -3,9 +3,10 @@ id: ARV-26
 title: >-
   response_schema_conformance probe misses format violations caught by
   --validate-schema
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 08:27'
+updated_date: '2026-05-10 08:36'
 labels:
   - feedback-loop
   - api-resend

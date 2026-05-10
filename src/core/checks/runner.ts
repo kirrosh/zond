@@ -365,11 +365,14 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   interface OpReport {
     findings: CheckFinding[];
     cases: number;
+    /** ARV-26: skip-outcome counts keyed by `"<check_id>: <reason>"`. */
+    skipped: Record<string, number>;
   }
 
   async function processOperation(op: EndpointInfo): Promise<OpReport> {
     const localFindings: CheckFinding[] = [];
     let localCases = 0;
+    const localSkipped: Record<string, number> = {};
     if (opts.onEvent) {
       opts.onEvent({
         type: "check_start",
@@ -443,6 +446,12 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
         if (outcome.kind === "fail") {
           recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent);
         }
+        if (outcome.kind === "skip") {
+          // ARV-26: bucket skips by check+reason so the summary can surface
+          // "0 findings BUT 2 skipped (no JSON Schema on this branch)".
+          const key = `${check.id}: ${outcome.reason ?? "unspecified"}`;
+          localSkipped[key] = (localSkipped[key] ?? 0) + 1;
+        }
         if (opts.onEvent && (outcome.kind === "pass" || outcome.kind === "fail")) {
           opts.onEvent({
             type: "check_result",
@@ -456,7 +465,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
         }
       }
     }
-    return { findings: localFindings, cases: localCases };
+    return { findings: localFindings, cases: localCases, skipped: localSkipped };
   }
 
   // ARV-8: parallelize the op-loop. workers=1 (default) preserves the
@@ -468,6 +477,9 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   const findings: CheckFinding[] = [];
   for (const report of opReports) {
     summary.cases += report.cases;
+    for (const [key, n] of Object.entries(report.skipped)) {
+      summary.skipped_outcomes[key] = (summary.skipped_outcomes[key] ?? 0) + n;
+    }
     for (const f of report.findings) {
       findings.push(f);
       summary.findings += 1;

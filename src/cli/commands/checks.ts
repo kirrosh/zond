@@ -118,6 +118,24 @@ async function deriveAuthHeadersFromApi(apiName: string | undefined, dbPath: str
   }
 }
 
+/**
+ * ARV-26: render the per-(check, reason) skip tally as a single line so
+ * "0 findings" doesn't read as "all green" when half the probes never got
+ * a checkable response (e.g. no auth → 4xx → no schema on that branch).
+ *
+ * Top-3 reasons are inlined; if more exist, append "; +N more". Returns
+ * empty string when nothing was skipped.
+ */
+function formatSkippedOutcomes(skipped: Record<string, number> | undefined): string {
+  if (!skipped) return "";
+  const entries = Object.entries(skipped).sort((a, b) => b[1] - a[1]);
+  if (entries.length === 0) return "";
+  const total = entries.reduce((acc, [, n]) => acc + n, 0);
+  const top = entries.slice(0, 3).map(([k, n]) => `${k} ×${n}`);
+  const tail = entries.length > 3 ? `; +${entries.length - 3} more` : "";
+  return `(${total} check outcome(s) skipped: ${top.join("; ")}${tail})`;
+}
+
 function splitList(values: string[] | undefined): string[] | undefined {
   if (!values || values.length === 0) return undefined;
   return values.flatMap((v) => v.split(",")).map((s) => s.trim()).filter(Boolean);
@@ -313,12 +331,16 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       console.error(
         `${s.findings} finding(s) across ${s.cases} case(s) on ${s.operations} operation(s) — ${s.checks_run} check(s) active`,
       );
+      const skipLine = formatSkippedOutcomes(s.skipped_outcomes);
+      if (skipLine) console.error(skipLine);
     } else {
       for (const w of warnings) console.error(w);
       const s = result.data.summary;
       printSuccess(
         `${s.findings} finding(s) across ${s.cases} case(s) on ${s.operations} operation(s) — ${s.checks_run} check(s) active`,
       );
+      const skipLine = formatSkippedOutcomes(s.skipped_outcomes);
+      if (skipLine) console.log(`  ${skipLine}`);
       // ARV-18: aggregate identical findings (same check + same response
       // status + same severity) so a 30-operation 401-not-in-spec sweep
       // collapses to one row instead of drowning out single-shot findings.

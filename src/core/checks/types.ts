@@ -125,6 +125,12 @@ export interface CheckRunSummary {
   checks_run: number;
   findings: number;
   by_severity: Record<Severity, number>;
+  /** ARV-26: count of `kind: "skip"` outcomes returned by checks, keyed by
+   *  `"<check_id>: <reason>"`. Surfaces the gap between probe and runtime
+   *  validators — e.g. `response_schema_conformance: no JSON Schema on this
+   *  response branch ×2` tells the user why "0 findings" doesn't mean "all
+   *  green" (probe got 4xx, response schema only declared on 2xx). */
+  skipped_outcomes: Record<string, number>;
 }
 
 export interface CheckRunData {
@@ -139,5 +145,6 @@ export function emptySummary(): CheckRunSummary {
     checks_run: 0,
     findings: 0,
     by_severity: { low: 0, medium: 0, high: 0, critical: 0 },
+    skipped_outcomes: {},
   };
 }
