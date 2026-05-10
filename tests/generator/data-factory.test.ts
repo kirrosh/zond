@@ -702,4 +702,44 @@ describe("classifyFieldSource (TASK-269)", () => {
     expect(classifyFieldSource({ type: "integer", minimum: 5 } as OpenAPIV3.SchemaObject, "n")).toBe("min");
     expect(classifyFieldSource({ type: "integer" } as OpenAPIV3.SchemaObject, "n")).toBe("random");
   });
+
+  // ARV-38
+  test("string with default + no enum: classifyFieldSource returns 'default'", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(
+      classifyFieldSource(
+        { type: "string", default: "opportunistic" } as OpenAPIV3.SchemaObject,
+        "tls",
+      ),
+    ).toBe("default");
+  });
+
+  test("string with enum still wins over default", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(
+      classifyFieldSource(
+        { type: "string", enum: ["a", "b"], default: "z" } as OpenAPIV3.SchemaObject,
+        "x",
+      ),
+    ).toBe("enum");
+  });
+});
+
+// ARV-38
+describe("string default beats randomString fallback", () => {
+  test("PATCH-style default is emitted verbatim instead of {{$randomString}}", () => {
+    const result = generateFromSchema(
+      { type: "string", default: "opportunistic" } as OpenAPIV3.SchemaObject,
+      "tls",
+    );
+    expect(result).toBe("opportunistic");
+  });
+
+  test("empty-string default still falls through to heuristics", () => {
+    const result = generateFromSchema(
+      { type: "string", default: "" } as OpenAPIV3.SchemaObject,
+      "memo",
+    );
+    expect(result).toBe("{{$randomString}}");
+  });
 });
