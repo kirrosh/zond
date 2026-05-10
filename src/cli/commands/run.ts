@@ -2,7 +2,7 @@ import { dirname } from "path";
 import { stat } from "node:fs/promises";
 import { parseSafe } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
-import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
+import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod, filterSuitesByOperationFilter } from "../../core/parser/filter.ts";
 import { preflightCheckVars, formatMissingVarLine, summarizeMissingVars } from "../../core/runner/preflight-vars.ts";
 import { runSuite } from "../../core/runner/executor.ts";
 import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
@@ -47,6 +47,11 @@ export interface RunOptions {
   tag?: string[];
   excludeTag?: string[];
   method?: string;
+  /** ARV-25: parity with `zond generate`/`zond checks run` — selector
+   *  grammar `<path|method|tag|operation-id>:<value>`, repeatable, OR. */
+  include?: string[];
+  /** ARV-25: same grammar as `include`; evaluated after includes. */
+  exclude?: string[];
   envVars?: string[];
   /** Hard-fail (exit 2) on undefined {{var}} references instead of warning. */
   strictVars?: boolean;
@@ -113,6 +118,24 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
     printWarning(`No test files found in ${pathList}`);
     return 0;
+  }
+
+  // 1b0. ARV-25: unified --include/--exclude filter (parity with generate/checks).
+  //      Applied before tag/method filters so it can narrow the scope first.
+  if ((options.include && options.include.length > 0) || (options.exclude && options.exclude.length > 0)) {
+    const result = filterSuitesByOperationFilter(suites, options.include ?? [], options.exclude ?? []);
+    if (result.errors.length > 0) {
+      for (const err of result.errors) printError(err);
+      return 2;
+    }
+    suites = result.suites;
+    if (suites.length === 0) {
+      const parts: string[] = [];
+      if (options.include?.length) parts.push(`--include [${options.include.join(", ")}]`);
+      if (options.exclude?.length) parts.push(`--exclude [${options.exclude.join(", ")}]`);
+      printWarning(`No tests match ${parts.join(" / ")}`);
+      return 0;
+    }
   }
 
   // 1b. Tag filter
@@ -633,6 +656,14 @@ export function registerRun(program: Command): void {
     .option("--tag <tag>", "Filter suites by tag (repeatable, comma-separated)", collect, [])
     .option("--exclude-tag <tag>", "Exclude suites by tag (repeatable, comma-separated)", collect, [])
     .option("--method <method>", "Filter tests by HTTP method (e.g. GET, POST)")
+    .option(
+      "--include <spec...>",
+      "ARV-25: keep only steps matching <selector>:<value> (path|method|tag|operation-id). Same grammar as `zond generate` / `zond checks run`. Repeatable, combines with OR.",
+    )
+    .option(
+      "--exclude <spec...>",
+      "ARV-25: drop steps matching <selector>:<value>. Same grammar as --include. Excludes evaluated after includes.",
+    )
     .option("--env-var <KEY=VALUE>", "Inject env variable (repeatable, overrides env file)", collect, [])
     .option("--strict-vars", "Hard-fail (exit 2) when a {{var}} reference has no producer (default: warn and continue)")
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
@@ -701,6 +732,8 @@ export function registerRun(program: Command): void {
       const tags = flatSplit(opts.tag);
       const excludeTags = flatSplit(opts.excludeTag);
       const envVars = (opts.envVar as string[] | undefined)?.length ? (opts.envVar as string[]) : undefined;
+      const includeSpecs = (opts.include as string[] | undefined)?.length ? (opts.include as string[]) : undefined;
+      const excludeSpecs = (opts.exclude as string[] | undefined)?.length ? (opts.exclude as string[]) : undefined;
 
       process.exitCode = await runCommand({
         paths,
@@ -717,6 +750,8 @@ export function registerRun(program: Command): void {
         tag: tags,
         excludeTag: excludeTags,
         method: opts.method,
+        include: includeSpecs,
+        exclude: excludeSpecs,
         envVars,
         strictVars: opts.strictVars === true,
         dryRun: opts.dryRun === true,
