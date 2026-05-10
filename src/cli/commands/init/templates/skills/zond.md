@@ -315,6 +315,7 @@ zond session start --label "smoke + probes"                          # group run
 zond run apis/<name>/tests --tag sanity --report json                       # 3.1 sanity gate
 zond run apis/<name>/tests --safe --report json                             # 3.2 smoke (GET-only)
 zond run apis/<name>/tests --tag crud,setup --validate-schema --report json  # 3.3 full CRUD
+zond run apis/<name>/tests --tag positive --include 'path:^/emails'         # 3.4 narrow to one resource
 zond session end
 ```
 
