@@ -1,9 +1,10 @@
 ---
 id: ARV-18
 title: 'status_code_conformance: aggregate identical 401-not-in-spec findings'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 07:22'
+updated_date: '2026-05-10 07:58'
 labels:
   - feedback-loop
   - api-resend

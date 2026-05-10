@@ -84,6 +84,7 @@ interface ChecksRunOptions {
   ndjson?: boolean;
   workers?: string;
   rateLimit?: string;
+  verbose?: boolean;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -318,8 +319,39 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       printSuccess(
         `${s.findings} finding(s) across ${s.cases} case(s) on ${s.operations} operation(s) — ${s.checks_run} check(s) active`,
       );
-      for (const f of result.data.findings) {
-        console.log(`  [${f.severity}] ${f.check} ${f.operation.method} ${f.operation.path} — ${f.message}`);
+      // ARV-18: aggregate identical findings (same check + same response
+      // status + same severity) so a 30-operation 401-not-in-spec sweep
+      // collapses to one row instead of drowning out single-shot findings.
+      // Per-operation detail is restored under --verbose; the JSON envelope
+      // and SARIF sidecar always carry the full unaggregated list.
+      if (opts.verbose) {
+        for (const f of result.data.findings) {
+          console.log(`  [${f.severity}] ${f.check} ${f.operation.method} ${f.operation.path} — ${f.message}`);
+        }
+      } else {
+        const groups = new Map<string, { severity: string; check: string; status: number; ops: Set<string>; sample: string }>();
+        for (const f of result.data.findings) {
+          const status = f.response_summary?.status ?? 0;
+          const key = `${f.severity}|${f.check}|${status}`;
+          const opKey = `${f.operation.method} ${f.operation.path}`;
+          let g = groups.get(key);
+          if (!g) {
+            g = { severity: f.severity, check: f.check, status, ops: new Set(), sample: f.message };
+            groups.set(key, g);
+          }
+          g.ops.add(opKey);
+        }
+        for (const g of groups.values()) {
+          if (g.ops.size <= 1) {
+            const op = [...g.ops][0] ?? "(unknown op)";
+            console.log(`  [${g.severity}] ${g.check} ${op} — ${g.sample}`);
+          } else {
+            const stem = g.status > 0
+              ? `Status ${g.status} not declared / unexpected`
+              : g.sample.replace(/ for [A-Z]+ .+$/, "");
+            console.log(`  [${g.severity}] ${g.check} — ${stem} (${g.ops.size} operation${g.ops.size === 1 ? "" : "s"} affected; --verbose for per-op detail)`);
+          }
+        }
       }
     }
     // Exit-code rule: 0 when no HIGH/CRITICAL findings, 1 otherwise. LOW/MEDIUM
@@ -401,6 +433,10 @@ function defineRun(parent: Command): void {
     .option(
       "--rate-limit <rps>",
       "ARV-8: cap outbound RPS — positive number (fixed budget) or `auto` (adaptive — paces from RateLimit-* response headers, RFC 9568). Combined with --workers, the limiter gates *all* workers globally so N workers never exceed <rps>.",
+    )
+    .option(
+      "--verbose",
+      "ARV-18: emit one stdout row per finding instead of aggregating identical findings (same check + same response status). JSON / NDJSON / SARIF outputs always carry the unaggregated list; this flag only controls the human summary.",
     )
     .action(checksRunAction);
 }

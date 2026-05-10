@@ -504,6 +504,27 @@ describe("TASK-220 / F12 — email-context name heuristics", () => {
   ])("string field named '%s' (no format) -> %s", (name, expected) => {
     expect(generateFromSchema({ type: "string" } as OA.SchemaObject, name)).toBe(expected);
   });
+
+  // ARV-23: Resend-style specs describe `from` as "Name <user@domain>" — the
+  // word "domain" used to flip the field to {{$randomDomain}}. Email-vocab
+  // names should beat description-based domain heuristic.
+  test("'from' with description mentioning 'domain' still maps to randomEmail", () => {
+    expect(
+      generateFromSchema(
+        { type: "string", description: "Sender — 'Name <user@domain>' or 'user@domain'" } as OA.SchemaObject,
+        "from",
+      ),
+    ).toBe("{{$randomEmail}}");
+  });
+
+  test("'reply_to' with description mentioning 'verified domain' still maps to randomEmail", () => {
+    expect(
+      generateFromSchema(
+        { type: "string", description: "Reply-To address; must be on a verified sending domain" } as OA.SchemaObject,
+        "reply_to",
+      ),
+    ).toBe("{{$randomEmail}}");
+  });
 });
 
 describe("TASK-221 / F13 — null example is ignored", () => {
@@ -662,6 +683,17 @@ describe("classifyFieldSource (TASK-269)", () => {
   test("returns 'random' fallback for unrecognised string", async () => {
     const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
     expect(classifyFieldSource({ type: "string" } as OpenAPIV3.SchemaObject, "memo")).toBe("random");
+  });
+
+  // ARV-23
+  test("email-vocab name beats domain-from-description for classification", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(
+      classifyFieldSource(
+        { type: "string", description: "Sender — 'Name <user@domain>'" } as OpenAPIV3.SchemaObject,
+        "from",
+      ),
+    ).toBe("heuristic:email");
   });
 
   test("returns 'min'/'max' for bounded integers", async () => {

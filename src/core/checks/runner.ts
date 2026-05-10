@@ -323,9 +323,15 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   // ARV-7: drop checks the active mode doesn't care about — `selection`
   // is what the runner sends to checks; `rawSelection` is what the user
   // *asked for* (kept on the result so warnings still surface unknown ids).
+  // feedback-04#F1: stateful checks (ignored_auth, use_after_free,
+  // ensure_resource_availability) live in a separate registry but are
+  // accepted by `--check`; selectChecks doesn't know about them and would
+  // flag the ids as "unknown". Strip those out so the user only sees
+  // warnings for ids that are truly absent from `zond checks list`.
+  const statefulIds = new Set(listStatefulChecks().map((c) => c.id));
   const selection: SelectionResult = {
     selected: filterChecksByMode(rawSelection.selected, mode),
-    unknown: rawSelection.unknown,
+    unknown: rawSelection.unknown.filter((id) => !statefulIds.has(id)),
   };
   const summary = emptySummary();
   summary.operations = ops.length;

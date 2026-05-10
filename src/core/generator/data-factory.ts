@@ -190,6 +190,34 @@ function pickPreferredVariant(variants: OpenAPIV3.SchemaObject[]): OpenAPIV3.Sch
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Names that strongly imply an email field. Kept in sync with the email
+ *  branch of `guessStringPlaceholder`/`classifyFieldSource`. Used to gate the
+ *  description-based domain heuristic so phrases like "verified sending
+ *  domain" in the description of a `from`/`to` field don't override the
+ *  email mapping. */
+function isEmailContextName(name?: string): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+  return (
+    lower === "email" ||
+    lower === "from" ||
+    lower === "to" ||
+    lower === "cc" ||
+    lower === "bcc" ||
+    lower === "sender" ||
+    lower === "recipient" ||
+    lower === "reply_to" ||
+    lower === "replyto" ||
+    lower.endsWith("_email") ||
+    lower.endsWith("Email") ||
+    lower.endsWith("_reply_to") ||
+    lower.endsWith("_from") ||
+    lower.endsWith("_to") ||
+    lower.endsWith("_cc") ||
+    lower.endsWith("_bcc")
+  );
+}
+
 /** A schema `pattern` that explicitly allows lowercase but not uppercase
  *  letters (typical slug regex like `^[a-z0-9_\-]+$`). Used to switch from
  *  mixed-case `{{$randomString}}` to a slug-shaped generator. */
@@ -287,7 +315,11 @@ export function classifyFieldSource(
 
   if (t === "string") {
     if (isLowercaseOnlyPattern(schema.pattern)) return "pattern";
-    if (schema.description && /\b(domain|hostname|fqdn)\b/i.test(schema.description)) {
+    if (
+      schema.description &&
+      /\b(domain|hostname|fqdn)\b/i.test(schema.description) &&
+      !isEmailContextName(propertyName)
+    ) {
       return "heuristic:domain-from-description";
     }
     if (propertyName) {
@@ -388,7 +420,15 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
   // `POST /domains/`, Cloudflare zones, etc.) but the field is generically
   // named `name`, the default `{{$randomName}}` returns "Bob Wilson" and the
   // server rejects it. TASK-224.
-  if (schema.description && /\b(domain|hostname|fqdn)\b/i.test(schema.description)) {
+  // Skip when the field name is clearly in email vocabulary — Resend, SendGrid
+  // and friends describe `from`/`to`/etc. with phrases like "verified sending
+  // domain" or "Name <user@domain>", which trips the regex but the field is
+  // an email, not a domain. Email vocab > domain-from-description.
+  if (
+    schema.description &&
+    /\b(domain|hostname|fqdn)\b/i.test(schema.description) &&
+    !isEmailContextName(name)
+  ) {
     return "{{$randomDomain}}";
   }
 
