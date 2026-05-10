@@ -27,7 +27,7 @@ import {
   extractEndpoints,
   extractSecuritySchemes,
 } from "../../core/generator/index.ts";
-import { generateFromSchema } from "../../core/generator/data-factory.ts";
+import { buildCreateRequestBody } from "../../core/generator/create-body.ts";
 import { loadEnvFile, substituteDeep } from "../../core/parser/variables.ts";
 import { liveAuthHeaders } from "../../core/probe/shared.ts";
 import { executeRequest } from "../../core/runner/http-client.ts";
@@ -64,9 +64,21 @@ interface SeedAttempt {
   varName: string;
   resource: string;
   createPath: string;
-  status: "seeded" | "skip-already-set" | "skip-no-create" | "skip-no-schema" | "miss-network" | "miss-status" | "miss-no-id";
+  status:
+    | "seeded"
+    | "skip-already-set"
+    | "skip-no-create"
+    | "skip-no-schema"
+    | "miss-network"
+    | "miss-status"
+    | "miss-seed-422"
+    | "miss-no-id";
   capturedId?: string;
   reason?: string;
+  /** ARV-47: short curl-style repro printed for 4xx seed failures so the
+   *  user (or downstream agent) can reproduce the exact request without
+   *  poking through structured envelopes. */
+  repro?: string;
 }
 
 interface Pass {
@@ -137,6 +149,42 @@ function findOwnerResourceForSeed(
   return undefined;
 }
 
+/** ARV-47: build a one-line `curl` invocation that reproduces the failed
+ *  seed request. Headers carrying secrets (Authorization, X-API-Key) are
+ *  redacted to a `<REDACTED>` placeholder so the repro can ship in stderr
+ *  / JSON envelopes without leaking tokens. */
+function buildCurlRepro(
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+): string {
+  const parts: string[] = [`curl -X ${method} ${JSON.stringify(url)}`];
+  for (const [k, v] of Object.entries(headers)) {
+    const lk = k.toLowerCase();
+    const redacted = lk === "authorization" || lk === "x-api-key" || lk === "api-key";
+    parts.push(`-H ${JSON.stringify(`${k}: ${redacted ? "<REDACTED>" : v}`)}`);
+  }
+  parts.push(`-d ${JSON.stringify(JSON.stringify(body))}`);
+  return parts.join(" ");
+}
+
+/** Pull the first useful validation message out of a 422 response body. */
+function extractFirst422Detail(body: unknown): string | undefined {
+  if (typeof body === "string") return body.length < 200 ? body : undefined;
+  if (!body || typeof body !== "object") return undefined;
+  const obj = body as Record<string, unknown>;
+  if (typeof obj.detail === "string") return obj.detail;
+  if (typeof obj.message === "string") return obj.message;
+  if (typeof obj.error === "string") return obj.error;
+  // FastAPI / many SaaS APIs nest details: { detail: [{ loc, msg }] }
+  if (Array.isArray(obj.detail) && obj.detail.length > 0) {
+    const first = obj.detail[0] as { msg?: string; loc?: unknown[] };
+    if (first?.msg) return `${first.msg}${Array.isArray(first.loc) ? ` at ${first.loc.join(".")}` : ""}`;
+  }
+  return undefined;
+}
+
 /** Substitute path-params in a path with values from vars. Returns
  *  `{ resolved, missing }`; missing is non-empty when a parent fixture is
  *  still absent — caller defers the seed for a later cascade pass. */
@@ -193,7 +241,13 @@ async function trySeed(
       reason: `parent fixtures missing for create path: ${missing.join(", ")}`,
     };
   }
-  const generated = generateFromSchema(ep.requestBodySchema, undefined, { forRequest: true });
+  // ARV-47: spec-aware body builder substitutes parent-FK fields with
+  // values already in env (audience_id ↔ env["audience_id"]) before the
+  // schema-derived random placeholders win. Without this, every nested
+  // POST 422s on a real API because randomly-generated parent ids don't
+  // exist in the target tenant.
+  const known = nonEmptyVars(vars);
+  const generated = buildCreateRequestBody(ep.requestBodySchema, { knownFixtures: known });
   // Resolve `{{$randomSlug}}` etc. into concrete values for the live POST.
   const concreteBody = substituteDeep(generated, vars);
 
@@ -206,9 +260,12 @@ async function trySeed(
 
   let resp;
   try {
+    // ARV-48: 1 network-class retry covers transient DNS/connection-reset
+    // hiccups during seed POSTs. Application-level errors (4xx/5xx) keep
+    // their existing branches and surface to the user.
     resp = await executeRequest(
       { method: parsed.method, url, headers, body: JSON.stringify(concreteBody) },
-      { timeout: timeoutMs, retries: 0 },
+      { timeout: timeoutMs, retries: 0, network_retries: 1 },
     );
   } catch (err) {
     return {
@@ -220,12 +277,21 @@ async function trySeed(
     };
   }
   if (resp.status < 200 || resp.status >= 300) {
+    // ARV-47 AC#4: 422 is the most common failure mode for seed POSTs
+    // (validator complaint, not transport error). Branch it out so agents
+    // can route on the manifest-grade status, and emit a curl-style repro
+    // so the user can reproduce the request manually.
+    const isSeed422 = resp.status === 422;
+    const repro = buildCurlRepro(parsed.method, url, headers, concreteBody);
+    const respBody = resp.body_parsed ?? resp.body;
+    const detailHint = extractFirst422Detail(respBody);
     return {
       varName,
       resource: owner.resource,
       createPath: parsed.path,
-      status: "miss-status",
-      reason: `${parsed.method} ${pathResolved} → ${resp.status}`,
+      status: isSeed422 ? "miss-seed-422" : "miss-status",
+      reason: `${parsed.method} ${pathResolved} → ${resp.status}${detailHint ? ` (${detailHint})` : ""}`,
+      repro,
     };
   }
   const captured = captureFromResponse(
@@ -504,6 +570,13 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
           for (const s of seeds) {
             const tail = s.status === "seeded" ? `→ ${s.capturedId}` : `(${s.reason ?? ""})`;
             console.log(`  ${s.status.padEnd(18)} ${s.varName.padEnd(28)} ${s.resource.padEnd(20)} ${tail}`);
+          }
+          // ARV-47 AC#4: print curl-style repro for every 422 to stderr so the
+          // user can copy-paste-debug without inspecting the JSON envelope.
+          for (const s of seeds) {
+            if (s.status === "miss-seed-422" && s.repro) {
+              console.error(`  Repro: ${s.repro}`);
+            }
           }
           console.log(`Seed loop stopped: ${seedStop}.`);
         }

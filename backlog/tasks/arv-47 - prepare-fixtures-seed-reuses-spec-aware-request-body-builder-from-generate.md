@@ -1,18 +1,19 @@
 ---
 id: ARV-47
 title: 'prepare-fixtures: --seed reuses spec-aware request body builder from generate'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 18:43'
+updated_date: '2026-05-10 19:36'
 labels:
   - m-17
   - fixtures
   - seed
   - agent-contract
+milestone: m-17
 dependencies:
   - ARV-46
 priority: high
-milestone: m-17
 ---
 
 ## Description

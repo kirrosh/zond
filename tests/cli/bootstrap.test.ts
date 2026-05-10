@@ -331,6 +331,199 @@ describe("zond bootstrap", () => {
     expect(byVar.widget_id).toBe("seeded");
   });
 
+  // ARV-47: --seed POSTs a spec-aware body that pulls parent-FK ids from
+  // .env.yaml (audience_id from env), so the live API actually accepts it.
+  // Without this fix, generated body had a random UUID and APIs 422'd.
+  test("--seed substitutes FK fields from env (ARV-47); 422 surfaces miss-seed-422 + repro", async () => {
+    const arvDir = join(tmpDir, "apis", "arv47");
+    await mkdir(arvDir, { recursive: true });
+    let lastBody: { audience_id?: string; name?: string } | null = null;
+    const arv = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const u = new URL(req.url);
+        if (u.pathname === "/audiences" && req.method === "GET") {
+          // Owner resource list — used by cascade to confirm audience_id discovery.
+          return Response.json([{ id: "aud_real_42" }]);
+        }
+        if (u.pathname === "/contacts" && req.method === "GET") {
+          // Empty list — forces seed.
+          return Response.json([]);
+        }
+        if (u.pathname === "/contacts" && req.method === "POST") {
+          lastBody = (await req.json()) as { audience_id?: string; name?: string };
+          // 422 when audience_id doesn't match the magic value (mimics
+          // "audience aud_xxx not found" on a real tenant).
+          if (lastBody.audience_id !== "aud_real_42") {
+            return Response.json(
+              { detail: "audience not found" },
+              { status: 422 },
+            );
+          }
+          return Response.json({ id: "ct_new" }, { status: 201 });
+        }
+        if (u.pathname === "/baddies" && req.method === "GET") return Response.json([]);
+        if (u.pathname === "/baddies" && req.method === "POST") {
+          return Response.json(
+            { detail: "validation failed: bad_id missing" },
+            { status: 422 },
+          );
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    const arvBaseUrl = `http://localhost:${arv.port}`;
+    const arvSpec = join(arvDir, "spec.json");
+    await writeFile(arvSpec, JSON.stringify({
+      openapi: "3.0.0",
+      info: { title: "arv", version: "1" },
+      paths: {
+        "/audiences": { get: { responses: { "200": {} } } },
+        "/contacts": {
+          get: { responses: { "200": {} } },
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["audience_id", "name"],
+                    properties: {
+                      audience_id: { type: "string", format: "uuid" },
+                      name: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { "201": {} },
+          },
+        },
+        "/baddies": {
+          get: { responses: { "200": {} } },
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["nope"],
+                    properties: { nope: { type: "string" } },
+                  },
+                },
+              },
+            },
+            responses: { "201": {} },
+          },
+        },
+      },
+    }));
+    await writeFile(join(arvDir, ".api-resources.yaml"),
+      [
+        "resources:",
+        "  - resource: audiences",
+        "    basePath: /audiences",
+        "    itemPath: \"\"",
+        "    idParam: \"\"",
+        "    captureField: id",
+        "    hasFullCrud: false",
+        "    endpoints:",
+        "      list: GET /audiences",
+        "    fkDependencies: []",
+        "  - resource: contacts",
+        "    basePath: /contacts",
+        "    itemPath: /contacts/{contact_id}",
+        "    idParam: contact_id",
+        "    captureField: id",
+        "    hasFullCrud: false",
+        "    endpoints:",
+        "      list: GET /contacts",
+        "      create: POST /contacts",
+        "    fkDependencies:",
+        "      - var: audience_id",
+        "        param: audience_id",
+        "        in: body",
+        "        ownerResource: audiences",
+        "  - resource: baddies",
+        "    basePath: /baddies",
+        "    itemPath: /baddies/{bad_id}",
+        "    idParam: bad_id",
+        "    captureField: id",
+        "    hasFullCrud: false",
+        "    endpoints:",
+        "      list: GET /baddies",
+        "      create: POST /baddies",
+        "    fkDependencies: []",
+        // Pretend a downstream consumer needs both contact_id and bad_id so
+        // they enter the target list.
+        "  - resource: things",
+        "    basePath: /things",
+        "    itemPath: \"\"",
+        "    idParam: \"\"",
+        "    captureField: id",
+        "    hasFullCrud: false",
+        "    endpoints: {}",
+        "    fkDependencies:",
+        "      - var: contact_id",
+        "        param: contact_id",
+        "        in: path",
+        "        ownerResource: contacts",
+        "      - var: bad_id",
+        "        param: bad_id",
+        "        in: path",
+        "        ownerResource: baddies",
+        "",
+      ].join("\n"));
+    const envPath = join(arvDir, ".env.yaml");
+    // audience_id pre-filled — seed should substitute it into POST /contacts.
+    await writeFile(envPath, `base_url: ${arvBaseUrl}\naudience_id: aud_real_42\n`);
+
+    const origStdout = process.stdout.write;
+    let captured = "";
+    process.stdout.write = ((chunk: unknown) => {
+      captured += typeof chunk === "string" ? chunk : String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+    let exit: number;
+    try {
+      exit = await bootstrapCommand({
+        specPath: arvSpec,
+        apiDir: arvDir,
+        envPath,
+        apply: true,
+        seed: true,
+        json: true,
+      });
+    } finally {
+      process.stdout.write = origStdout;
+      arv.stop();
+    }
+    expect(exit).toBe(0);
+
+    // 1. audience_id from env was substituted into the seed POST body —
+    //    not a random UUID — proving buildCreateRequestBody's FK swap works.
+    expect(lastBody?.audience_id).toBe("aud_real_42");
+
+    // 2. /baddies seed got a 422 → status miss-seed-422 + repro present.
+    const out = JSON.parse(captured);
+    const seeds = out.data.seeds as Array<{
+      varName: string;
+      status: string;
+      reason?: string;
+      repro?: string;
+    }>;
+    const bad = seeds.find(s => s.varName === "bad_id");
+    expect(bad).toBeDefined();
+    expect(bad!.status).toBe("miss-seed-422");
+    expect(bad!.reason).toMatch(/422/);
+    // detail extraction surfaces FastAPI-style validation messages.
+    expect(bad!.reason).toMatch(/validation failed/);
+    expect(bad!.repro).toMatch(/^curl -X POST/);
+    expect(bad!.repro).toContain("/baddies");
+  });
+
   test("missing base_url returns exit 2", async () => {
     const envPath = join(apiDir, ".env.nobase.yaml");
     await writeFile(envPath, "auth_token: abc\n");
