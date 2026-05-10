@@ -86,10 +86,21 @@ function formatAssertion(a: { field: string; rule: string; actual: unknown; expe
   // required field …", "type integer", …). Use it directly — interpolating
   // the actual subtree via String() turns into "[object Object]" and buries
   // the actionable detail (TASK-277).
+  //
+  // ARV-27: when `actual` is a primitive (string/number/bool/null), append it
+  // to the message so format/type/enum/const failures show the offending value
+  // — same shape as runtime asserts ("expected equals 200 but got 422").
+  // Skipped for objects/arrays to avoid burying the message under JSON dumps
+  // (the original TASK-277 concern).
   if (a.kind === "schema" && typeof a.expected === "string") {
+    if (isPrimitive(a.actual)) return `${a.field}: ${a.expected} (got ${formatValue(a.actual)})`;
     return `${a.field}: ${a.expected}`;
   }
   return `${a.field}: expected ${a.rule} but got ${formatValue(a.actual)}`;
+}
+
+function isPrimitive(v: unknown): boolean {
+  return v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 }
 
 function formatValue(value: unknown): string {

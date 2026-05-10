@@ -1,9 +1,10 @@
 ---
 id: ARV-27
 title: 'schema validator: include actual value in format error messages'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 08:27'
+updated_date: '2026-05-10 08:30'
 labels:
   - feedback-loop
   - api-resend
