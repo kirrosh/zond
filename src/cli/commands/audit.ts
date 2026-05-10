@@ -29,7 +29,8 @@ import { globalJson } from "../resolve.ts";
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
-import { printSuccess, printWarning } from "../output.ts";
+import { printSuccess, printWarning, printError } from "../output.ts";
+import { readCurrentApi } from "../../core/context/current.ts";
 import { jsonOk, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
 
@@ -373,7 +374,13 @@ export function registerAudit(program: Command): void {
   program
     .command("audit")
     .description("Macro: prepare-fixtures → generate → probes → run → coverage → HTML report (TASK-262)")
-    .requiredOption("--api <name>", "Registered API to audit")
+    // ARV-29: not `requiredOption` — same regression that hit prepare-fixtures
+    // (TASK-20) and checks run (TASK-17). Commander routes `--api` to the
+    // program-level option, so the subcommand's opts.api ends up undefined and
+    // requiredOption rejects every form (`--api foo`, `--api=foo`, even
+    // `zond --api foo audit`). Fall back the same way: explicit > program-level
+    // mirror > .zond/current-api.
+    .option("--api <name>", "Registered API to audit. Falls back to ZOND_API / .zond/current-api.")
     .option("--db <path>", "Path to SQLite database file")
     .option("--seed", "Use 'prepare-fixtures --cascade --seed --apply' instead of the plain single-pass prep stage")
     .option("--with-mass-assignment", "Include 'probe mass-assignment' as an extra stage")
@@ -382,6 +389,13 @@ export function registerAudit(program: Command): void {
     .option("--dry-run", "Print the stage plan without executing anything")
     .option("--force", "Disable mtime-based skip (always regenerate, even if tests/ newer than spec)")
     .action(async (opts, cmd: Command) => {
+      const apiName = (opts.api as string | undefined) ?? cmd.parent?.opts().api ?? readCurrentApi() ?? undefined;
+      if (!apiName) {
+        printError("--api is required (or set ZOND_API / `zond use <name>`).");
+        process.exitCode = 2;
+        return;
+      }
+      opts.api = apiName;
       process.exitCode = await auditCommand({
         api: opts.api,
         dbPath: opts.db,
