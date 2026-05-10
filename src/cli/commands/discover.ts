@@ -145,6 +145,7 @@ export interface DiscoveryItem {
     | "write"
     | "skip-already-set"
     | "skip-already-equal"
+    | "skip-not-required"
     | "miss-no-list"
     | "miss-nested-list"
     | "miss-no-owner"
@@ -158,6 +159,13 @@ export interface DiscoveryItem {
     | "verify-unknown"
     | "verify-no-read"
     | "verify-skip-empty";
+  /** ARV-46: manifest-grade status enum projected onto agent-readable
+   *  envelope. Filled when discover ran in manifest-driven mode.
+   *  filled | failed:no-list-endpoint | failed:list-empty | failed:miss-network
+   *  | skipped:already-set | skipped:not-required */
+  manifestStatus?: ManifestStatus;
+  /** ARV-46: source classification copied from `.api-fixtures.yaml`. */
+  manifestSource?: FixtureManifestEntry["source"];
   reason?: string;
   /** TASK-294: agent-routable action for items the user must fix.
    *  miss-* / verify-stale / verify-unknown → `fix_fixture`.
@@ -173,6 +181,38 @@ export function discoveryAction(status: DiscoveryItem["status"]): RecommendedAct
     return "fix_fixture";
   }
   return undefined;
+}
+
+/** ARV-46: stable manifest-grade status enum for agent consumers. The CLI
+ *  prints this column when discover runs in manifest-driven mode and it's
+ *  exposed verbatim in the JSON envelope. */
+export type ManifestStatus =
+  | "filled"
+  | "failed:no-list-endpoint"
+  | "failed:list-empty"
+  | "failed:miss-network"
+  | "skipped:already-set"
+  | "skipped:not-required";
+
+export function toManifestStatus(status: DiscoveryItem["status"]): ManifestStatus {
+  switch (status) {
+    case "write":
+      return "filled";
+    case "skip-already-set":
+    case "skip-already-equal":
+      return "skipped:already-set";
+    case "skip-not-required":
+      return "skipped:not-required";
+    case "miss-network":
+      return "failed:miss-network";
+    case "miss-empty":
+      return "failed:list-empty";
+    // miss-no-list / miss-nested-list / miss-no-owner / miss-status / miss-no-id —
+    // the underlying cause is "we have no usable list endpoint to read from", so
+    // they collapse onto the same manifest-level bucket.
+    default:
+      return "failed:no-list-endpoint";
+  }
 }
 
 export function isPlaceholder(value: string | undefined): boolean {
@@ -214,6 +254,32 @@ export async function readResourceMap(apiDir: string): Promise<ApiResourceMapYam
   if (!parsed || typeof parsed !== "object") return null;
   const obj = parsed as { resources?: ResourceYaml[] };
   return { resources: obj.resources ?? [] };
+}
+
+export interface FixtureManifestEntry {
+  name: string;
+  source: "auth" | "server" | "path" | "header" | "body-fk" | "capture-chain";
+  required: boolean;
+  description?: string;
+  defaultValue?: string;
+  affectedEndpoints?: string[];
+}
+
+export interface FixtureManifestYaml {
+  fixtures: FixtureManifestEntry[];
+}
+
+/** Read `.api-fixtures.yaml`. Returns null when missing — caller falls back
+ *  to the legacy resource-map-driven path. */
+export async function readFixtureManifest(apiDir: string): Promise<FixtureManifestYaml | null> {
+  const path = join(apiDir, ".api-fixtures.yaml");
+  const file = Bun.file(path);
+  if (!(await file.exists())) return null;
+  const text = await file.text();
+  const parsed = Bun.YAML.parse(text);
+  if (!parsed || typeof parsed !== "object") return null;
+  const obj = parsed as { fixtures?: FixtureManifestEntry[] };
+  return { fixtures: obj.fixtures ?? [] };
 }
 
 /** Build the unique target list from FK deps. Each FK var = one discovery
@@ -479,14 +545,42 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
       return 2;
     }
 
+    // ARV-46: manifest is the source-of-truth for the *list* of variables
+    // this API needs (per decision-7). When `.api-fixtures.yaml` exists,
+    // discover iterates it instead of `.env.yaml` keys / FK deps directly,
+    // so vars present in tests but absent from FK deps still show up in the
+    // status table — and env keys without a manifest entry surface as a
+    // warning instead of being silently ignored.
+    const manifest = await readFixtureManifest(options.apiDir);
+
     const targets = collectTargets(resourceMap);
-    if (targets.length === 0) {
+    if (targets.length === 0 && !manifest) {
       if (options.json) {
         printJson(jsonOk("discover", { items: [], message: "No path-FK dependencies with known owner resources." }));
       } else {
         console.log("No path-FK dependencies with known owner resources — nothing to discover.");
       }
       return 0;
+    }
+    // Index targets by var name so manifest entries can resolve their owner
+    // resource via the FK chain (manifest knows *what*, resource map knows
+    // *where to fetch*).
+    const targetsByVar = new Map<string, FkTarget>();
+    for (const t of targets) targetsByVar.set(t.varName, t);
+    // Resource map's `collectPathFkDeps` skips the resource's own idParam —
+    // it only emits *parent* FKs. The manifest legitimately wants discover
+    // to fill `api_key_id` (idParam of /api-keys/{api_key_id}) from the list
+    // endpoint /api-keys, so wire each resource's own idParam onto its list
+    // endpoint here. This is what makes "discover walks the manifest" not
+    // collapse 80% of entries into failed:no-list-endpoint.
+    for (const r of resourceMap.resources) {
+      if (!r.idParam || !r.endpoints?.list) continue;
+      if (targetsByVar.has(r.idParam)) continue;
+      targetsByVar.set(r.idParam, {
+        varName: r.idParam,
+        ownerResource: r.resource,
+        listLabel: r.endpoints.list,
+      });
     }
 
     // TASK-281: --verify mode — GET the read-by-id endpoint for every fixture
@@ -535,9 +629,71 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
           if (idx >= 0) items[idx] = refreshed;
         }
       }
+    } else if (manifest) {
+      // ARV-46: drive the loop by manifest entries (one row per entry).
+      // Each entry's status maps onto the manifest-grade enum so agents
+      // get a stable contract independent of the underlying probe shape.
+      for (const entry of manifest.fixtures) {
+        const current = env[entry.name];
+        const placeholder: DiscoveryItem = {
+          varName: entry.name,
+          resource: "",
+          listPath: "",
+          current,
+          status: "skip-not-required",
+          manifestSource: entry.source,
+        };
+
+        // Sources that discover does not own: the user fills these (auth/
+        // server/header) or the runtime captures them (capture-chain).
+        // required:false manifest entries (currently capture-chain) are also
+        // not the discover loop's responsibility.
+        const isOwnedByDiscover =
+          entry.required && (entry.source === "path" || entry.source === "body-fk");
+        if (!isOwnedByDiscover) {
+          placeholder.status = "skip-not-required";
+          placeholder.manifestStatus = "skipped:not-required";
+          items.push(placeholder);
+          continue;
+        }
+
+        // Already filled (and not a TODO placeholder) — leave it alone.
+        if (!isPlaceholder(current)) {
+          placeholder.status = "skip-already-set";
+          placeholder.manifestStatus = "skipped:already-set";
+          items.push(placeholder);
+          continue;
+        }
+
+        // Resolve owner resource via FK chain. body-fk vars often share the
+        // name with a path-param of another resource (audience_id ↔
+        // /audiences/{id}); resource map's collectBodyFkDeps already does
+        // name-stemming inference for us. A miss here means we have nothing
+        // to GET — the entry stays in the table as failed:no-list-endpoint.
+        const target = targetsByVar.get(entry.name);
+        if (!target) {
+          placeholder.status = "miss-no-list";
+          placeholder.manifestStatus = "failed:no-list-endpoint";
+          placeholder.reason = `${entry.source}-source var has no owner resource in .api-resources.yaml — cannot derive a list endpoint`;
+          items.push(placeholder);
+          continue;
+        }
+
+        const item = await probeOne(
+          target,
+          current,
+          endpoints,
+          securitySchemes,
+          env,
+          baseUrl,
+          options.timeoutMs ?? 30000,
+        );
+        item.manifestSource = entry.source;
+        item.manifestStatus = toManifestStatus(item.status);
+        items.push(item);
+      }
     } else {
-      // Probe each target sequentially — keeps load on the API low and the
-      // diff readable. Discovery is a one-off pre-flight, not a hot loop.
+      // Legacy path: no manifest in the workspace — probe FK targets directly.
       for (const target of targets) {
         const current = env[target.varName];
         const item = await probeOne(
@@ -581,6 +737,20 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
       applied = true;
     }
 
+    // ARV-46: env keys without a manifest entry are noise — the user (or a
+    // legacy hand-edit) put them there; the API doesn't actually need them.
+    // Surface as warning so they can be removed; do not act on them.
+    let unknownEnvKeys: string[] = [];
+    if (manifest) {
+      const manifestNames = new Set(manifest.fixtures.map(f => f.name));
+      unknownEnvKeys = Object.keys(env).filter(k => !manifestNames.has(k));
+    }
+
+    const requiredManifestCount = manifest
+      ? manifest.fixtures.filter(f => f.required).length
+      : 0;
+    const filledCount = items.filter(i => i.manifestStatus === "filled").length;
+
     if (options.json) {
       printJson(jsonOk("discover", {
         envPath,
@@ -592,6 +762,13 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
           writes: writes.length,
           alreadySet: items.filter(i => i.status === "skip-already-set").length,
           misses: items.filter(i => i.status.startsWith("miss-")).length,
+          ...(manifest ? {
+            manifest: {
+              required: requiredManifestCount,
+              filled: filledCount,
+              unknownEnvKeys,
+            },
+          } : {}),
           ...(options.verify ? {
             verify: {
               live: items.filter(i => i.status === "verify-live").length,
@@ -605,23 +782,26 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     } else {
       console.log(`Discovery against ${baseUrl} (${envPath}):`);
       console.log("");
-      const cols = ["var", "resource", "list", "status", "value/reason"];
+      const cols = ["var", "source", "resource", "list", "status", "value/reason"];
       const rows = items.map(i => [
         i.varName,
-        i.resource,
+        i.manifestSource ?? "—",
+        i.resource || "—",
         i.listPath || "—",
-        i.status,
+        i.manifestStatus ?? i.status,
         i.status === "write"
           ? i.discovered!
           : i.status === "skip-already-set"
             ? `(kept: ${i.current})`
             : i.status === "skip-already-equal"
               ? `(unchanged: ${i.current})`
-              : i.status === "verify-live"
-                ? `(live: ${i.current})`
-                : i.status === "verify-stale"
-                  ? `(stale: ${i.current})${i.reason ? ` — ${i.reason}` : ""}`
-                  : (i.reason ?? ""),
+              : i.status === "skip-not-required"
+                ? `(not owned by discover)`
+                : i.status === "verify-live"
+                  ? `(live: ${i.current})`
+                  : i.status === "verify-stale"
+                    ? `(stale: ${i.current})${i.reason ? ` — ${i.reason}` : ""}`
+                    : (i.reason ?? ""),
       ]);
       const widths = cols.map((h, i) => Math.max(h.length, ...rows.map(r => r[i]!.length)));
       const fmt = (cells: string[]) => cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
@@ -637,6 +817,14 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
         if (stale > 0 && !options.apply) {
           printWarning(`${stale} stale fixture(s) detected. Re-run with --refresh to drop and re-resolve them.`);
         }
+      }
+      if (manifest) {
+        console.log(`Filled ${filledCount} / ${requiredManifestCount} manifest entries.`);
+      }
+      if (unknownEnvKeys.length > 0) {
+        printWarning(
+          `${unknownEnvKeys.length} env key(s) not in manifest, ignored: ${unknownEnvKeys.join(", ")}. Drop them from .env.yaml or run \`zond refresh-api\` if the manifest is stale.`,
+        );
       }
       if (applied) {
         printSuccess(`Wrote ${writes.length} value(s) to ${envPath}` + (backupPath ? ` (backup: ${backupPath})` : ""));

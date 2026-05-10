@@ -1,18 +1,19 @@
 ---
 id: ARV-46
 title: 'prepare-fixtures: discover iterates manifest entries, not .env.yaml keys'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 18:43'
+updated_date: '2026-05-10 19:31'
 labels:
   - m-17
   - fixtures
   - discover
   - agent-contract
+milestone: m-17
 dependencies:
   - ARV-45
 priority: high
-milestone: m-17
 ---
 
 ## Description
