@@ -332,8 +332,8 @@ export async function probeOne(
     if (isEmptyListBody(respBody)) {
       item.status = "miss-empty";
       item.reason =
-        `no ${target.ownerResource} in target API — create one first (in the product UI ` +
-        `or via API), then re-run discover`;
+        `no ${target.ownerResource} in target API — re-run with \`zond prepare-fixtures --api <name> --seed --apply\` ` +
+        `to POST-create one automatically, or create the resource yourself (in the product UI or via API) and re-run discover`;
     } else {
       item.status = "miss-no-id";
       item.reason = `response shape has no extractable first id (no array/data/items/results/records field)`;
