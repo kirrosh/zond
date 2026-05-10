@@ -3,9 +3,10 @@ id: ARV-34
 title: >-
   probe engine: treat 429 as throttle, not failure (auto-retry-with-backoff or
   include in negative-allowed set)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 11:20'
+updated_date: '2026-05-10 11:28'
 labels:
   - feedback-loop
   - api-resend
@@ -23,3 +24,10 @@ Expected: 429 is a valid rejection for negative-input probes ('must reject (no 5
 Actual: 519/707 probe failures in audit because of 429s, not real probe gaps. Tester cannot distinguish 'zond found a bug' from 'zond DoS'd itself'.
 Log: /Users/kirrotech/Projects/zond-test/.fb-loop/rounds/raw-09.log:241-250 (failing probes), :268 (rate-limit warning), :271 (audit summary)
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 ACCEPTABLE_4XX in negative-probe.ts includes 429 so server throttling does not turn negative-input probe runs red — 429 is itself a valid client-side rejection (server refused to process)
+- [x] #2 Doc-comment + tests updated to reflect new allow-set
+- [x] #3 bun run check passes
+<!-- AC:END -->

@@ -367,8 +367,10 @@ Per endpoint the generator emits probes from these classes (capped by
 
 Probes are deterministic — same spec → same suites — so generated YAML can be
 committed as a regression test. Each probe expects status in
-`[400, 401, 403, 404, 405, 409, 415, 422]`; a 5xx (or unexpected 2xx) is a
-test failure surfaced via the regular runner / reporter / `zond db diagnose`.
+`[400, 401, 403, 404, 405, 409, 415, 422, 429]` (ARV-34: 429 is a valid
+server-side rejection — refusing-via-throttle still satisfies the contract);
+a 5xx (or unexpected 2xx) is a test failure surfaced via the regular runner /
+reporter / `zond db diagnose`.
 
 **Real parent path-params (default).** For nested paths like
 `/orgs/{organization_id_or_slug}/repos/{repo_id}/commits`, only the *attacked*

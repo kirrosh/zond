@@ -6,9 +6,15 @@
  * is simple: any client-supplied invalid input MUST produce a 4xx, never a 5xx.
  *
  * For each endpoint we generate a suite of probe steps. Each step expects a
- * "no 5xx" response (status in [400, 401, 403, 404, 405, 409, 415, 422]).
+ * "no 5xx" response (status in [400, 401, 403, 404, 405, 409, 415, 422, 429]).
  * If the API returns 500/502/503 — the test fails and the runner logs it as
  * a bug candidate via the regular reporter / `zond db diagnose` flow.
+ *
+ * ARV-34: 429 is in the allow-set because rate-limiting is itself a valid
+ * server-side rejection of the request — the API refused to process invalid
+ * input, the contract is satisfied. Throttled probe runs were producing
+ * hundreds of false failures with the warning "N requests hit rate limit"
+ * already saying the same thing.
  *
  * The probes are deterministic — same spec → same suites — so the generated
  * YAML can be committed as a regression test.
@@ -35,8 +41,9 @@ import {
 
 /** Statuses we consider an *acceptable* response to invalid input. Anything
  *  outside this set (notably 5xx, but also 200/201 which would mean the API
- *  silently accepted the bad input) is a probe failure. */
-const ACCEPTABLE_4XX = [400, 401, 403, 404, 405, 409, 415, 422];
+ *  silently accepted the bad input) is a probe failure. ARV-34: 429 stays in
+ *  the allow-set — server-side throttling is a valid rejection. */
+const ACCEPTABLE_4XX = [400, 401, 403, 404, 405, 409, 415, 422, 429];
 
 /** Long string for boundary probes — 10_000 chars. */
 const LONG_STRING = "a".repeat(10_000);
