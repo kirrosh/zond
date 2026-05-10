@@ -29,7 +29,7 @@ export function singularizeResource(word: string): string {
  * a safe template variable identifier — `contact-properties` becomes
  * `contact_property_id` rather than `contact-propertie_id` (TASK-214).
  */
-function resourceVar(resource: string, suffix: string): string {
+export function resourceVar(resource: string, suffix: string): string {
   const singular = singularizeResource(resource);
   return `${singular.replace(/[^a-zA-Z0-9]+/g, "_")}_${suffix}`;
 }

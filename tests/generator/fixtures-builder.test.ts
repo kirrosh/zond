@@ -9,6 +9,7 @@ import {
   extractEndpoints,
   extractSecuritySchemes,
   buildApiFixtureManifest,
+  buildApiResourceMap,
   serializeApiFixtureManifest,
 } from "../../src/core/generator/index.ts";
 
@@ -108,6 +109,118 @@ describe("buildApiFixtureManifest", () => {
     expect(names).not.toContain("authorization");
     expect(names).not.toContain("accept");
     expect(names).not.toContain("content_type");
+  });
+
+  test("body-FK fields from request bodies surface as source: body-fk (ARV-45 AC#5)", () => {
+    // Mirrors the AC#5 fixture-test: POST /A {body: {b_id: ref}}, POST /B
+    // → manifest contains b_id with source: body-fk + affectedEndpoints
+    // includes the create endpoint that consumes it.
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1.0" },
+      paths: {
+        "/bs": {
+          get: { responses: { "200": { content: { "application/json": { schema: { type: "array", items: { type: "object", properties: { id: { type: "string" } } } } } } } } },
+          post: {
+            requestBody: { content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" } } } } } },
+            responses: { "201": { content: { "application/json": { schema: { type: "object", properties: { id: { type: "string" } } } } } } },
+          },
+        },
+        "/bs/{id}": {
+          get: { parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": {} } },
+        },
+        "/as": {
+          post: {
+            requestBody: { content: { "application/json": { schema: { type: "object", required: ["b_id"], properties: { b_id: { type: "string" } } } } } },
+            responses: { "201": { content: { "application/json": { schema: { type: "object", properties: { id: { type: "string" } } } } } } },
+          },
+        },
+      },
+    };
+    const endpoints = extractEndpoints(spec as any);
+    const resourceMap = buildApiResourceMap({ endpoints, specHash: "x" });
+    const manifest = buildApiFixtureManifest({
+      endpoints,
+      securitySchemes: [],
+      specHash: "x",
+      resourceMap,
+    });
+    const byName = Object.fromEntries(manifest.fixtures.map(f => [f.name, f]));
+    expect(byName.b_id).toBeDefined();
+    expect(byName.b_id!.source).toBe("body-fk");
+    expect(byName.b_id!.required).toBe(true);
+    expect(byName.b_id!.affectedEndpoints).toContain("POST /as");
+  });
+
+  test("CRUD-chain capture vars surface as source: capture-chain, required: false", () => {
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1.0" },
+      paths: {
+        "/templates": {
+          get: { responses: { "200": { content: { "application/json": { schema: { type: "array", items: { type: "object", properties: { id: { type: "string" } } } } } } } } },
+          post: {
+            requestBody: { content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" } } } } } },
+            responses: { "201": { content: { "application/json": { schema: { type: "object", properties: { id: { type: "string" } } } } } } },
+          },
+        },
+        "/templates/{id}": {
+          get: { parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": {} } },
+          patch: { parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": {} } },
+        },
+      },
+    };
+    const endpoints = extractEndpoints(spec as any);
+    const resourceMap = buildApiResourceMap({ endpoints, specHash: "x" });
+    const manifest = buildApiFixtureManifest({
+      endpoints,
+      securitySchemes: [],
+      specHash: "x",
+      resourceMap,
+    });
+    const byName = Object.fromEntries(manifest.fixtures.map(f => [f.name, f]));
+    // template_id is the CRUD-chain capture var (resourceVar("templates","id"))
+    expect(byName.template_id).toBeDefined();
+    expect(byName.template_id!.source).toBe("capture-chain");
+    expect(byName.template_id!.required).toBe(false);
+    // path-param `id` keeps source=path (more constraining)
+    expect(byName.id).toBeDefined();
+    expect(byName.id!.source).toBe("path");
+  });
+
+  test("body-FK var that is also a path-param keeps source: path (precedence)", () => {
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1.0" },
+      paths: {
+        "/audiences": {
+          get: { responses: { "200": { content: { "application/json": { schema: { type: "array", items: { type: "object", properties: { id: { type: "string" } } } } } } } } },
+          post: { requestBody: { content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" } } } } } }, responses: { "201": { content: { "application/json": { schema: { type: "object", properties: { id: { type: "string" } } } } } } } },
+        },
+        "/audiences/{audience_id}": {
+          get: { parameters: [{ name: "audience_id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": {} } },
+        },
+        "/contacts": {
+          post: {
+            requestBody: { content: { "application/json": { schema: { type: "object", required: ["audience_id"], properties: { audience_id: { type: "string" } } } } } },
+            responses: { "201": {} },
+          },
+        },
+      },
+    };
+    const endpoints = extractEndpoints(spec as any);
+    const resourceMap = buildApiResourceMap({ endpoints, specHash: "x" });
+    const manifest = buildApiFixtureManifest({
+      endpoints,
+      securitySchemes: [],
+      specHash: "x",
+      resourceMap,
+    });
+    const byName = Object.fromEntries(manifest.fixtures.map(f => [f.name, f]));
+    expect(byName.audience_id).toBeDefined();
+    expect(byName.audience_id!.source).toBe("path");
+    // affectedEndpoints merges the body-FK consumer (POST /contacts) onto the path entry
+    expect(byName.audience_id!.affectedEndpoints).toContain("POST /contacts");
   });
 
   test("serializeApiFixtureManifest produces stable YAML structure", () => {

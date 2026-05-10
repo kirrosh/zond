@@ -82,6 +82,7 @@ export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
     securitySchemes,
     baseUrl: baseUrl || undefined,
     specHash,
+    resourceMap: resources,
   });
   const fixturesPath = join(baseDir, ".api-fixtures.yaml");
   writeFileSync(fixturesPath, serializeApiFixtureManifest(fixtures), "utf-8");
