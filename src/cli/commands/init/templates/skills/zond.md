@@ -410,8 +410,10 @@ When `recommended_action: fix_test_logic` and the body is rejected on format
 Run on a passing API to surface latent bugs.
 
 ```bash
-zond probe static  apis/<name>/spec.json --output apis/<name>/probes/static
-# defaults to validation+methods; restrict via --include validation,methods
+zond probe static --api <name>
+# defaults to validation+methods; restrict via --include validation,methods.
+# --output defaults to apis/<name>/probes/static when --api / current-api is
+# set (ARV-30); pass --output explicitly only for bare-spec invocations.
 zond probe mass-assignment apis/<name>/spec.json --env apis/<name>/.env.yaml \
   --output apis/<name>/probes/mass-assignment-digest.md \
   --emit-tests apis/<name>/probes/mass-assignment
