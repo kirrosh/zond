@@ -26,6 +26,27 @@ import { loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
 
 /**
+ * ARV-33: resolve the active API name for probe subcommands. `--api` is
+ * registered both globally (program.ts) and per-subcommand. Commander
+ * routes the value to whichever scope reaches it first, so a user typing
+ * `zond probe mass-assignment --api resend` ends up with `opts.api =
+ * undefined` because the global option grabbed it. Mirror the resolution
+ * chain prepare-fixtures / audit / ARV-29 use.
+ */
+export function resolveProbeApi(
+  optsApi: string | undefined,
+  cmd: { parent?: { opts(): { api?: string } } | null } | undefined,
+): string | undefined {
+  if (typeof optsApi === "string" && optsApi.length > 0) return optsApi;
+  // `probe` umbrella does not declare --api itself, but walk anyway in
+  // case someone adds it later or routing surprises us. Final fallback
+  // (`readCurrentApi`) covers ZOND_API_GLOBAL / ZOND_API / .zond/current-api.
+  const parentApi = cmd?.parent?.opts().api;
+  if (typeof parentApi === "string" && parentApi.length > 0) return parentApi;
+  return readCurrentApi() ?? undefined;
+}
+
+/**
  * TASK-233: pick the env file to feed live-probe commands.
  *  - Explicit --env wins (legacy behaviour).
  *  - Otherwise --api <name> derives `apis/<name>/.env.yaml` via the registered
@@ -96,7 +117,10 @@ function defineProbeStatic(parent: Command, name: string): void {
     .option("--include <classes>", "Comma-separated subset of {validation, methods} (default: both)")
     .option("--exclude <classes>", "Comma-separated subset to skip (mutually exclusive with --include)")
     .action(async (specPos: string | undefined, optsArg, cmdRef: Command) => {
-      const resolved = resolveSpecArg(specPos, optsArg.api, optsArg.db);
+      // ARV-33: see resolveProbeApi — keep the chain consistent with the
+      // sibling subcommands (mass-assignment, security).
+      const apiName = resolveProbeApi(optsArg.api, cmdRef);
+      const resolved = resolveSpecArg(specPos, apiName, optsArg.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
 
       const r = resolveStaticClasses(optsArg.include, optsArg.exclude);
@@ -106,12 +130,9 @@ function defineProbeStatic(parent: Command, name: string): void {
       // user didn't pass one. Bare-spec invocations (positional only, no --api,
       // no current-api) still must pass --output explicitly.
       let outputDir: string | undefined = optsArg.output;
-      if (!outputDir) {
-        const apiName = (optsArg.api as string | undefined) ?? readCurrentApi() ?? undefined;
-        if (apiName) {
-          const col = resolveApiCollection(apiName, optsArg.db);
-          if (!("error" in col) && col.baseDir) outputDir = join(col.baseDir, "probes", "static");
-        }
+      if (!outputDir && apiName) {
+        const col = resolveApiCollection(apiName, optsArg.db);
+        if (!("error" in col) && col.baseDir) outputDir = join(col.baseDir, "probes", "static");
       }
       if (!outputDir) {
         printError("--output <dir> is required when no --api / current-api can resolve apis/<name>/probes/static.");
@@ -153,7 +174,12 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      // ARV-33: resolve --api via the same fallback chain as prepare-fixtures /
+      // ARV-29 — direct opts, then parent opts, then ZOND_API_GLOBAL /
+      // .zond/current-api. Otherwise `zond probe mass-assignment --api foo`
+      // hits commander's global-option absorption and `opts.api` is empty.
+      const apiName = resolveProbeApi(opts.api, cmd);
+      const resolved = resolveSpecArg(specPos, apiName, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
 
       // --emit-template short-circuits the live probe.
@@ -167,9 +193,9 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         return;
       }
 
-      const envFile = resolveProbeEnv(opts.env, opts.api, opts.db);
+      const envFile = resolveProbeEnv(opts.env, apiName, opts.db);
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
-      const timeoutMs = await resolveProbeTimeout(opts.timeout, opts.api, envFile.env);
+      const timeoutMs = await resolveProbeTimeout(opts.timeout, apiName, envFile.env);
       process.exitCode = await probeMassAssignmentCommand({
         specPath: resolved.spec,
         env: envFile.env,
@@ -205,13 +231,17 @@ function defineProbeSecurity(parent: Command, name: string): void {
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .action(async (classes: string, specPos: string | undefined, opts, cmd: Command) => {
-      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      // ARV-33: same fallback chain as mass-assignment so `zond probe security
+      // ssrf --api foo` doesn't fall through to a confusing "base_url is
+      // required" when commander absorbs --api at the global scope.
+      const apiName = resolveProbeApi(opts.api, cmd);
+      const resolved = resolveSpecArg(specPos, apiName, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       // probe-security tolerates a missing env (--dry-run path), so don't
       // fail when --api is given but the env file isn't on disk yet.
-      const envFile = resolveProbeEnv(opts.env, opts.api, opts.db, { tolerateMissing: true });
+      const envFile = resolveProbeEnv(opts.env, apiName, opts.db, { tolerateMissing: true });
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
-      const timeoutMs = await resolveProbeTimeout(opts.timeout, opts.api, envFile.env);
+      const timeoutMs = await resolveProbeTimeout(opts.timeout, apiName, envFile.env);
       process.exitCode = await probeSecurityCommand({
         specPath: resolved.spec,
         classes,
@@ -225,7 +255,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
         timeoutMs,
         overwrite: opts.overwrite === true,
         json: globalJson(cmd),
-        apiName: typeof opts.api === "string" ? opts.api : undefined,
+        apiName,
         isolated: opts.isolated === true,
       });
     });
