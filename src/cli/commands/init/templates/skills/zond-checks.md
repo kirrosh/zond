@@ -115,6 +115,15 @@ operation always run sequentially (CRUD chain ordering must be
 preserved). `--rate-limit auto` adapts from `RateLimit-*` response
 headers (RFC 9568); use it on rate-limited APIs to avoid bursting.
 
+## "0 findings" doesn't always mean "all green"
+
+The summary one-liner now ends with `(N check outcome(s) skipped: …)`
+when probes can't validate (e.g. `response_schema_conformance: no JSON
+Schema on this response branch ×2` when probes ran without auth and
+got a 4xx that the spec only declares for 2xx). Treat skipped probes
+as "not yet exercised", not "passed" — re-run with auth (or via
+`zond run --validate-schema`) to actually cover those branches.
+
 ## Exit codes
 
 | Code | Meaning |
