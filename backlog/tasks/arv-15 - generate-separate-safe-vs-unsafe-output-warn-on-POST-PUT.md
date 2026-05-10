@@ -1,9 +1,10 @@
 ---
 id: ARV-15
 title: 'generate: separate safe vs unsafe output, warn on POST/PUT'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 07:13'
+updated_date: '2026-05-10 07:58'
 labels:
   - feedback-loop
   - api-resend

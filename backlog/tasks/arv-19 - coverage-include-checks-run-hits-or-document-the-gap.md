@@ -1,9 +1,10 @@
 ---
 id: ARV-19
 title: 'coverage: include checks-run hits or document the gap'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 07:22'
+updated_date: '2026-05-10 07:58'
 labels:
   - feedback-loop
   - api-resend

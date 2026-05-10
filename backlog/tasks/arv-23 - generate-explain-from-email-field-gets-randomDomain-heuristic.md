@@ -1,9 +1,10 @@
 ---
 id: ARV-23
 title: 'generate --explain: ''from'' email field gets randomDomain heuristic'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 07:25'
+updated_date: '2026-05-10 07:58'
 labels:
   - feedback-loop
   - api-resend

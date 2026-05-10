@@ -1,16 +1,23 @@
 /**
  * Unit tests for the checks registry — covers ARV-1 acceptance criterion #4.
  */
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 
 import {
   __resetRegistryForTests,
+  __snapshotRegistryForTests,
   listChecks,
   getCheck,
   registerCheck,
   selectChecks,
 } from "../../../src/core/checks/registry.ts";
 import type { Check } from "../../../src/core/checks/types.ts";
+
+// Built-in checks register on import via side effects (see
+// `core/checks/checks/index.ts`). Pull them in here so the snapshot taken in
+// `beforeAll` includes them — otherwise the registry tests run before
+// anything has populated it and `restore()` would put back an empty Map.
+import "../../../src/core/checks/index.ts";
 
 function fakeCheck(id: string, severity: Check["severity"] = "low"): Check {
   return {
@@ -24,6 +31,9 @@ function fakeCheck(id: string, severity: Check["severity"] = "low"): Check {
 }
 
 describe("checks registry", () => {
+  let restore: () => void;
+  beforeAll(() => { restore = __snapshotRegistryForTests(); });
+  afterAll(() => { restore(); });
   beforeEach(() => __resetRegistryForTests());
 
   test("registerCheck + listChecks returns sorted by id", () => {

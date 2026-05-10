@@ -1,9 +1,10 @@
 ---
 id: ARV-16
 title: doctor and coverage suggest different next-steps for same blocker
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 07:13'
+updated_date: '2026-05-10 07:58'
 labels:
   - feedback-loop
   - api-resend

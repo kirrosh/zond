@@ -288,11 +288,40 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       );
     }
 
+    // ARV-15: warn when in-scope endpoints will create/modify real resources.
+    // POST/PUT/PATCH/DELETE on a live API send real traffic — Resend's
+    // `POST /emails` literally sends mail; deleting a record is irreversible.
+    // Generation is harmless (just YAML), but `zond run` against the suite
+    // is not, so the warning fires here so the user sees it before they grep
+    // the output for what to run next.
+    const unsafeOps = endpoints.filter(
+      ep => ep.method !== "GET" && ep.method !== "HEAD" && ep.method !== "OPTIONS",
+    );
+    if (unsafeOps.length > 0) {
+      const byMethod = new Map<string, number>();
+      for (const ep of unsafeOps) {
+        byMethod.set(ep.method, (byMethod.get(ep.method) ?? 0) + 1);
+      }
+      const breakdown = [...byMethod.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([m, n]) => `${n} ${m}`)
+        .join(", ");
+      warnings.push(
+        `${unsafeOps.length} write endpoint(s) in scope (${breakdown}) — \`zond run\` on the resulting *-unsafe.yaml / crud-*.yaml suites will hit the real API. Use --include 'method:GET' for read-only smoke first.`,
+      );
+    }
+
     // Ensure output directory exists
     await mkdir(options.output, { recursive: true });
 
     // Write suite files
-    const createdFiles: Array<{ file: string; suite: string; tests: number }> = [];
+    // ARV-15: tag each created file as safe/unsafe based on suite tags so the
+    // stdout summary can group them and the user can tell at a glance which
+    // suites send writes/deletes vs. read-only smoke.
+    const UNSAFE_TAGS = new Set(["unsafe", "crud", "system", "reset", "cleanup"]);
+    const isUnsafeSuite = (s: typeof suites[number]) =>
+      (s.tags ?? []).some(t => UNSAFE_TAGS.has(t));
+    const createdFiles: Array<{ file: string; suite: string; tests: number; safety: "safe" | "unsafe" }> = [];
     const manifestEntries: RecordInput[] = [];
     const inferredApi = inferApiName(options.output);
 
@@ -302,7 +331,12 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       const filePath = join(options.output, fileName);
       const header = autoGenHeader("zond generate", `zond generate --api <name> --output ${options.output}`);
       await Bun.write(filePath, header + yaml);
-      createdFiles.push({ file: filePath, suite: suite.name, tests: suite.tests.length });
+      createdFiles.push({
+        file: filePath,
+        suite: suite.name,
+        tests: suite.tests.length,
+        safety: isUnsafeSuite(suite) ? "unsafe" : "safe",
+      });
       manifestEntries.push({
         path: filePath,
         by: "zond generate",
@@ -395,8 +429,19 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       }, warnings));
     } else {
       printSuccess(`Generated ${suites.length} suite(s) with ${totalTests} test(s) in ${options.output}`);
-      for (const f of createdFiles) {
-        console.log(`  ${f.file} (${f.tests} tests)`);
+      // ARV-15: split safe vs unsafe so the user can see at a glance which
+      // suites are read-only smoke and which will send writes/deletes.
+      const safeFiles = createdFiles.filter(f => f.safety === "safe");
+      const unsafeFiles = createdFiles.filter(f => f.safety === "unsafe");
+      if (safeFiles.length > 0 && unsafeFiles.length > 0) {
+        console.log(`  Safe (read-only) — ${safeFiles.length} suite(s):`);
+        for (const f of safeFiles) console.log(`    ${f.file} (${f.tests} tests)`);
+        console.log(`  Unsafe (writes/deletes — hit live API) — ${unsafeFiles.length} suite(s):`);
+        for (const f of unsafeFiles) console.log(`    ${f.file} (${f.tests} tests)`);
+      } else {
+        for (const f of createdFiles) {
+          console.log(`  ${f.file} (${f.tests} tests)`);
+        }
       }
       if (warnings.length > 0) {
         for (const w of warnings) {

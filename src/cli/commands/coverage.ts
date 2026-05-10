@@ -193,6 +193,10 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
     // and humans can pick the one they care about.
     console.log(`Pass-coverage (passing 2xx): ${passCount}/${total} endpoints (${passPct}%)${runLabel}`);
     console.log(`Hit-coverage  (any response): ${hitCount}/${total} endpoints (${hitPct}%)`);
+    // ARV-19: explicit gap-disclosure so users running `zond checks run`
+    // alongside don't assume probes contribute. Only `zond run` results
+    // land in the run table that coverage reads from.
+    console.log(`  ${color ? DIM : ""}(source: \`zond run\` results only — \`zond checks run\` probes are not counted)${color ? RESET : ""}`);
     console.log("");
 
     if (passing > 0) {
@@ -430,6 +434,11 @@ export function registerCoverage(program: Command): void {
       "metrics side-by-side (TASK-270):\n" +
       "  pass-coverage  — endpoint had at least one passing 2xx response (strict; what CI usually wants)\n" +
       "  hit-coverage   — endpoint received any response at all, including 5xx and assertion failures (loose; for breadth audits)\n" +
+      "\n" +
+      "Source: only `zond run` results are aggregated (ARV-19). `zond checks " +
+      "run` probes hit the API but are not stored as run results, so they " +
+      "don't move either metric — generate suites with `zond generate` and " +
+      "execute them via `zond run` to grow coverage.\n" +
       "\n" +
       "Defaults to the latest stored run for the resolved API; pass " +
       "--run-id to pin a specific run, or --union <selector> to combine " +

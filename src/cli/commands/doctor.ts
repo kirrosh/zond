@@ -524,7 +524,10 @@ function printHuman(
   if (opts.missingOnly && r.blockedRequired === 0 && r.staleArtifacts.length === 0) {
     out.write(`No missing items. Workspace is ready.\n`);
   } else if (r.blockedRequired > 0) {
-    out.write(`Next: edit ${r.baseDir}/.env.yaml and fill the ${r.blockedRequired} required value${r.blockedRequired === 1 ? "" : "s"}, then re-run \`zond doctor --api ${r.api}\`.\n`);
+    // ARV-16: align with `zond coverage`, which points users at the same
+    // remedy. `prepare-fixtures` auto-seeds from list endpoints; manual edit
+    // is the fallback for fields prepare-fixtures can't infer.
+    out.write(`Next: run \`zond prepare-fixtures --api ${r.api}\` to auto-seed from list endpoints, or edit ${r.baseDir}/.env.yaml and fill the ${r.blockedRequired} required value${r.blockedRequired === 1 ? "" : "s"} manually. Then re-run \`zond doctor --api ${r.api}\`.\n`);
   } else if (r.staleArtifacts.some(s => !s.fresh)) {
     out.write(`Next: artifacts are out of sync — run \`zond refresh-api ${r.api}\`.\n`);
   } else {

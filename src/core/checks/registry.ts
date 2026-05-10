@@ -63,3 +63,16 @@ export function selectChecks(opts: SelectOptions = {}): SelectionResult {
 export function __resetRegistryForTests(): void {
   REGISTRY.clear();
 }
+
+/** Test-only snapshot/restore. Use when a test wants a clean slate but the
+ *  rest of the suite still needs the side-effect-registered built-ins
+ *  (otherwise wiping the registry leaks across files because the modules
+ *  that registered them are already cached and won't re-fire on re-import).
+ */
+export function __snapshotRegistryForTests(): () => void {
+  const saved = new Map(REGISTRY);
+  return () => {
+    REGISTRY.clear();
+    for (const [k, v] of saved) REGISTRY.set(k, v);
+  };
+}

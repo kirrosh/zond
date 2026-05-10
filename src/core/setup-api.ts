@@ -224,6 +224,18 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   let authVarNames: string[] = [];
   if (spec) {
     const doc = await readOpenApiSpec(spec, { insecure: options.insecure });
+    // Validate the document looks like OpenAPI/Swagger before we snapshot it.
+    // dereference() happily round-trips arbitrary JSON (e.g. a marketing-site
+    // landing payload), so without this guard `zond add api foo --spec
+    // https://example.com` silently registers a 0-endpoint API.
+    const docAny = doc as any;
+    const hasOpenApiField = typeof docAny?.openapi === "string";
+    const hasSwaggerField = typeof docAny?.swagger === "string";
+    if (!hasOpenApiField && !hasSwaggerField) {
+      throw new Error(
+        `Spec at ${spec} is not an OpenAPI/Swagger document — missing top-level 'openapi' (3.x) or 'swagger' (2.x) field. Check the URL points to the JSON spec, not the API root.`,
+      );
+    }
     dereferencedDoc = doc;
     openapiSpec = spec;
     if ((doc as any).servers?.[0]?.url) {
@@ -253,6 +265,15 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     const endpoints = extractEndpoints(doc);
     endpointCount = endpoints.length;
     authVarNames = deriveAuthVarNames(extractSecuritySchemes(doc));
+
+    if (endpointCount === 0) {
+      const hasPaths = docAny?.paths && typeof docAny.paths === "object" && Object.keys(docAny.paths).length > 0;
+      warnings.push(
+        hasPaths
+          ? `Spec declares paths but no operations were extracted — every method may be filtered out (deprecated, unsupported method, etc.). Verify with \`zond catalog --api <name>\`.`
+          : `Spec contains 0 endpoints — 'paths' field is empty or missing. generate/probe/checks will produce nothing until the spec is fixed or replaced.`,
+      );
+    }
 
     // Collect unique path parameters. The default is empty string so that
     // generated `skip_if: "{{<id>}} =="` checks auto-skip until the user

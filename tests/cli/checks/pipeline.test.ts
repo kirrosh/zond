@@ -142,6 +142,7 @@ describe("zond checks pipeline (ARV-1)", () => {
       "evidence",
       "message",
       "operation",
+      "recommended_action",
       "request_signature",
       "response_summary",
       "severity",

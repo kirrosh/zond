@@ -1,9 +1,10 @@
 ---
 id: ARV-13
 title: 'add api: warn when spec has 0 endpoints / not OpenAPI'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 07:13'
+updated_date: '2026-05-10 07:58'
 labels:
   - feedback-loop
   - api-resend
