@@ -22,6 +22,7 @@ import { registerSession } from "./commands/session.ts";
 import { registerDoctor } from "./commands/doctor.ts";
 import { registerRefreshApi } from "./commands/refresh-api.ts";
 import { registerAdd } from "./commands/add-api.ts";
+import { registerRemove } from "./commands/remove-api.ts";
 import { registerAudit } from "./commands/audit.ts";
 import { registerReference } from "./commands/reference.ts";
 
@@ -84,6 +85,7 @@ export function buildProgram(): Command {
 
   registerInit(program);
   registerAdd(program);
+  registerRemove(program);
 
   registerDescribe(program);
   registerDb(program);
@@ -112,6 +114,7 @@ export function buildProgram(): Command {
     // setup: register an API, prepare workspace
     "init":         "Setup:",
     "add":          "Setup:",
+    "remove":       "Setup:",
     "use":          "Setup:",
     "refresh-api":  "Setup:",
     "doctor":       "Setup:",
