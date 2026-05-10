@@ -13,9 +13,10 @@
  */
 
 import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
-import { schemeVarName } from "./suite-generator.ts";
+import { schemeVarName, resourceVar } from "./suite-generator.ts";
+import type { ApiResourceMap } from "./resources-builder.ts";
 
-export type FixtureSource = "auth" | "server" | "path" | "header";
+export type FixtureSource = "auth" | "server" | "path" | "header" | "body-fk" | "capture-chain";
 
 export interface FixtureRequirement {
   /** Variable name as referenced via {{var}} in tests. */
@@ -54,6 +55,14 @@ export interface BuildFixturesParams {
   securitySchemes: SecuritySchemeInfo[];
   baseUrl?: string;
   specHash: string;
+  /**
+   * Resource map (CRUD groups + body-FK refs) — when provided, the manifest
+   * also lists body-FK and capture-chain variables that the test generator
+   * will reference. Keeps `.api-fixtures.yaml` in sync with what generated
+   * tests actually consume (per decision-7: manifest = source of truth for
+   * the *list* of variables).
+   */
+  resourceMap?: ApiResourceMap;
 }
 
 export function buildApiFixtureManifest(params: BuildFixturesParams): ApiFixtureManifest {
@@ -164,8 +173,78 @@ export function buildApiFixtureManifest(params: BuildFixturesParams): ApiFixture
     }
   }
 
+  // 5. Body-FK fields — required parent-id fields in request bodies that
+  //    the generator copies from `.env.yaml` (e.g. `audience_id` in
+  //    POST /contacts). Without these in the manifest, prepare-fixtures
+  //    discovers/seeds nothing for them and `zond audit` 422s on first
+  //    nested resource. Walks ALL mutating endpoints (not only full
+  //    CRUD groups) so POST-only resources still surface their FK deps.
+  //    Source precedence: path > body-fk (path-params more constraining).
+  for (const ep of params.endpoints) {
+    const method = ep.method.toUpperCase();
+    if (method !== "POST" && method !== "PUT" && method !== "PATCH") continue;
+    const schema = ep.requestBodySchema as
+      | { properties?: Record<string, unknown>; required?: string[] }
+      | undefined;
+    if (!schema?.properties) continue;
+    const required = new Set(schema.required ?? []);
+    for (const fieldName of Object.keys(schema.properties)) {
+      if (!/_id$|Id$|_uuid$/.test(fieldName)) continue;
+      if (!required.has(fieldName)) continue;
+      const existing = fixtures.get(fieldName);
+      if (existing) {
+        // Already covered (likely as path-param). Keep the existing entry
+        // and just surface the additional affected endpoint.
+        pushAffected(existing, ep);
+        continue;
+      }
+      fixtures.set(fieldName, {
+        name: fieldName,
+        source: "body-fk",
+        description: `Foreign-key id consumed by ${epLabel(ep)} request body. Set to a real id from your account, or leave blank to skip dependent tests.`,
+        affectedEndpoints: [epLabel(ep)],
+        required: true,
+        defaultValue: "",
+      });
+    }
+  }
+
+  // 6. CRUD-chain capture vars — the generator emits `capture: <resource>_id`
+  //    in POST steps and references {{<resource>_id}} downstream. These are
+  //    auto-captured at runtime; surfacing them in the manifest keeps the
+  //    "var in tests but not in manifest" contract intact (per decision-7)
+  //    and lets prepare-fixtures distinguish "captured automatically" from
+  //    "user must fill". required: false — env override is advanced-only.
+  if (params.resourceMap) {
+    for (const r of params.resourceMap.resources) {
+      if (!r.endpoints.create) continue;
+      const captureName = resourceVar(r.resource, "id");
+      if (fixtures.has(captureName)) continue;
+      const description = `Captured automatically from ${r.endpoints.create} response (field "${r.captureField}") and used in downstream CRUD steps. Set in .env.yaml only to override the captured value.`;
+      const affectedFromGroup = Object.entries(r.endpoints)
+        .filter(([k]) => k !== "list" && k !== "create")
+        .map(([, v]) => v as string);
+      const req: FixtureRequirement = {
+        name: captureName,
+        source: "capture-chain",
+        description,
+        affectedEndpoints: affectedFromGroup.slice(0, 10),
+        required: false,
+        defaultValue: "",
+      };
+      fixtures.set(captureName, req);
+    }
+  }
+
   const ordered = Array.from(fixtures.values()).sort((a, b) => {
-    const sourceOrder: Record<FixtureSource, number> = { server: 0, auth: 1, header: 2, path: 3 };
+    const sourceOrder: Record<FixtureSource, number> = {
+      server: 0,
+      auth: 1,
+      header: 2,
+      path: 3,
+      "body-fk": 4,
+      "capture-chain": 5,
+    };
     if (sourceOrder[a.source] !== sourceOrder[b.source]) {
       return sourceOrder[a.source] - sourceOrder[b.source];
     }

@@ -3,17 +3,18 @@ id: ARV-45
 title: >-
   fixtures-manifest: builder scans request-body schemas and CRUD-chain
   parent-FKs, not only path-params
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 18:43'
+updated_date: '2026-05-10 19:26'
 labels:
   - m-17
   - fixtures
   - manifest
   - agent-contract
+milestone: m-17
 dependencies: []
 priority: high
-milestone: m-17
 ---
 
 ## Description
