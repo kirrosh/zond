@@ -109,6 +109,10 @@ export const CheckRunSummarySchema = z.object({
     high: z.number().int().nonnegative(),
     critical: z.number().int().nonnegative(),
   }),
+  // ARV-26: per-(check, reason) skip tally — surfaces probe outcomes that
+  // never produced a checkable response (e.g. probe got 4xx, schema only on
+  // 200) so "0 findings" doesn't read as "all green".
+  skipped_outcomes: z.record(z.string(), z.number().int().nonnegative()),
 });
 
 export const ChecksRunDataSchema = z.object({
