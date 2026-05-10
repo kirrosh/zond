@@ -17,7 +17,7 @@ import { probeStaticCommand, resolveStaticClasses } from "./probe-static.ts";
 import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from "./probe-mass-assignment.ts";
 import { probeSecurityCommand } from "./probe-security.ts";
 import { globalJson, resolveSpecArg, resolveApiEnv, resolveApiCollection } from "../resolve.ts";
-import { readCurrentApi } from "../../core/context/current.ts";
+import { getApi } from "../util/api-context.ts";
 import { existsSync } from "fs";
 import { join, dirname } from "node:path";
 import { parsePositiveInt } from "../argv.ts";
@@ -26,24 +26,23 @@ import { loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
 
 /**
- * ARV-33: resolve the active API name for probe subcommands. `--api` is
- * registered both globally (program.ts) and per-subcommand. Commander
- * routes the value to whichever scope reaches it first, so a user typing
- * `zond probe mass-assignment --api resend` ends up with `opts.api =
- * undefined` because the global option grabbed it. Mirror the resolution
- * chain prepare-fixtures / audit / ARV-29 use.
+ * ARV-53: thin wrapper kept for the existing call-sites — the real chain
+ * (local → ancestor → ZOND_API_GLOBAL/ZOND_API/.zond/current-api) lives in
+ * cli/util/api-context.ts. `resolveProbeApi` predates that helper (ARV-33).
  */
 export function resolveProbeApi(
   optsApi: string | undefined,
-  cmd: { parent?: { opts(): { api?: string } } | null } | undefined,
+  cmd: { opts?: () => Record<string, unknown>; parent?: { opts(): Record<string, unknown> } | null } | undefined,
 ): string | undefined {
-  if (typeof optsApi === "string" && optsApi.length > 0) return optsApi;
-  // `probe` umbrella does not declare --api itself, but walk anyway in
-  // case someone adds it later or routing surprises us. Final fallback
-  // (`readCurrentApi`) covers ZOND_API_GLOBAL / ZOND_API / .zond/current-api.
-  const parentApi = cmd?.parent?.opts().api;
-  if (typeof parentApi === "string" && parentApi.length > 0) return parentApi;
-  return readCurrentApi() ?? undefined;
+  // Adapt the loose mock shape used at the old call-sites to CommandLike.
+  if (cmd === undefined) {
+    return getApi(undefined, { api: optsApi });
+  }
+  const adapted = {
+    opts: () => (typeof cmd.opts === "function" ? cmd.opts() : {}),
+    parent: cmd.parent ?? null,
+  };
+  return getApi(adapted, { api: optsApi });
 }
 
 /**

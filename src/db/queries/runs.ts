@@ -44,8 +44,8 @@ function buildRunFilterSQL(filters: RunFilters): { where: string; params: unknow
 export function createRun(opts: CreateRunOpts): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch, collection_id, session_id, tags)
-    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch, $collection_id, $session_id, $tags)
+    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch, collection_id, session_id, tags, run_kind)
+    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch, $collection_id, $session_id, $tags, $run_kind)
   `);
   const result = stmt.run({
     $started_at: opts.started_at,
@@ -56,6 +56,9 @@ export function createRun(opts: CreateRunOpts): number {
     $collection_id: opts.collection_id ?? null,
     $session_id: opts.session_id ?? null,
     $tags: opts.tags && opts.tags.length > 0 ? JSON.stringify(opts.tags) : null,
+    // ARV-55: default 'regular' here too — DB default would also catch it,
+    // but spelling it out keeps INSERTs idempotent and matches the type.
+    $run_kind: opts.run_kind ?? "regular",
   });
   return Number(result.lastInsertRowid);
 }
@@ -74,10 +77,21 @@ function decodeTags(raw: unknown): string[] | null {
   }
 }
 
+function decodeRunKind(raw: unknown): "regular" | "probe" | "check" {
+  // Migration v10 backfills legacy rows; this is a belt-and-suspenders
+  // normaliser for any value SQLite returns from `run_kind`.
+  if (raw === "probe" || raw === "check") return raw;
+  return "regular";
+}
+
 function decodeRunRow(row: unknown): RunRecord | null {
   if (!row || typeof row !== "object") return null;
-  const r = row as Record<string, unknown> & { tags?: unknown };
-  return { ...(r as unknown as RunRecord), tags: decodeTags(r.tags) };
+  const r = row as Record<string, unknown> & { tags?: unknown; run_kind?: unknown };
+  return {
+    ...(r as unknown as RunRecord),
+    tags: decodeTags(r.tags),
+    run_kind: decodeRunKind(r.run_kind),
+  };
 }
 
 export function finalizeRun(runId: number, results: TestRunResult[]): void {

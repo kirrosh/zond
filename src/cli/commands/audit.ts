@@ -30,7 +30,7 @@ import { getDb } from "../../db/schema.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { printSuccess, printWarning, printError } from "../output.ts";
-import { readCurrentApi } from "../../core/context/current.ts";
+import { getApi, MISSING_API_MESSAGE } from "../util/api-context.ts";
 import { jsonOk, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
 
@@ -389,9 +389,10 @@ export function registerAudit(program: Command): void {
     .option("--dry-run", "Print the stage plan without executing anything")
     .option("--force", "Disable mtime-based skip (always regenerate, even if tests/ newer than spec)")
     .action(async (opts, cmd: Command) => {
-      const apiName = (opts.api as string | undefined) ?? cmd.parent?.opts().api ?? readCurrentApi() ?? undefined;
+      // ARV-53.
+      const apiName = getApi(cmd, opts);
       if (!apiName) {
-        printError("--api is required (or set ZOND_API / `zond use <name>`).");
+        printError(MISSING_API_MESSAGE);
         process.exitCode = 2;
         return;
       }

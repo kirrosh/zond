@@ -25,6 +25,7 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
+import { classify } from "../classifier/recommended-action.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { executeRequest } from "../runner/http-client.ts";
 import type { HttpRequest } from "../runner/types.ts";
@@ -636,19 +637,14 @@ async function probeEndpoint(
   return verdict;
 }
 
-/** TASK-294: agent-routable action derived from final severity. */
+/** ARV-56: route through the single classifier instead of carrying the
+ *  severity→action switch inline. */
 function stampRecommendedAction(verdict: EndpointVerdict): void {
-  switch (verdict.severity) {
-    case "high":
-    case "medium":
-    case "inconclusive-5xx":
-      verdict.recommended_action = "report_backend_bug";
-      break;
-    case "inconclusive-baseline":
-      verdict.recommended_action = "fix_fixture";
-      break;
-    // low / ok / skipped → no action
-  }
+  const action = classify({
+    finding_class: "probe:mass_assignment",
+    severity: verdict.severity as Parameters<typeof classify>[0]["severity"],
+  });
+  if (action) verdict.recommended_action = action;
 }
 
 async function tryCleanupBaseline(

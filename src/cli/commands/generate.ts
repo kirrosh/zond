@@ -16,7 +16,7 @@ import {
 } from "../../core/generator/suite-generator.ts";
 import { generateFromSchema, classifyFieldSource } from "../../core/generator/data-factory.ts";
 import { filterByTag, collectTags } from "../../core/generator/chunker.ts";
-import { compileOperationFilter } from "../../core/utils/operation-filter.ts";
+import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
 import { parse } from "../../core/parser/yaml-parser.ts";
 import { printError, printSuccess } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";

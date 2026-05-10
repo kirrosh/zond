@@ -26,7 +26,7 @@ import { discoverCommand } from "./discover.ts";
 import { bootstrapCommand } from "./bootstrap.ts";
 import { loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
-import { readCurrentApi } from "../../core/context/current.ts";
+import { getApi, MISSING_API_MESSAGE } from "../util/api-context.ts";
 
 export function registerPrepareFixtures(program: Command): void {
   program
@@ -54,10 +54,11 @@ export function registerPrepareFixtures(program: Command): void {
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--max-passes <n>", "Cap on cascade passes (default 8; cascade only)", parsePositiveInt("--max-passes"))
     .action(async (opts, cmd: Command) => {
-      // Resolve --api the same way zond run / request / checks-run do.
-      const apiName = (opts.api as string | undefined) ?? cmd.parent?.opts().api ?? readCurrentApi() ?? undefined;
+      // ARV-53: --api resolution lives in cli/util/api-context.ts —
+      // local opt > ancestor opt > ZOND_API_GLOBAL/ZOND_API/.zond/current-api.
+      const apiName = getApi(cmd, opts);
       if (!apiName) {
-        printError("--api is required (or set ZOND_API / `zond use <name>`).");
+        printError(MISSING_API_MESSAGE);
         process.exitCode = 2;
         return;
       }

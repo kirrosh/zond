@@ -368,26 +368,20 @@ async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
 import type { Command } from "commander";
 import { globalJson, resolveApiCollection } from "../resolve.ts";
 import { parseInteger, parsePercentage } from "../argv.ts";
-import { readCurrentApi } from "../../core/context/current.ts";
+import { getApi } from "../util/api-context.ts";
 import { readCurrentSession } from "../../core/context/session.ts";
-import { listRunsBySession, getLatestRunByCollection, getResultsByRunId, findCollectionByNameOrId } from "../../db/queries.ts";
+import { listRunsBySession, getLatestRunByCollection, getRunById, findCollectionByNameOrId } from "../../db/queries.ts";
 
 /**
- * ARV-41: a run that only executed probe suites (everything under
- * apis/<api>/probes/) intentionally hits a small subset of endpoints.
- * Letting it become the default for `zond coverage` produces the
- * apparent regression "47% → 20%" right after a probe-run, masking
- * the prior smoke/CRUD coverage. Conservative — every stored result
- * must live under /probes/ for the run to count as probe-only; mixed
- * runs go untouched.
+ * ARV-55: probe-run classification moved from path-regex heuristic into the
+ * persisted `runs.run_kind` column. Coverage's default loader query already
+ * filters `run_kind = 'regular'`, so this helper is no longer the gate — it
+ * just powers the human-readable warning when the *latest* run (regardless
+ * of kind) happens to be a probe-only one, which still surprises users.
  */
 export function isProbeOnlyRun(runId: number): boolean {
-  const results = getResultsByRunId(runId);
-  if (results.length === 0) return false;
-  return results.every((r) => {
-    const f = r.suite_file ?? "";
-    return /(^|\/)probes(\/|$)/.test(f);
-  });
+  const run = getRunById(runId);
+  return run?.run_kind === "probe";
 }
 
 export type UnionSpec =
@@ -518,7 +512,10 @@ export function registerCoverage(program: Command): void {
     .option("--db <path>", "Path to SQLite database file")
     .option("--verbose", "List not-covered (and partial) endpoints inline — same data as `--json` but human-readable")
     .action(async (opts, cmd: Command) => {
-      const apiFlag = (opts.api as string | undefined) ?? (opts.spec ? undefined : readCurrentApi() ?? undefined);
+      // ARV-53: only walk the --api chain when --spec wasn't provided —
+      // an explicit spec disables the current-API fallback (coverage's
+      // legacy mode supports bare-spec usage).
+      const apiFlag = opts.spec ? (opts.api as string | undefined) : getApi(cmd, opts);
       let apiName: string | undefined;
       let spec: string | undefined = opts.spec;
 
@@ -596,9 +593,14 @@ export function registerCoverage(program: Command): void {
         try {
           const collection = findCollectionByNameOrId(apiName);
           if (collection) {
-            const latest = getLatestRunByCollection(collection.id);
-            if (latest && isProbeOnlyRun(latest.id)) {
-              const hint = `Latest run #${latest.id} only executed probe suites — coverage will look lower than the previous smoke/CRUD run. ` +
+            // ARV-55: peek at the absolute latest run (`runKind: 'any'`).
+            // Coverage's default loader query already skips probe runs
+            // via `run_kind = 'regular'`, so the user won't see a
+            // regression — but if their *most recent* invocation was a
+            // probe-only run, the inline warning keeps it visible.
+            const latest = getLatestRunByCollection(collection.id, { runKind: "any" });
+            if (latest && latest.run_kind === "probe") {
+              const hint = `Latest run #${latest.id} only executed probe suites — coverage falls back to the prior smoke/CRUD run. ` +
                 `For combined coverage, wrap your runs in 'zond session start/end' and pass '--union session' here.`;
               process.stderr.write(`zond: ${hint}\n`);
             }

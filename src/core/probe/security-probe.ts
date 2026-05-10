@@ -14,6 +14,7 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
+import { classify as classifyRecommendedAction } from "../classifier/recommended-action.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
 import { executeRequest } from "../runner/http-client.ts";
@@ -639,11 +640,13 @@ async function restoreOriginal(
   };
 }
 
-/** TASK-294: stamp `recommended_action` on every finding before returning. */
+/** ARV-56: route through the single classifier. */
 function stampAction(f: SecurityFinding): SecurityFinding {
-  if (f.severity === "high" || f.severity === "low") {
-    f.recommended_action = "report_backend_bug";
-  }
+  const action = classifyRecommendedAction({
+    finding_class: "probe:security",
+    severity: f.severity as Parameters<typeof classifyRecommendedAction>[0]["severity"],
+  });
+  if (action) f.recommended_action = action;
   return f;
 }
 
