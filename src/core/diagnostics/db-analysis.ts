@@ -1,7 +1,7 @@
 import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
-import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, clusterEnvIssues, buildEnvIssue, recommendedAction, softDeleteHint, type RecommendedAction, type EnvIssue } from "./failure-hints.ts";
+import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, clusterEnvIssues, buildEnvIssue, recommendedActionForGenerated, isGeneratedTest, softDeleteHint, type RecommendedAction, type EnvIssue } from "./failure-hints.ts";
 import { buildSuggestedFixes, type SuggestedFix } from "./suggested-fixes.ts";
 import { AUTH_PATH_RE } from "../runner/auth-path.ts";
 
@@ -196,7 +196,10 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
         softDeleteHint(r.response_status, r.request_method, parsedBody) ??
         statusHint(r.response_status);
       const failure_type = classifyFailure(r.status, r.response_status);
-      const rec_action = recommendedAction(failure_type, r.response_status);
+      // ARV-42: generator-emitted suites should not route to fix_test_logic —
+      // editing the YAML gets clobbered on the next `zond audit`.
+      const generated = isGeneratedTest(r.provenance, r.suite_file);
+      const rec_action = recommendedActionForGenerated(failure_type, r.response_status, generated);
       const sHint = schemaHint(failure_type, r.response_status);
       return {
         suite_name: r.suite_name,

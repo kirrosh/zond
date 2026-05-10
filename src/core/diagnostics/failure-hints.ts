@@ -49,6 +49,11 @@ export type RecommendedAction =
   /** Add or correct a fixture in .env.yaml — emitted by discover for
    *  miss-* states (TASK-294). */
   | "fix_fixture"
+  /** ARV-42 — generator-emitted suite produced a body the API rejected
+   *  (4xx with validation hint). Editing the YAML is wrong: the next
+   *  `zond generate` would clobber it. Re-run generate (or refine the
+   *  spec/.api-resources hints) instead. */
+  | "regenerate_suite"
   /** ARV-11 — server accepted an invalid request body. Backend should
    *  reject earlier; the test isn't wrong. */
   | "tighten_validation"
@@ -71,6 +76,52 @@ export function recommendedAction(
   // assertion_failed
   if (responseStatus === 401 || responseStatus === 403) return "fix_auth_config";
   return "fix_test_logic";
+}
+
+/**
+ * ARV-42: extended recommender that knows whether the failing test was
+ * emitted by `zond generate`. For generated suites, "fix_test_logic" is
+ * actively misleading — the generated YAML carries the header
+ * "⚠️ Edits will be overwritten on regenerate" and the next `zond audit`
+ * really does clobber manual edits. Branch into the actually-actionable
+ * remediation instead.
+ *
+ *  - 4xx (400/422) → regenerate_suite: the body the generator emitted
+ *    didn't pass validation; either re-run generate (so newer heuristics
+ *    apply, e.g. ARV-38 default-string) or tighten .api-resources hints.
+ *  - 404 → fix_fixture: a path-param resolved to an empty / stale id
+ *    in .env.yaml; `prepare-fixtures --seed` is the correct remedy.
+ *  - everything else → falls back to recommendedAction (auth → 401/403,
+ *    api_error → 5xx, etc.).
+ *
+ * `isGenerated` is the heuristic from db-analysis: provenance.type
+ * "openapi-generated" OR suite_file under apis/<api>/tests/.
+ */
+export function recommendedActionForGenerated(
+  failureType: "api_error" | "assertion_failed" | "network_error",
+  responseStatus: number | null,
+  isGenerated: boolean,
+): RecommendedAction {
+  const base = recommendedAction(failureType, responseStatus);
+  if (!isGenerated) return base;
+  if (base !== "fix_test_logic") return base;
+  if (responseStatus === 404) return "fix_fixture";
+  if (responseStatus === 400 || responseStatus === 422) return "regenerate_suite";
+  return base;
+}
+
+/** ARV-42: classify a failing result row as generator-emitted. The two
+ *  signals are independent — provenance is missing on older runs, while
+ *  suite_file disambiguates against ad-hoc YAMLs the user dropped into
+ *  apis/<api>/tests/ themselves (rare but supported). */
+export function isGeneratedTest(
+  provenance: { type?: string; generator?: string } | null | undefined,
+  suite_file: string | null | undefined,
+): boolean {
+  if (provenance?.type === "openapi-generated") return true;
+  if (provenance?.generator && provenance.generator.toLowerCase().includes("zond")) return true;
+  if (typeof suite_file === "string" && /(^|\/)apis\/[^/]+\/tests\//.test(suite_file)) return true;
+  return false;
 }
 
 export function envCategory(hint: string | undefined): string | null {
