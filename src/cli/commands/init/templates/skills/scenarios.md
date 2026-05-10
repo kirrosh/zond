@@ -12,6 +12,10 @@ allowed-tools: [Read, Write, Edit, Bash(zond *), Bash(bunx zond *), Bash(sqlite3
 
 # zond — Scenario authoring
 
+**Read `zond-base` first** for the workspace artifact model
+(manifest-vs-values rule for `.api-fixtures.yaml` vs `.env.yaml`) and
+cross-cutting iron rules — this skill assumes you know them.
+
 You write **hand-crafted multi-step YAML** that exercises a specific flow,
 runs it, and analyses the result. No autogen, no full audit. Optimised
 for small focused work — bug repro, post-deploy smoke for one flow,

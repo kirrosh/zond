@@ -13,8 +13,11 @@ allowed-tools: [Read, Write, Edit, Bash(zond *), Bash(bunx zond *), Bash(sqlite3
 
 # zond — Full API audit
 
-CLI-only skill. The lighter sibling `zond-scenarios` covers single-flow
-work; this one does breadth: autogen, smoke, probes, coverage, reports.
+CLI-only skill. **Read `zond-base` first** for the workspace artifact
+model (manifest-vs-values rule), cross-cutting iron rules, and secrets
+policy — this skill assumes you know them. The lighter sibling
+`zond-scenarios` covers single-flow work; this one does breadth:
+autogen, smoke, probes, coverage, reports.
 
 Run `zond --version` first; if missing:
 `curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh`.

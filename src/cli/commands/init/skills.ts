@@ -5,6 +5,7 @@ import zondSkill from "./templates/skills/zond.md" with { type: "text" };
 import scenariosSkill from "./templates/skills/scenarios.md" with { type: "text" };
 import checksSkill from "./templates/skills/zond-checks.md" with { type: "text" };
 import triageSkill from "./templates/skills/zond-triage.md" with { type: "text" };
+import baseSkill from "./templates/skills/zond-base.md" with { type: "text" };
 
 export interface SkillResult {
   name: string;
@@ -18,15 +19,13 @@ interface SkillTemplate {
 }
 
 const SKILLS: SkillTemplate[] = [
+  // Foundation: workspace contract + manifest-vs-values rule + cross-cutting
+  // iron rules + sub-skill router. Auto-loads when the user mentions any
+  // workspace artefact; siblings extend it without duplicating its rules.
+  { name: "zond-base", body: baseSkill },
   { name: "zond", body: zondSkill },
   { name: "zond-scenarios", body: scenariosSkill },
-  // ARV-12 (m-15): depth-checks skill ships with a per-check
-  // recommended_action triage table so agents route on the closed
-  // enum instead of parsing finding messages.
   { name: "zond-checks", body: checksSkill },
-  // Last-run triage skill — referenced from CLI hints, ZOND.md and
-  // docs since TASK-294. Was orphan-template until m-15 cleanup;
-  // ships under .claude/skills/ on `zond init` now.
   { name: "zond-triage", body: triageSkill },
 ];
 
