@@ -370,7 +370,25 @@ import { globalJson, resolveApiCollection } from "../resolve.ts";
 import { parseInteger, parsePercentage } from "../argv.ts";
 import { readCurrentApi } from "../../core/context/current.ts";
 import { readCurrentSession } from "../../core/context/session.ts";
-import { listRunsBySession } from "../../db/queries.ts";
+import { listRunsBySession, getLatestRunByCollection, getResultsByRunId, findCollectionByNameOrId } from "../../db/queries.ts";
+
+/**
+ * ARV-41: a run that only executed probe suites (everything under
+ * apis/<api>/probes/) intentionally hits a small subset of endpoints.
+ * Letting it become the default for `zond coverage` produces the
+ * apparent regression "47% → 20%" right after a probe-run, masking
+ * the prior smoke/CRUD coverage. Conservative — every stored result
+ * must live under /probes/ for the run to count as probe-only; mixed
+ * runs go untouched.
+ */
+export function isProbeOnlyRun(runId: number): boolean {
+  const results = getResultsByRunId(runId);
+  if (results.length === 0) return false;
+  return results.every((r) => {
+    const f = r.suite_file ?? "";
+    return /(^|\/)probes(\/|$)/.test(f);
+  });
+}
 
 export type UnionSpec =
   | { kind: "session" }
@@ -572,6 +590,20 @@ export function registerCoverage(program: Command): void {
             process.stderr.write(`zond: ${hint}\n`);
           }
         }
+        // ARV-41: warn when the latest run is probe-only — otherwise
+        // `zond coverage` right after `zond run apis/<api>/probes/...`
+        // looks like a regression vs the prior smoke/CRUD run.
+        try {
+          const collection = findCollectionByNameOrId(apiName);
+          if (collection) {
+            const latest = getLatestRunByCollection(collection.id);
+            if (latest && isProbeOnlyRun(latest.id)) {
+              const hint = `Latest run #${latest.id} only executed probe suites — coverage will look lower than the previous smoke/CRUD run. ` +
+                `For combined coverage, wrap your runs in 'zond session start/end' and pass '--union session' here.`;
+              process.stderr.write(`zond: ${hint}\n`);
+            }
+          }
+        } catch { /* DB inspection is best-effort, don't break coverage */ }
       }
 
       process.exitCode = await coverageCommand({
