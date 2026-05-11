@@ -8,11 +8,11 @@
  * dispatch through this command.
  */
 
-import { generateNegativeProbes } from "../../core/probe/negative-probe.ts";
-import { generateMethodProbes } from "../../core/probe/method-probe.ts";
-import { loadSpecForProbe, writeProbeSuites } from "../../core/probe/runner.ts";
-import { printError, printSuccess, printWarning } from "../output.ts";
-import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
+import { generateNegativeProbes } from "../../../core/probe/negative-probe.ts";
+import { generateMethodProbes } from "../../../core/probe/method-probe.ts";
+import { loadSpecForProbe, writeProbeSuites } from "../../../core/probe/runner.ts";
+import { printError, printSuccess, printWarning } from "../../output.ts";
+import { jsonOk, jsonError, printJson } from "../../json-envelope.ts";
 
 export type ProbeStaticClass = "validation" | "methods";
 const ALL_CLASSES: ProbeStaticClass[] = ["validation", "methods"];

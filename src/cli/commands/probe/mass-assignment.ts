@@ -1,24 +1,24 @@
 import { join } from "path";
 import { mkdir, writeFile } from "fs/promises";
-import { loadEnvironment, loadEnvFile } from "../../core/parser/variables.ts";
+import { loadEnvironment, loadEnvFile } from "../../../core/parser/variables.ts";
 import {
   runMassAssignmentProbes,
   formatDigestMarkdown,
   emitRegressionSuites,
-} from "../../core/probe/mass-assignment-probe.ts";
-import { loadSpecForProbe, writeProbeSuites } from "../../core/probe/runner.ts";
-import { printError, printSuccess, printWarning } from "../output.ts";
-import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
-import { getSecretRegistry } from "../../core/secrets/registry.ts";
-import { applySanitizer } from "../../core/exporter/exporter.ts";
-import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
-import { tallyBySeverity, formatSummaryLine } from "../../core/probe/verdict-aggregator.ts";
-import { printMutationBanner, countCleanupFailures } from "../../core/probe/shared.ts";
-import { MassAssignmentProbe } from "../../core/probe/mass-assignment-probe-class.ts";
-import { summarizeDryRun, formatDryRunDigest } from "../../core/probe/dry-run-envelope.ts";
-import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
-import type { EndpointVerdict, MassAssignmentResult } from "../../core/probe/mass-assignment-probe.ts";
-import type { ProbeEndpointResult, ProbeEndpointStatus, ProbeFindingSeverity } from "../../core/probe/types.ts";
+} from "../../../core/probe/mass-assignment-probe.ts";
+import { loadSpecForProbe, writeProbeSuites } from "../../../core/probe/runner.ts";
+import { printError, printSuccess, printWarning } from "../../output.ts";
+import { jsonOk, jsonError, printJson } from "../../json-envelope.ts";
+import { getSecretRegistry } from "../../../core/secrets/registry.ts";
+import { applySanitizer } from "../../../core/exporter/exporter.ts";
+import { rotateOutputTarget } from "../../../core/workspace/output-rotation.ts";
+import { tallyBySeverity, formatSummaryLine } from "../../../core/probe/verdict-aggregator.ts";
+import { printMutationBanner, countCleanupFailures } from "../../../core/probe/shared.ts";
+import { MassAssignmentProbe } from "../../../core/probe/mass-assignment-probe-class.ts";
+import { summarizeDryRun, formatDryRunDigest } from "../../../core/probe/dry-run-envelope.ts";
+import { compileOperationFilter } from "../../../core/selectors/operation-filter.ts";
+import type { EndpointVerdict, MassAssignmentResult } from "../../../core/probe/mass-assignment-probe.ts";
+import type { ProbeEndpointResult, ProbeEndpointStatus, ProbeFindingSeverity } from "../../../core/probe/types.ts";
 
 interface BucketCounts {
   high: number;
@@ -287,7 +287,7 @@ export async function probeMassAssignmentCommand(
 // TASK-146: --emit-template short-circuit
 // ──────────────────────────────────────────────
 
-import { buildMassAssignmentTemplate } from "../../core/probe/mass-assignment-template.ts";
+import { buildMassAssignmentTemplate } from "../../../core/probe/mass-assignment-template.ts";
 
 export interface EmitTemplateCliOptions {
   specPath: string;

@@ -1,25 +1,25 @@
 import { join } from "path";
 import { mkdir, writeFile } from "fs/promises";
-import { loadEnvironment, loadEnvFile } from "../../core/parser/variables.ts";
+import { loadEnvironment, loadEnvFile } from "../../../core/parser/variables.ts";
 import {
   runSecurityProbes,
   formatSecurityDigest,
   emitSecurityRegressionSuites,
   SECURITY_CLASSES,
   type SecurityClass,
-} from "../../core/probe/security-probe.ts";
-import { loadSpecForProbe, writeProbeSuites } from "../../core/probe/runner.ts";
-import { printError, printSuccess, printWarning } from "../output.ts";
-import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
-import { getSecretRegistry } from "../../core/secrets/registry.ts";
-import { applySanitizer } from "../../core/exporter/exporter.ts";
-import { rotateOutputTarget } from "../../core/workspace/output-rotation.ts";
-import { tallyBySeverity, formatSummaryLine } from "../../core/probe/verdict-aggregator.ts";
-import { printMutationBanner, countCleanupFailures } from "../../core/probe/shared.ts";
-import { persistVerdictsAsOrphans } from "../../core/probe/orphan-tracker.ts";
-import { SecurityProbe } from "../../core/probe/security-probe-class.ts";
-import { summarizeDryRun } from "../../core/probe/dry-run-envelope.ts";
-import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
+} from "../../../core/probe/security-probe.ts";
+import { loadSpecForProbe, writeProbeSuites } from "../../../core/probe/runner.ts";
+import { printError, printSuccess, printWarning } from "../../output.ts";
+import { jsonOk, jsonError, printJson } from "../../json-envelope.ts";
+import { getSecretRegistry } from "../../../core/secrets/registry.ts";
+import { applySanitizer } from "../../../core/exporter/exporter.ts";
+import { rotateOutputTarget } from "../../../core/workspace/output-rotation.ts";
+import { tallyBySeverity, formatSummaryLine } from "../../../core/probe/verdict-aggregator.ts";
+import { printMutationBanner, countCleanupFailures } from "../../../core/probe/shared.ts";
+import { persistVerdictsAsOrphans } from "../../../core/probe/orphan-tracker.ts";
+import { SecurityProbe } from "../../../core/probe/security-probe-class.ts";
+import { summarizeDryRun } from "../../../core/probe/dry-run-envelope.ts";
+import { compileOperationFilter } from "../../../core/selectors/operation-filter.ts";
 
 interface Buckets {
   high: number;
@@ -185,7 +185,7 @@ export async function probeSecurityCommand(
       if (options.json) {
         printJson(jsonOk("probe-security", data));
       } else {
-        const { formatDryRunDigest } = await import("../../core/probe/dry-run-envelope.ts");
+        const { formatDryRunDigest } = await import("../../../core/probe/dry-run-envelope.ts");
         console.log(formatDryRunDigest(plan));
       }
       return 0;
@@ -355,8 +355,8 @@ export async function probeSecurityCommand(
 // SecurityVerdict[] so the live runner keeps emitting its richer
 // internal structure.
 
-import type { SecurityProbeResult, SecurityVerdict } from "../../core/probe/security-probe.ts";
-import type { ProbeEndpointResult, ProbeEndpointStatus, ProbeFindingSeverity } from "../../core/probe/types.ts";
+import type { SecurityProbeResult, SecurityVerdict } from "../../../core/probe/security-probe.ts";
+import type { ProbeEndpointResult, ProbeEndpointStatus, ProbeFindingSeverity } from "../../../core/probe/types.ts";
 
 function statusFromSeverity(s: SecurityVerdict["severity"]): ProbeEndpointStatus {
   if (s === "high") return "high";
