@@ -9,8 +9,8 @@
  *   queries/types.ts        — shared interfaces, normalizePath
  *   queries/runs.ts         — createRun, listRuns, finalizeRun, …
  *   queries/sessions.ts     — listSessions, countSessions, …
- *   queries/results.ts      — saveResults, getResultById, …
- *   queries/collections.ts  — collections CRUD + getLatestRunForSuite
+ *   queries/results.ts      — saveResults, getResultsByRunId, …
+ *   queries/collections.ts  — collections CRUD
  *   queries/dashboard.ts    — getDashboardStats, getPassRateTrend, …
  *   queries/settings.ts     — kv settings (currently dormant)
  *   queries/coverage.ts     — reserved (future coverage queries)
@@ -31,7 +31,6 @@ export {
   type PassRateTrendPoint,
   type SlowestTest,
   type FlakyTest,
-  type LastRunForSuite,
 } from "./queries/types.ts";
 
 export {
@@ -50,7 +49,6 @@ export { listSessions, countSessions, listRunsBySession } from "./queries/sessio
 
 export {
   saveResults,
-  getResultById,
   getResultsByRunId,
   getFilteredResults,
 } from "./queries/results.ts";
@@ -64,7 +62,6 @@ export {
   deleteCollection,
   findCollectionByTestPath,
   findCollectionByNameOrId,
-  getLatestRunForSuite,
 } from "./queries/collections.ts";
 
 export {

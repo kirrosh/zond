@@ -56,14 +56,6 @@ export function listStatefulChecks(): StatefulCheck[] {
   return [...STATEFUL_REGISTRY.values()].sort((a, b) => a.id.localeCompare(b.id));
 }
 
-export function getStatefulCheck(id: string): StatefulCheck | undefined {
-  return STATEFUL_REGISTRY.get(id);
-}
-
-export function __resetStatefulRegistryForTests(): void {
-  STATEFUL_REGISTRY.clear();
-}
-
 export function makeHarness(
   baseUrl: string,
   doc: OpenAPIV3.Document,
