@@ -127,10 +127,39 @@ export function hasUnverifiableMutations(c: CheckCase): GuardSkip | null {
   return null;
 }
 
+/**
+ * Guard #4 — `_coverage_phase_boundary_positive`.
+ * `--phase coverage` enumerates boundary values across the body schema:
+ *   - shortest/longest string, min/max int, every enum option, ...
+ * Those bodies are JSON-Schema-valid but semantically synthetic — they
+ * sit on the contract edge. Real APIs reject them with 422 for reasons
+ * that have nothing to do with the contract:
+ *   - "from" email must be on a verified-sending-domain,
+ *   - "broadcast.from_audience_id" must exist on this tenant,
+ *   - rate-limited resource (Resend plan_limit).
+ * Treating each one as `positive_data_acceptance` fail floods the report
+ * (171/349 findings on Resend round-03) and drowns real depth signal.
+ * Skip when the case is a coverage-phase positive — keep the
+ * examples-phase positive (one realistic baseline body) as the strict
+ * signal.
+ *
+ * Source: feedback round-03 F20 / ARV-77.
+ */
+export function coveragePhaseBoundaryPositive(c: CheckCase): GuardSkip | null {
+  const meta = c.meta as { phase?: string } | undefined;
+  if (!meta || meta.phase !== "coverage") return null;
+  if (c.kind !== "positive") return null;
+  return {
+    guard: "_coverage_phase_boundary_positive",
+    reason: "boundary-positive bodies are synthetic — server may reject for semantic reasons unrelated to the contract",
+  };
+}
+
 export const ALL_GUARDS = [
   bodyNegationBecomesValidAfterSerialization,
   stringTypeMutationBecomesValidAfterSerialization,
   hasUnverifiableMutations,
+  coveragePhaseBoundaryPositive,
 ] as const;
 
 /** Run every guard; return the first skip reason or null. */
