@@ -877,7 +877,7 @@ Typical chain after a green YAML smoke:
 ```bash
 zond checks run --api <name> --workers auto --rate-limit 50 \
   --report sarif --output zond.sarif        # GitHub Security tab
-zond checks run --api <name> --ndjson | \
+zond checks run --api <name> --report ndjson | \
   jq -c 'select(.type=="finding")'           # live agent pipeline
 ```
 

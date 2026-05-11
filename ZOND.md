@@ -291,7 +291,7 @@ zond checks run --api myapi --mode negative                   # ARV-7: malicious
 zond checks run --api myapi --report sarif --output zond.sarif # ARV-5: GitHub Code Scanning
 zond checks run --api myapi --workers auto                    # ARV-8: pool over operations (min(cpus, 8))
 zond checks run --api myapi --workers 8 --rate-limit 50       # ARV-8: 8 workers, global 50 RPS budget
-zond checks run --api myapi --ndjson | jq -c '.'              # ARV-10: stream events (one JSON per line)
+zond checks run --api myapi --report ndjson | jq -c '.'       # ARV-10/118: stream events (one JSON per line)
 zond checks list                                              # show the registered catalog
 ```
 
@@ -309,7 +309,7 @@ Flag cheat-sheet:
 | `--bootstrap-cleanup-failed` | Skip stateful security checks with a warning when bootstrap-cleanup couldn't be confirmed (avoids FP on stale data). |
 | `--workers <n\|auto>` | ARV-8: bounded async-pool concurrency at the *operation* level (cases inside one op stay sequential — CRUD chains rely on it). `auto` = `min(cpus, 8)`; numeric is clamped to `[1, 64]`. Default `1` = pre-ARV-8 sequential behaviour. |
 | `--rate-limit <rps\|auto>` | ARV-8: global RPS budget across the worker pool. `auto` = adaptive limiter that paces from `RateLimit-*` response headers (RFC 9568). Combine with `--workers` so N workers never exceed `<rps>`. |
-| `--ndjson` | ARV-10: stream events as NDJSON on stdout (one JSON object per line — types `check_start`, `check_result`, `finding`, `summary`). Schema published at `docs/json-schema/ndjson-events.schema.json`. Mutually exclusive with `--json` and `--report`. Stderr carries the human-readable summary line; stdout stays a clean stream for `\| jq` / ajv. |
+| `--report ndjson` | ARV-10/118: stream events as NDJSON on stdout (one JSON object per line — types `check_start`, `check_result`, `finding`, `summary`). Schema published at `docs/json-schema/ndjson-events.schema.json`. Combine with `--output <path>` to redirect the stream to a file. Stderr carries the human-readable summary line; stdout stays a clean stream for `\| jq` / ajv. |
 
 Each finding carries an ARV-11 closed-enum `recommended_action` so an
 agent can route on it without parsing free-form messages:

@@ -7,10 +7,13 @@
  * from a previous session and analysed it as if it were the current
  * Sentry output.
  *
- * The fix opens an fd up front when `ndjson && opts.output` and pipes
- * events into the file instead of stdout. Re-running with the same path
- * truncates (matches the SARIF branch). This file pins both behaviours
- * and the human "written to" line on stderr.
+ * ARV-118 (m-19) replaced the alias rewrite with a typed OutputSpec —
+ * `--report ndjson --output <path>` is now resolved up-front to
+ * `{ format: "ndjson", channel: "file", path: <abs> }`, and the legacy
+ * `--ndjson` boolean is gone (`--report ndjson` is the only spelling).
+ * Re-running with the same path truncates (matches the SARIF branch).
+ * This file pins both behaviours and the human "written to" line on
+ * stderr.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, existsSync } from "node:fs";
@@ -100,16 +103,27 @@ describe("checks run: --report ndjson --output writes to file (ARV-97)", () => {
     }
   });
 
-  test("--ndjson --output <path> (no alias) honours --output too", async () => {
-    const outPath = join(workspace, "alt.ndjson");
-    await runCli([
-      "checks", "run", "--api", "foo", "--check", "not_a_server_error",
-      "--ndjson", "--output", outPath, "--db", dbPath,
-    ]);
-
-    expect(existsSync(outPath)).toBe(true);
-    const text = readFileSync(outPath, "utf-8");
-    expect(text.length).toBeGreaterThan(0);
+  test("ARV-118: the legacy --ndjson flag was removed; --report ndjson is the only spelling", async () => {
+    const outPath = join(workspace, "legacy.ndjson");
+    // Commander rejects unknown options by throwing CommanderError; the
+    // captureOutput wrapper would re-throw it. Catch here so we can assert
+    // both the error message and that nothing leaked to the filesystem.
+    const cap = captureOutput();
+    const program = buildProgram();
+    let thrown: unknown;
+    try {
+      await program.parseAsync(preprocessArgv([
+        "bun", "zond", "checks", "run", "--api", "foo", "--check", "not_a_server_error",
+        "--ndjson", "--output", outPath, "--db", dbPath,
+      ]));
+    } catch (err) {
+      thrown = err;
+    }
+    cap.restore();
+    const msg = thrown instanceof Error ? thrown.message : String(thrown ?? "");
+    expect(msg).toContain("unknown option");
+    expect(msg).toContain("--ndjson");
+    expect(existsSync(outPath)).toBe(false);
   });
 
   test("re-running with the same --output truncates instead of appending", async () => {
