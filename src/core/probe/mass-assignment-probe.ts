@@ -698,7 +698,15 @@ function inconclusiveBaselineSummary(
 ): string {
   const hint = extractBaselineHint(body);
   const base = `baseline body invalid — server returned ${status}`;
-  const tail = " — fix fixture / FK value / path-params and re-probe";
+  // ARV-104 (F9): when status is 403 and the response body explicitly
+  // says the endpoint is subscription/scope-gated (paid plan, feature
+  // flag, role/scope insufficient), the right answer isn't "fix fixture"
+  // — there's nothing to fix. Swap the tail so triage agents stop
+  // crank-turning fixture edits on the 46-endpoint Sentry slice.
+  const subscriptionGated = status === 403 && hint !== undefined && isSubscriptionGated(hint);
+  const tail = subscriptionGated
+    ? " — endpoint is env/subscription-gated (paid plan, role/scope, feature flag); not a fixture issue — wontfix unless scope changes"
+    : " — fix fixture / FK value / path-params and re-probe";
   // TASK-137: if body-FK auto-discovery couldn't fill required FK fields, name
   // them in the summary so the user knows exactly what to add to env (or
   // why discover-fk missed — e.g. nested list endpoint, 403 from scope).
@@ -710,6 +718,29 @@ function inconclusiveBaselineSummary(
   return hint
     ? `${base} (${hint})${fkClause}${tail}`
     : `${base}${fkClause}${tail}`;
+}
+
+/** ARV-104 (F9): pattern-match the server's 403 message against known
+ *  subscription/scope phrases. Lower-cased, anchored on full-word
+ *  fragments to avoid false positives — `paid plan`, `subscription
+ *  required`, `not available on your plan`, `requires .* scope`,
+ *  `feature is not enabled`, `org-level` membership refusals. */
+const SUBSCRIPTION_GATED_PATTERNS: RegExp[] = [
+  /\bpaid plan\b/i,
+  /\bsubscription (?:required|needed)\b/i,
+  /\bnot (?:available|enabled) (?:on|for) your\b/i,
+  /\bplan (?:does not include|doesn['']?t include)\b/i,
+  /\brequires? (?:the )?[\w:-]+ scope\b/i,
+  /\bmissing (?:the )?[\w:-]+ scope\b/i,
+  /\bfeature (?:is )?(?:not enabled|disabled|not available)\b/i,
+  /\binsufficient (?:permissions?|scope)\b/i,
+];
+
+export function isSubscriptionGated(message: string): boolean {
+  for (const re of SUBSCRIPTION_GATED_PATTERNS) {
+    if (re.test(message)) return true;
+  }
+  return false;
 }
 
 function extractBaselineHint(body: unknown): string | undefined {
