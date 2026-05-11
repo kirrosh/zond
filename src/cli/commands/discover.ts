@@ -927,6 +927,10 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
   }
 }
 
-// CLI registration moved to ./prepare-fixtures.ts (TASK-299, m-13 D).
-// `discoverCommand` above is still the imperative core for the
-// single-pass branch and is consumed directly by tests.
+// ARV-130 (m-19): file kept on purpose. CLI registration is owned by
+// ./prepare-fixtures.ts (TASK-299, m-13 D); the `discoverCommand` core
+// above is consumed both by that wrapper and by direct unit tests
+// (`tests/cli/discover*.test.ts`). It is NOT a deprecated alias for a
+// top-level `zond discover` command — that command does not exist and
+// has never been registered in `src/cli/program.ts`. See the m-19
+// audit note in backlog/tasks/arv-130.

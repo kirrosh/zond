@@ -3,9 +3,10 @@ id: ARV-116
 title: >-
   output: introduce core/output OutputSpec — single typed channel for
   --report/--output/--json across all commands
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 10:12'
+updated_date: '2026-05-11 10:22'
 labels:
   - m-19
   - refactor
@@ -31,8 +32,8 @@ Lesson §E (strategy/lessons.md): 7 багов о `--report`/`--output`/`--json`
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 core/output/types.ts с OutputSpec interface
-- [ ] #2 core/output/run.ts с runCommandWithOutput() helper
-- [ ] #3 tests/core/output/*.test.ts покрывает 6 правил matrix'а (format × channel × envelope-wrap)
-- [ ] #4 Документация в src/core/output/README.md — таблица всех допустимых (format, channel, envelopeWrap) комбинаций
+- [x] #1 core/output/types.ts с OutputSpec interface
+- [x] #2 core/output/run.ts с runCommandWithOutput() helper
+- [x] #3 tests/core/output/*.test.ts покрывает 6 правил matrix'а (format × channel × envelope-wrap)
+- [x] #4 Документация в src/core/output/README.md — таблица всех допустимых (format, channel, envelopeWrap) комбинаций
 <!-- AC:END -->
