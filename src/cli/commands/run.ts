@@ -89,6 +89,11 @@ export interface RunOptions {
   learnTarget?: "test" | "drifts";
   /** TASK-265: console reporter emits only the grand-total summary line. */
   quiet?: boolean;
+  /** ARV-72 (feedback round-02 / F14): default true. Set to false (via
+   *  --no-fail-on-failures) to keep exit code 0 even when steps failed —
+   *  useful for advisory runs (audit pre-pass, surface discovery) where
+   *  CI shouldn't break on a single test red. */
+  failOnFailures?: boolean;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -625,6 +630,22 @@ export async function runCommand(options: RunOptions): Promise<number> {
     printJson(jsonOk("run", { summary: { total, passed, failed, fiveXx }, failures, warnings, runId: savedRunId }));
   }
 
+  // ARV-72 (feedback round-02 / F14): make the exit-code → failures
+  // mapping visible. Tester reported "545 failed, exit_code=0" which is
+  // not what this function returns — but the symptom is real: the reader
+  // can't tell whether the surrounding shell or a wrapper script swallowed
+  // the non-zero exit. Print a one-line tail to stderr that names the
+  // exit code so wrapper scripts that hide it become obvious. Skipped in
+  // --json so the JSON envelope stays alone on stdout (this is stderr
+  // anyway, but skip avoids confusing parsers that capture both streams).
+  if (hasFailures && !options.json) {
+    const total = results.reduce((s, r) => s + r.failed, 0);
+    process.stderr.write(`zond: ${total} test step(s) failed — exiting with code 1 (pass --no-fail-on-failures to suppress, e.g. for advisory runs).\n`);
+  }
+
+  if (hasFailures && options.failOnFailures === false) {
+    return 0;
+  }
   return hasFailures ? 1 : 0;
 }
 
@@ -799,6 +820,10 @@ export function registerRun(program: Command): void {
       parseNonNegativeInt("--retry-on-network"),
       1,
     )
+    .option(
+      "--no-fail-on-failures",
+      "ARV-72: keep exit code 0 even when steps failed (advisory runs). Default: exit 1 on any failure. The stderr tail still names the count for visibility.",
+    )
     .action(async (pathArgs: string[] | undefined, opts, cmd: Command) => {
       let paths = pathArgs ?? [];
       // ARV-53: explicit paths or --all suppress the current-API fallback —
@@ -873,6 +898,7 @@ export function registerRun(program: Command): void {
         strictVars: opts.strictVars === true,
         dryRun: opts.dryRun === true,
         quiet: opts.quiet === true,
+        failOnFailures: opts.failOnFailures !== false,
         reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
         validateSchema: opts.validateSchema === true,
         specPath: typeof opts.spec === "string" ? opts.spec : undefined,
