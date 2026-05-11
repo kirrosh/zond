@@ -538,10 +538,10 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
             } else {
               const owner = findOwnerResourceForSeed(t.varName, resourceMap.resources);
               if (!owner) {
-                reason = `no .api-resources.yaml owner produces ${t.varName} — --seed cannot help (extend .api-resources.yaml or create the resource yourself).`;
+                reason = `no .api-resources.yaml owner produces ${t.varName} — --seed cannot help. Either extend .api-resources.local.yaml (ARV-111: user-maintained sibling that survives refresh-api) or harvest the id by hand into .env.yaml.`;
                 status = "failed:miss-empty-no-seed-owner";
               } else if (!owner.endpoints?.create) {
-                reason = `owner resource '${owner.resource}' has no create endpoint in spec — --seed cannot help (resource likely write-only via SDK). Create the resource yourself.`;
+                reason = `owner resource '${owner.resource}' has no create endpoint in spec — --seed cannot help (resource likely write-only / SDK-only). Either extend .api-resources.local.yaml with a custom create endpoint (ARV-111) or harvest the id by hand into .env.yaml.`;
                 status = "failed:miss-empty-no-seed-endpoint";
               }
               // Else: owner has a create endpoint but no attempt landed in

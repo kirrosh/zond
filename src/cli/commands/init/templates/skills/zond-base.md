@@ -135,9 +135,42 @@ OpenAPI spec doesn't describe that route at all. Common examples:
    directly — see `feedback_env_yaml_editable` memory: `.env.yaml`
    holds **only values**, never secrets, so editing it is the
    sanctioned workaround.
-3. When ARV-111 lands, the manual harvest will be replaced by
-   `zond api extend <api>` (CLI to register custom endpoints alongside
-   the spec, surviving `refresh-api`).
+3. **Persistent registration of custom endpoints** (ARV-111). When a
+   write-only resource is needed across multiple runs, declare it in
+   `apis/<name>/.api-resources.local.yaml` — a sibling file that survives
+   `refresh-api`. Merged into the main resource map at read time;
+   extensions with the same `resource` name override the spec-derived
+   entry, which is how you teach `prepare-fixtures` about a create
+   endpoint missing from OpenAPI. Schema (top-level `extensions:` array,
+   each entry is a partial `ResourceYaml`):
+
+   ```yaml
+   # apis/<name>/.api-resources.local.yaml
+   # Survives `zond refresh-api`. Add resources/endpoints not in OpenAPI.
+   extensions:
+     - resource: sentry-events
+       basePath: /api/{project_id}/store
+       itemPath: /api/{project_id}/store
+       idParam: id
+       captureField: id
+       hasFullCrud: false
+       endpoints:
+         create: POST /api/{project_id}/store/
+       fkDependencies:
+         - var: project_id
+           param: project_id
+           in: path
+           ownerResource: projects
+   ```
+
+   Note (ARV-111 MVP): merge-only landed. The extension surfaces in the
+   resource map and unblocks downstream tooling that consumes it, but
+   `prepare-fixtures --seed` still requires the spec to carry the
+   request-body schema for the create endpoint — so for true write-only
+   ingest (Sentry's `/store/` with a free-form event payload), the
+   `zond request` harvest + `.env.yaml` edit remains the workflow. A
+   follow-up will extend the local file with an inline `requestBodyTemplate`
+   so `--seed` can call the extension directly.
 
 **Known dead-ends — do NOT add to the backlog:**
 
