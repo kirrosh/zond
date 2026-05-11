@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-05-11 06:50'
-updated_date: '2026-05-11 06:55'
+updated_date: '2026-05-11 07:34'
 labels:
   - feedback-loop
   - api-resend
@@ -28,3 +28,9 @@ Source: feedback round 01, finding F3, class definitely_bug. Repro: zond probe s
 - [x] #3 regression test: tab and \x00/\x7f are emitted as escaped sequences and survive round-trip
 - [x] #4 existing serializer test suite still passes (no regression for non-control payloads)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+round-03/F19 confirmed open against round-01 binary; fix landed before tester re-tested. Round-04 verify (V-F3) shows 3/3 yaml files parse cleanly.
+<!-- SECTION:NOTES:END -->
