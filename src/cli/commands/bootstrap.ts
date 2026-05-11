@@ -657,6 +657,9 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
   }
 }
 
-// CLI registration moved to ./prepare-fixtures.ts (TASK-299, m-13 D).
-// `bootstrapCommand` above is still the imperative core for the
-// cascade branch and is consumed directly by tests.
+// ARV-130 (m-19): file kept on purpose. CLI registration is owned by
+// ./prepare-fixtures.ts (TASK-299, m-13 D); `bootstrapCommand` above is
+// consumed both by that wrapper and by direct unit tests
+// (`tests/cli/bootstrap.test.ts`). Not to be confused with
+// `./init/bootstrap.ts` — a different module that scaffolds a fresh
+// workspace. See the m-19 audit note in backlog/tasks/arv-130.

@@ -1,9 +1,10 @@
 ---
 id: ARV-123
 title: 'anti-fp: core/anti-fp registry — FpRule interface + applyAntiFp() helper'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 10:14'
+updated_date: '2026-05-11 10:22'
 labels:
   - m-19
   - refactor
@@ -29,8 +30,8 @@ src/core/anti-fp/:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 core/anti-fp/types.ts с FpRule interface
-- [ ] #2 core/anti-fp/registry.ts с register/get/list
-- [ ] #3 core/anti-fp/index.ts с applyAntiFp() helper
-- [ ] #4 tests/core/anti-fp/registry.test.ts — register/dedup/scope-filter
+- [x] #1 core/anti-fp/types.ts с FpRule interface
+- [x] #2 core/anti-fp/registry.ts с register/get/list
+- [x] #3 core/anti-fp/index.ts с applyAntiFp() helper
+- [x] #4 tests/core/anti-fp/registry.test.ts — register/dedup/scope-filter
 <!-- AC:END -->
