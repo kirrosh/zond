@@ -216,6 +216,14 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
     }
     if (uncoveredRows.length > 0) {
       console.log(`  ${color ? DIM : ""}⬜ ${uncoveredRows.length} not covered${color ? RESET : ""}`);
+      // ARV-75 (feedback round-03 / F16): when some of the not-covered rows
+      // are deprecated, surface the count so a user reading "5% uncovered"
+      // can attribute the gap to deprecated endpoints (which generate skips
+      // by default) instead of suite regression.
+      const deprecatedUnhit = uncoveredRows.filter((r) => r.deprecated).length;
+      if (deprecatedUnhit > 0) {
+        console.log(`  ${color ? DIM : ""}↳ ${deprecatedUnhit} of those are deprecated (skipped by \`zond generate\` unless --include-deprecated)${color ? RESET : ""}`);
+      }
     }
 
     // ARV-28: --verbose lists not-covered endpoints (and partial) inline,
@@ -287,6 +295,12 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
       covered2xxEndpoints: buckets.covered2xx,
       coveredButNon2xxEndpoints: buckets.coveredButNon2xx,
       unhitEndpoints: buckets.unhit,
+      // ARV-75 (F16): expose deprecated-endpoint counts so CI / agents can
+      // distinguish "we missed coverage on a live endpoint" from "the
+      // remaining uncovered rows are spec-deprecated and explicitly skipped
+      // by zond generate" without re-deriving from the spec.
+      deprecated_unhit: uncoveredRows.filter((r) => r.deprecated).length,
+      deprecated_total: cov.matrix.rows.filter((r) => r.deprecated).length,
     }));
   }
 
