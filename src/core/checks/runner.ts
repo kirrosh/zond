@@ -279,6 +279,27 @@ function checkKinds(c: Check): CaseKind[] {
   return c.caseKinds ?? ["positive"];
 }
 
+/** ARV-61 (feedback round-01 / F1): inject auth headers into a response-phase
+ *  case so depth-checks pierce the auth-wall on real APIs. Case-specific
+ *  headers win (case-insensitive). `missing_required_header` deliberately
+ *  drops one header — if the dropped one matches an auth header, skip the
+ *  injection for that key so the probe stays meaningful. */
+function injectAuthHeadersIntoCase(built: BuiltCase, authHeaders: Record<string, string>): void {
+  if (!authHeaders || Object.keys(authHeaders).length === 0) return;
+  const existing = new Set(Object.keys(built.req.headers).map((k) => k.toLowerCase()));
+  const droppedLower =
+    built.case.kind === "missing_required_header" && typeof built.case.meta?.dropped_header === "string"
+      ? (built.case.meta.dropped_header as string).toLowerCase()
+      : null;
+  for (const [name, value] of Object.entries(authHeaders)) {
+    const lower = name.toLowerCase();
+    if (existing.has(lower)) continue;
+    if (droppedLower === lower) continue;
+    built.req.headers[name] = value;
+    built.case.request.headers[name] = value;
+  }
+}
+
 function summarizeResponse(resp: HttpResponse): { status: number; content_type?: string } {
   const ct = resp.headers["content-type"] ?? resp.headers["Content-Type"];
   return { status: resp.status, content_type: ct };
@@ -404,6 +425,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
 
     for (const built of cases) {
       if (!caseMatchesMode(built.case.mode, mode)) continue;
+      if (opts.authHeaders) injectAuthHeadersIntoCase(built, opts.authHeaders);
       // ARV-8: gate the request through the rate-limiter (no-op when
       // none configured). Acquire happens *inside* the worker so a pool
       // of N workers can't leak more requests/sec than the limiter
