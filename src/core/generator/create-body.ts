@@ -22,6 +22,7 @@
 
 import type { OpenAPIV3 } from "openapi-types";
 import { generateFromSchema } from "./data-factory.ts";
+import { canonicalVarName } from "./fixtures-builder.ts";
 
 const FK_FIELD_RE = /(?:_id|Id|_uuid)$/;
 
@@ -36,7 +37,12 @@ function substituteFkFields(value: unknown, knownFixtures: Record<string, string
       // Recurse first — nested objects may carry their own FKs.
       const recursed = substituteFkFields(v, knownFixtures);
       if (FK_FIELD_RE.test(k)) {
-        const fixture = knownFixtures[k];
+        // ARV-138: look up by raw field name first (back-compat with envs
+        // that still key off `issueId`), then by canonical snake_case form
+        // (`issue_id`) — which is the only form the manifest emits since
+        // ARV-138. This keeps both old `.env.yaml`s and new ones working
+        // during the rollout window.
+        const fixture = knownFixtures[k] ?? knownFixtures[canonicalVarName(k)];
         if (typeof fixture === "string" && fixture.length > 0) {
           out[k] = fixture;
           continue;

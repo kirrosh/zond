@@ -547,7 +547,15 @@ export function generateCrudSuite(
   securitySchemes: SecuritySchemeInfo[],
 ): RawSuite {
   const captureField = group.create ? getCaptureField(group.create, group.idParam) : "id";
-  const captureVar = resourceVar(group.resource, "id");
+  // ARV-137: use the spec's path-param name as the capture var. Previously
+  // we synthesised `<resource>_id` via `resourceVar(...)`, which produced
+  // phantom manifest dupes whenever the spec named the path-param anything
+  // other than `<resource>_id` (e.g. `monitor_id_or_slug`, `version`, or
+  // collection-stem mismatches like resource=`saved`/idParam=`query_id`).
+  // Aligning on `group.idParam` keeps tests, manifest, and spec consistent.
+  // Fallback to `resourceVar` only when the group has no idParam (defensive
+  // — shouldn't happen for any group with a read/update/delete endpoint).
+  const captureVar = group.idParam || resourceVar(group.resource, "id");
   const tests: RawStep[] = [];
 
   const allEps = [group.create, group.list, group.read, group.update, group.delete].filter(Boolean) as EndpointInfo[];
