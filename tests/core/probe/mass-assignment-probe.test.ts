@@ -4,6 +4,7 @@ import {
   formatDigestMarkdown,
   emitRegressionSuites,
   SUSPECTED_FIELDS,
+  isSubscriptionGated,
 } from "../../../src/core/probe/mass-assignment-probe.ts";
 import type { EndpointInfo } from "../../../src/core/generator/types.ts";
 import type { OpenAPIV3 } from "openapi-types";
@@ -741,4 +742,38 @@ describe("emitRegressionSuites", () => {
     const suites = emitRegressionSuites(result, eps, []);
     expect(suites).toHaveLength(0);
   });
+});
+
+// ARV-104 (F9): when the response body of a 403 baseline-failure says
+// the endpoint is subscription-gated (paid plan, scope, feature flag),
+// the user-facing summary must drop the "fix fixture" hint — there's
+// nothing to fix in env. Tester saw 46 INCONCLUSIVE verdicts on Sentry's
+// org endpoints, all with "A paid plan is required to enable this
+// feature." in the body, all advised "fix fixture / FK value / re-probe".
+describe("ARV-104 (F9): subscription-gated 403 detection", () => {
+  it("isSubscriptionGated matches the common SaaS phrasings", () => {
+    expect(isSubscriptionGated("A paid plan is required to enable this feature.")).toBe(true);
+    expect(isSubscriptionGated("This feature is not available on your plan.")).toBe(true);
+    expect(isSubscriptionGated("Your plan does not include this endpoint.")).toBe(true);
+    expect(isSubscriptionGated("Subscription required for this organization.")).toBe(true);
+    expect(isSubscriptionGated("Requires the org:admin scope.")).toBe(true);
+    expect(isSubscriptionGated("Missing the project:write scope")).toBe(true);
+    expect(isSubscriptionGated("Feature is not enabled for this org.")).toBe(true);
+    expect(isSubscriptionGated("Insufficient permissions to perform this action.")).toBe(true);
+    expect(isSubscriptionGated("Insufficient scope")).toBe(true);
+  });
+
+  it("isSubscriptionGated does NOT match generic 4xx errors", () => {
+    expect(isSubscriptionGated("Domain not found")).toBe(false);
+    expect(isSubscriptionGated("Validation failed: name is required")).toBe(false);
+    expect(isSubscriptionGated("Unauthorized")).toBe(false);
+    expect(isSubscriptionGated("Resource does not exist")).toBe(false);
+  });
+
+  // Live integration of the new tail through the inconclusive-baseline
+  // builder is exercised in tests that already drive `runMassAssignmentProbes`
+  // end-to-end (see "does NOT emit suites for INCONCLUSIVE-baseline
+  // verdicts" above). Here we pin only the classifier predicate — that's
+  // the load-bearing piece for ARV-104; the wiring is straight string
+  // concat in inconclusiveBaselineSummary.
 });
