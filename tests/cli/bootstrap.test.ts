@@ -558,7 +558,8 @@ describe("zond bootstrap", () => {
 
     // 1. audience_id from env was substituted into the seed POST body —
     //    not a random UUID — proving buildCreateRequestBody's FK swap works.
-    expect(lastBody?.audience_id).toBe("aud_real_42");
+    const seedBody = lastBody as { audience_id?: string; name?: string } | null;
+    expect(seedBody?.audience_id).toBe("aud_real_42");
 
     // 2. /baddies seed got a 422 → status miss-seed-422 + repro present.
     const out = JSON.parse(captured);

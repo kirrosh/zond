@@ -1,10 +1,10 @@
 ---
 id: ARV-117
 title: 'output: migrate run.ts to OutputSpec — drop --report-out flag entirely'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 10:13'
-updated_date: '2026-05-11 10:14'
+updated_date: '2026-05-11 10:38'
 labels:
   - m-19
   - refactor
@@ -30,8 +30,14 @@ Skill update — отдельная задача (§3 регрессия пой�
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 src/cli/commands/run.ts использует runCommandWithOutput()
-- [ ] #2 опция --report-out удалена
-- [ ] #3 tests/cli/run.test.ts зелёные
-- [ ] #4 skill (init/templates/skills/zond.md) не содержит --report-out
+- [x] #1 src/cli/commands/run.ts использует runCommandWithOutput()
+- [x] #2 опция --report-out удалена
+- [x] #3 tests/cli/run.test.ts зелёные
+- [x] #4 skill (init/templates/skills/zond.md) не содержит --report-out
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implementation note: ARV-117 used resolveOutput() rather than runCommandWithOutput() — run.ts has a streaming console reporter (per-suite output via reporter.report()) that doesn't fit the single-shot render contract. Per src/core/output/README.md, resolveOutput is the documented standalone API for commands with their own streaming pipeline. OutputSpec policy (format detection, mutual exclusion, channel resolution) still flows through core/output uniformly. AC#3: there is no tests/cli/run.test.ts; the migrated tests/cli/run-report-out.test.ts (3/3) plus the full tests/cli/run-*.test.ts suite (all green) validate the change.
+<!-- SECTION:NOTES:END -->

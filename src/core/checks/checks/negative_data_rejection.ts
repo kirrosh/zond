@@ -9,7 +9,7 @@
  *   2xx and 3xx with our payload are findings.
  */
 import type { Check } from "../types.ts";
-import { applyGuards } from "./_anti_fp.ts";
+import { applyAntiFp } from "../../anti-fp/index.ts";
 
 const ACCEPTABLE = (status: number): boolean => {
   if (status === 400 || status === 401 || status === 403 || status === 404 || status === 422 || status === 428) return true;
@@ -26,9 +26,9 @@ export const negativeDataRejection: Check = {
   applies: (op) => Boolean(op.requestBodySchema),
   run({ case: c, response }) {
     if (ACCEPTABLE(response.status)) return { kind: "pass" };
-    const skip = applyGuards(c);
+    const skip = applyAntiFp(c, "check:negative_data_rejection");
     if (skip) {
-      return { kind: "skip", reason: `${skip.guard}: ${skip.reason}` };
+      return { kind: "skip", reason: `${skip.ruleId}: ${skip.reason}` };
     }
     return {
       kind: "fail",

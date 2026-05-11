@@ -1,9 +1,10 @@
 ---
 id: ARV-131
 title: 'cleanup: fix typecheck errors in core/orphans/orphan-tracker.ts'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 10:14'
+updated_date: '2026-05-11 10:38'
 labels:
   - m-19
   - cleanup
@@ -24,7 +25,7 @@ priority: low
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 bun run typecheck — 0 errors
-- [ ] #2 tsconfig.json (если был exclude orphan-tracker) приведён в default
-- [ ] #3 CI step bun run typecheck присутствует или подтверждено что уже есть
+- [x] #1 bun run typecheck — 0 errors
+- [x] #2 tsconfig.json (если был exclude orphan-tracker) приведён в default
+- [x] #3 CI step bun run typecheck присутствует или подтверждено что уже есть
 <!-- AC:END -->
