@@ -3,9 +3,10 @@ id: ARV-114
 title: >-
   skill / policy: разрешить edit .env.yaml в user-mode (нет sensitive data,
   единственный путь для write-only vars)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 09:21'
+updated_date: '2026-05-11 09:33'
 labels:
   - zond
   - skill-drift
@@ -32,7 +33,13 @@ Skill сейчас явно запрещает агенту править `.env
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 решение зафиксировано: полное снятие запрета vs whitelisted CLI
-- [ ] #2 skill (zond-base.md) обновлён под решение
+- [x] #1 решение зафиксировано: полное снятие запрета vs whitelisted CLI
+- [x] #2 skill (zond-base.md) обновлён под решение
 - [ ] #3 если выбран CLI-путь — реализован `zond fixture set` с provenance `source: manual`
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Решение: полное снятие запрета (Option 1), не CLI-путь. Reason: skill уже формально позволял (zond-base.md table line 61 'user editing | env | always'), но это было закопано в таблицу и читалось как 'user', не 'agent'. Добавлена явная подсекция 'Editing .env.yaml directly — when it's the right move (ARV-114)' в zond-base.md рядом с разделом про .api-fixtures workflow. Прописаны: (1) когда edit оправдан (write-only ids, mis-derived values, slug/region), (2) правила (только values; не трогать .api-*.yaml; зафиксировать в run summary), (3) роль 'owner: the user' — это про cleanup, не permission boundary. AC#3 (CLI 'zond fixture set') — не выбран этот путь; если потребуется trackable provenance — отдельный таск.
+<!-- SECTION:NOTES:END -->
