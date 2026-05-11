@@ -97,6 +97,7 @@ const ALLOW_LIST: Array<{ source: string; reason: string }> = [
   { source: "prepare-fixtures.ts", reason: "Aborts with `Error: API not found` (printed by withApiContext middleware before the action) on missing-api; envelope path covered by tests/cli/prepare-fixtures.test.ts." },
   { source: "audit.ts", reason: "Same withApiContext early-exit; envelope path covered by tests/cli/audit-orchestration.test.ts." },
   { source: "refresh-api.ts", reason: "Same withApiContext early-exit; envelope path covered by tests/cli/refresh-api.test.ts." },
+  { source: "probe.ts", reason: "ARV-119: registration umbrella for `probe static|mass-assignment|security`. The envelope helpers in this file fire only on input-flag errors (resolveOutput rejecting an unknown --report). The live command-level envelopes are emitted by probe-mass-assignment.ts / probe-security.ts, both already in SMOKE." },
 ];
 
 /** Use the pre-compiled binary when it exists (much faster — 10× over

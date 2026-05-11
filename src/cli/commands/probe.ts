@@ -23,8 +23,80 @@ import { existsSync } from "fs";
 import { join, dirname } from "node:path";
 import { parsePositiveInt } from "../argv.ts";
 import { printError } from "../output.ts";
+import { jsonError, printJson } from "../json-envelope.ts";
 import { loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
+import { resolveOutput, OutputSpecError, type OutputSpec, type ResolvedOutput } from "../../core/output/index.ts";
+
+/**
+ * ARV-119 (m-19): typed declaration of the `--report` / `--output`
+ * surface shared by the live-probe subcommands (mass-assignment +
+ * security). Both render a markdown digest by default, with `--report
+ * json` switching to a structured JSON file body. `--output <path>`
+ * routes the rendered body to a file; without it the body lands on
+ * stdout (when `--json` is not set — see m-17 / ARV-51: the `--json`
+ * envelope is a separate channel that wraps the structured result).
+ *
+ * `probe static` is *not* on this spec — its `--output` is a directory
+ * where YAML probe suites are written, semantics not output-format.
+ */
+export const PROBE_OUTPUT_SPEC: OutputSpec<unknown> = {
+  command: "probe",
+  defaultFormat: "markdown",
+  formats: {
+    markdown: { defaultChannel: "stdout", description: "Human-readable digest (default)" },
+    json:     { defaultChannel: "stdout", description: "Structured JSON body — same shape as the --json envelope's data." },
+  },
+};
+
+/**
+ * ARV-119: shared `--report` / `--output` / `--overwrite` option set
+ * for the two live-probe subcommands. Resolution goes through
+ * `resolveProbeOutputFlags` so unknown formats and mutually-exclusive
+ * combinations surface the same error for both subcommands instead of
+ * each one reimplementing the validation.
+ */
+function addProbeReportOutputOptions(cmd: Command): Command {
+  return cmd
+    .option("--output <file>", "ARV-119: write the rendered report to this file (default: stdout). Pairs with --report to pick the format.")
+    .option(
+      "--report <format>",
+      "ARV-119: format for --output / non-json stdout (markdown|json). Default markdown. The --json envelope (m-17 ARV-51) is a separate channel and is always structured.",
+      "markdown",
+    )
+    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)");
+}
+
+interface ProbeReportOutputOpts {
+  report?: string;
+  output?: string;
+}
+
+/**
+ * ARV-119: resolve --report / --output through PROBE_OUTPUT_SPEC. On
+ * unknown format / mutual-exclusion violation, prints the consistent
+ * error (envelope when --json) and returns null — caller exits 2.
+ */
+function resolveProbeOutputFlags(
+  command: string,
+  opts: ProbeReportOutputOpts,
+  json: boolean,
+): { resolved: ResolvedOutput; report: "markdown" | "json"; output?: string } | null {
+  let resolved: ResolvedOutput;
+  try {
+    resolved = resolveOutput(PROBE_OUTPUT_SPEC, { report: opts.report, output: opts.output });
+  } catch (err) {
+    if (err instanceof OutputSpecError) {
+      if (json) printJson(jsonError(command, [err.message]));
+      else printError(err.message);
+      return null;
+    }
+    throw err;
+  }
+  const report: "markdown" | "json" = resolved.format === "json" ? "json" : "markdown";
+  const output = resolved.channel === "file" ? resolved.path : undefined;
+  return { resolved, report, output };
+}
 
 /**
  * ARV-53: thin wrapper kept for the existing call-sites — the real chain
@@ -156,7 +228,7 @@ function defineProbeStatic(parent: Command, name: string): void {
 }
 
 function defineProbeMassAssignment(parent: Command, name: string): void {
-  parent
+  const sub = parent
     .command(`${name} [spec]`)
     .description(
       "Live probe for mass-assignment / privilege-escalation: classifies POST/PATCH/PUT against suspected extra fields (is_admin, role, account_id, owner_id, user_id, verified, is_system) as rejected (4xx) | accepted-and-applied (HIGH) | accepted-and-ignored (LOW) via follow-up GET",
@@ -164,7 +236,6 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
     .option("--env <file>", "Env YAML with base_url + auth_token (live calls require this; auto-derived from apis/<name>/.env.yaml when --api is given)")
-    .option("--output <file>", "Write markdown digest to file (default: stdout)")
     .option("--emit-tests <dir>", "Also emit YAML regression suites locking in safe behaviour for CI")
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .option("--list-tags", "List available tags from spec and exit")
@@ -184,10 +255,9 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
       [] as string[],
     )
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
-    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
-    .option("--report <format>", "Format for --output / non-json stdout (markdown|json). --json envelope is always structured (m-17 ARV-51). Default markdown.", "markdown")
-    .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.")
-    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+    .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.");
+  addProbeReportOutputOptions(sub);
+  sub.action(async (specPos: string | undefined, opts, cmd: Command) => {
       // ARV-33: resolve --api via the same fallback chain as prepare-fixtures /
       // ARV-29 — direct opts, then parent opts, then ZOND_API_GLOBAL /
       // .zond/current-api. Otherwise `zond probe mass-assignment --api foo`
@@ -215,11 +285,13 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
       });
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
       const timeoutMs = await resolveProbeTimeout(opts.timeout, apiName, envFile.env);
-      const reportFmt = opts.report === "json" ? "json" : "markdown";
+      const json = globalJson(cmd);
+      const rep = resolveProbeOutputFlags("probe-mass-assignment", opts, json);
+      if (!rep) { process.exitCode = 2; return; }
       process.exitCode = await probeMassAssignmentCommand({
         specPath: resolved.spec,
         env: envFile.env,
-        output: opts.output,
+        output: rep.output,
         emitTests: opts.emitTests,
         tag: opts.tag,
         listTags: opts.listTags,
@@ -227,17 +299,17 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         noDiscover: opts.discover === false,
         timeoutMs,
         overwrite: opts.overwrite === true,
-        json: globalJson(cmd),
+        json,
         dryRun: opts.dryRun === true,
         include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
         exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
-        report: reportFmt,
+        report: rep.report,
       });
     });
 }
 
 function defineProbeSecurity(parent: Command, name: string): void {
-  parent
+  const sub = parent
     // ARV-36: classes is technically required but kept optional in commander
     // so the missing-arg branch can produce the same actionable list of
     // available classes that --unknown-class already prints (data already in
@@ -249,7 +321,6 @@ function defineProbeSecurity(parent: Command, name: string): void {
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
     .option("--env <file>", "Env YAML with base_url + auth_token (live calls require this; --dry-run can run without; auto-derived from apis/<name>/.env.yaml when --api is given)")
-    .option("--output <file>", "Write markdown digest to file (default: stdout)")
     .option("--emit-tests <dir>", "Also emit YAML regression suites locking in safe behaviour for CI")
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .option("--list-tags", "List available tags from spec and exit")
@@ -268,10 +339,9 @@ function defineProbeSecurity(parent: Command, name: string): void {
       [] as string[],
     )
     .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests")
-    .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
-    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
-    .option("--report <format>", "Format for --output / non-json stdout (markdown|json). --json envelope is always structured (m-17 ARV-51). Default markdown.", "markdown")
-    .action(async (classes: string | undefined, specPos: string | undefined, opts, cmd: Command) => {
+    .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"));
+  addProbeReportOutputOptions(sub);
+  sub.action(async (classes: string | undefined, specPos: string | undefined, opts, cmd: Command) => {
       // ARV-36: missing-arg path should list the available classes (parity
       // with the unknown-class error). Commander's default `missing required
       // argument` doesn't include them; once we made <classes> optional, we
@@ -292,12 +362,14 @@ function defineProbeSecurity(parent: Command, name: string): void {
       const envFile = resolveProbeEnv(opts.env, apiName, opts.db, { tolerateMissing: true });
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
       const timeoutMs = await resolveProbeTimeout(opts.timeout, apiName, envFile.env);
-      const reportFmt = opts.report === "json" ? "json" : "markdown";
+      const json = globalJson(cmd);
+      const rep = resolveProbeOutputFlags("probe-security", opts, json);
+      if (!rep) { process.exitCode = 2; return; }
       process.exitCode = await probeSecurityCommand({
         specPath: resolved.spec,
         classes,
         env: envFile.env,
-        output: opts.output,
+        output: rep.output,
         emitTests: opts.emitTests,
         tag: opts.tag,
         listTags: opts.listTags,
@@ -305,10 +377,10 @@ function defineProbeSecurity(parent: Command, name: string): void {
         dryRun: opts.dryRun === true,
         timeoutMs,
         overwrite: opts.overwrite === true,
-        json: globalJson(cmd),
+        json,
         apiName,
         isolated: opts.isolated === true,
-        report: reportFmt,
+        report: rep.report,
         include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
         exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
       });
