@@ -1,9 +1,10 @@
 ---
 id: ARV-107
 title: 'report bundle case-study: <TODO: API name> placeholder remains with --api set'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 08:51'
+updated_date: '2026-05-11 09:03'
 labels:
   - feedback-loop
   - api-sentry
@@ -33,3 +34,9 @@ Effect: every bundle requires manual final editing. Skill encourages 'report bun
 Log: .fb-loop/rounds/bundle-19/19/case-study.md L11-15
 Related: skill-drift SD8
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Round 03: case-study autopopulates API name from --api slug and spec slice via specDoc lookup. See tests/core/exporter/case-study-repro.test.ts.
+<!-- SECTION:NOTES:END -->
