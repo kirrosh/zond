@@ -203,8 +203,20 @@ cat apis/<name>/.api-fixtures.yaml
 ```
 
 If `doctor` reports stale → `zond refresh-api <name>`. If required
-fixtures missing → ask the user to fill `.env.yaml` and pause until they
-confirm.
+fixtures missing → **do NOT immediately bail to the user**. Drive the
+fixture loop yourself first:
+
+```bash
+zond prepare-fixtures --api <name> --apply --cascade --seed
+zond doctor --api <name> --missing-only --json   # re-check
+```
+
+`--seed` POST-creates resources when a list endpoint returns `[]`;
+`--cascade` chases nested FKs up to 8 passes. Only fall back to "ask the
+user" when seed has converged but vars remain UNSET — and the reason is
+genuinely outside the API path (ownership-proof / email-verify /
+manual-only setup / TOS limits). "User can paste an ID into `.env.yaml`"
+is **not** a reason — you should have seeded it.
 
 ## Phase 2 — Generate (autogen smoke + CRUD)
 
