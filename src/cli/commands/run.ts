@@ -607,6 +607,23 @@ export async function runCommand(options: RunOptions): Promise<number> {
   }
   const hasFailures = results.some((r) => r.failed > 0 || r.steps.some((s) => s.status === "error"));
 
+  // ARV-105 (F10): a suite where every step was skipped (e.g. probe-emitted
+  // regression suite that needs an unfilled capture-chain var) reports
+  // total>0, passed=0, failed=0, skipped=total. Without surfacing this,
+  // CI sees "0 failed" and the run looks green even though nothing was
+  // actually tested. Compute the list once and expose it in both the
+  // JSON envelope and the stderr tail.
+  const allSkippedSuites = results
+    .filter(r => r.total > 0 && r.passed === 0 && r.failed === 0 && r.skipped === r.total)
+    .map(r => ({
+      suite: r.suite_name,
+      ...(r.suite_file ? { file: r.suite_file } : {}),
+      total: r.total,
+      // Sample skip reason from the first step — usually "missing variable
+      // {{X}}" or similar. Helps the operator route to fixtures vs spec.
+      first_skip_reason: r.steps[0]?.error ?? null,
+    }));
+
   if (options.json) {
     const total = results.reduce((s, r) => s + r.total, 0);
     const passed = results.reduce((s, r) => s + r.passed, 0);
@@ -627,7 +644,25 @@ export async function runCommand(options: RunOptions): Promise<number> {
       }))
     );
     const fiveXx = failures.filter(f => f.is_5xx).length;
-    printJson(jsonOk("run", { summary: { total, passed, failed, fiveXx }, failures, warnings, runId: savedRunId }));
+    printJson(jsonOk("run", {
+      summary: { total, passed, failed, fiveXx, allSkippedSuites: allSkippedSuites.length },
+      failures,
+      ...(allSkippedSuites.length > 0 ? { all_skipped_suites: allSkippedSuites } : {}),
+      warnings,
+      runId: savedRunId,
+    }));
+  }
+
+  // ARV-105 (F10): non-json — name the all-skipped suites on stderr so a
+  // tail-eyeballing operator notices the visibility-pitfall. Doesn't gate
+  // exit code (skipping isn't a failure) but is loud enough that a green
+  // "0 failed" can no longer hide a regression suite that ran zero steps.
+  if (allSkippedSuites.length > 0 && !options.json) {
+    process.stderr.write(`zond: ${allSkippedSuites.length} suite(s) ran with every step skipped (no test executed — likely missing fixtures or capture-chain ids).\n`);
+    for (const s of allSkippedSuites) {
+      const reason = s.first_skip_reason ? ` — ${s.first_skip_reason}` : "";
+      process.stderr.write(`  - ${s.suite}${s.file ? ` (${s.file})` : ""}: ${s.total} step(s) skipped${reason}\n`);
+    }
   }
 
   // ARV-72 (feedback round-02 / F14): make the exit-code → failures
