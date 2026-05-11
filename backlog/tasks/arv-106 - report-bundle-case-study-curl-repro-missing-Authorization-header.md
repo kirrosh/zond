@@ -1,10 +1,10 @@
 ---
 id: ARV-106
 title: 'report bundle case-study: curl repro missing Authorization header'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 08:51'
-updated_date: '2026-05-11 08:53'
+updated_date: '2026-05-11 09:03'
 labels:
   - feedback-loop
   - api-sentry
@@ -34,7 +34,7 @@ Log: .fb-loop/rounds/bundle-19/19/case-study.md L17-21
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 case-study curl repro emits an Authorization header line (with redacted placeholder)
-- [ ] #2 Skill anti-curl rule respected if --api flag is set
-- [ ] #3 Test pins repro contains either Authorization or zond-request alternative
+- [x] #1 case-study curl repro emits an Authorization header line (with redacted placeholder)
+- [x] #2 Skill anti-curl rule respected if --api flag is set
+- [x] #3 Test pins repro contains either Authorization or zond-request alternative
 <!-- AC:END -->

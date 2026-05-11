@@ -12,6 +12,22 @@ export interface CaseStudyOptions {
   /** TASK-164 (m-9 P8): cap response/request bodies to N bytes. 0 or
    *  unset = no cap. The CLI wrapper defaults to 8 KB. */
   bodyCapBytes?: number;
+  /** ARV-106/107: short registry slug (`--api <name>`). When set, the
+   *  case-study renders a `zond request --api <name>` alternative below the
+   *  curl repro and falls back to it for the "API" field when specTitle is
+   *  null. */
+  apiName?: string | null;
+  /** ARV-107: loaded OpenAPI spec. When provided, the renderer auto-extracts
+   *  the relevant operation block for the "What the spec says" section instead
+   *  of leaving the `<TODO: paste …>` placeholder. */
+  specDoc?: OpenApiDocLike | null;
+}
+
+/** Minimal shape we touch from an OpenAPI spec — keeps this module
+ *  framework-free. */
+interface OpenApiDocLike {
+  paths?: Record<string, Record<string, unknown>> | null;
+  components?: { schemas?: Record<string, unknown> } | null;
 }
 
 function capBody(content: string | null | undefined, capBytes: number | undefined): string | null {
@@ -112,8 +128,43 @@ function howZondFoundIt(result: StoredStepResult): string {
   return lines.join("\n");
 }
 
-function specSnippet(result: StoredStepResult): string {
+function matchSpecOperation(
+  spec: OpenApiDocLike,
+  method: string,
+  concretePath: string,
+): { template: string; operation: Record<string, unknown> } | null {
+  const paths = spec.paths;
+  if (!paths) return null;
+  const want = method.toLowerCase();
+  // Prefer an exact path hit (no path-params), then fall back to a regex-based
+  // template match. Both passes ignore query strings.
+  const cleanPath = concretePath.split("?")[0] ?? concretePath;
+  if (paths[cleanPath]) {
+    const op = (paths[cleanPath] as Record<string, unknown>)[want];
+    if (op && typeof op === "object") return { template: cleanPath, operation: op as Record<string, unknown> };
+  }
+  for (const [template, item] of Object.entries(paths)) {
+    if (template === cleanPath) continue;
+    if (!template.includes("{")) continue;
+    const re = new RegExp("^" + template.replace(/\{[^}]+\}/g, "[^/]+") + "$");
+    if (!re.test(cleanPath)) continue;
+    const op = (item as Record<string, unknown>)[want];
+    if (op && typeof op === "object") return { template, operation: op as Record<string, unknown> };
+  }
+  return null;
+}
+
+function specSnippet(result: StoredStepResult, specDoc?: OpenApiDocLike | null): string {
   if (!result.spec_pointer && !result.spec_excerpt) {
+    // ARV-107: try to recover the operation slice from the loaded spec.
+    if (specDoc && result.request_method && result.request_url) {
+      const path = extractPath(result.request_url);
+      const match = matchSpecOperation(specDoc, result.request_method, path);
+      if (match) {
+        const ptr = `JSON pointer: \`#/paths/${match.template.replace(/\//g, "~1")}/${result.request_method.toLowerCase()}\`\n\n`;
+        return ptr + "```json\n" + JSON.stringify(match.operation, null, 2) + "\n```";
+      }
+    }
     return TODO("paste the relevant slice of the OpenAPI spec");
   }
   const ptr = result.spec_pointer ? `JSON pointer: \`${result.spec_pointer}\`\n\n` : "";
@@ -135,21 +186,43 @@ function provenanceLine(result: StoredStepResult): string {
     : `Provenance: \`${prov.type ?? "unknown"}\`.`;
 }
 
+function buildZondRequestLine(apiName: string, result: StoredStepResult): string {
+  const method = (result.request_method ?? "GET").toUpperCase();
+  const path = extractPath(result.request_url);
+  const parts: string[] = [`zond request --api ${apiName} ${method} ${path}`];
+  if (result.request_body) {
+    const escaped = result.request_body.replace(/'/g, `'\\''`);
+    parts.push(`  --json '${escaped}'`);
+  }
+  return parts.join(" \\\n");
+}
+
 export function renderCaseStudy(opts: CaseStudyOptions): string {
-  const { result, run, specTitle, specVersion, zondVersion } = opts;
+  const { result, run, specTitle, specVersion, zondVersion, apiName } = opts;
   const method = (result.request_method ?? TODO("HTTP method")).toUpperCase();
   const path = extractPath(result.request_url);
   const fc = result.failure_class ? CLASS_HUMAN[result.failure_class] : TODO("classification");
 
+  // ARV-107: cascade — explicit spec title, then registry slug (`--api`), then
+  // collection-id breadcrumb, then unrecoverable.
   const apiLine = specTitle
     ? `${specTitle}${specVersion ? ` ${specVersion}` : ""}`
-    : (run.collection_id != null ? TODO("API title — spec was not loadable at export time") : TODO("API name"));
+    : apiName
+      ? apiName
+      : (run.collection_id != null ? TODO("API title — spec was not loadable at export time") : TODO("API name"));
 
   const responseStatus = result.response_status != null ? String(result.response_status) : "no response";
   const cappedBody = capBody(result.response_body, opts.bodyCapBytes);
   const responseBody = cappedBody
     ? "```json\n" + tryPretty(cappedBody) + "\n```"
     : (result.error_message ? `Network/runtime error: \`${result.error_message}\`` : "_(empty body)_");
+
+  // ARV-106: prefer the `zond request` form when an api slug is known
+  // (skill anti-curl rule). The curl block stays as a copy-paste fallback for
+  // recipients without zond installed, with a redacted Authorization header.
+  const reproAlt = apiName
+    ? `\n\n_Or with zond:_\n\n\`\`\`bash\n${buildZondRequestLine(apiName, result)}\n\`\`\``
+    : "";
 
   return `# ${method} ${path} — ${shortDescription(result)}
 
@@ -167,13 +240,13 @@ export function renderCaseStudy(opts: CaseStudyOptions): string {
 
 ### What the spec says
 
-${specSnippet(result)}
+${specSnippet(result, opts.specDoc)}
 
 ## Repro
 
 \`\`\`bash
 ${buildCurl(result)}
-\`\`\`
+\`\`\`${reproAlt}
 
 ## What happened
 
