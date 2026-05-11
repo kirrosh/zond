@@ -33,6 +33,7 @@ import { loadIdentityFromAncestor } from "../../core/identity/identity-file.ts";
 import { hashSpec } from "../../core/meta/meta-store.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError } from "../output.ts";
+import { getApi } from "../util/api-context.ts";
 
 export interface DoctorOptions {
   api?: string;
@@ -588,8 +589,15 @@ export function registerDoctor(program: Command): void {
     .option("--missing-only", "Show only missing/stale items (hide rows that are already healthy). Applies to both text and --json output.")
     .option("--query <dotpath>", "Resolve a dot-path inside the doctor report and emit just that subtree as JSON (e.g. fixtures.required, staleArtifacts, spec.sha).")
     .action(async (opts, cmd: Command) => {
+      // ARV-96: resolve --api via the shared chain (local opt > ancestor opt
+      // > ZOND_API_GLOBAL > ZOND_API > .zond/current-api). Without this,
+      // `zond --api X doctor` and `zond doctor --api X` on a multi-API
+      // workspace both fell through to the "Multiple APIs registered" branch
+      // because the global --api option (program.ts) absorbs the flag and
+      // leaves opts.api undefined for the subcommand.
+      const resolvedApi = getApi(cmd, opts);
       process.exitCode = await doctorCommand({
-        api: opts.api,
+        api: resolvedApi,
         dbPath: typeof opts.db === "string" ? opts.db : undefined,
         json: globalJsonResolver(cmd),
         missingOnly: opts.missingOnly === true,
