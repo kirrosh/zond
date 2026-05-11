@@ -90,6 +90,11 @@ export async function runCommand(options: RunOptions): Promise<number> {
     printError("No path given");
     return 2;
   }
+  const emptyPaths = options.paths.filter((p) => typeof p !== "string" || p.trim().length === 0);
+  if (emptyPaths.length > 0) {
+    printError(`Empty path argument (got ${emptyPaths.length} blank entr${emptyPaths.length === 1 ? "y" : "ies"}) — pass a non-empty file or directory path`);
+    return 2;
+  }
   const primaryPath = options.paths[0]!;
 
   // 1. Parse test files from every input path (collect parse errors instead
