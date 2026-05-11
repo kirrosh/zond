@@ -14,12 +14,16 @@ import { loadEnvironment, loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printWarning, printSuccess } from "../output.ts";
+import { readCurrentApi } from "../../core/context/current.ts";
 import type { Command } from "commander";
 import { globalJson } from "../resolve.ts";
 
 export interface CleanupOptions {
   orphans: boolean;
   api?: string;
+  /** ARV-139: pass true to disable the default current-api scoping and look
+   *  at orphans across every API in the tracker. */
+  allApis?: boolean;
   runId?: string;
   dryRun?: boolean;
   json?: boolean;
@@ -38,10 +42,21 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
     return 2;
   }
 
+  // ARV-139: scope the orphan queue to the active API by default. The on-disk
+  // tracker at ~/.zond/orphans/<api>/... is shared across the workspace, so
+  // switching APIs (e.g. apis/resend → apis/sentry) would otherwise surface
+  // orphans from previous work on unrelated APIs — including DELETE attempts
+  // against endpoints that aren't even part of the active spec. Explicit
+  // `--api <name>` wins; `--all-apis` opts back into the pre-ARV-139 behaviour.
+  let scopedApi = opts.api;
+  if (!scopedApi && !opts.allApis) {
+    scopedApi = readCurrentApi() ?? undefined;
+  }
+
   let records: OrphanRecord[];
   try {
     const filter: { api?: string; runId?: string } = {};
-    if (opts.api) filter.api = opts.api;
+    if (scopedApi) filter.api = scopedApi;
     if (opts.runId) filter.runId = opts.runId;
     records = await loadOrphans(filter);
   } catch (err) {
@@ -189,7 +204,8 @@ export function registerCleanup(program: Command): void {
     .command("cleanup")
     .description("Retry probe-leftover work. Currently only --orphans (TASK-278) — re-issues DELETE for resources captured in ~/.zond/orphans/.")
     .option("--orphans", "Retry DELETE for resources in the orphan tracker")
-    .option("--api <name>", "Limit to a single API (matches the orphan-tracker subdirectory)")
+    .option("--api <name>", "Limit to a single API (matches the orphan-tracker subdirectory; defaults to the current API)")
+    .option("--all-apis", "Include orphans from every API in the tracker (disables the default current-api scoping)")
     .option("--run <id>", "Limit to a single probe run id")
     .option("--dry-run", "Print the plan without sending DELETEs")
     .option("--timeout <ms>", "Per-request timeout in ms (overrides .env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)")
@@ -197,6 +213,7 @@ export function registerCleanup(program: Command): void {
       process.exitCode = await cleanupCommand({
         orphans: opts.orphans === true,
         api: typeof opts.api === "string" ? opts.api : undefined,
+        allApis: opts.allApis === true,
         runId: typeof opts.run === "string" ? opts.run : undefined,
         dryRun: opts.dryRun === true,
         timeoutMs: typeof opts.timeout === "string" ? Number(opts.timeout) : undefined,

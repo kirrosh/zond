@@ -105,6 +105,55 @@ describe("orphan-tracker + zond cleanup --orphans (TASK-278)", () => {
     expect(suppress.err).toMatch(/--orphans/);
   });
 
+  // ARV-139: orphan queue is shared across APIs on disk, but `cleanup --orphans`
+  // must default to the active API. Otherwise, switching APIs leaves stale
+  // orphans from the prior API showing up and triggering DELETE attempts
+  // against an unrelated server. Explicit --api wins; --all-apis opts out.
+  test("ARV-139: defaults to current-api scoping; --all-apis disables it", async () => {
+    const t = new Date().toISOString();
+    await appendOrphanRecord({
+      api: "sentry", runId: "1", createdAt: t,
+      method: "POST", path: "/teams/", id: "s1", deletePath: "/teams/s1",
+      lastCleanupStatus: 500, lastCleanupError: null,
+    });
+    await appendOrphanRecord({
+      api: "resend", runId: "1", createdAt: t,
+      method: "POST", path: "/templates/", id: "r1", deletePath: "/templates/r1",
+      lastCleanupStatus: 500, lastCleanupError: null,
+    });
+
+    // No current-api set, no --api flag, no --all-apis → unscoped (legacy behaviour).
+    const codeAll = await cleanupCommand({ orphans: true, dryRun: true, baseUrl: "http://srv", json: false });
+    expect(codeAll).toBe(0);
+    expect(suppress.out).toMatch(/Dry-run: 2 orphan/);
+
+    // Active API resolves via ZOND_API_GLOBAL: only sentry orphans surface.
+    suppress.outChunks.length = 0;
+    process.env.ZOND_API_GLOBAL = "sentry";
+    try {
+      const codeScoped = await cleanupCommand({ orphans: true, dryRun: true, baseUrl: "http://srv", json: false });
+      expect(codeScoped).toBe(0);
+      expect(suppress.out).toMatch(/Dry-run: 1 orphan/);
+      expect(suppress.out).toMatch(/\/teams\/s1/);
+      expect(suppress.out).not.toMatch(/\/templates\/r1/);
+
+      // --all-apis explicitly opts back into the cross-API view.
+      suppress.outChunks.length = 0;
+      const codeAllOptIn = await cleanupCommand({ orphans: true, allApis: true, dryRun: true, baseUrl: "http://srv", json: false });
+      expect(codeAllOptIn).toBe(0);
+      expect(suppress.out).toMatch(/Dry-run: 2 orphan/);
+
+      // Explicit --api still wins.
+      suppress.outChunks.length = 0;
+      const codeExplicit = await cleanupCommand({ orphans: true, api: "resend", dryRun: true, baseUrl: "http://srv", json: false });
+      expect(codeExplicit).toBe(0);
+      expect(suppress.out).toMatch(/Dry-run: 1 orphan/);
+      expect(suppress.out).toMatch(/\/templates\/r1/);
+    } finally {
+      delete process.env.ZOND_API_GLOBAL;
+    }
+  });
+
   // ARV-102 (F7): orphan records that the probe couldn't auto-clean
   // (no DELETE counterpart in spec, response had no usable id) are now
   // persisted with `requires_manual_cleanup: true`. cleanup --orphans

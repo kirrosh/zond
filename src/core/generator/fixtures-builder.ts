@@ -16,6 +16,23 @@ import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
 import { schemeVarName, resourceVar } from "./suite-generator.ts";
 import type { ApiResourceMap } from "./resources-builder.ts";
 
+/**
+ * ARV-138: canonicalise a body field name to a manifest var name.
+ * Converts camelCase → snake_case + lowercase so spec body fields
+ * (`issueId`, `audienceId`, `accountID`) collapse onto the same manifest
+ * entry as the spec's path-param spelling (`issue_id`, `audience_id`).
+ *
+ * Idempotent on already-snake_case input. The HTTP request still sends
+ * the raw field name to the server — only the var-name namespace is
+ * normalised (see `create-body.ts:substituteFkFields`).
+ */
+export function canonicalVarName(name: string): string {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .toLowerCase();
+}
+
 export type FixtureSource = "auth" | "server" | "path" | "header" | "body-fk" | "capture-chain";
 
 export interface FixtureRequirement {
@@ -191,15 +208,20 @@ export function buildApiFixtureManifest(params: BuildFixturesParams): ApiFixture
     for (const fieldName of Object.keys(schema.properties)) {
       if (!/_id$|Id$|_uuid$/.test(fieldName)) continue;
       if (!required.has(fieldName)) continue;
-      const existing = fixtures.get(fieldName);
+      // ARV-138: canonicalise camelCase to snake_case so `issueId` shares
+      // a manifest slot with path-param `issue_id`. The raw `fieldName`
+      // still goes to the server unchanged via `create-body.ts` —
+      // canonicalisation only affects the manifest var-name namespace.
+      const varName = canonicalVarName(fieldName);
+      const existing = fixtures.get(varName);
       if (existing) {
         // Already covered (likely as path-param). Keep the existing entry
         // and just surface the additional affected endpoint.
         pushAffected(existing, ep);
         continue;
       }
-      fixtures.set(fieldName, {
-        name: fieldName,
+      fixtures.set(varName, {
+        name: varName,
         source: "body-fk",
         description: `Foreign-key id consumed by ${epLabel(ep)} request body. Set to a real id from your account, or leave blank to skip dependent tests.`,
         affectedEndpoints: [epLabel(ep)],
@@ -209,16 +231,23 @@ export function buildApiFixtureManifest(params: BuildFixturesParams): ApiFixture
     }
   }
 
-  // 6. CRUD-chain capture vars — the generator emits `capture: <resource>_id`
-  //    in POST steps and references {{<resource>_id}} downstream. These are
+  // 6. CRUD-chain capture vars — the generator emits `capture: <idParam>`
+  //    in POST steps and references {{<idParam>}} downstream. These are
   //    auto-captured at runtime; surfacing them in the manifest keeps the
   //    "var in tests but not in manifest" contract intact (per decision-7)
   //    and lets prepare-fixtures distinguish "captured automatically" from
   //    "user must fill". required: false — env override is advanced-only.
+  //
+  //    ARV-137: capture name = `r.idParam` (the spec's path-param name), not
+  //    `resourceVar(r.resource, "id")`. The synthesised form produced phantom
+  //    manifest dupes whenever the spec's path-param didn't equal
+  //    `<resource>_id` (e.g. monitors/monitor_id_or_slug, saved/query_id,
+  //    releases/version). Now the manifest carries one var per resource id
+  //    that matches both the path-source entry and the generated test refs.
   if (params.resourceMap) {
     for (const r of params.resourceMap.resources) {
       if (!r.endpoints.create) continue;
-      const captureName = resourceVar(r.resource, "id");
+      const captureName = r.idParam || resourceVar(r.resource, "id");
       if (fixtures.has(captureName)) continue;
       const description = `Captured automatically from ${r.endpoints.create} response (field "${r.captureField}") and used in downstream CRUD steps. Set in .env.yaml only to override the captured value.`;
       const affectedFromGroup = Object.entries(r.endpoints)

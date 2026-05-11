@@ -428,22 +428,23 @@ describe("generateCrudSuite", () => {
     expect(suite.base_url).toBe("{{base_url}}");
     expect(suite.tests).toHaveLength(5); // create, read, update, delete, verify
 
-    // Create step has capture
+    // Create step has capture — ARV-137: captureVar = group.idParam (the
+    // spec's path-param name `petId`), not synthesised `<resource>_id`.
     const createStep = suite.tests[0]!;
-    expect(createStep.expect.body?.id).toEqual({ capture: "pet_id" });
+    expect(createStep.expect.body?.id).toEqual({ capture: "petId" });
 
     // Read uses captured var
     const readStep = suite.tests[1]!;
-    expect(readStep.GET).toBe("/pets/{{pet_id}}");
+    expect(readStep.GET).toBe("/pets/{{petId}}");
 
     // Delete step
     const deleteStep = suite.tests[3]!;
-    expect(deleteStep.DELETE).toBe("/pets/{{pet_id}}");
+    expect(deleteStep.DELETE).toBe("/pets/{{petId}}");
     expect(deleteStep.expect.status).toBe(204);
 
     // Verify deleted
     const verifyStep = suite.tests[4]!;
-    expect(verifyStep.GET).toBe("/pets/{{pet_id}}");
+    expect(verifyStep.GET).toBe("/pets/{{petId}}");
     expect(verifyStep.expect.status).toBe(404);
   });
 
@@ -484,11 +485,13 @@ describe("generateCrudSuite", () => {
     ];
     const groups = detectCrudGroups(endpoints);
     const suite = generateCrudSuite(groups[0]!, noSecurity);
-    // Create step captures `slug`, not `id`
+    // Create step captures `slug` field — ARV-137: capture var = idParam
+    // (the spec path-param name `slug`), so the response field and the
+    // capture target share the same name. Previously this was synthesised
+    // to `project_id`.
     const createStep = suite.tests[0]!;
-    expect(createStep.expect.body?.slug).toEqual({ capture: "project_id" });
-    // Read uses the captured slug interpolated into the {slug} path-param
-    expect(suite.tests[1]!.GET).toBe("/projects/{{project_id}}");
+    expect(createStep.expect.body?.slug).toEqual({ capture: "slug" });
+    expect(suite.tests[1]!.GET).toBe("/projects/{{slug}}");
   });
 
   test("TASK-139: rule_id path-param maps to id field on response", () => {
