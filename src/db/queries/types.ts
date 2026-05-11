@@ -170,11 +170,3 @@ export interface FlakyTest {
   test_name: string;
   distinct_statuses: number;
 }
-
-export interface LastRunForSuite {
-  run_id: number;
-  started_at: string;
-  total: number;
-  passed: number;
-  failed: number;
-}

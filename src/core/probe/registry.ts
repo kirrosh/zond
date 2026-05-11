@@ -82,10 +82,6 @@ export function listProbes(): readonly Probe[] {
   return Array.from(PROBES.values());
 }
 
-export function getProbe(name: string): Probe | undefined {
-  return PROBES.get(name);
-}
-
 /** Test helper — wipes the registry between unit tests. NOT exported
  *  through `index.ts`; tests import this module directly. */
 export function clearProbes(): void {

@@ -42,18 +42,3 @@ export function matchesScope(rule: FpRule<unknown>, scope: FpScope): boolean {
   return rule.scope === scope;
 }
 
-/** Suppression factory used by the runner — keeps the shape uniform
- *  across rules that build their own reason and rules that rely on
- *  the static `reason` field. */
-export function makeSuppression(
-  rule: FpRule<unknown>,
-  scope: FpScope,
-  overrides?: Partial<FpSuppression>,
-): FpSuppression {
-  return {
-    ruleId: rule.id,
-    scope,
-    reason: overrides?.reason ?? rule.reason ?? rule.id,
-    references: overrides?.references ?? rule.references,
-  };
-}

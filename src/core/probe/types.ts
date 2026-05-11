@@ -163,17 +163,3 @@ export interface Probe {
   report(format: ProbeReportFormat, result: ProbeResult): string | object;
 }
 
-/**
- * Convenience base class. Subclasses implement abstract slots; we keep
- * the shape minimal so boot-validation still catches missing methods
- * (the abstract declarations are purely a TypeScript hint, not the
- * runtime check).
- */
-export abstract class BaseProbe implements Probe {
-  abstract readonly name: string;
-  abstract readonly description: string;
-  abstract readonly commonFlags: ProbeFlags;
-  abstract dryRun(ctx: ProbeContext): Promise<EndpointPlan[]>;
-  abstract run(ctx: ProbeContext): Promise<ProbeResult>;
-  abstract report(format: ProbeReportFormat, result: ProbeResult): string | object;
-}

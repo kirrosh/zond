@@ -10,7 +10,7 @@
  */
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { mkdir, readdir, readFile, appendFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, appendFile } from "node:fs/promises";
 import type { SecurityVerdict } from "./security-probe.ts";
 
 export interface OrphanRecord {
@@ -185,13 +185,4 @@ export async function loadOrphans(filter: { api?: string; runId?: string } = {})
 
 export async function markRemoved(record: OrphanRecord): Promise<void> {
   await appendOrphanRecord({ ...record, removed: true, lastCleanupStatus: 200, lastCleanupError: null, createdAt: new Date().toISOString() });
-}
-
-export async function fileExists(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
 }

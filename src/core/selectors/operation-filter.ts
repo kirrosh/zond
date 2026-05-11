@@ -142,14 +142,3 @@ export function compileOperationFilter(opts: CompileFilterOptions = {}): Compile
   return { filter, errors, parsed: { includes, excludes } };
 }
 
-/** CLI helper — split repeated `--include`/`--exclude` flag values that
- *  may also be comma-joined. Useful when commander gives us either
- *  `["path:/a", "tag:b"]` or `["path:/a,tag:b"]`. We split on commas
- *  *only outside* a regex, by recognising selector-prefixed chunks. */
-export function splitFilterFlags(values: string[] | undefined): string[] {
-  if (!values || values.length === 0) return [];
-  // We don't naive-split on `,` because regexes can contain commas
-  // (e.g. `path:^/foo{2,4}$`). Each `--include` flag is treated as one
-  // spec verbatim. If users want multiple, they pass `--include` again.
-  return values.map((v) => v.trim()).filter(Boolean);
-}

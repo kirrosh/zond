@@ -16,11 +16,6 @@ export type Method = (typeof ALL_METHODS)[number];
  *  method), 401/403 are acceptable when auth is checked before routing. */
 export const ACCEPTABLE_UNSUPPORTED_STATUSES = [401, 403, 404, 405] as const;
 
-export function missingMethodsForPath(declared: Iterable<string>): Method[] {
-  const set = new Set<string>([...declared].map((m) => m.toUpperCase()));
-  return ALL_METHODS.filter((m) => !set.has(m));
-}
-
 /**
  * Replace `{name}` segments with valid-shape placeholders so the
  * request can reach the routing layer without being rejected purely on

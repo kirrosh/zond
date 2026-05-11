@@ -4,7 +4,6 @@ import {
   type CollectionRecord,
   type CollectionSummary,
   type CreateCollectionOpts,
-  type LastRunForSuite,
   type RunRecord,
 } from "./types.ts";
 
@@ -132,32 +131,3 @@ export function findCollectionByNameOrId(nameOrId: string): CollectionRecord | n
   return db.query("SELECT * FROM collections WHERE lower(name) = lower(?)").get(nameOrId) as CollectionRecord | null;
 }
 
-/**
- * Latest run that included `suiteFile` (matched by step_results.suite_file),
- * with per-suite step counts within that run. Used by the Suites browser UI.
- */
-export function getLatestRunForSuite(suiteFile: string): LastRunForSuite | null {
-  const db = getDb();
-  const row = db.query(`
-    SELECT
-      r.id AS run_id,
-      r.started_at AS started_at,
-      COUNT(*) AS total,
-      SUM(CASE WHEN s.status = 'pass' THEN 1 ELSE 0 END) AS passed,
-      SUM(CASE WHEN s.status IN ('fail', 'error') THEN 1 ELSE 0 END) AS failed
-    FROM results s
-    JOIN runs r ON r.id = s.run_id
-    WHERE s.suite_file = ?
-    GROUP BY r.id
-    ORDER BY r.id DESC
-    LIMIT 1
-  `).get(suiteFile) as LastRunForSuite | null;
-  if (!row) return null;
-  return {
-    run_id: row.run_id,
-    started_at: row.started_at,
-    total: Number(row.total) || 0,
-    passed: Number(row.passed) || 0,
-    failed: Number(row.failed) || 0,
-  };
-}
