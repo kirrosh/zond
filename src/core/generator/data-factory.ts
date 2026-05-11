@@ -96,7 +96,7 @@ export function generateFromSchema(
   // "Expected object, received string" 422s on Resend. Infer the type
   // from structural hints when nothing else gives one.
   if (effectiveType === undefined) {
-    if (schema.items !== undefined) effectiveType = "array";
+    if ((schema as { items?: unknown }).items !== undefined) effectiveType = "array";
     else if (schema.properties || Array.isArray(schema.required)) effectiveType = "object";
   }
 
