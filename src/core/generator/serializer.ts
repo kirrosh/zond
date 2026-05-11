@@ -260,6 +260,17 @@ function formatInlineValue(val: unknown): string {
   return String(val);
 }
 
+/** ARV-62 (feedback round-01 / F3): security probes emit attack payloads
+ *  with raw CRLF (`crlf:`, header-injection) and other control bytes.
+ *  When written into a double-quoted YAML scalar these *must* be escaped
+ *  (`\r` / `\n` / `\t` / `\xNN`) — emitting the raw byte produces YAML
+ *  that the parser rejects with "bad indentation of a mapping entry"
+ *  (`zond run` then fails the whole suite at load-time before sending a
+ *  single request). The check also covers `\r`, `\t`, `\x00–\x1f`, and
+ *  `\x7f` so any other control byte that sneaks into a payload survives
+ *  the YAML round-trip. */
+// eslint-disable-next-line no-control-regex
+const CONTROL_BYTE_RE = /[\x00-\x1f\x7f]/;
 function yamlScalar(value: string): string {
   if (
     value === "" ||
@@ -268,7 +279,6 @@ function yamlScalar(value: string): string {
     value === "null" ||
     value.includes(":") ||
     value.includes("#") ||
-    value.includes("\n") ||
     value.includes("'") ||
     value.includes('"') ||
     value.includes("{") ||
@@ -281,9 +291,32 @@ function yamlScalar(value: string): string {
     value.startsWith("%") ||
     value.startsWith("@") ||
     value.startsWith("`") ||
-    /^\d+$/.test(value)
+    /^\d+$/.test(value) ||
+    CONTROL_BYTE_RE.test(value)
   ) {
-    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    return `"${escapeYamlDoubleQuoted(value)}"`;
   }
   return value;
+}
+
+function escapeYamlDoubleQuoted(value: string): string {
+  let out = "";
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i]!;
+    const code = ch.charCodeAt(0);
+    if (ch === "\\") { out += "\\\\"; continue; }
+    if (ch === '"') { out += '\\"'; continue; }
+    if (ch === "\n") { out += "\\n"; continue; }
+    if (ch === "\r") { out += "\\r"; continue; }
+    if (ch === "\t") { out += "\\t"; continue; }
+    if (code < 0x20 || code === 0x7f) {
+      // YAML 1.2 allows \xNN for any byte in (0..0xff); use this for any
+      // control character that doesn't have a dedicated short escape
+      // (covers \x00–\x1f minus the three handled above, plus DEL).
+      out += "\\x" + code.toString(16).padStart(2, "0");
+      continue;
+    }
+    out += ch;
+  }
+  return out;
 }

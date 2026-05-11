@@ -174,6 +174,50 @@ describe("serializeSuite", () => {
     const parsed = yamlToObject(yaml) as { tests: { json: { tags: unknown } }[] };
     expect(parsed.tests[0]!.json.tags).toEqual([]);
   });
+  test("ARV-62 / F3 — raw CRLF in string payload emits valid YAML round-trip (escaped \\r\\n)", () => {
+    const crlfPayload = "zond-safe\r\nX-Zond-Injected: yes";
+    const suite: RawSuite = {
+      name: "probe-security",
+      tests: [
+        {
+          name: `crlf: name=${crlfPayload} must not echo`,
+          POST: "/items",
+          json: { name: crlfPayload },
+          expect: { status: [400, 422] },
+        },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    expect(yaml).not.toContain("zond-safe\r\nX-Zond-Injected");
+    expect(yaml).toContain("\\r\\nX-Zond-Injected");
+    const parsed = yamlToObject(yaml) as {
+      tests: { name: string; json: { name: string } }[];
+    };
+    expect(parsed.tests[0]!.json.name).toBe(crlfPayload);
+    expect(parsed.tests[0]!.name).toContain(crlfPayload);
+  });
+
+  test("ARV-62 / F3 — tab and other control bytes are escaped, not emitted raw", () => {
+    const suite: RawSuite = {
+      name: "probe-security",
+      tests: [
+        {
+          name: "ctrl",
+          POST: "/x",
+          json: { payload: "before\tafter\x00null\x7fdel" },
+          expect: { status: 400 },
+        },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    expect(yaml).toContain("\\t");
+    expect(yaml).toContain("\\x00");
+    expect(yaml).toContain("\\x7f");
+    const parsed = yamlToObject(yaml) as {
+      tests: { json: { payload: string } }[];
+    };
+    expect(parsed.tests[0]!.json.payload).toBe("before\tafter\x00null\x7fdel");
+  });
 });
 
 function yamlToObject(yaml: string): unknown {
