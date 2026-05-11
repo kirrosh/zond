@@ -172,6 +172,19 @@ async function resolveBaseUrl(
 async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   const opts = cmd.opts<ChecksRunOptions>();
   const json = opts.json === true || globalJson(cmd);
+
+  // ARV-63 (F2): `--report ndjson` is a friendly alias for `--ndjson`.
+  // The skill prompt and earlier docs referred to it that way; rather than
+  // surface a confusing "Available: sarif" error, fold the alias into the
+  // dedicated streaming flag and treat downstream code as if --ndjson was
+  // passed. Anything other than "ndjson" / "sarif" still hits the unknown-
+  // format branch below.
+  let reportFormatFromAlias = false;
+  if (opts.report === "ndjson") {
+    opts.ndjson = true;
+    opts.report = undefined;
+    reportFormatFromAlias = true;
+  }
   const ndjson = opts.ndjson === true;
 
   // ARV-10: --ndjson and --json render fundamentally different shapes
@@ -183,7 +196,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     printError(msg);
     process.exit(2);
   }
-  if (ndjson && typeof opts.report === "string") {
+  if (ndjson && typeof opts.report === "string" && !reportFormatFromAlias) {
     const msg = "--ndjson conflicts with --report — pick one output channel";
     printError(msg);
     process.exit(2);
@@ -313,7 +326,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       writeFileSync(resolvePath(out), JSON.stringify(sarif, null, 2));
       if (!json) console.error(`SARIF report written to ${out}`);
     } else if (typeof opts.report === "string") {
-      const msg = `Unknown --report format: "${opts.report}". Available: sarif`;
+      const msg = `Unknown --report format: "${opts.report}". Available: sarif, ndjson (alias for --ndjson)`;
       if (json) printJson(jsonError("checks run", [msg]));
       else printError(msg);
       process.exit(2);
@@ -416,7 +429,7 @@ function defineRun(parent: Command): void {
     )
     .option(
       "--report <format>",
-      "ARV-5: emit findings in an extra format alongside the JSON envelope. Available: sarif (SARIF v2.1.0 for GitHub Code Scanning).",
+      "ARV-5: emit findings in an extra format alongside the JSON envelope. Available: sarif (SARIF v2.1.0 for GitHub Code Scanning), ndjson (alias for --ndjson — stream events on stdout).",
     )
     .option(
       "--output <path>",
