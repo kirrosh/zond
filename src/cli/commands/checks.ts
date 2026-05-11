@@ -10,7 +10,7 @@
  * Built-in checks register themselves on import via `core/checks` —
  * adding a new check (ARV-2/3/4) doesn't require touching this file.
  */
-import { writeFileSync, readFileSync } from "node:fs";
+import { writeFileSync, readFileSync, openSync, writeSync, closeSync } from "node:fs";
 import { resolve as resolvePath, relative as relativePath } from "node:path";
 import type { Command } from "commander";
 
@@ -283,6 +283,32 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     }
   }
 
+  // ARV-97 (F2): `--report ndjson --output <path>` was silently dropping
+  // the file because the alias rewrite (line 183) clears `opts.report` and
+  // the downstream sarif branch is the only place that honoured `--output`.
+  // Open a write fd up front and stream events into it instead of stdout
+  // when the path is set; we still surface the human summary on stderr so
+  // exit-code/UX behaviour matches the stdout-streaming form.
+  const ndjsonOutputPath: string | undefined = ndjson && typeof opts.output === "string" && opts.output.length > 0
+    ? resolvePath(opts.output)
+    : undefined;
+  let ndjsonFd: number | undefined;
+  let ndjsonEventCount = 0;
+  if (ndjsonOutputPath) {
+    // Truncate-on-open mirrors the sarif branch (writeFileSync overwrites);
+    // re-running with the same --output path produces a fresh artifact
+    // rather than appending to a stale one.
+    ndjsonFd = openSync(ndjsonOutputPath, "w");
+  }
+  const ndjsonOnEvent = ndjson
+    ? (ndjsonFd !== undefined
+        ? (ev: import("../../core/reporter/ndjson.ts").NdjsonEvent) => {
+            ndjsonEventCount += 1;
+            writeSync(ndjsonFd!, `${JSON.stringify(ev)}\n`);
+          }
+        : emitToStdout)
+    : undefined;
+
   try {
     const result = await runChecks({
       specPath: specRes.spec,
@@ -296,7 +322,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       allowX00: opts.allowX00 === true,
       mode: modeRaw as "positive" | "negative" | "all",
       operationFilter,
-      onEvent: ndjson ? emitToStdout : undefined,
+      onEvent: ndjsonOnEvent,
       // ARV-8: bounded concurrency at op-level + optional rate-limiter
       // gating. workers=1 (default) preserves the pre-ARV-8 sequential
       // path inside runPool — same observable behaviour.
@@ -339,6 +365,9 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       // flushed inside runChecks via onEvent). Warnings ride on stderr
       // so a `| jq` consumer never sees them; the human one-liner is
       // also routed to stderr to keep stdout discipline (AC #5).
+      // ARV-97: when events were redirected to a file via --output, the
+      // stdout-discipline rationale doesn't apply, but routing the summary
+      // to stderr keeps the contract uniform across the two ndjson modes.
       for (const w of warnings) console.error(w);
       const s = result.data.summary;
       console.error(
@@ -346,6 +375,12 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       );
       const skipLine = formatSkippedOutcomes(s.skipped_outcomes);
       if (skipLine) console.error(skipLine);
+      if (ndjsonOutputPath) {
+        // Mirror the SARIF branch's "written to" line. Use process.stderr
+        // directly (not console.error) so test harnesses that mock the
+        // streams without intercepting console pick this up.
+        process.stderr.write(`NDJSON report written to ${ndjsonOutputPath} (${ndjsonEventCount} events)\n`);
+      }
     } else {
       for (const w of warnings) console.error(w);
       const s = result.data.summary;
@@ -392,8 +427,12 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     // Exit-code rule: 0 when no HIGH/CRITICAL findings, 1 otherwise. LOW/MEDIUM
     // findings are reported but don't gate CI by default — agents that want
     // strict gating can post-process the JSON envelope.
+    if (ndjsonFd !== undefined) closeSync(ndjsonFd);
     process.exit(result.high_or_critical > 0 ? 1 : 0);
   } catch (err) {
+    if (ndjsonFd !== undefined) {
+      try { closeSync(ndjsonFd); } catch { /* fd may already be invalid */ }
+    }
     const msg = err instanceof Error ? err.message : String(err);
     if (json) printJson(jsonError("checks run", [msg]));
     else printError(msg);
@@ -433,7 +472,7 @@ function defineRun(parent: Command): void {
     )
     .option(
       "--output <path>",
-      "ARV-5: write the --report file here. Defaults to zond-checks.sarif when --report sarif is set.",
+      "ARV-5/ARV-97: write the report to this file. With --report sarif, defaults to zond-checks.sarif. With --report ndjson (or --ndjson), redirects the event stream from stdout into the file (one JSON event per line).",
     )
     .option(
       "--phase <phase>",
