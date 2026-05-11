@@ -107,6 +107,17 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
       const v = result.body;
       if (v === null || v === undefined) {
         console.log("");
+        // ARV-70 (F11): when --json-path resolved to undefined, surface
+        // *why* on stderr so the user doesn't burn time wondering whether
+        // their selector is wrong vs. whether the response body looks
+        // different than they expected.
+        if (result.jsonPathDiagnostic?.failedAt) {
+          const d = result.jsonPathDiagnostic;
+          const resolved = d.resolved.length > 0 ? d.resolved.join(".") : "(root)";
+          process.stderr.write(
+            `zond: --json-path '${options.jsonPath}' did not resolve — stopped at segment "${d.failedAt}" after ${resolved}: ${d.reason ?? "unknown"}\n`,
+          );
+        }
       } else if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
         console.log(String(v));
       } else {
