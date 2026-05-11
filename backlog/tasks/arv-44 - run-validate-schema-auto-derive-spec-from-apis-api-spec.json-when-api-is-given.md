@@ -3,9 +3,10 @@ id: ARV-44
 title: >-
   run --validate-schema: auto-derive --spec from apis/<api>/spec.json when --api
   is given
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 11:36'
+updated_date: '2026-05-11 02:58'
 labels:
   - feedback-loop
   - api-resend
