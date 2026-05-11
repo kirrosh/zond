@@ -3,9 +3,10 @@ id: ARV-39
 title: >-
   zond run <missing-file>: trim trailing whitespace + suggest directory form on
   ENOENT
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 11:30'
+updated_date: '2026-05-11 02:58'
 labels:
   - feedback-loop
   - api-resend

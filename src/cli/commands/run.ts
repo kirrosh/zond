@@ -20,6 +20,8 @@ import { getDb } from "../../db/schema.ts";
 import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from "../../db/queries.ts";
 import { AUTH_PATH_RE } from "../../core/runner/auth-path.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
+import { findWorkspaceRoot } from "../../core/workspace/root.ts";
+import { existsSync } from "node:fs";
 import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
 import { detectStatusDrifts, formatDriftPlan, applyDriftsToTests, appendToleratedDrifts } from "../../core/runner/learn-drift.ts";
 import { detectCiContext } from "../../core/runner/ci-context.ts";
@@ -64,6 +66,10 @@ export interface RunOptions {
   validateSchema?: boolean;
   /** Explicit OpenAPI spec path/URL (overrides collection.openapi_spec). */
   specPath?: string;
+  /** ARV-44: --api <name> passed alongside paths — used as the lookup-by-name
+   *  fallback when test-path lookup in DB doesn't yield a spec. Parity with
+   *  ARV-33 (probe mass-assignment / probe security). */
+  apiName?: string;
   /** Group this run under a session id (multi-run campaigns). */
   sessionId?: string;
   /** TASK-144: per-step retry budget for transient network errors
@@ -95,6 +101,11 @@ export async function runCommand(options: RunOptions): Promise<number> {
     printError(`Empty path argument (got ${emptyPaths.length} blank entr${emptyPaths.length === 1 ? "y" : "ies"}) — pass a non-empty file or directory path`);
     return 2;
   }
+  // ARV-39: strip leading/trailing whitespace from path args so a stray space
+  // from copy-paste / shell history doesn't produce an ENOENT that quotes
+  // the rogue character. Mutating options.paths so downstream lookups
+  // (collection by test_path, env-file search) see the cleaned form.
+  options.paths = options.paths.map((p) => p.trim());
   const primaryPath = options.paths[0]!;
 
   // 1. Parse test files from every input path (collect parse errors instead
@@ -107,7 +118,8 @@ export async function runCommand(options: RunOptions): Promise<number> {
       suites.push(...parsed.suites);
       parseErrors.push(...parsed.errors);
     } catch (err) {
-      printError(err instanceof Error ? err.message : String(err));
+      const raw = err instanceof Error ? err.message : String(err);
+      printError(formatPathError(p, raw));
       return 2;
     }
   }
@@ -299,6 +311,23 @@ export async function runCommand(options: RunOptions): Promise<number> {
         const collection = findCollectionByTestPath(primaryPath);
         if (collection?.openapi_spec) specPath = resolveCollectionSpec(collection.openapi_spec);
       } catch { /* DB not available — fall through */ }
+    }
+    // ARV-44: parity with ARV-33 (probe mass-assignment / security). When the
+    // user passed --api <name> together with a path, the test-path lookup
+    // above may miss (path normalisation, alias, --all merge). Fall back to
+    // lookup-by-name, then to apis/<name>/spec.json on disk.
+    if (!specPath && options.apiName) {
+      try {
+        const byName = resolveApiCollection(options.apiName, options.dbPath);
+        if (!("error" in byName) && byName.spec) specPath = byName.spec;
+      } catch { /* fall through to disk probe */ }
+      if (!specPath) {
+        try {
+          const ws = findWorkspaceRoot();
+          const onDisk = pathResolve(ws.root, "apis", options.apiName, "spec.json");
+          if (existsSync(onDisk)) specPath = onDisk;
+        } catch { /* workspace not initialised — give up silently */ }
+      }
     }
     if (specPath) {
       try {
@@ -593,8 +622,7 @@ import { resolveApiCollection } from "../resolve.ts";
 import { collect, flatSplit, parseNonNegativeInt, parsePositiveInt, parseRateLimit, parseReporter } from "../argv.ts";
 import { resolveSessionId } from "../../core/context/session.ts";
 import { getApi } from "../util/api-context.ts";
-import { findWorkspaceRoot } from "../../core/workspace/root.ts";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -609,6 +637,42 @@ function emitMissingVarWarnings(hits: import("../../core/runner/preflight-vars.t
     return;
   }
   for (const line of summarizeMissingVars(hits)) printWarning(line);
+}
+
+/**
+ * ARV-39: rewrite an ENOENT bubbling up from `parseSafe` so the user sees
+ * a clean path quote and an actionable hint. Bun's raw glob/open error
+ * quotes the path with a trailing space ("'foo.yaml '"), which makes users
+ * think the path itself has a typo. We strip the noise and, when the file's
+ * parent directory exists, suggest either the dir form (`apis/<api>/tests`)
+ * or list its YAML siblings so the right invocation is discoverable.
+ */
+function formatPathError(path: string, raw: string): string {
+  const isEnoent = /ENOENT/i.test(raw) || /no such file or directory/i.test(raw);
+  if (!isEnoent) return raw;
+  const cleanPath = path.trim();
+  const parent = pathDirname(cleanPath);
+  const lines: string[] = [`Path not found: ${cleanPath}`];
+  // Parent directory exists → list known YAML suites to make the right
+  // invocation obvious. Parent missing → just say so; nothing useful to add.
+  try {
+    if (parent && existsSync(parent) && statSync(parent).isDirectory()) {
+      const siblings = readdirSync(parent)
+        .filter((f) => /\.ya?ml$/i.test(f))
+        .sort();
+      if (siblings.length === 0) {
+        lines.push(`(${parent}/ has no YAML files — did you forget to run \`zond generate\`?)`);
+      } else {
+        // Prefer suggesting the directory itself — that's the parity command
+        // most users actually want ("run all suites under apis/<api>/tests").
+        lines.push(`Did you mean \`zond run ${parent}\` (runs ${siblings.length} suite${siblings.length === 1 ? "" : "s"})?`);
+        const preview = siblings.slice(0, 6).map((s) => `  - ${parent}/${s}`).join("\n");
+        const more = siblings.length > 6 ? `\n  … ${siblings.length - 6} more` : "";
+        lines.push(`Known suites in ${parent}/:\n${preview}${more}`);
+      }
+    }
+  } catch { /* readdir / stat failed — fall through with the basic message */ }
+  return lines.join("\n");
 }
 
 /**
@@ -800,6 +864,7 @@ export function registerRun(program: Command): void {
         reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
         validateSchema: opts.validateSchema === true,
         specPath: typeof opts.spec === "string" ? opts.spec : undefined,
+        apiName: apiFlag,
         sessionId: resolveSessionId({
           flag: typeof opts.sessionId === "string" ? opts.sessionId : null,
           env: process.env.ZOND_SESSION_ID ?? null,
