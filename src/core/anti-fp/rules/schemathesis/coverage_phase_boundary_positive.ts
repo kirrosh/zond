@@ -8,9 +8,9 @@
  * that have nothing to do with the contract:
  *   - "from" email must be on a verified-sending-domain,
  *   - "broadcast.from_audience_id" must exist on this tenant,
- *   - rate-limited resource (Resend plan_limit).
+ *   - rate-limited resource (a plan_limit).
  * Treating each one as `positive_data_acceptance` fail floods the
- * report (171/349 findings on Resend round-03) and drowns real depth
+ * report (171/349 findings on a benchmark run) and drowns real depth
  * signal. Skip when the case is a coverage-phase positive — keep the
  * examples-phase positive (one realistic baseline body) as the strict
  * signal.

@@ -178,12 +178,13 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
 
 /** Spec authors often mark endpoints as deprecated in the summary or
  *  description text instead of (or in addition to) the `deprecated: true`
- *  flag — Sentry, GitHub legacy, Stripe-like APIs all do this. Without this
+ *  flag — common across many SaaS and legacy specs. Without this
  *  fallback, generator emits CRUD suites whose POST returns 404 from a dead
  *  endpoint. (TASK-245) */
 /** Matches `(DEPRECATED) ...`, `[DEPRECATED] ...`, `DEPRECATED: ...` at the
  *  start of a string. Also matches markdown `## Deprecated` headings, which
- *  Sentry uses in operation `description` to flag end-of-life endpoints. */
+ *  some spec authors use in operation `description` to flag end-of-life
+ *  endpoints. */
 const DEPRECATED_PREFIX_RE = /^\s*[\(\[]?\s*DEPRECATED\s*[\)\]:\-—\s]/i;
 const DEPRECATED_HEADING_RE = /^\s*#+\s*Deprecated\b/im;
 function isMarkedDeprecatedInText(summary?: string, description?: string, operationId?: string): boolean {

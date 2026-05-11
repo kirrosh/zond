@@ -29,7 +29,7 @@ function slugify(s: string): string {
  *
  * The general rule: drop trailing `_id` / `_slug` / `_or_slug` /
  * `Id` / `Slug`, then slugify and trim to the first segment. We also
- * canonicalise a couple of common Sentry-style names to short aliases
+ * canonicalise a couple of common common SaaS-style names to short aliases
  * (`organization` → `org`, `project` → `proj`).
  */
 export function placeholderAlias(rawName: string): string {
@@ -240,7 +240,7 @@ function escapeRegex(s: string): string {
 
 /**
  * Strip a single trailing slash so `/keys/` and `/keys` compare equal.
- * Sentry-style APIs mix both forms; without this normalisation, the
+ * common SaaS-style APIs mix both forms; without this normalisation, the
  * counterpart lookup misses on every collection that ends in `/`,
  * leaking created resources during probe runs.
  */
@@ -259,7 +259,7 @@ function pathsEqual(a: string, b: string): boolean {
  *  - PATCH /collection/{id}      → DELETE /collection/{id}
  *
  *  Trailing-slash tolerant on both sides (TASK-139-style fix carried
- *  into shared.ts after round-4 dogfooding showed POST /keys/ on Sentry
+ *  into shared.ts after round-4 dogfooding showed a real-world `POST /keys/`
  *  leaked DSN keys because the regex required identical slash forms).
  */
 export function findDeleteCounterpart(

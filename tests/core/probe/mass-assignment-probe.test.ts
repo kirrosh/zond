@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, beforeAll } from "bun:test
 import { bootstrapAntiFp } from "../../../src/core/anti-fp/bootstrap.ts";
 
 // ARV-125: the inconclusive-baseline summary now consults the anti-FP
-// registry (`sentry/paid-plan-403` rule) instead of an inline regex
+// registry (`subscription-gated/paid-plan-403` rule) instead of an inline regex
 // array. The probe entry-point doesn't bootstrap the registry — the
 // CLI does, in `buildProgram`. Tests bypass that, so we register the
 // shipped rule set explicitly. Idempotent: safe to call repeatedly.

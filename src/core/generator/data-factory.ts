@@ -108,7 +108,7 @@ export function generateFromSchema(
   // branch returns "{{$randomString}}" for a missing-type field — which
   // is what made `prepare-fixtures --seed` send a string for nested
   // objects like `automations.config` / `automations.steps` and earn
-  // "Expected object, received string" 422s on Resend. Infer the type
+  // "Expected object, received string" 422s. Infer the type
   // from structural hints when nothing else gives one.
   if (effectiveType === undefined) {
     if ((schema as { items?: unknown }).items !== undefined) effectiveType = "array";
@@ -173,7 +173,7 @@ export function generateFromSchema(
 
 /** Fields the client must not send in a request body: explicit `readOnly: true`,
  *  or the literal name `id`. The latter is a heuristic for under-specified specs
- *  (Sentry, many in-house APIs) that don't mark the server-assigned id readOnly
+ *  (common in in-house APIs) that don't mark the server-assigned id readOnly
  *  but still 4xx on it being present. */
 function shouldSkipForRequest(name: string, schema: OpenAPIV3.SchemaObject): boolean {
   if (schema.readOnly === true) return true;
@@ -485,9 +485,9 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
 
   // ARV-38: when the spec declares a JSON-Schema `default` for a string-typed
   // field with no enum, prefer it over heuristics. PATCH endpoints in
-  // particular rely on this — e.g. Resend `PATCH /domains/{id}` has
-  // `tls: { type: string, default: "opportunistic" }` and the random fallback
-  // produced a guaranteed 422 every run.
+  // particular rely on this — e.g. a `PATCH /domains/{id}` with
+  // `tls: { type: string, default: "opportunistic" }` would otherwise get
+  // a random fallback and a guaranteed 422 every run.
   if (typeof schema.default === "string" && schema.default.length > 0) {
     return schema.default;
   }
@@ -500,14 +500,14 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
     return "{{$randomSlug}}";
   }
 
-  // Description-aware: when the schema describes a domain/hostname (Resend
-  // `POST /domains/`, Cloudflare zones, etc.) but the field is generically
-  // named `name`, the default `{{$randomName}}` returns "Bob Wilson" and the
-  // server rejects it. TASK-224.
-  // Skip when the field name is clearly in email vocabulary — Resend, SendGrid
-  // and friends describe `from`/`to`/etc. with phrases like "verified sending
-  // domain" or "Name <user@domain>", which trips the regex but the field is
-  // an email, not a domain. Email vocab > domain-from-description.
+  // Description-aware: when the schema describes a domain/hostname (e.g.
+  // a `POST /domains/`-style endpoint or DNS-zone create route) but the
+  // field is generically named `name`, the default `{{$randomName}}`
+  // returns "Bob Wilson" and the server rejects it. TASK-224.
+  // Skip when the field name is clearly in email vocabulary — email-API
+  // specs often describe `from`/`to`/etc. with phrases like "verified
+  // sending domain" or "Name <user@domain>", which trips the regex but
+  // the field is an email, not a domain. Email vocab > domain-from-description.
   if (
     schema.description &&
     /\b(domain|hostname|fqdn)\b/i.test(schema.description) &&
@@ -533,7 +533,7 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
     if (lower === "country" || lower === "country_code") return "US";
     if (lower === "timezone" || lower === "time_zone" || lower === "tz") return "UTC";
     if (lower === "currency" || lower === "currency_code") return "USD";
-    // Email-context fields. Email-API specs (Resend, SendGrid, Mailgun) often
+    // Email-context fields. Email-API specs often
     // omit `format: email` on `from`/`to`/`reply_to`/`cc`/`bcc` — the field
     // name is the only clue, and `{{$randomString}}` guarantees a 422.
     if (

@@ -536,7 +536,7 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
           //   (a) seed was tried for this var → splice in its outcome.
           //   (b) seed was on but no attempt landed → owner lookup couldn't
           //       find a POST/create endpoint (common for SDK-only writes
-          //       like Sentry replays). Spell that out.
+          //       like ingest-only resources). Spell that out.
           if (options.seed && lastItem.status === "miss-empty") {
             if (lastSeed) {
               reason = `${lastItem.reason ?? lastItem.status}; seed attempt: ${lastSeed.reason ?? lastSeed.status}`;

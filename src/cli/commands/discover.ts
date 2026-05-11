@@ -57,7 +57,7 @@ function preferredFieldFromVar(varName: string): string {
 /** Strip a trailing FK-shape suffix (`_id`, `Id`, `_uuid`, `_slug`, `_name`,
  *  `_code`) from a var name and return the stem. Used by ARV-69 to find an
  *  owner resource when the resource map doesn't link the var to a list
- *  endpoint explicitly (Resend-style {id} placeholders).
+ *  endpoint explicitly (common-style {id} placeholders).
  */
 function stemFromVarName(varName: string): string | null {
   const lower = varName.toLowerCase();
@@ -831,7 +831,7 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
         if (!target) {
           // ARV-69 (feedback round-02 / F10): the resource map only links a
           // var to a list endpoint when the path explicitly carries it as a
-          // path-param (e.g. /audiences/{audience_id}). Resend-style APIs
+          // path-param (e.g. /audiences/{audience_id}). common-style APIs
           // commonly use the generic {id} placeholder, so vars like
           // `domain_id` / `segment_id` / `log_id` end up with no fkDep edge
           // even though /domains, /segments, /logs are perfectly usable as

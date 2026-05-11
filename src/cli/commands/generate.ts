@@ -305,8 +305,9 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
     }
 
     // ARV-15: warn when in-scope endpoints will create/modify real resources.
-    // POST/PUT/PATCH/DELETE on a live API send real traffic — Resend's
-    // `POST /emails` literally sends mail; deleting a record is irreversible.
+    // POST/PUT/PATCH/DELETE on a live API send real traffic — e.g. an
+    // email API's `POST /emails` literally sends mail; deleting a record
+    // is irreversible.
     // Generation is harmless (just YAML), but `zond run` against the suite
     // is not, so the warning fires here so the user sees it before they grep
     // the output for what to run next.

@@ -106,29 +106,30 @@ this on production/shared orgs without `--dry-run` first.
 ### Write-only / SDK-only resources (ARV-113)
 
 Some ids cannot be acquired through `discover` or `--seed` because they
-**have no list/GET endpoint and no spec-described POST**. They're created
-through an SDK-style ingest endpoint with its own auth scheme, and the
-OpenAPI spec doesn't describe that route at all. Common examples:
+**have no list/GET endpoint and no spec-described POST**. Typical shapes:
 
-| Resource     | Created by              | Why discover/--seed can't help              |
-|--------------|-------------------------|---------------------------------------------|
-| Sentry `event_id`   | `POST /api/<project>/store/` with `X-Sentry-Auth: DSN<public-key>` | not in OpenAPI; auth is DSN, not Bearer |
-| Sentry `issue_id`   | side-effect of the same ingest call | derived from an event after Sentry groups it |
-| Sentry `replay_id`  | replay SDK only         | requires a real browser session |
-| Sentry-app `uuid`   | UI / paid plan          | OpenAPI describes GET only |
+- **SDK-only ingest endpoints** — the resource is created through an
+  endpoint with its own auth scheme (DSN, signed-URL, write-key) that
+  isn't described in the OpenAPI spec at all.
+- **Side-effect ids** — the value is produced as a byproduct of another
+  call (e.g. an event-ingest call assigns a grouping id server-side).
+- **Client-SDK-only resources** — produced by a browser/mobile SDK
+  session and unreachable from a CLI HTTP client.
+- **UI- or paid-plan-only resources** — OpenAPI describes only GET; the
+  create path is dashboard-only.
 
 **Workflow when prepare-fixtures reports `failed:miss-empty-no-seed-endpoint`:**
 
 1. Read the failure reason — it names whether the owner has *no* create
    endpoint or *no* owner resource at all. `--seed` cannot help; do not
    keep re-running it.
-2. If the resource is SDK-only and the ingest endpoint is public-DSN-style,
-   you can harvest it by hand:
+2. If the resource is reachable via an out-of-spec ingest endpoint, you
+   can harvest the id by hand:
    ```
-   zond request POST https://o<org>.ingest.<region>.sentry.io/api/<project>/store/ \
-     --header "X-Sentry-Auth: Sentry sentry_key=<dsn-public-key>,sentry_version=7" \
+   zond request POST <ingest-url> \
+     --header "<auth-header>: <token>" \
      --header "Content-Type: application/json" \
-     --body '{"message":"zond fixture seed","level":"info","platform":"javascript"}' \
+     --body '<minimal payload>' \
      --json-path id
    ```
    Then write the captured value into `apis/<name>/.env.yaml`
@@ -148,37 +149,39 @@ OpenAPI spec doesn't describe that route at all. Common examples:
    # apis/<name>/.api-resources.local.yaml
    # Survives `zond refresh-api`. Add resources/endpoints not in OpenAPI.
    extensions:
-     - resource: sentry-events
-       basePath: /api/{project_id}/store
-       itemPath: /api/{project_id}/store
+     - resource: <resource-name>
+       basePath: /<collection>
+       itemPath: /<collection>
        idParam: id
        captureField: id
        hasFullCrud: false
        endpoints:
-         create: POST /api/{project_id}/store/
+         create: POST /<collection>/
        fkDependencies:
-         - var: project_id
-           param: project_id
+         - var: <owner_id_var>
+           param: <owner_id_param>
            in: path
-           ownerResource: projects
+           ownerResource: <owner-resource>
    ```
 
    Note (ARV-111 MVP): merge-only landed. The extension surfaces in the
    resource map and unblocks downstream tooling that consumes it, but
    `prepare-fixtures --seed` still requires the spec to carry the
    request-body schema for the create endpoint — so for true write-only
-   ingest (Sentry's `/store/` with a free-form event payload), the
+   ingest (a free-form event payload not described in OpenAPI), the
    `zond request` harvest + `.env.yaml` edit remains the workflow. A
    follow-up will extend the local file with an inline `requestBodyTemplate`
    so `--seed` can call the extension directly.
 
-**Known dead-ends — do NOT add to the backlog:**
+**Known dead-end shapes — do NOT add to the backlog:**
 
-- `POST /monitors/` on Sentry returns `400 Invalid project` regardless of
-  whether `project` is a slug or a numeric id. This is a Sentry API quirk,
-  not a zond bug. Move on or seed by hand via the Sentry UI.
-- `POST /api/0/teams/<org>/<team>/external-teams/` requires a paid plan;
-  same shape — not a zond bug.
+- Endpoints whose server-side validation rejects every value of a
+  path/body field regardless of how it's encoded (slug vs numeric id
+  etc.) — vendor-specific API quirks, not zond bugs. Move on or seed
+  by hand via the vendor UI.
+- Endpoints requiring a paid plan / scope you don't have — not a zond
+  bug; the anti-FP `subscription-gated/paid-plan-403` rule already
+  marks these as wontfix in probe summaries.
 - Fixtures gated by SCIM provisioning, paid SSO, or data forwarders
   cannot be acquired through any CLI flow. Mark them with a placeholder
   in `.env.yaml` and document the gap in the case-study.
