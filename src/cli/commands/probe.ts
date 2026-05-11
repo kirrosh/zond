@@ -13,9 +13,12 @@
 
 import type { Command } from "commander";
 
-import { probeStaticCommand, resolveStaticClasses } from "./probe-static.ts";
-import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from "./probe-mass-assignment.ts";
-import { probeSecurityCommand } from "./probe-security.ts";
+// ARV-129: action handlers relocated from top-level commands/probe-*.ts
+// into commands/probe/ — the orchestrator (this file) stays at top level,
+// the per-subcommand modules are no longer mistaken for siblings.
+import { probeStaticCommand, resolveStaticClasses } from "./probe/static.ts";
+import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from "./probe/mass-assignment.ts";
+import { probeSecurityCommand } from "./probe/security.ts";
 import { SECURITY_CLASSES } from "../../core/probe/security-probe.ts";
 import { globalJson, resolveSpecArg, resolveApiEnv, resolveApiCollection } from "../resolve.ts";
 import { getApi } from "../util/api-context.ts";

@@ -124,7 +124,8 @@ describe("probe security --report json shape", () => {
     // Direct grep over the source file: a regression that re-introduces
     // the markdown blob would put the property name back. This is a
     // belt-and-suspenders check on top of the schema validation above.
-    const path = require.resolve("../../src/cli/commands/probe-security.ts");
+    // ARV-129: probe action handler moved to src/cli/commands/probe/security.ts.
+    const path = require.resolve("../../src/cli/commands/probe/security.ts");
     const src = require("node:fs").readFileSync(path, "utf-8") as string;
     expect(src.includes("digest: options.output ? { file: options.output } : { stdout: md }")).toBe(false);
   });
