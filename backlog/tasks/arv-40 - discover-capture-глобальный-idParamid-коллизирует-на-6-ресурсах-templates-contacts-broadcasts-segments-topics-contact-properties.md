@@ -3,10 +3,10 @@ id: ARV-40
 title: >-
   discover/capture: глобальный idParam=id коллизирует на 6 ресурсах
   (templates/contacts/broadcasts/segments/topics/contact-properties)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 11:30'
-updated_date: '2026-05-11 17:53'
+updated_date: '2026-05-11 18:03'
 labels:
   - feedback-loop
   - api-resend
@@ -38,8 +38,8 @@ Related: ARV-69 (harvest per-resource done), ARV-122 (layered spec model).
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 .api-fixtures.yaml manifest пишет per-resource var вместо одного глобального id
-- [ ] #2 generate подставляет соответствующий per-resource var в CRUD-сьюты, generated тесты не делят один uuid между 6 ресурсами
-- [ ] #3 regression: existing per-resource entries (email_id, domain_id) не переименовываются и не дублируются
-- [ ] #4 resource-builder при collision на path-param id синтезирует уникальное имя вида <resource>_id (snake-case, suffix _id)
+- [x] #1 .api-fixtures.yaml manifest пишет per-resource var вместо одного глобального id
+- [x] #2 generate подставляет соответствующий per-resource var в CRUD-сьюты, generated тесты не делят один uuid между 6 ресурсами
+- [x] #3 regression: existing per-resource entries (email_id, domain_id) не переименовываются и не дублируются
+- [x] #4 resource-builder при collision на path-param id синтезирует уникальное имя вида <resource>_id (snake-case, suffix _id)
 <!-- AC:END -->
