@@ -295,9 +295,21 @@ export async function runCommand(options: RunOptions): Promise<number> {
     envRateLimit = (await loadEnvMeta(options.env, searchDir)).rateLimit;
   } catch { /* meta load failure is non-fatal */ }
   const rateLimit = resolveRateLimit(options.rateLimit, envRateLimit);
-  const rateLimiter = rateLimit === "auto"
-    ? createAdaptiveRateLimiter()
-    : createRateLimiter(rateLimit);
+  // ARV-64 (feedback round-01 / F4): when no rate-limit was configured
+  // explicitly, default to an adaptive limiter. Adaptive is a no-op until
+  // a response carries RateLimit-* headers (RFC 9568) — in which case it
+  // learns the policy and throttles subsequent requests so a burst can't
+  // blow through small windows like Resend's 5/1s. Without this default
+  // `zond run` ignored server-published rate-limit headers entirely and
+  // 22% of a typical sweep landed in 429.
+  let rateLimiter: ReturnType<typeof createAdaptiveRateLimiter> | undefined;
+  if (rateLimit === "auto") {
+    rateLimiter = createAdaptiveRateLimiter();
+  } else if (rateLimit !== undefined) {
+    rateLimiter = createRateLimiter(rateLimit);
+  } else {
+    rateLimiter = createAdaptiveRateLimiter();
+  }
 
   // 3c. Resolve OpenAPI spec. Explicit --spec wins; otherwise fall back to the
   // collection record. The doc is reused for --validate-schema (TASK-50) and
@@ -745,7 +757,7 @@ export function registerRun(program: Command): void {
         .argParser(parseReporter),
     )
     .option("--timeout <ms>", "Override request timeout", parsePositiveInt("--timeout"))
-    .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers (overrides .env.yaml `rateLimit` and zond.config.yml `defaults.rate_limit`)", parseRateLimit)
+    .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers. Default: adaptive (ARV-64) — no-op until the server publishes RateLimit-* headers, then paces requests automatically. Pass a number for hard caps; `off` is not supported (set --workers 1 + no flag for sequential).", parseRateLimit)
     .option("--bail", "Stop on first suite failure")
     .option("--sequential", "Run regular suites one after another instead of in parallel (opt-out of Promise.all)")
     .option("--all", "TASK-116: discover every apis/<name>/tests/ directory in the workspace and merge them into a single run row (one runs.id per CI invocation, even with multiple registered APIs). Implies CI-style aggregation; pairs with auto-detected commit_sha / branch / trigger=ci.")
