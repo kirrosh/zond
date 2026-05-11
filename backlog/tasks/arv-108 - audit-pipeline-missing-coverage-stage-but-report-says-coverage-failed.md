@@ -1,9 +1,10 @@
 ---
 id: ARV-108
 title: audit pipeline missing coverage stage but report says coverage failed
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 08:51'
+updated_date: '2026-05-11 09:05'
 labels:
   - feedback-loop
   - api-sentry
@@ -42,3 +43,9 @@ Effect: Phase 6 (coverage) usually needed for CI gate; user runs zond audit, exp
 Log: rounds/raw-03.log block '=== zond audit --dry-run ===' + audit-03.html grep
 Related: skill-drift SD7
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Round 03: coverage now appears in dry-run plan; HTML warning differentiates 'no session runs' / 'parse error' / 'exit N'. Coverage stays non-fatal for the audit exit code.
+<!-- SECTION:NOTES:END -->
