@@ -308,6 +308,38 @@ describe("ARV-101 (F6): diagnose payload aggregates by recommended_action enum",
     expect(agg.report_backend_bug!.count).toBeGreaterThanOrEqual(2);
   });
 
+  test("ARV-103 (F8): schema-kind assertions route to report_backend_bug, not fix_test_logic", () => {
+    // --validate-schema annotates each violated field with kind:"schema".
+    // db-analysis must walk the assertions array, detect that, and route
+    // through the classifier's schema_violation branch (skill: "treat them
+    // like 5xx, do not edit the expectation away").
+    const schemaFailStep: TestRunResult["steps"][number] = {
+      name: "Retrieve Ownership Configuration",
+      status: "fail",
+      duration_ms: 12,
+      request: { method: "GET", url: "http://api/projects/acme/frontend/ownership/", headers: {} },
+      response: { status: 200, headers: {}, body: '{"raw": null}', duration_ms: 12 },
+      assertions: [
+        { field: "body.raw", rule: "type=string", passed: false, actual: null, expected: "string", kind: "schema" } as unknown as { field: string; rule: string; passed: boolean },
+      ],
+      captures: {},
+    };
+    const result: TestRunResult = {
+      suite_name: "Sentry Schema",
+      started_at: "2024-01-01T00:00:00.000Z",
+      finished_at: "2024-01-01T00:00:01.000Z",
+      total: 1, passed: 0, failed: 1, skipped: 0,
+      steps: [schemaFailStep],
+    };
+    const runId = createRun({ started_at: result.started_at });
+    finalizeRun(runId, [result]);
+    saveResults(runId, [result]);
+
+    const diag = diagnoseRun(runId, true, dbPath);
+    expect(diag.failures).toHaveLength(1);
+    expect(diag.failures[0]!.recommended_action).toBe("report_backend_bug");
+  });
+
   test("payload omits by_recommended_action entirely when there are no failures", () => {
     const allPass: TestRunResult = {
       suite_name: "Healthy",

@@ -105,14 +105,19 @@ export function recommendedActionForGenerated(
   failureType: "api_error" | "assertion_failed" | "network_error",
   responseStatus: number | null,
   isGenerated: boolean,
+  schemaViolation = false,
 ): RecommendedAction {
   // ARV-56: delegate to classifier. `isGenerated` is encoded via a
   // synthetic suite_path so the same logic flows through classify().
+  // ARV-103 (F8): `schemaViolation` propagates the assertion-kind flag —
+  // when true, the classifier's "treat schema bugs like 5xx" branch wins
+  // over the generator's regenerate_suite default.
   const action = classify({
     finding_class: failureType === "api_error" ? "test:api_error" :
       failureType === "network_error" ? "test:network_error" : "test:assertion_failed",
     status: responseStatus,
     ...(isGenerated ? { suite_path: "apis/_/tests/_.yaml" } : {}),
+    ...(schemaViolation ? { schema_violation: true } : {}),
   });
   if (!action) throw new Error(`classifier returned no action for failure_type=${failureType} status=${responseStatus}`);
   return action;
