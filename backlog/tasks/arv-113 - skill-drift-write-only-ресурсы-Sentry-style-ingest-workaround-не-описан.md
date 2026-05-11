@@ -1,9 +1,10 @@
 ---
 id: ARV-113
 title: 'skill drift: write-only ресурсы / Sentry-style ingest workaround не описан'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 09:20'
+updated_date: '2026-05-11 09:32'
 labels:
   - zond
   - skill-drift
@@ -30,8 +31,14 @@ Reason: в раунде 4 пользователь повторил один и 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 новая секция в zond-base.md / prepare-fixtures.md: "write-only / SDK-only ресурсы"
-- [ ] #2 пример Sentry ingest workaround (без хардкода DSN — placeholder)
-- [ ] #3 footer "known dead-ends" в skill, чтобы агент не зацикливался
-- [ ] #4 cross-ref на F18-таск (extend .api-resources)
+- [x] #1 новая секция в zond-base.md / prepare-fixtures.md: "write-only / SDK-only ресурсы"
+- [x] #2 пример Sentry ingest workaround (без хардкода DSN — placeholder)
+- [x] #3 footer "known dead-ends" в skill, чтобы агент не зацикливался
+- [x] #4 cross-ref на F18-таск (extend .api-resources)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Добавлена секция 'Write-only / SDK-only resources (ARV-113)' в zond-base.md после блока про --seed. Содержит: (1) таблицу классов write-only ресурсов с примерами Sentry (event_id, issue_id, replay_id, sentry-app uuid); (2) workflow при failed:miss-empty-no-seed-endpoint с примером curl-style harvest через zond request + DSN-auth header; (3) footer 'Known dead-ends — do NOT add to the backlog' — POST /monitors/ (Sentry quirk), external-teams (paid plan), SCIM/SSO gated; (4) cross-ref на ARV-111 (зов extend CLI) и feedback_env_yaml_editable memory.
+<!-- SECTION:NOTES:END -->
