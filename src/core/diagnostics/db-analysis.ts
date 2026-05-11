@@ -172,6 +172,14 @@ export interface DiagnoseResult {
     duration_ms: number | null;
   }>;
   grouped_failures?: FailureGroup[];
+  /** ARV-101 (F6): top-level aggregation keyed by `recommended_action`
+   *  enum so triage agents (zond-triage skill) can route on the canonical
+   *  action without re-folding `failures[].recommended_action` through
+   *  `jq | group_by`. Built from the *full* failure set (not the compact
+   *  subset), so counts match `.summary.failed`. Each bucket carries
+   *  total count + a small examples list (`<suite>/<test>`). Empty when
+   *  there are no failures. */
+  by_recommended_action?: Record<string, { count: number; examples: string[] }>;
 }
 
 export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, maxExamples?: number): DiagnoseResult {
@@ -342,6 +350,26 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
     envFilePath,
   });
 
+  // ARV-101 (F6): aggregate failures by recommended_action enum so triage
+  // agents read .data.by_recommended_action.fix_env.count instead of
+  // re-folding failures[].recommended_action through `jq | group_by`. Built
+  // from the full failure set (not compactFailures) so counts match
+  // .summary.failed. Bounded examples list (5) keeps payload small while
+  // still pointing at concrete suites the agent can open.
+  const by_recommended_action: Record<string, { count: number; examples: string[] }> = {};
+  for (const f of failures) {
+    const key = f.recommended_action;
+    let bucket = by_recommended_action[key];
+    if (!bucket) {
+      bucket = { count: 0, examples: [] };
+      by_recommended_action[key] = bucket;
+    }
+    bucket.count += 1;
+    if (bucket.examples.length < 5) {
+      bucket.examples.push(`${f.suite_name}/${f.test_name}`);
+    }
+  }
+
   return {
     run: {
       id: diagRun.id,
@@ -364,6 +392,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
     ...(suggestedFixes.length > 0 ? { suggested_fixes: suggestedFixes } : {}),
     failures: compactFailures,
     ...(grouped_failures ? { grouped_failures } : {}),
+    ...(failures.length > 0 ? { by_recommended_action } : {}),
   };
 }
 
