@@ -582,18 +582,25 @@ export function registerCoverage(program: Command): void {
         return;
       }
 
-      // Hint when an active session has multiple runs but the user defaulted
-      // to "latest run only". Skip when --json (don't pollute envelope) or
-      // any explicit selector is set.
+      // ARV-71 (feedback round-02 / F12): when --api X is set and a zond
+      // session is active with more than one run, auto-promote the default
+      // to `--union session`. The pre-ARV-71 behaviour ("latest run only")
+      // misreads as a coverage regression every time a user runs a partial
+      // suite mid-session, and the previous stderr hint was easy to miss
+      // (the percentage already looked like a regression). Explicit
+      // selectors win, --json keeps the envelope untouched.
       const noSelector = !opts.runId && !sessionId && !runIds && !sinceIso && !tag;
-      if (apiName && noSelector && !globalJson(cmd)) {
+      if (apiName && noSelector) {
         const current = readCurrentSession();
         if (current) {
           const sessRuns = listRunsBySession(current.id);
           if (sessRuns.length > 1) {
-            const hint = `Active session has ${sessRuns.length} runs. ` +
-              `Coverage shows the latest only — pass '--union session' to combine all runs in the session.`;
-            process.stderr.write(`zond: ${hint}\n`);
+            sessionId = current.id;
+            if (!globalJson(cmd)) {
+              process.stderr.write(
+                `zond: active session has ${sessRuns.length} runs — defaulting to --union session (pass --run-id <N> for a single run).\n`,
+              );
+            }
           }
         }
         // ARV-41: warn when the latest run is probe-only — otherwise
