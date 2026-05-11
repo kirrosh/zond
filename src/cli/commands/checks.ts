@@ -51,7 +51,7 @@ export const CHECKS_OUTPUT_SPEC: OutputSpec<RunChecksResult> = {
   defaultFormat: "console",
   formats: {
     console:  { defaultChannel: "stdout", description: "Human-readable summary (default)" },
-    json:     { defaultChannel: "stdout", envelopeWrap: true, description: "JSON envelope ({ok, command, data})" },
+    json:     { defaultChannel: "stdout", envelopeWrap: true, envelopeSchemaFile: "checksRunData.schema.json", description: "JSON envelope ({ok, command, data})" },
     ndjson:   { defaultChannel: "stdout", description: "Stream events on stdout (check_start | check_result | finding | summary)" },
     sarif:    { defaultChannel: "file", defaultFilename: "zond-checks.sarif", description: "SARIF v2.1.0 for GitHub Code Scanning" },
     markdown: { defaultChannel: "stdout", description: "Short markdown summary of findings" },

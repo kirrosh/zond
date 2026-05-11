@@ -59,6 +59,11 @@ export interface FormatPolicy {
    *  formats (NDJSON) and bespoke serialisations (SARIF, JUnit) are
    *  not envelope-wrapped — they have their own contracts. */
   envelopeWrap?: boolean;
+  /** ARV-120: for `envelopeWrap` formats — basename of the JSON schema
+   *  under `docs/json-schema/` that describes the envelope's `data`
+   *  field. The build-time coverage test asserts the file exists, so
+   *  a renamed/deleted schema fails CI together with the spec. */
+  envelopeSchemaFile?: string;
   /** Optional human description, surfaced by `--help` generators and
    *  the README table. */
   description?: string;
