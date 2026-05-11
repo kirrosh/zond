@@ -35,6 +35,7 @@ import {
   collectTargets,
   isPlaceholder,
   probeOne,
+  readFixtureManifest,
   readResourceMap,
   upsertEnvLine,
   type DiscoveryItem,
@@ -386,7 +387,12 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
 
     const timeout = options.timeoutMs ?? 30000;
     const maxPasses = options.maxPasses ?? 8;
-    const targets = collectTargets(resourceMap);
+    // ARV-133: manifest-aware cascade — pull every required path/body-fk var
+    // into the target list, not only ones declared as parent-FK edges. Without
+    // the manifest, root-level vars (`domain_id`, `webhook_id`) that have no
+    // fkDep edge to another resource silently dropped out of cascade.
+    const manifest = (await readFixtureManifest(options.apiDir)) ?? undefined;
+    const targets = collectTargets(resourceMap, manifest);
 
     if (targets.length === 0 && !options.seed) {
       const msg = "No path-FK dependencies — nothing to bootstrap.";

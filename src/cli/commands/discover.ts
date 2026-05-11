@@ -393,22 +393,64 @@ export async function readFixtureManifest(apiDir: string): Promise<FixtureManife
 }
 
 /** Build the unique target list from FK deps. Each FK var = one discovery
- *  attempt (we hit the owner's list endpoint once and reuse the result). */
-export function collectTargets(map: ApiResourceMapYaml): FkTarget[] {
+ *  attempt (we hit the owner's list endpoint once and reuse the result).
+ *
+ *  ARV-133: also include each resource's own idParam (when it has a list
+ *  endpoint) — these are root-level required path-params with no fkDep edge
+ *  to another resource, but they're trivially harvestable from the resource's
+ *  own list endpoint. Without this, cascade silently skipped vars like
+ *  `domain_id`, `webhook_id`, `template_id` even though `/domains`,
+ *  `/webhooks`, `/templates` returned live data. Optional `manifest`
+ *  parameter wires manifest-required path/body-fk vars onto a list endpoint
+ *  via `inferOwnerFromVarName` (singular ↔ plural matching) so vars whose
+ *  name doesn't appear in the resource map's idParam table still get
+ *  attempted. */
+export function collectTargets(
+  map: ApiResourceMapYaml,
+  manifest?: FixtureManifestYaml,
+): FkTarget[] {
   const seen = new Set<string>();
   const out: FkTarget[] = [];
+  const push = (t: FkTarget): void => {
+    if (seen.has(t.varName)) return;
+    seen.add(t.varName);
+    out.push(t);
+  };
+
+  // 1. fkDeps — parent-id edges declared by resource-builder.
   for (const r of map.resources) {
     for (const dep of r.fkDependencies ?? []) {
       if (dep.in !== "path") continue;
       if (!dep.ownerResource) continue;
-      const key = dep.var;
-      if (seen.has(key)) continue;
-      seen.add(key);
       const owner = map.resources.find(x => x.resource === dep.ownerResource);
       const listLabel = owner?.endpoints.list ?? "";
-      out.push({ varName: dep.var, ownerResource: dep.ownerResource, listLabel });
+      push({ varName: dep.var, ownerResource: dep.ownerResource, listLabel });
     }
   }
+
+  // 2. Each resource's own idParam → its own list endpoint. resource-builder's
+  //    collectPathFkDeps skips this case (it emits only *parent* FKs), so
+  //    without an explicit pass `domain_id`/`webhook_id`/etc. drop out of
+  //    cascade entirely.
+  for (const r of map.resources) {
+    if (!r.idParam) continue;
+    if (!r.endpoints?.list) continue;
+    push({ varName: r.idParam, ownerResource: r.resource, listLabel: r.endpoints.list });
+  }
+
+  // 3. Manifest-required vars (path / body-fk) whose name doesn't match any
+  //    fkDep edge or resource idParam. Use singular↔plural stemming to find
+  //    an owner — same logic as the discover-via-manifest path uses (ARV-69).
+  if (manifest) {
+    for (const entry of manifest.fixtures) {
+      if (!entry.required) continue;
+      if (entry.source !== "path" && entry.source !== "body-fk") continue;
+      if (seen.has(entry.name)) continue;
+      const inferred = inferOwnerFromVarName(entry.name, map);
+      if (inferred) push(inferred);
+    }
+  }
+
   return out;
 }
 
