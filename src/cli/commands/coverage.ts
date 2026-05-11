@@ -366,6 +366,7 @@ async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
 }
 
 import type { Command } from "commander";
+import { Option } from "commander";
 import { globalJson, resolveApiCollection } from "../resolve.ts";
 import { parseInteger, parsePercentage } from "../argv.ts";
 import { getApi } from "../util/api-context.ts";
@@ -511,7 +512,15 @@ export function registerCoverage(program: Command): void {
     )
     .option("--db <path>", "Path to SQLite database file")
     .option("--verbose", "List not-covered (and partial) endpoints inline — same data as `--json` but human-readable")
+    // ARV-35: `--format json` matches the kubectl/gh/aws-cli convention many
+    // users reach for first; until ARV-54 lands a workspace-wide alias layer
+    // we accept it locally and forward to `--json`. Other values are rejected
+    // (no markdown reporter on coverage) so typos still fail loud.
+    .addOption(
+      new Option("--format <fmt>", "Alias for --json (parity with kubectl/gh/aws-cli)").choices(["json"]),
+    )
     .action(async (opts, cmd: Command) => {
+      if (opts.format === "json") opts.json = true;
       // ARV-53: only walk the --api chain when --spec wasn't provided —
       // an explicit spec disables the current-API fallback (coverage's
       // legacy mode supports bare-spec usage).
