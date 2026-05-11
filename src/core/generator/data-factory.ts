@@ -61,11 +61,26 @@ export function generateFromSchema(
   // properties over loose primitives — APIs that accept `Array<{id}>|Array<string>`
   // need the object variant, not a string that 422s. Falls back to first
   // non-null entry.
+  //
+  // ARV-78 (feedback round-04 / F25): when the parent schema declares a
+  // `discriminator: { propertyName, mapping? }` (typical OpenAPI 3 polymorphism —
+  // /automations.steps with type=trigger|action), pick the variant whose
+  // discriminator property carries a const/enum-single value and stamp that
+  // value into the result. Without this, generator emits a random variant and
+  // the API 422s with "Missing <required-by-other-variant>".
   if (schema.oneOf) {
-    return recurse(pickPreferredVariant(schema.oneOf as OpenAPIV3.SchemaObject[]), propertyName);
+    const variants = schema.oneOf as OpenAPIV3.SchemaObject[];
+    const picked = pickDiscriminatorVariant(variants, schema.discriminator?.propertyName)
+      ?? pickPreferredVariant(variants);
+    const result = recurse(picked, propertyName);
+    return stampDiscriminator(result, picked, schema.discriminator?.propertyName);
   }
   if (schema.anyOf) {
-    return recurse(pickPreferredVariant(schema.anyOf as OpenAPIV3.SchemaObject[]), propertyName);
+    const variants = schema.anyOf as OpenAPIV3.SchemaObject[];
+    const picked = pickDiscriminatorVariant(variants, schema.discriminator?.propertyName)
+      ?? pickPreferredVariant(variants);
+    const result = recurse(picked, propertyName);
+    return stampDiscriminator(result, picked, schema.discriminator?.propertyName);
   }
 
   // enum: first value (always valid for the API contract)
@@ -182,6 +197,50 @@ function depthLimitDefault(schema: OpenAPIV3.SchemaObject, name?: string): unkno
     case "object":
     default: return {};
   }
+}
+
+/** ARV-78 (F25): when a parent oneOf/anyOf carries `discriminator.propertyName`,
+ *  pick the variant whose discriminator property has a single-value enum or
+ *  const so its identity is unambiguous. Returns undefined when nothing
+ *  qualifies — caller falls back to pickPreferredVariant. */
+function pickDiscriminatorVariant(
+  variants: OpenAPIV3.SchemaObject[],
+  propertyName: string | undefined,
+): OpenAPIV3.SchemaObject | undefined {
+  if (!propertyName) return undefined;
+  for (const v of variants) {
+    const prop = v.properties?.[propertyName] as OpenAPIV3.SchemaObject | undefined;
+    if (!prop) continue;
+    const en = (prop as { enum?: unknown[] }).enum;
+    const cn = (prop as { const?: unknown }).const;
+    if (Array.isArray(en) && en.length === 1) return v;
+    if (cn !== undefined && cn !== null) return v;
+  }
+  return undefined;
+}
+
+/** Stamp the discriminator key onto a generated object. Without this the
+ *  variant choice is "anonymous" from the body's point of view — APIs that
+ *  switch on `type` reject the request even when every other field is
+ *  perfect. No-op when the propertyName is missing or the variant lacks an
+ *  enum/const for that property. */
+function stampDiscriminator(
+  result: unknown,
+  variant: OpenAPIV3.SchemaObject,
+  propertyName: string | undefined,
+): unknown {
+  if (!propertyName) return result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  const prop = variant.properties?.[propertyName] as OpenAPIV3.SchemaObject | undefined;
+  if (!prop) return result;
+  const en = (prop as { enum?: unknown[] }).enum;
+  const cn = (prop as { const?: unknown }).const;
+  let stamp: unknown;
+  if (Array.isArray(en) && en.length === 1) stamp = en[0];
+  else if (cn !== undefined && cn !== null) stamp = cn;
+  else return result;
+  (result as Record<string, unknown>)[propertyName] = stamp;
+  return result;
 }
 
 /** Prefer the most data-shape-informative variant from a oneOf/anyOf list:

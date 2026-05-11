@@ -795,3 +795,105 @@ describe("typeless schema infers shape from structural hints (ARV-67)", () => {
     expect(result).toBe("{{$randomString}}");
   });
 });
+
+// ARV-78 / feedback round-04 / F25
+describe("discriminator-aware oneOf variant selection (ARV-78)", () => {
+  test("oneOf with discriminator: picks the variant whose discriminator prop has a single-value enum", () => {
+    const schema: OpenAPIV3.SchemaObject = {
+      type: "object",
+      discriminator: { propertyName: "type" },
+      oneOf: [
+        {
+          type: "object",
+          required: ["type", "config"],
+          properties: {
+            type: { type: "string", enum: ["trigger"] },
+            config: {
+              type: "object",
+              required: ["event_name"],
+              properties: { event_name: { type: "string" } },
+            },
+          },
+        },
+        {
+          type: "object",
+          required: ["type", "name"],
+          properties: {
+            type: { type: "string", enum: ["action"] },
+            name: { type: "string" },
+          },
+        },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const body = generateFromSchema(schema) as Record<string, unknown>;
+    expect(body.type).toBe("trigger");
+    expect(typeof body.config).toBe("object");
+    expect((body.config as Record<string, unknown>).event_name).toBeDefined();
+  });
+
+  test("oneOf with discriminator: discriminator key is stamped onto the result", () => {
+    const schema: OpenAPIV3.SchemaObject = {
+      discriminator: { propertyName: "kind" },
+      oneOf: [
+        {
+          type: "object",
+          properties: { kind: { type: "string", enum: ["A"] }, payload: { type: "string" } },
+        },
+        {
+          type: "object",
+          properties: { kind: { type: "string", enum: ["B"] }, payload: { type: "number" } },
+        },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const body = generateFromSchema(schema) as Record<string, unknown>;
+    expect(["A", "B"]).toContain(String(body.kind));
+  });
+
+  test("oneOf without discriminator: original pickPreferredVariant path still wins", () => {
+    const schema: OpenAPIV3.SchemaObject = {
+      oneOf: [
+        { type: "string" },
+        { type: "object", properties: { x: { type: "string" } } },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const body = generateFromSchema(schema);
+    expect(typeof body).toBe("object");
+  });
+
+  test("F25 repro: automations body — steps[0] gets type=trigger + config.event_name", () => {
+    const stepSchema: OpenAPIV3.SchemaObject = {
+      discriminator: { propertyName: "type" },
+      oneOf: [
+        {
+          type: "object",
+          required: ["type", "config"],
+          properties: {
+            type: { type: "string", enum: ["trigger"] },
+            config: { type: "object", required: ["event_name"], properties: { event_name: { type: "string" } } },
+          },
+        },
+        {
+          type: "object",
+          required: ["type"],
+          properties: {
+            type: { type: "string", enum: ["delay"] },
+            seconds: { type: "integer" },
+          },
+        },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const automationBody: OpenAPIV3.SchemaObject = {
+      type: "object",
+      required: ["name", "steps"],
+      properties: {
+        name: { type: "string" },
+        steps: { type: "array", items: stepSchema } as unknown as OpenAPIV3.SchemaObject,
+      },
+    };
+    const body = generateFromSchema(automationBody) as { steps: Array<{ type: string; config?: { event_name?: string } }> };
+    expect(Array.isArray(body.steps)).toBe(true);
+    expect(body.steps[0]!.type).toBe("trigger");
+    expect(body.steps[0]!.config).toBeDefined();
+    expect(body.steps[0]!.config!.event_name).toBeDefined();
+  });
+});
