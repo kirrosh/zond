@@ -1,6 +1,7 @@
 import { dereference } from "@readme/openapi-parser";
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, ResponseInfo, SecuritySchemeInfo } from "./types.ts";
+import { disambiguateGenericPathParams } from "./path-param-disambig.ts";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
@@ -168,7 +169,11 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
     }
   }
 
-  return endpoints;
+  // ARV-40: when generic path-param names (`{id}`, `{slug}`, ...) collide
+  // across multiple resources, rewrite each to `<parent_singular>_<param>`
+  // so the manifest derives per-resource vars and tests stop sharing one
+  // global `id`. In-memory only; on-disk spec stays untouched.
+  return disambiguateGenericPathParams(endpoints);
 }
 
 /** Spec authors often mark endpoints as deprecated in the summary or
