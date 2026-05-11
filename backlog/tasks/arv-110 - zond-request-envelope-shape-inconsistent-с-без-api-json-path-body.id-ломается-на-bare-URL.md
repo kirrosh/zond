@@ -3,9 +3,10 @@ id: ARV-110
 title: >-
   zond request envelope shape inconsistent с/без --api (--json-path body.id
   ломается на bare URL)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 09:20'
+updated_date: '2026-05-11 09:27'
 labels:
   - zond
   - cli
@@ -30,7 +31,13 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 envelope-shape одинаков с `--api` и без него
-- [ ] #2 `--json-path body.id` работает на bare URL
-- [ ] #3 added regression test: `zond request <bare-url>` → JSON envelope matches schema
+- [x] #1 envelope-shape одинаков с `--api` и без него
+- [x] #2 `--json-path body.id` работает на bare URL
+- [x] #3 added regression test: `zond request <bare-url>` → JSON envelope matches schema
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+F17 — envelope shape подтверждён идентичный с/без --api (regression test добавлен в tests/cli/request.test.ts). Симптом пользователя был от путаницы envelope (data.body.id) vs response body (--json-path body.id). Добавлена эвристика: когда --json-path начинается с 'body.' или 'data.' и failedAt — первый сегмент, печатается hint про envelope-vs-response-body. Также диагностика теперь печатается и в --json режиме (раньше только в pipe-friendly режиме). Docstring --json-path уточнён: 'extract from RESPONSE BODY (not zond envelope)'.
+<!-- SECTION:NOTES:END -->

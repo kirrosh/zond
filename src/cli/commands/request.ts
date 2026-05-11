@@ -34,6 +34,30 @@ function looksLikeBlockedShellSubstitution(s: string | undefined): boolean {
   return /\$\([^)]+\)|`[^`]+`/.test(s) && /yq|cat|jq|grep|awk|sed|sh /.test(s);
 }
 
+/** ARV-110: pretty-print --json-path failure to stderr.
+ *  Adds a one-line envelope-vs-response-body hint when the user's path
+ *  starts at a top-level envelope key (`body`, `data`) but the response
+ *  body has no such field — a common confusion when graduating from
+ *  `--json | jq .data.body.id` (envelope) to `--json-path body.id`
+ *  (response body, NOT envelope). */
+function printJsonPathDiagnostic(
+  jsonPath: string | undefined,
+  diag: { resolved: string[]; failedAt?: string; reason?: string } | undefined,
+): void {
+  if (!jsonPath || !diag?.failedAt) return;
+  const resolved = diag.resolved.length > 0 ? diag.resolved.join(".") : "(root)";
+  process.stderr.write(
+    `zond: --json-path '${jsonPath}' did not resolve — stopped at segment "${diag.failedAt}" after ${resolved}: ${diag.reason ?? "unknown"}\n`,
+  );
+  const firstSeg = jsonPath.replace(/\[\d+\]/g, "").split(".")[0];
+  if ((firstSeg === "body" || firstSeg === "data") && diag.resolved.length === 0) {
+    process.stderr.write(
+      `      Hint: --json-path extracts from the response body, not the zond envelope. ` +
+      `To address the envelope's data.body.id, use \`--json\` and pipe to jq.\n`,
+    );
+  }
+}
+
 function authHintLines(apis: string[]): string[] {
   const example = apis[0] ?? "<name>";
   return [
@@ -99,6 +123,11 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
 
     if (options.json) {
       printJson(jsonOk("request", validation ? { ...result, schema_validation: validation } : result));
+      // ARV-110: surface jsonPath diagnostic on stderr in --json mode too, so
+      // pipelines that read envelope from stdout still see *why* `body` came
+      // back null. Without this, the only signal was a silent null inside the
+      // envelope — easy to misread as "envelope shape differs between modes".
+      printJsonPathDiagnostic(options.jsonPath, result.jsonPathDiagnostic);
     } else if (options.jsonPath) {
       // TASK-133: pipe-friendly mode — print only the extracted value.
       // Scalars (string/number/bool) emit verbatim with no JSON quoting so
@@ -107,17 +136,7 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
       const v = result.body;
       if (v === null || v === undefined) {
         console.log("");
-        // ARV-70 (F11): when --json-path resolved to undefined, surface
-        // *why* on stderr so the user doesn't burn time wondering whether
-        // their selector is wrong vs. whether the response body looks
-        // different than they expected.
-        if (result.jsonPathDiagnostic?.failedAt) {
-          const d = result.jsonPathDiagnostic;
-          const resolved = d.resolved.length > 0 ? d.resolved.join(".") : "(root)";
-          process.stderr.write(
-            `zond: --json-path '${options.jsonPath}' did not resolve — stopped at segment "${d.failedAt}" after ${resolved}: ${d.reason ?? "unknown"}\n`,
-          );
-        }
+        printJsonPathDiagnostic(options.jsonPath, result.jsonPathDiagnostic);
       } else if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
         console.log(String(v));
       } else {
@@ -319,11 +338,12 @@ export function registerRequest(program: Command): void {
     .option("--api <name>", "Collection name; auto-loads env + Authorization from apis/<name>/.secrets.yaml")
     .option(
       "--json-path <path>",
-      "Extract one field from the response body (dot notation, e.g. 'data.id', " +
-      "'items[0].name'). Without --json, prints the value verbatim — scalars without " +
-      "quotes for shell use (`id=$(zond request --json-path data.id ...)`), " +
-      "objects/arrays as compact JSON. With --json, embeds the extracted value as " +
-      "the envelope's `body` field.",
+      "Extract one field from the RESPONSE BODY (not the zond envelope; " +
+      "to address envelope.data.body.id pipe `--json` through jq instead). " +
+      "Dot notation, e.g. 'data.id', 'items[0].name'. Without --json, prints " +
+      "the value verbatim — scalars without quotes for shell use " +
+      "(`id=$(zond request --json-path data.id ...)`), objects/arrays as compact JSON. " +
+      "With --json, embeds the extracted value as the envelope's `body` field.",
     )
     .option("--db <path>", "Path to SQLite database file")
     .option("--validate-schema", "TASK-142: validate the response body against the OpenAPI response schema (requires --api). Endpoint is auto-resolved from the request method + URL.path; templated paths like /users/{id} are matched via regex. Falls back gracefully if no endpoint matches — pass --validate-against to override.")
