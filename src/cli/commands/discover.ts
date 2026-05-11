@@ -22,6 +22,11 @@ import {
   extractSecuritySchemes,
 } from "../../core/generator/index.ts";
 import { loadEnvFile } from "../../core/parser/variables.ts";
+import {
+  composeSpec,
+  type ComposedSpec,
+  type SpecLayer,
+} from "../../core/spec/layers.ts";
 import { liveAuthHeaders } from "../../core/probe/shared.ts";
 import { executeRequest } from "../../core/runner/http-client.ts";
 
@@ -283,28 +288,67 @@ export interface ApiResourceMapYaml {
   resources: ResourceYaml[];
 }
 
-export async function readResourceMap(apiDir: string): Promise<ApiResourceMapYaml | null> {
-  const path = join(apiDir, ".api-resources.yaml");
-  const file = Bun.file(path);
-  if (!(await file.exists())) return null;
-  const text = await file.text();
-  const parsed = Bun.YAML.parse(text);
-  if (!parsed || typeof parsed !== "object") return null;
-  const obj = parsed as { resources?: ResourceYaml[] };
-  const base = obj.resources ?? [];
+/** ARV-122 layer ids — exported so downstream code (doctor, future
+ *  catalog --provenance) can compare against the provenance map
+ *  without re-typing the strings. */
+export const RESOURCE_LAYER_UPSTREAM = "upstream";
+export const RESOURCE_LAYER_EXTENSION = "extension";
 
-  // ARV-111: merge in user-maintained extensions from `.api-resources.local.yaml`
-  // — a sibling file that survives `refresh-api`. Lets the user describe
-  // write-only / SDK-only endpoints (Sentry's /store/ ingest, etc.) that
-  // aren't in the OpenAPI spec, so prepare-fixtures --seed can still
-  // POST-create them. Extensions append to the resource list; when a name
-  // collides with a spec-derived resource, the extension wins (user-override).
-  const extensions = await readResourceExtensions(apiDir);
-  if (extensions.length === 0) return { resources: base };
-  const byName = new Map<string, ResourceYaml>();
-  for (const r of base) byName.set(r.resource, r);
-  for (const ext of extensions) byName.set(ext.resource, ext);
-  return { resources: Array.from(byName.values()) };
+/** ARV-122: build the two-layer SpecLayer set for an API's resource
+ *  map. Kept here (and not in `core/spec/layers.ts`) so the YAML
+ *  loaders stay co-located with the schema types they parse. */
+function buildResourceLayers(apiDir: string): SpecLayer<ResourceYaml>[] {
+  return [
+    {
+      id: RESOURCE_LAYER_UPSTREAM,
+      path: join(apiDir, ".api-resources.yaml"),
+      precedence: 10,
+      scope: "resources",
+      mergePolicy: "override",
+      load: async () => {
+        const file = Bun.file(join(apiDir, ".api-resources.yaml"));
+        if (!(await file.exists())) return [];
+        const parsed = Bun.YAML.parse(await file.text());
+        if (!parsed || typeof parsed !== "object") return [];
+        return (parsed as { resources?: ResourceYaml[] }).resources ?? [];
+      },
+    },
+    {
+      id: RESOURCE_LAYER_EXTENSION,
+      path: join(apiDir, ".api-resources.local.yaml"),
+      precedence: 20,
+      scope: "resources",
+      mergePolicy: "override",
+      load: () => readResourceExtensions(apiDir),
+    },
+  ];
+}
+
+/** ARV-122: compose the resource map through the SpecLayer pipeline,
+ *  exposing the provenance map for callers that need to know which
+ *  layer contributed a given resource (doctor diagnostics, m-18 CLI
+ *  surface). `readResourceMap` keeps the legacy shape for callers
+ *  that don't care. */
+export async function composeResourceMap(
+  apiDir: string,
+): Promise<ComposedSpec<ResourceYaml>> {
+  return composeSpec(buildResourceLayers(apiDir), (r) => r.resource);
+}
+
+export async function readResourceMap(apiDir: string): Promise<ApiResourceMapYaml | null> {
+  // Old contract: return null when the upstream `.api-resources.yaml`
+  // is missing (callers branch on this to surface a setup error). The
+  // SpecLayer pipeline returns an empty list in that case, so check
+  // existence explicitly to preserve behaviour.
+  const upstream = Bun.file(join(apiDir, ".api-resources.yaml"));
+  if (!(await upstream.exists())) return null;
+
+  // ARV-122: route the merge through composeSpec. Behaviour is
+  // identical to the previous ad-hoc Map merge — extension wins on
+  // name collision (precedence 20 > 10, mergePolicy: "override") —
+  // and the same path also feeds provenance into composeResourceMap.
+  const composed = await composeResourceMap(apiDir);
+  return { resources: composed.entries };
 }
 
 /** ARV-111: read `apis/<name>/.api-resources.local.yaml`. Same `resources:`

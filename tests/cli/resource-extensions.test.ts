@@ -2,7 +2,13 @@ import { describe, test, expect, beforeAll, afterAll, beforeEach } from "bun:tes
 import { mkdir, writeFile, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
-import { readResourceMap, readResourceExtensions } from "../../src/cli/commands/discover.ts";
+import {
+  readResourceMap,
+  readResourceExtensions,
+  composeResourceMap,
+  RESOURCE_LAYER_UPSTREAM,
+  RESOURCE_LAYER_EXTENSION,
+} from "../../src/cli/commands/discover.ts";
 
 /**
  * ARV-111: `.api-resources.local.yaml` is the user-maintained sibling to
@@ -168,5 +174,77 @@ describe("readResourceMap with .api-resources.local.yaml extensions (ARV-111)", 
 
     const map = await readResourceMap(apiDir);
     expect(map).toBeNull();
+  });
+
+  // ARV-122: refresh-api rewrites only the upstream layer
+  // (.api-resources.yaml). The extension layer (.api-resources.local.yaml)
+  // must survive — both as a file on disk and as a contributor to the
+  // composed map. Simulate the refresh by re-writing the upstream file
+  // with new content and re-reading.
+  test("ARV-122 regression: refresh-api preserves extension layer in composed map", async () => {
+    await writeBase([
+      "resources:",
+      "  - resource: users",
+      "    basePath: /users",
+      "    itemPath: /users/{id}",
+      "    idParam: id",
+      "    captureField: id",
+      "    hasFullCrud: false",
+      "    endpoints:",
+      "      list: GET /users",
+      "    fkDependencies: []",
+    ].join("\n"));
+    await writeLocal([
+      "extensions:",
+      "  - resource: ingest",
+      "    basePath: /ingest",
+      "    itemPath: /ingest/{id}",
+      "    idParam: id",
+      "    captureField: event_id",
+      "    hasFullCrud: false",
+      "    endpoints:",
+      "      create: POST /ingest",
+      "    fkDependencies: []",
+    ].join("\n"));
+
+    const before = await composeResourceMap(apiDir);
+    expect(before.entries.map((r) => r.resource).sort()).toEqual(["ingest", "users"]);
+    expect(before.provenance.get("ingest")).toBe(RESOURCE_LAYER_EXTENSION);
+    expect(before.provenance.get("users")).toBe(RESOURCE_LAYER_UPSTREAM);
+
+    // Simulate refresh-api: upstream rewritten with an extra resource;
+    // local file is untouched (refresh-api never writes there).
+    await writeBase([
+      "resources:",
+      "  - resource: users",
+      "    basePath: /users",
+      "    itemPath: /users/{id}",
+      "    idParam: id",
+      "    captureField: id",
+      "    hasFullCrud: false",
+      "    endpoints:",
+      "      list: GET /users",
+      "      create: POST /users",
+      "    fkDependencies: []",
+      "  - resource: teams",
+      "    basePath: /teams",
+      "    itemPath: /teams/{id}",
+      "    idParam: id",
+      "    captureField: id",
+      "    hasFullCrud: false",
+      "    endpoints:",
+      "      list: GET /teams",
+      "    fkDependencies: []",
+    ].join("\n"));
+
+    const after = await composeResourceMap(apiDir);
+    expect(after.entries.map((r) => r.resource).sort()).toEqual(["ingest", "teams", "users"]);
+    // Extension still wins on its own key, and the new upstream entry
+    // shows up with the expected provenance.
+    expect(after.provenance.get("ingest")).toBe(RESOURCE_LAYER_EXTENSION);
+    expect(after.provenance.get("teams")).toBe(RESOURCE_LAYER_UPSTREAM);
+    // And the upstream "users" picked up its newly-added create endpoint.
+    const users = after.entries.find((r) => r.resource === "users");
+    expect(users?.endpoints.create).toBe("POST /users");
   });
 });
