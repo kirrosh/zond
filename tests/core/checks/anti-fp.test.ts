@@ -106,6 +106,43 @@ describe("guard #3 — _has_unverifiable_mutations", () => {
   });
 });
 
+describe("guard #4 — _coverage_phase_boundary_positive (ARV-77 / F20)", () => {
+  // Lazy-import to avoid touching the original module header.
+  const mod = require("../../../src/core/checks/checks/_anti_fp.ts") as typeof import("../../../src/core/checks/checks/_anti_fp.ts");
+  const guard = mod.coveragePhaseBoundaryPositive;
+
+  function positiveCoverageCase(): CheckCase {
+    const c = caseWith({ phase: "coverage", boundary: "max-length" });
+    c.kind = "positive";
+    c.mode = "positive";
+    return c;
+  }
+
+  test("phase=coverage + kind=positive → skip (boundary body is synthetic)", () => {
+    const r = guard(positiveCoverageCase());
+    expect(r?.guard).toBe("_coverage_phase_boundary_positive");
+  });
+
+  test("phase=coverage + kind=negative_data → no skip (handled by negative_data_rejection guards)", () => {
+    const c = positiveCoverageCase();
+    c.kind = "negative_data";
+    c.mode = "negative";
+    expect(guard(c)).toBeNull();
+  });
+
+  test("phase=examples + kind=positive → no skip (examples are realistic, real 422 is signal)", () => {
+    const c = positiveCoverageCase();
+    c.meta = { phase: "examples" };
+    expect(guard(c)).toBeNull();
+  });
+
+  test("no phase meta → no skip (legacy code path stays put)", () => {
+    const c = positiveCoverageCase();
+    c.meta = undefined;
+    expect(guard(c)).toBeNull();
+  });
+});
+
 describe("applyGuards composition", () => {
   test("returns first matching skip", () => {
     const r = applyGuards(caseWith(
