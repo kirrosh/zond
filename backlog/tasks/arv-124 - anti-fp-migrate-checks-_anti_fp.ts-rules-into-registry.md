@@ -1,9 +1,10 @@
 ---
 id: ARV-124
 title: 'anti-fp: migrate checks/_anti_fp.ts rules into registry'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 10:14'
+updated_date: '2026-05-11 10:38'
 labels:
   - m-19
   - refactor
@@ -31,8 +32,8 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 4 правила в core/anti-fp/rules/schemathesis/
-- [ ] #2 src/core/checks/checks/_anti_fp.ts удалён
-- [ ] #3 tests/core/checks/checks/negative_data_rejection.test.ts зелёные
-- [ ] #4 fixture-pack из 6 schemathesis-FP regressions проходит
+- [x] #1 4 правила в core/anti-fp/rules/schemathesis/
+- [x] #2 src/core/checks/checks/_anti_fp.ts удалён
+- [x] #3 tests/core/checks/checks/negative_data_rejection.test.ts зелёные
+- [x] #4 fixture-pack из 6 schemathesis-FP regressions проходит
 <!-- AC:END -->

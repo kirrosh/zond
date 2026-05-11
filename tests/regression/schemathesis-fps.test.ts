@@ -1,15 +1,20 @@
 /**
- * Regression fixture-pack (m-15 ARV-4 AC #2). Each JSON file in
- * tests/regression/schemathesis-fps/ encodes a closed schemathesis
- * issue that historically produced a false positive in their
- * data-rejection check. The pack drives `applyGuards` and asserts
- * that the named anti-FP guard kicks in — so no FP can return.
+ * Regression fixture-pack (m-15 ARV-4 AC #2 + m-19 ARV-124).
+ * Each JSON file in `tests/regression/schemathesis-fps/` encodes a
+ * closed schemathesis issue that historically produced a false
+ * positive in their data-rejection check. The pack drives
+ * `applyAntiFp` (via the migrated registry) and asserts that the
+ * named rule kicks in — so no FP can return.
  */
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeAll } from "bun:test";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 
-import { applyGuards } from "../../src/core/checks/checks/_anti_fp.ts";
+import {
+  bootstrapAntiFp,
+  resetAntiFpBootstrap,
+} from "../../src/core/anti-fp/bootstrap.ts";
+import { applyAntiFp } from "../../src/core/anti-fp/index.ts";
 import type { CheckCase } from "../../src/core/checks/types.ts";
 
 const FIXTURE_DIR = join(import.meta.dir, "schemathesis-fps");
@@ -42,7 +47,12 @@ function caseFromFixture(fx: Fixture): CheckCase {
   };
 }
 
-describe("schemathesis FP fixture-pack — every case is suppressed by the named guard", () => {
+beforeAll(() => {
+  resetAntiFpBootstrap();
+  bootstrapAntiFp();
+});
+
+describe("schemathesis FP fixture-pack — every case is suppressed by the named rule", () => {
   const fixtures = loadFixtures();
 
   test("at least the 6 documented FPs are present", () => {
@@ -57,9 +67,9 @@ describe("schemathesis FP fixture-pack — every case is suppressed by the named
 
   for (const { name, fx } of fixtures) {
     test(`${name} — guarded by ${fx.expected_guard}`, () => {
-      const skip = applyGuards(caseFromFixture(fx));
+      const skip = applyAntiFp(caseFromFixture(fx), "check:negative_data_rejection");
       expect(skip).not.toBeNull();
-      expect(skip!.guard).toBe(fx.expected_guard);
+      expect(skip!.ruleId).toBe(fx.expected_guard);
     });
   }
 });

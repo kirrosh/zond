@@ -9,6 +9,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import { runChecks } from "../../../src/core/checks/index.ts";
+import { bootstrapAntiFp, resetAntiFpBootstrap } from "../../../src/core/anti-fp/bootstrap.ts";
 
 describe("ARV-4 data-rejection pipeline", () => {
   let server: ReturnType<typeof Bun.serve>;
@@ -17,6 +18,11 @@ describe("ARV-4 data-rejection pipeline", () => {
   let specPath: string;
 
   beforeAll(async () => {
+    // ARV-124: anti-FP guards live in the registry now — bootstrap it so
+    // the direct check-call below sees the schemathesis rule that turns
+    // an integer→string coercion 2xx into a skip instead of a finding.
+    resetAntiFpBootstrap();
+    bootstrapAntiFp();
     // Server emulates Express/FastAPI-style coercion: it accepts both
     // {qty: 5} and {qty: "5"}. From the wire it can't tell — auto-cast.
     // For schema-typed fields it 200's; for dropped required fields it

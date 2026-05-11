@@ -159,22 +159,22 @@ describe("orphan-tracker + zond cleanup --orphans (TASK-278)", () => {
       {
         method: "POST", path: "/teams/",
         cleanup: { attempted: true, id: "team_1", deletePath: "/teams/team_1", status: 500, error: null },
-      } as LooseVerdict,
+      } as unknown as LooseVerdict,
       // No DELETE counterpart in spec → manual_cleanup_required.
       {
         method: "POST", path: "/symbol-sources/",
         cleanup: { attempted: true, id: "src_1", deletePath: "", status: null, error: "no DELETE counterpart for POST /symbol-sources/" },
-      } as LooseVerdict,
+      } as unknown as LooseVerdict,
       // Response had no usable id → manual_cleanup_required.
       {
         method: "POST", path: "/api-keys/",
         cleanup: { attempted: true, id: undefined, deletePath: "", status: null, error: "cleanup skipped: response had no usable id" },
-      } as LooseVerdict,
+      } as unknown as LooseVerdict,
       // Cleanup never attempted (probe didn't enter cleanup phase) → skipped.
       {
         method: "GET", path: "/orgs/",
         cleanup: { attempted: false },
-      } as LooseVerdict,
+      } as unknown as LooseVerdict,
     ];
 
     const written = await persistVerdictsAsOrphans("demo", "run-99", verdicts);

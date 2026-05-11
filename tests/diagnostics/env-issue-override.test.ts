@@ -320,7 +320,7 @@ describe("ARV-101 (F6): diagnose payload aggregates by recommended_action enum",
       request: { method: "GET", url: "http://api/projects/acme/frontend/ownership/", headers: {} },
       response: { status: 200, headers: {}, body: '{"raw": null}', duration_ms: 12 },
       assertions: [
-        { field: "body.raw", rule: "type=string", passed: false, actual: null, expected: "string", kind: "schema" } as unknown as { field: string; rule: string; passed: boolean },
+        { field: "body.raw", rule: "type=string", passed: false, actual: null, expected: "string", kind: "schema" } as unknown as TestRunResult["steps"][number]["assertions"][number],
       ],
       captures: {},
     };

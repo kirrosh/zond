@@ -10,7 +10,7 @@
  * `not_a_server_error` already covers it.
  */
 import type { Check } from "../types.ts";
-import { applyGuards } from "./_anti_fp.ts";
+import { applyAntiFp } from "../../anti-fp/index.ts";
 
 export const positiveDataAcceptance: Check = {
   id: "positive_data_acceptance",
@@ -25,8 +25,8 @@ export const positiveDataAcceptance: Check = {
     if (s === 401 || s === 403 || s === 404 || s === 409) return { kind: "pass" };
     if (s >= 500) return { kind: "skip", reason: "5xx covered by not_a_server_error" };
     if (s !== 400 && s !== 422) return { kind: "skip", reason: `status ${s} not a schema-validation reject` };
-    const skip = applyGuards(c);
-    if (skip) return { kind: "skip", reason: `${skip.guard}: ${skip.reason}` };
+    const skip = applyAntiFp(c, "check:positive_data_acceptance");
+    if (skip) return { kind: "skip", reason: `${skip.ruleId}: ${skip.reason}` };
     return {
       kind: "fail",
       message: `Server rejected a generated-as-valid body with ${s} — generator or spec disagrees with the implementation`,

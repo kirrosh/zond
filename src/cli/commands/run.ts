@@ -10,8 +10,9 @@ import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
 import { createRateLimiter, createAdaptiveRateLimiter } from "../../core/runner/rate-limiter.ts";
 import { getReporter, generateJsonReport, generateJunitXml } from "../../core/reporter/index.ts";
 import type { ReporterName } from "../../core/reporter/types.ts";
+import { resolveOutput, OutputSpecError, type OutputSpec } from "../../core/output/index.ts";
 import { writeFile, mkdir } from "node:fs/promises";
-import { dirname as pathDirname, isAbsolute, resolve as pathResolve } from "node:path";
+import { dirname as pathDirname, resolve as pathResolve } from "node:path";
 import type { TestSuite } from "../../core/parser/types.ts";
 import type { TestRunResult } from "../../core/runner/types.ts";
 import { printError, printWarning } from "../output.ts";
@@ -27,6 +28,26 @@ import { detectStatusDrifts, formatDriftPlan, applyDriftsToTests, appendTolerate
 import { detectCiContext } from "../../core/runner/ci-context.ts";
 import { detectRunKind } from "../../core/runner/run-kind.ts";
 import { resolveRateLimit } from "../../core/workspace/config.ts";
+
+/**
+ * ARV-117 (m-19): OutputSpec for `zond run`. Three formats; console is
+ * the default (stdout, rich per-suite stream); `json` / `junit` default
+ * to stdout but accept `--output <path>` to redirect. None of the
+ * formats are envelope-wrapped — `--report json` is a test-run report
+ * (per-suite breakdown), NOT the `{ok, data, errors}` envelope that
+ * other commands emit for `--json`. That distinction is intentional
+ * (TASK-134) and remains enforced by the explicit absence of `--json`
+ * on this command.
+ */
+export const RUN_OUTPUT_SPEC: OutputSpec<unknown> = {
+  command: "run",
+  defaultFormat: "console",
+  formats: {
+    console: { defaultChannel: "stdout", description: "Rich per-suite stream (default)" },
+    json:    { defaultChannel: "stdout", description: "Per-test JSON breakdown (`generateJsonReport`)" },
+    junit:   { defaultChannel: "stdout", description: "JUnit XML — CI consumption" },
+  },
+};
 
 export interface RunOptions {
   /**
@@ -60,8 +81,10 @@ export interface RunOptions {
   strictVars?: boolean;
   dryRun?: boolean;
   json?: boolean;
-  /** Write the report to a file instead of stdout. */
-  reportOut?: string;
+  /** ARV-117: write the report to a file instead of stdout. Replaces
+   *  the legacy `--report-out` flag (no alias — see m-19 lesson §E).
+   *  Resolved through `core/output`'s OutputSpec policy. */
+  output?: string;
   /** Validate every JSON response against the OpenAPI response schema. */
   validateSchema?: boolean;
   /** Explicit OpenAPI spec path/URL (overrides collection.openapi_spec). */
@@ -459,25 +482,35 @@ export async function runCommand(options: RunOptions): Promise<number> {
     warnings.push(`${rateLimited.length} request(s) hit rate limit (429). Consider: consolidating login steps, adding --bail, or using retry_until with delay.`);
   }
 
-  // 5b. Report
+  // 5b. Report — ARV-117: route through core/output's OutputSpec so
+  // `--report <format>` + `--output <path>` follow the same policy as
+  // every other command. `--output` (was `--report-out`) is honoured for
+  // any format; with `console` format it falls back to JSON in the file
+  // (most useful), matching prior behaviour.
+  let resolvedOutput;
+  try {
+    resolvedOutput = resolveOutput(RUN_OUTPUT_SPEC, {
+      report: options.report,
+      output: options.output,
+    });
+  } catch (err) {
+    if (err instanceof OutputSpecError) {
+      printError(err.message);
+      return 2;
+    }
+    throw err;
+  }
   if (!options.json) {
-    if (options.reportOut) {
-      // Write report to a file via fs (bypass stdout). Console reporter falls
-      // back to a single-line summary on stdout; json/junit produce no stdout.
-      const outPath = isAbsolute(options.reportOut)
-        ? options.reportOut
-        : pathResolve(process.cwd(), options.reportOut);
+    if (resolvedOutput.channel === "file") {
+      const outPath = resolvedOutput.path!;
       let content: string;
       let label: string;
-      switch (options.report) {
-        case "json":
-          content = generateJsonReport(results);
-          label = "JSON";
-          break;
+      switch (resolvedOutput.format) {
         case "junit":
           content = generateJunitXml(results);
           label = "JUnit XML";
           break;
+        case "json":
         default: // "console" — fall back to JSON in the file (most useful)
           content = generateJsonReport(results);
           label = "JSON";
@@ -488,7 +521,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
         await writeFile(outPath, content, "utf-8");
         process.stderr.write(`zond: ${label} report written to ${outPath}\n`);
       } catch (err) {
-        printError(`Failed to write --report-out file ${outPath}: ${(err as Error).message}`);
+        printError(`Failed to write --output file ${outPath}: ${(err as Error).message}`);
         return 2;
       }
       for (const w of warnings) {
@@ -839,7 +872,7 @@ export function registerRun(program: Command): void {
       "--quiet",
       "TASK-265: emit only the grand-total summary line — drops per-suite/per-test detail and warning footers. Exit code (0/1) still differentiates pass/fail. For CI logs and watcher loops where step-level output is noise.",
     )
-    .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
+    .option("--output <file>", "ARV-117: write the report to a file instead of stdout. Replaces the legacy --report-out flag. With --report console, falls back to JSON in the file (machine-parseable). Path is resolved relative to cwd; parent directories are auto-created.")
     .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
     .option("--session-id <id>", "Group this run under a session. Resolution order: --session-id flag > ZOND_SESSION_ID env > .zond/current-session file (set by 'zond session start')")
@@ -934,7 +967,7 @@ export function registerRun(program: Command): void {
         dryRun: opts.dryRun === true,
         quiet: opts.quiet === true,
         failOnFailures: opts.failOnFailures !== false,
-        reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
+        output: typeof opts.output === "string" ? opts.output : undefined,
         validateSchema: opts.validateSchema === true,
         specPath: typeof opts.spec === "string" ? opts.spec : undefined,
         apiName: apiFlag,

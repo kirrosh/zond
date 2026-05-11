@@ -104,7 +104,7 @@ export async function persistVerdictsAsOrphans(api: string, runId: string, verdi
       method: v.method.toUpperCase(),
       path: v.path,
       id: String(c.id),
-      deletePath: c.deletePath,
+      deletePath: c.deletePath ?? "",
       lastCleanupStatus: c.status ?? null,
       lastCleanupError: c.error ?? null,
       ...(removed ? { removed: true } : {}),

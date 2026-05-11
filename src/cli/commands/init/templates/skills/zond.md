@@ -58,7 +58,7 @@ Run `zond --version` first; if missing:
 - `--safe` enforces GET-only — required for first-pass smoke against unknown
   envs.
 - For multi-suite tag filters always include `setup`: `--tag crud,setup`.
-- Re-run after each fix with `--report json [--report-out <file>]` (NOT
+- Re-run after each fix with `--report json [--output <file>]` (NOT
   `--json` — that flag is reserved for the small `{ok,data,errors}` envelope
   on read-only subcommands; `zond run --json` errors); don't batch edits
   without verifying.
@@ -397,7 +397,7 @@ Buildkite / Jenkins, or `CI=true` for generic providers): `commit_sha`,
 
 ```bash
 # CI shape — one run per commit, HTML report + JSON for the gate
-zond run --all --report json --report-out results.json
+zond run --all --report json --output results.json
 echo "exit=$?"  # 0 green, 1 failures, 2 config error
 zond report export $(jq -r .data.runId results.json) -o report.html
 ```

@@ -15,6 +15,7 @@ import { registerGenerate } from "./commands/generate.ts";
 import { registerPrepareFixtures } from "./commands/prepare-fixtures.ts";
 import { registerProbes } from "./commands/probe.ts";
 import { bootstrapProbes } from "../core/probe/bootstrap.ts";
+import { bootstrapAntiFp } from "../core/anti-fp/bootstrap.ts";
 import { registerReport } from "./commands/report.ts";
 import { registerCatalog } from "./commands/catalog.ts";
 import { registerCompletions } from "./commands/completions.ts";
@@ -103,6 +104,9 @@ export function buildProgram(): Command {
   // contract before commander gets to wire them up. Boot-throws on a
   // missing slot, so a regression can't slip past CI.
   bootstrapProbes();
+  // ARV-123/124: populate the anti-FP rule registry before checks run
+  // — checks call applyAntiFp() and need every shipped rule present.
+  bootstrapAntiFp();
   registerProbes(program);
 
   registerCatalog(program);
