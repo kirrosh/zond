@@ -56,6 +56,20 @@ const TABLE: Row[] = [
   { name: "assertion_failed plain → fix_test_logic",
     ctx: { finding_class: "test:assertion_failed", status: 200 },
     expected: "fix_test_logic" },
+  // ARV-103 (F8): schema-kind assertions are real backend bugs, route to
+  // report_backend_bug — same bucket as 5xx. Wins over the
+  // generator-aware regenerate_suite default below; otherwise the next
+  // `zond generate` would silently re-emit the same broken assertion
+  // against the same broken response and the contract bug stays hidden.
+  { name: "assertion_failed schema-kind 200 → report_backend_bug",
+    ctx: { finding_class: "test:assertion_failed", status: 200, schema_violation: true },
+    expected: "report_backend_bug" },
+  { name: "assertion_failed schema-kind generated 200 → report_backend_bug (wins over generator override)",
+    ctx: { finding_class: "test:assertion_failed", status: 200, schema_violation: true, suite_path: "apis/r/tests/x.yaml" },
+    expected: "report_backend_bug" },
+  { name: "assertion_failed schema-kind 401 still routes auth (auth wins over schema)",
+    ctx: { finding_class: "test:assertion_failed", status: 401, schema_violation: true },
+    expected: "fix_auth_config" },
   { name: "assertion_failed generated 404 → fix_fixture",
     ctx: { finding_class: "test:assertion_failed", status: 404, suite_path: "apis/r/tests/x.yaml" },
     expected: "fix_fixture" },

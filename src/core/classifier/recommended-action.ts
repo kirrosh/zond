@@ -93,6 +93,12 @@ export interface ClassifierContext {
   /** When the env-issue detector flagged the suite, it overrides the
    *  classifier's default. Producers set this *after* clustering. */
   baseline_status?: number | null;
+  /** ARV-103 (F8): true when at least one assertion on the failing step
+   *  has `kind: "schema"`. Schema violations are real contract bugs — per
+   *  zond/SKILL.md L376-377 they should route to report_backend_bug, not
+   *  fix_test_logic. Producers (db-analysis) set this after walking the
+   *  step's assertions array. */
+  schema_violation?: boolean;
 }
 
 /**
@@ -114,6 +120,14 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
     case "test:assertion_failed": {
       // 401/403 → auth always wins.
       if (ctx.status === 401 || ctx.status === 403) return "fix_auth_config";
+      // ARV-103 (F8): schema-kind assertions are real contract bugs (the
+      // server returned a body that violates its own spec). Route to
+      // report_backend_bug — same bucket as 5xx. Skill (zond/SKILL.md
+      // L376-377) explicitly says "treat them like 5xx, do not edit the
+      // expectation away". Wins over the generator-aware override below
+      // because regenerate_suite would silently re-emit the same broken
+      // assertion against the same broken response.
+      if (ctx.schema_violation) return "report_backend_bug";
       // ARV-42: generator-emitted suites get a different default — editing
       // the YAML gets clobbered on the next `zond audit`.
       const generated = isGeneratedSource(ctx.provenance, ctx.suite_path);

@@ -41,6 +41,32 @@ const USEFUL_HEADERS = new Set([
 ]);
 const USEFUL_PREFIXES = ["x-", "ratelimit"];
 
+/** ARV-103 (F8): true when at least one assertion on the failing step is
+ *  a schema-validation kind. `--validate-schema` annotates each violated
+ *  field with `kind: "schema"` (set in src/core/runner/schema-validator.ts).
+ *  The assertions column is stored as JSON in SQLite; parse defensively. */
+function hasSchemaAssertion(raw: string | unknown[] | null | undefined): boolean {
+  if (raw === null || raw === undefined) return false;
+  let arr: unknown[];
+  if (Array.isArray(raw)) {
+    arr = raw;
+  } else if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return false;
+      arr = parsed;
+    } catch {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  for (const a of arr) {
+    if (a && typeof a === "object" && (a as { kind?: unknown }).kind === "schema") return true;
+  }
+  return false;
+}
+
 function filterHeaders(raw: string | null | undefined): Record<string, string> | undefined {
   if (!raw) return undefined;
   try {
@@ -207,7 +233,13 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
       // ARV-42: generator-emitted suites should not route to fix_test_logic —
       // editing the YAML gets clobbered on the next `zond audit`.
       const generated = isGeneratedTest(r.provenance, r.suite_file);
-      const rec_action = recommendedActionForGenerated(failure_type, r.response_status, generated);
+      // ARV-103 (F8): walk the assertions array to detect a schema-kind
+      // failure (--validate-schema annotates each assertion with its kind).
+      // When present, propagate the flag so the classifier routes to
+      // report_backend_bug — schema violations are real contract bugs, not
+      // test-logic mistakes.
+      const schema_violation = hasSchemaAssertion(r.assertions);
+      const rec_action = recommendedActionForGenerated(failure_type, r.response_status, generated, schema_violation);
       const sHint = schemaHint(failure_type, r.response_status);
       return {
         suite_name: r.suite_name,
