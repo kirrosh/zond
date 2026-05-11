@@ -3,9 +3,10 @@ id: ARV-35
 title: >-
   coverage: accept --format json as alias for --json (or suggest it on
   unknown-option)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 11:20'
+updated_date: '2026-05-11 02:58'
 labels:
   - feedback-loop
   - api-resend
