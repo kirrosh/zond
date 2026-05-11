@@ -130,7 +130,7 @@ zond checks run --api myapi --mode negative      # только malicious-input 
 zond checks run --api myapi --report sarif --output zond.sarif
                                                   # SARIF v2.1.0 для GitHub Code Scanning
 zond checks run --api myapi --workers auto       # параллелизм по операциям (= min(cpus, 8))
-zond checks run --api myapi --ndjson | jq -c '.' # стримить события (check_start/result/finding/summary)
+zond checks run --api myapi --report ndjson | jq -c '.' # стримить события (check_start/result/finding/summary)
 ```
 
 Каждый `CheckFinding` несёт closed-enum `recommended_action` — агент

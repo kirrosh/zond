@@ -34,7 +34,7 @@ zond checks list --json          # same, machine-readable
 | "boundary value coverage" | `... --phase coverage` |
 | "find security bugs", "broken auth" | `... --check ignored_auth,use_after_free,ensure_resource_availability` |
 | "SARIF for GitHub Code Scanning" | `... --report sarif --output zond.sarif` |
-| "stream findings to a pipeline" | `... --ndjson \| jq -c '.'` |
+| "stream findings to a pipeline" | `... --report ndjson \| jq -c '.'` |
 | "scan large API faster" | `... --workers auto` (or `--workers 8`) |
 
 ## Iron rules
@@ -74,7 +74,7 @@ gates exit-code 1; LOW/MEDIUM is informational.
 zond checks run --api myapi --json                 # one envelope: findings[] + summary
 zond checks run --api myapi --report sarif --output zond.sarif
                                                     # SARIF v2.1.0 for github/codeql-action/upload-sarif@v3
-zond checks run --api myapi --ndjson | jq -c '.'   # streaming events: check_start, check_result, finding, summary
+zond checks run --api myapi --report ndjson | jq -c '.'   # streaming events: check_start, check_result, finding, summary
 ```
 
 NDJSON event schema is published at `docs/json-schema/ndjson-events.schema.json`
@@ -144,6 +144,6 @@ zond checks run --api prod \
   --auth-header 'Authorization: Bearer $TOKEN'
 
 # Coverage-phase boundary sweep, NDJSON pipe into a watcher
-zond checks run --api dev --phase coverage --ndjson | \
+zond checks run --api dev --phase coverage --report ndjson | \
   jq -c 'select(.type == "finding") | {check, op: .finding.operation, action: .finding.recommended_action}'
 ```

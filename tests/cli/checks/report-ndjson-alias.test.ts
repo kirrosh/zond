@@ -2,9 +2,13 @@
  * ARV-63 (feedback round-01 / F2): tester (and earlier docs / skill
  * prompts) referenced `--report ndjson`, but the implementation only
  * accepted `sarif` there and bailed with "Unknown --report format". The
- * NDJSON streaming channel lives behind the separate `--ndjson` flag.
- * This test pins the alias: `--report ndjson` now behaves exactly like
- * `--ndjson` (and the help text advertises it as such).
+ * NDJSON streaming channel lived behind the separate `--ndjson` flag,
+ * and `--report ndjson` was wired in as an alias for it.
+ *
+ * ARV-118 (m-19) promoted `--report ndjson` to a first-class format on
+ * the typed OutputSpec and removed `--ndjson`. This test now pins both
+ * the streaming behaviour and the help-error message listing ndjson
+ * next to sarif.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";

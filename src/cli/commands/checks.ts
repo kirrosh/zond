@@ -27,6 +27,36 @@ import { printError, printSuccess } from "../output.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
 import { getApi } from "../util/api-context.ts";
 import { VERSION } from "../version.ts";
+import { resolveOutput, OutputSpecError, type OutputSpec, type ResolvedOutput } from "../../core/output/index.ts";
+import type { RunChecksResult } from "../../core/checks/index.ts";
+
+/**
+ * ARV-118 (m-19): typed declaration of every `--report` / `--output` /
+ * `--json` combination `zond checks run` supports. Replaces the inline
+ * `--report sarif|ndjson` parser + the legacy `--ndjson` boolean + the
+ * mutual-exclusion checks that produced ARV-63, ARV-83, ARV-97.
+ *
+ *   - `console` (default) — human-readable text on stdout.
+ *   - `json` — `{ok, command, data}` envelope (`--json` opts into this).
+ *   - `ndjson` — streamed events on stdout, one JSON object per line.
+ *     `--report ndjson --output <path>` redirects the stream to file
+ *     (ARV-97 — no more silent drop).
+ *   - `sarif` — SARIF v2.1.0 for GitHub Code Scanning, default file
+ *     `zond-checks.sarif` when `--output` is omitted.
+ *   - `markdown` — short human-readable summary (file via `--output`
+ *     or stdout otherwise).
+ */
+export const CHECKS_OUTPUT_SPEC: OutputSpec<RunChecksResult> = {
+  command: "checks run",
+  defaultFormat: "console",
+  formats: {
+    console:  { defaultChannel: "stdout", description: "Human-readable summary (default)" },
+    json:     { defaultChannel: "stdout", envelopeWrap: true, description: "JSON envelope ({ok, command, data})" },
+    ndjson:   { defaultChannel: "stdout", description: "Stream events on stdout (check_start | check_result | finding | summary)" },
+    sarif:    { defaultChannel: "file", defaultFilename: "zond-checks.sarif", description: "SARIF v2.1.0 for GitHub Code Scanning" },
+    markdown: { defaultChannel: "stdout", description: "Short markdown summary of findings" },
+  },
+};
 
 interface ChecksListOptions {
   json?: boolean;
@@ -81,7 +111,6 @@ interface ChecksRunOptions {
   mode?: string;
   include?: string[];
   exclude?: string[];
-  ndjson?: boolean;
   workers?: string;
   rateLimit?: string;
   verbose?: boolean;
@@ -136,6 +165,44 @@ function formatSkippedOutcomes(skipped: Record<string, number> | undefined): str
   return `(${total} check outcome(s) skipped: ${top.join("; ")}${tail})`;
 }
 
+/**
+ * ARV-118: minimal markdown render of a `checks run` result. Mirrors the
+ * console summary line + a grouped findings list. Kept deliberately small —
+ * SARIF / JSON envelope remain the canonical machine-readable artifacts.
+ */
+function renderMarkdownReport(
+  data: RunChecksResult["data"],
+  warnings: string[],
+): string {
+  const s = data.summary;
+  const lines: string[] = [];
+  lines.push(`# zond checks report`);
+  lines.push("");
+  lines.push(
+    `**${s.findings} finding(s)** across ${s.cases} case(s) on ${s.operations} operation(s) — ${s.checks_run} check(s) active`,
+  );
+  const skipLine = formatSkippedOutcomes(s.skipped_outcomes);
+  if (skipLine) {
+    lines.push("");
+    lines.push(skipLine);
+  }
+  if (warnings.length > 0) {
+    lines.push("");
+    lines.push(`## Warnings`);
+    for (const w of warnings) lines.push(`- ${w}`);
+  }
+  if (data.findings.length > 0) {
+    lines.push("");
+    lines.push(`## Findings`);
+    for (const f of data.findings) {
+      lines.push(
+        `- **[${f.severity}]** \`${f.check}\` ${f.operation.method} ${f.operation.path} — ${f.message}`,
+      );
+    }
+  }
+  return lines.join("\n") + "\n";
+}
+
 function splitList(values: string[] | undefined): string[] | undefined {
   if (!values || values.length === 0) return undefined;
   return values.flatMap((v) => v.split(",")).map((s) => s.trim()).filter(Boolean);
@@ -173,34 +240,28 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   const opts = cmd.opts<ChecksRunOptions>();
   const json = opts.json === true || globalJson(cmd);
 
-  // ARV-63 (F2): `--report ndjson` is a friendly alias for `--ndjson`.
-  // The skill prompt and earlier docs referred to it that way; rather than
-  // surface a confusing "Available: sarif" error, fold the alias into the
-  // dedicated streaming flag and treat downstream code as if --ndjson was
-  // passed. Anything other than "ndjson" / "sarif" still hits the unknown-
-  // format branch below.
-  let reportFormatFromAlias = false;
-  if (opts.report === "ndjson") {
-    opts.ndjson = true;
-    opts.report = undefined;
-    reportFormatFromAlias = true;
+  // ARV-118 (m-19): single source of truth for `--report` / `--output` /
+  // `--json` resolution. resolveOutput enforces mutual exclusion of
+  // `--json` and `--report`, validates the format name against the spec
+  // (ARV-97 — no silent acceptance), and computes the channel + path.
+  // The legacy `--ndjson` boolean and the inline alias rewrite are gone —
+  // `--report ndjson` is now a first-class format key.
+  let resolved: ResolvedOutput;
+  try {
+    resolved = resolveOutput(CHECKS_OUTPUT_SPEC, {
+      report: opts.report,
+      output: opts.output,
+      json,
+    });
+  } catch (err) {
+    if (err instanceof OutputSpecError) {
+      if (json) printJson(jsonError("checks run", [err.message]));
+      else printError(err.message);
+      process.exit(2);
+    }
+    throw err;
   }
-  const ndjson = opts.ndjson === true;
-
-  // ARV-10: --ndjson and --json render fundamentally different shapes
-  // (stream of events vs. one envelope). Mixing them silently would
-  // produce malformed output — fail loudly with the same exit code as
-  // other CLI-input errors.
-  if (ndjson && json) {
-    const msg = "--ndjson and --json are mutually exclusive — pick one";
-    printError(msg);
-    process.exit(2);
-  }
-  if (ndjson && typeof opts.report === "string" && !reportFormatFromAlias) {
-    const msg = "--ndjson conflicts with --report — pick one output channel";
-    printError(msg);
-    process.exit(2);
-  }
+  const ndjson = resolved.format === "ndjson";
 
   // ARV-53: one resolver for --api across all of `checks run`'s sub-lookups
   // (spec, base_url, auth-header derivation).
@@ -283,21 +344,14 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     }
   }
 
-  // ARV-97 (F2): `--report ndjson --output <path>` was silently dropping
-  // the file because the alias rewrite (line 183) clears `opts.report` and
-  // the downstream sarif branch is the only place that honoured `--output`.
-  // Open a write fd up front and stream events into it instead of stdout
-  // when the path is set; we still surface the human summary on stderr so
-  // exit-code/UX behaviour matches the stdout-streaming form.
-  const ndjsonOutputPath: string | undefined = ndjson && typeof opts.output === "string" && opts.output.length > 0
-    ? resolvePath(opts.output)
-    : undefined;
+  // ARV-97 (F2 / m-19): when `ndjson` lands in the file channel, open a
+  // write fd up front and pipe events into it; otherwise emit on stdout.
+  // Re-running with the same --output truncates (mirrors SARIF) so a
+  // stale artifact can't leak across runs.
+  const ndjsonOutputPath: string | undefined = ndjson && resolved.channel === "file" ? resolved.path : undefined;
   let ndjsonFd: number | undefined;
   let ndjsonEventCount = 0;
   if (ndjsonOutputPath) {
-    // Truncate-on-open mirrors the sarif branch (writeFileSync overwrites);
-    // re-running with the same --output path produces a fresh artifact
-    // rather than appending to a stale one.
     ndjsonFd = openSync(ndjsonOutputPath, "w");
   }
   const ndjsonOnEvent = ndjson
@@ -333,11 +387,12 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     for (const id of result.selection.unknown) {
       warnings.push(`Unknown check: "${id}" — ignored. Run \`zond checks list\` to see registered ids.`);
     }
-    // ARV-5: optional SARIF v2.1.0 sidecar for GitHub Code Scanning.
-    // Written before any text output so a partial-write failure surfaces
-    // before the success line and the exit code.
-    if (opts.report === "sarif") {
-      const out = opts.output ?? "zond-checks.sarif";
+    // ARV-5 / ARV-118: SARIF v2.1.0 sidecar — file channel always (default
+    // filename `zond-checks.sarif` is set by the OutputSpec). Written before
+    // any text output so a partial-write failure surfaces before the success
+    // line and the exit code.
+    if (resolved.format === "sarif") {
+      const out = resolved.path!;
       const absSpec = resolvePath(specRes.spec);
       const specContent = readFileSync(absSpec, "utf8");
       // Make spec uri repo-relative when possible — GitHub Code Scanning
@@ -349,16 +404,18 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
         specUri,
         toolVersion: VERSION,
       });
-      writeFileSync(resolvePath(out), JSON.stringify(sarif, null, 2));
-      if (!json) console.error(`SARIF report written to ${out}`);
-    } else if (typeof opts.report === "string") {
-      const msg = `Unknown --report format: "${opts.report}". Available: sarif, ndjson (alias for --ndjson)`;
-      if (json) printJson(jsonError("checks run", [msg]));
-      else printError(msg);
-      process.exit(2);
-    }
-
-    if (json) {
+      writeFileSync(out, JSON.stringify(sarif, null, 2));
+      console.error(`SARIF report written to ${out}`);
+      for (const w of warnings) console.error(w);
+    } else if (resolved.format === "markdown") {
+      const body = renderMarkdownReport(result.data, warnings);
+      if (resolved.channel === "file") {
+        writeFileSync(resolved.path!, body);
+        console.error(`Markdown report written to ${resolved.path}`);
+      } else {
+        process.stdout.write(body);
+      }
+    } else if (resolved.format === "json") {
       printJson(jsonOk("checks run", result.data, warnings.length > 0 ? warnings : undefined));
     } else if (ndjson) {
       // ARV-10: stdout already carries the NDJSON stream (events were
@@ -468,11 +525,11 @@ function defineRun(parent: Command): void {
     )
     .option(
       "--report <format>",
-      "ARV-5: emit findings in an extra format alongside the JSON envelope. Available: sarif (SARIF v2.1.0 for GitHub Code Scanning), ndjson (alias for --ndjson — stream events on stdout).",
+      "ARV-118: output format. Available: console (default — human summary), json (envelope; equivalent to --json), ndjson (stream events on stdout — check_start | check_result | finding | summary), sarif (SARIF v2.1.0 for GitHub Code Scanning), markdown (short summary).",
     )
     .option(
       "--output <path>",
-      "ARV-5/ARV-97: write the report to this file. With --report sarif, defaults to zond-checks.sarif. With --report ndjson (or --ndjson), redirects the event stream from stdout into the file (one JSON event per line).",
+      "ARV-118: write the report to this file. With --report sarif, defaults to zond-checks.sarif when omitted. With --report ndjson, redirects the event stream from stdout into the file (one JSON event per line).",
     )
     .option(
       "--phase <phase>",
@@ -495,10 +552,6 @@ function defineRun(parent: Command): void {
     .option(
       "--exclude <spec...>",
       "ARV-9: drop operations matching <selector>:<value>. Same grammar as --include. Excludes evaluated after includes.",
-    )
-    .option(
-      "--ndjson",
-      "ARV-10: stream events as NDJSON on stdout (one JSON object per line). Event types: check_start, check_result, finding, summary. Schema: docs/json-schema/ndjson-events.schema.json. Mutually exclusive with --json/--report.",
     )
     .option(
       "--workers <n>",

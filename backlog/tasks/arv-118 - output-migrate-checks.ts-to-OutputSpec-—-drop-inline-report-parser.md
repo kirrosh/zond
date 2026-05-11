@@ -1,10 +1,10 @@
 ---
 id: ARV-118
 title: 'output: migrate checks.ts to OutputSpec — drop inline --report parser'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 10:13'
-updated_date: '2026-05-11 10:14'
+updated_date: '2026-05-11 10:59'
 labels:
   - m-19
   - refactor
@@ -28,8 +28,8 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 --report ndjson работает (--ndjson удалена)
-- [ ] #2 --report sarif --output отрабатывает (без silent ignore)
-- [ ] #3 --report sarif без --output пишет в zond-checks.sarif (default filename)
-- [ ] #4 tests/cli/checks.test.ts зелёные
+- [x] #1 --report ndjson работает (--ndjson удалена)
+- [x] #2 --report sarif --output отрабатывает (без silent ignore)
+- [x] #3 --report sarif без --output пишет в zond-checks.sarif (default filename)
+- [x] #4 tests/cli/checks.test.ts зелёные
 <!-- AC:END -->
