@@ -230,6 +230,14 @@ since TASK-139, but the table lets you confirm).
 
 ## Phase 2.5 — Fixture pack
 
+> **TL;DR — fixture flow (replaces old `bootstrap`/`discover`):**
+>
+> 1. `zond doctor --api <name> --missing-only` — gap report (UNSET vars, blocked-endpoint counts).
+> 2. `apis/<name>/.api-fixtures.yaml` — auto-generated **manifest** (read-only): what vars are needed and why.
+> 3. `zond prepare-fixtures --api <name> --apply [--seed] [--cascade]` — fills `.env.yaml` from live API; `--seed` POST-creates resources when a list endpoint returns `200 []`.
+>
+> `zond init` does **not** touch fixtures — it only refreshes skills/AGENTS.md. The three commands above are the entire fixture lifecycle.
+
 `zond doctor` already showed which `.env.yaml` keys are missing. Beyond
 the auto-detected list, real-API CRUD usually needs **pre-existing FK
 ids**, **verified resources**, and **valid enums** the spec doesn't
