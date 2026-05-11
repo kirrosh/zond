@@ -329,6 +329,60 @@ describe("zond bootstrap", () => {
     const byVar = Object.fromEntries(out.data.perTarget.map((t: { var: string; status: string }) => [t.var, t.status]));
     expect(byVar.org_slug).toBe("discovered");
     expect(byVar.widget_id).toBe("seeded");
+
+    // ARV-112: each filled target carries `sourceEndpoint` so the operator
+    // can re-derive (or sanity-check) the harvest path without re-running.
+    const bySource = Object.fromEntries(
+      out.data.perTarget.map((t: { var: string; sourceEndpoint?: string }) => [t.var, t.sourceEndpoint]),
+    );
+    expect(bySource.org_slug).toBe("GET /orgs");
+    expect(bySource.widget_id).toBe("POST /widgets");
+  });
+
+  // ARV-112: stdout (non-JSON) prints the `from <endpoint>` suffix so the
+  // human reader sees provenance, not just status. Without this, a wrong
+  // auto-harvest (e.g. `dashboard_id` from a list of built-in dashboards
+  // instead of user-owned ones) was indistinguishable from a correct one.
+  test("stdout shows provenance suffix `from GET <list>` / `from POST <create>`", async () => {
+    widgetCreates = 0;
+    const envPath = join(apiDir, ".env.task271.stdout-provenance.yaml");
+    await writeFile(envPath, `base_url: ${baseUrl}\n`);
+
+    const origLog = console.log;
+    const lines: string[] = [];
+    console.log = ((...args: unknown[]) => { lines.push(args.map(String).join(" ")); }) as typeof console.log;
+    try {
+      await bootstrapCommand({ specPath, apiDir, envPath, apply: false, seed: true });
+    } finally {
+      console.log = origLog;
+    }
+    const stdout = lines.join("\n");
+    // discovered → from GET /orgs
+    expect(stdout).toMatch(/discovered\s+org_slug\s+\S+\s+→ \S+\s+from GET \/orgs/);
+    // seeded → from POST /widgets
+    expect(stdout).toMatch(/seeded\s+widget_id\s+\S+\s+→ \S+\s+from POST \/widgets/);
+  });
+
+  test("pre-set values carry sourceEndpoint=(pre-set)", async () => {
+    const envPath = join(apiDir, ".env.task271.preset-source.yaml");
+    await writeFile(envPath,
+      `base_url: ${baseUrl}\n` +
+      `org_slug: "acme"\n` +
+      `project_slug: "frontend"\n` +
+      `widget_id: "widget_existing"\n`,
+    );
+
+    const origWrite = process.stdout.write;
+    const chunks: string[] = [];
+    process.stdout.write = ((c: unknown) => { chunks.push(typeof c === "string" ? c : String(c)); return true; }) as typeof process.stdout.write;
+    try {
+      await bootstrapCommand({ specPath, apiDir, envPath, apply: true, seed: true, json: true });
+    } finally {
+      process.stdout.write = origWrite;
+    }
+    const out = JSON.parse(chunks.join(""));
+    const allPreset = out.data.perTarget.every((t: { sourceEndpoint?: string }) => t.sourceEndpoint === "(pre-set)");
+    expect(allPreset).toBe(true);
   });
 
   // ARV-47: --seed POSTs a spec-aware body that pulls parent-FK ids from

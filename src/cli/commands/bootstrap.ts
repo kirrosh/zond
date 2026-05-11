@@ -481,16 +481,37 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     // seeded a parent and we captured its id), `failed:<reason>` (still empty
     // — surface why so the operator knows where to step in by hand).
     type TargetStatus = "already" | "discovered" | "seeded" | `failed:${string}`;
-    const perTarget: Array<{ var: string; resource: string; status: TargetStatus; value?: string; reason?: string }> = [];
+    // ARV-112: `sourceEndpoint` records WHERE a filled value came from so
+    // the operator can re-derive it / spot a wrong harvest source without
+    // re-running with --verify. `discovered` → the list GET that surfaced
+    // the id; `seeded` → the POST that created it; `already` → "(pre-set)".
+    const perTarget: Array<{ var: string; resource: string; status: TargetStatus; value?: string; reason?: string; sourceEndpoint?: string }> = [];
     for (const t of targets) {
       const value = env[t.varName];
       let status: TargetStatus;
       let reason: string | undefined;
+      let sourceEndpoint: string | undefined;
       if (preFilled.has(t.varName) && !options.force) {
         status = "already";
+        sourceEndpoint = "(pre-set)";
       } else if (!isPlaceholder(value)) {
         const seeded = seeds.find(s => s.varName === t.varName && s.status === "seeded");
-        status = seeded ? "seeded" : "discovered";
+        if (seeded) {
+          status = "seeded";
+          sourceEndpoint = `POST ${seeded.createPath}`;
+        } else {
+          status = "discovered";
+          // Find the cascade item that actually wrote this var — last pass
+          // where it appeared with status="write" wins. Falls back to any
+          // pass-item for the var if no explicit write status was recorded
+          // (defensive — current code path always sets "write" on success).
+          const writingItem = [...passes].reverse()
+            .flatMap(p => p.items)
+            .find(i => i.varName === t.varName && i.status === "write");
+          const lookupItem = writingItem
+            ?? [...passes].reverse().flatMap(p => p.items).find(i => i.varName === t.varName);
+          if (lookupItem?.listPath) sourceEndpoint = `GET ${lookupItem.listPath}`;
+        }
       } else {
         // Still empty — pick the most recent miss-* item from the cascade as
         // the reason; fallback to the seed attempt's reason.
@@ -535,7 +556,14 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
           status = "failed:no-route";
         }
       }
-      perTarget.push({ var: t.varName, resource: t.ownerResource, status, ...(isPlaceholder(value) ? {} : { value }), ...(reason ? { reason } : {}) });
+      perTarget.push({
+        var: t.varName,
+        resource: t.ownerResource,
+        status,
+        ...(isPlaceholder(value) ? {} : { value }),
+        ...(reason ? { reason } : {}),
+        ...(sourceEndpoint ? { sourceEndpoint } : {}),
+      });
     }
 
     const noOp = totalFkVars > 0 && filledFkVars === totalFkVars && writes.size === 0 && seeds.length === 0;
@@ -571,14 +599,18 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
       if (noOp) {
         console.log(`bootstrap: nothing to do — ${filledFkVars}/${totalFkVars} fixtures already present.`);
       } else {
-        // Per-target table.
+        // Per-target table. ARV-112: include `from` column with the endpoint
+        // that produced the value (GET <list> for discovered, POST <create>
+        // for seeded, "(pre-set)" for already-filled) so a wrong harvest is
+        // diagnosable without re-running --verify.
         if (perTarget.length > 0) {
           console.log("Fixture status:");
           for (const r of perTarget) {
             const head = r.status.padEnd(20);
             const value = r.value !== undefined ? `→ ${r.value}` : "";
             const reason = r.reason ? ` (${r.reason})` : "";
-            console.log(`  ${head} ${r.var.padEnd(28)} ${r.resource.padEnd(20)} ${value}${reason}`);
+            const from = r.sourceEndpoint ? `  from ${r.sourceEndpoint}` : "";
+            console.log(`  ${head} ${r.var.padEnd(28)} ${r.resource.padEnd(20)} ${value}${reason}${from}`);
           }
           console.log("");
         }
