@@ -51,8 +51,15 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
     return 2;
   }
 
+  // ARV-102 (F7): split orphans into retriable (have a DELETE plan) and
+  // manual-only (probe knew the resource was created but couldn't derive
+  // a deletePath / id). Manual-only entries are surfaced separately —
+  // we can't auto-DELETE them, but the operator must know they exist.
+  const manualOnly = records.filter(r => r.requires_manual_cleanup === true || r.deletePath === "");
+  const retriable = records.filter(r => !(r.requires_manual_cleanup === true || r.deletePath === ""));
+
   if (records.length === 0) {
-    if (opts.json) printJson(jsonOk("cleanup", { retried: 0, removed: 0, failed: 0, items: [] }));
+    if (opts.json) printJson(jsonOk("cleanup", { retried: 0, removed: 0, failed: 0, items: [], manual_cleanup_required: [] }));
     else console.log("No orphan resources to retry.");
     return 0;
   }
@@ -60,15 +67,21 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
   // Group by api so we resolve env once per API instead of per record.
   const baseUrlByApi = new Map<string, string>();
   if (opts.baseUrl) {
-    for (const r of records) baseUrlByApi.set(r.api, opts.baseUrl);
+    for (const r of retriable) baseUrlByApi.set(r.api, opts.baseUrl);
   }
 
   if (opts.dryRun) {
-    if (opts.json) printJson(jsonOk("cleanup", { dryRun: true, items: records }));
+    if (opts.json) printJson(jsonOk("cleanup", { dryRun: true, items: retriable, manual_cleanup_required: manualOnly }));
     else {
-      console.log(`Dry-run: ${records.length} orphan(s) would be retried:`);
-      for (const r of records) {
+      console.log(`Dry-run: ${retriable.length} orphan(s) would be retried:`);
+      for (const r of retriable) {
         console.log(`  ${r.method} ${r.path} (id=${r.id}); DELETE ${r.deletePath} — last status: ${r.lastCleanupStatus ?? "n/a"}`);
+      }
+      if (manualOnly.length > 0) {
+        console.log(`\nManual cleanup required: ${manualOnly.length} resource(s) (no DELETE plan):`);
+        for (const r of manualOnly) {
+          console.log(`  ${r.method} ${r.path}${r.id ? ` (id=${r.id})` : ""} — ${r.lastCleanupError ?? "no DELETE counterpart"}`);
+        }
       }
     }
     return 0;
@@ -91,7 +104,7 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
   }
 
   const results: Array<{ record: OrphanRecord; status: number | null; ok: boolean; error?: string }> = [];
-  for (const r of records) {
+  for (const r of retriable) {
     let baseUrl = baseUrlByApi.get(r.api);
     if (!baseUrl) {
       try {
@@ -139,6 +152,14 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
         ok: r.ok,
         error: r.error ?? null,
       })),
+      manual_cleanup_required: manualOnly.map(r => ({
+        api: r.api,
+        runId: r.runId,
+        method: r.method,
+        path: r.path,
+        id: r.id,
+        reason: r.lastCleanupError ?? "no DELETE counterpart",
+      })),
     }));
   } else {
     if (removed > 0) printSuccess(`${removed} orphan(s) cleaned up.`);
@@ -150,9 +171,17 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
         process.stderr.write(`  ${r.record.method} ${r.record.path} (id=${r.record.id}); DELETE ${r.record.deletePath} ${tail}\n`);
       }
     }
+    if (manualOnly.length > 0) {
+      printWarning(`${manualOnly.length} resource(s) need manual cleanup (no DELETE plan):`);
+      for (const r of manualOnly) {
+        process.stderr.write(`  ${r.method} ${r.path}${r.id ? ` (id=${r.id})` : ""} — ${r.lastCleanupError ?? "no DELETE counterpart"}\n`);
+      }
+    }
   }
 
-  return failed > 0 ? 1 : 0;
+  // Manual-only orphans count as "still alive" for exit-code purposes —
+  // CI must fail loudly when probes leave un-deletable state behind.
+  return failed > 0 || manualOnly.length > 0 ? 1 : 0;
 }
 
 export function registerCleanup(program: Command): void {
