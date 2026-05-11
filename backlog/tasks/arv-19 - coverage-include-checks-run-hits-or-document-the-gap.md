@@ -4,7 +4,7 @@ title: 'coverage: include checks-run hits or document the gap'
 status: Done
 assignee: []
 created_date: '2026-05-10 07:22'
-updated_date: '2026-05-10 11:17'
+updated_date: '2026-05-11 06:50'
 labels:
   - feedback-loop
   - api-resend
@@ -26,5 +26,5 @@ Log: /Users/kirrotech/Projects/zond-test/.fb-loop/rounds/raw-02.log
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Resurfaced in feedback round 08 as F2 (low, missing-feature). Tester confirms after probe-static + probe-run: hit-coverage still 47% though audit touched ~all 83 endpoints. Gap remains documented; no action this round.
+round-01 (feedback-loop) repeat: tester confirms 'depth-coverage' counter missing in zond coverage output; ask is --include-checks or extra summary line.
 <!-- SECTION:NOTES:END -->
