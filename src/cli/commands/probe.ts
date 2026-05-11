@@ -16,6 +16,7 @@ import type { Command } from "commander";
 import { probeStaticCommand, resolveStaticClasses } from "./probe-static.ts";
 import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from "./probe-mass-assignment.ts";
 import { probeSecurityCommand } from "./probe-security.ts";
+import { SECURITY_CLASSES } from "../../core/probe/security-probe.ts";
 import { globalJson, resolveSpecArg, resolveApiEnv, resolveApiCollection } from "../resolve.ts";
 import { getApi } from "../util/api-context.ts";
 import { existsSync } from "fs";
@@ -237,7 +238,11 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
 
 function defineProbeSecurity(parent: Command, name: string): void {
   parent
-    .command(`${name} <classes> [spec]`)
+    // ARV-36: classes is technically required but kept optional in commander
+    // so the missing-arg branch can produce the same actionable list of
+    // available classes that --unknown-class already prints (data already in
+    // SECURITY_CLASSES — no reason to force a --help read for first-time users).
+    .command(`${name} [classes] [spec]`)
     .description(
       "Live security probes (TASK-138): SSRF / CRLF / open-redirect. Detects vulnerable fields by name+format, sends a baseline-OK then per-field payloads, classifies HIGH (5xx or echo) / LOW (2xx no echo) / OK (4xx). <classes> is a comma-separated subset of: ssrf, crlf, open-redirect.",
     )
@@ -266,7 +271,16 @@ function defineProbeSecurity(parent: Command, name: string): void {
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
     .option("--report <format>", "Format for --output / non-json stdout (markdown|json). --json envelope is always structured (m-17 ARV-51). Default markdown.", "markdown")
-    .action(async (classes: string, specPos: string | undefined, opts, cmd: Command) => {
+    .action(async (classes: string | undefined, specPos: string | undefined, opts, cmd: Command) => {
+      // ARV-36: missing-arg path should list the available classes (parity
+      // with the unknown-class error). Commander's default `missing required
+      // argument` doesn't include them; once we made <classes> optional, we
+      // surface the same hint here.
+      if (typeof classes !== "string" || classes.length === 0) {
+        printError(`Missing required argument <classes>. Available: ${SECURITY_CLASSES.join(", ")}`);
+        process.exitCode = 2;
+        return;
+      }
       // ARV-33: same fallback chain as mass-assignment so `zond probe security
       // ssrf --api foo` doesn't fall through to a confusing "base_url is
       // required" when commander absorbs --api at the global scope.
