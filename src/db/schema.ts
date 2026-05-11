@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { dirname, resolve } from "path";
 import { existsSync, mkdirSync } from "fs";
 import { findWorkspaceRoot } from "../core/workspace/root.ts";
+import { applyMigrations } from "./migrate.ts";
 
 let _db: Database | null = null;
 let _dbPath: string | null = null;
@@ -43,6 +44,12 @@ export function getDb(dbPath?: string): Database {
   db.exec("PRAGMA foreign_keys = ON");
 
   runMigrations(db);
+
+  // ARV-127: file-based migrations sit on top of the legacy PRAGMA
+  // path. On an existing DB the runner pre-seeds `schema_migrations`
+  // so the v9→v10 inline migration (now mirrored in
+  // src/db/migrations/0001_run_kind.sql) is treated as applied.
+  applyMigrations(db);
 
   _db = db;
   _dbPath = path;
