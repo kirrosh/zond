@@ -743,3 +743,55 @@ describe("string default beats randomString fallback", () => {
     expect(result).toBe("{{$randomString}}");
   });
 });
+
+// ARV-67 / feedback round-01 / F7
+describe("typeless schema infers shape from structural hints (ARV-67)", () => {
+  test("typeless schema with `items` → array", () => {
+    const result = generateFromSchema(
+      { items: { type: "object", properties: { kind: { type: "string" } } } } as unknown as OpenAPIV3.SchemaObject,
+      "steps",
+    );
+    expect(Array.isArray(result)).toBe(true);
+    expect((result as Array<{ kind: unknown }>)[0]).toEqual({ kind: "{{$randomString}}" });
+  });
+
+  test("typeless schema with `required` (no `properties`) → object {}", () => {
+    const result = generateFromSchema(
+      { required: ["a", "b"] } as unknown as OpenAPIV3.SchemaObject,
+      "config",
+    );
+    expect(result).toEqual({});
+    expect(typeof result).toBe("object");
+  });
+
+  test("typeless schema with `properties` already emits object (regression guard)", () => {
+    const result = generateFromSchema(
+      { properties: { memo: { type: "string" } } } as unknown as OpenAPIV3.SchemaObject,
+      "config",
+    );
+    expect(result).toEqual({ memo: "{{$randomString}}" });
+  });
+
+  test("F7 repro: nested `automations` body — `steps` / `config` are not strings", () => {
+    const automationsSchema: OpenAPIV3.SchemaObject = {
+      type: "object",
+      required: ["event_name", "steps", "config"],
+      properties: {
+        event_name: { type: "string" },
+        steps: { items: { type: "object", properties: { kind: { type: "string" } } } } as unknown as OpenAPIV3.SchemaObject,
+        config: { required: ["mode"], properties: { mode: { type: "string" } } } as unknown as OpenAPIV3.SchemaObject,
+      },
+    };
+    const body = generateFromSchema(automationsSchema, undefined) as Record<string, unknown>;
+    expect(typeof body).toBe("object");
+    expect(typeof body.event_name).toBe("string");
+    expect(Array.isArray(body.steps)).toBe(true);
+    expect(typeof body.config).toBe("object");
+    expect(typeof body.config).not.toBe("string");
+  });
+
+  test("typeless schema with no hints still falls back to randomString (no behaviour change for bare fields)", () => {
+    const result = generateFromSchema({} as OpenAPIV3.SchemaObject, "memo");
+    expect(result).toBe("{{$randomString}}");
+  });
+});

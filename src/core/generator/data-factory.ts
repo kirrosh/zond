@@ -83,9 +83,22 @@ export function generateFromSchema(
 
   // OpenAPI 3.1: type can be `["string", "null"]`. Collapse to the first
   // non-null entry so the switch below routes correctly.
-  const effectiveType = Array.isArray(schema.type)
+  let effectiveType = Array.isArray(schema.type)
     ? (schema.type as string[]).find(t => t !== "null") as OpenAPIV3.SchemaObject["type"] | undefined
     : schema.type;
+
+  // ARV-67 (feedback round-01 / F7): schemas in the wild routinely omit
+  // `type` on nested-object fields and rely on `properties` / `required`
+  // / `items` to convey shape. Without the salvage below, the default
+  // branch returns "{{$randomString}}" for a missing-type field — which
+  // is what made `prepare-fixtures --seed` send a string for nested
+  // objects like `automations.config` / `automations.steps` and earn
+  // "Expected object, received string" 422s on Resend. Infer the type
+  // from structural hints when nothing else gives one.
+  if (effectiveType === undefined) {
+    if (schema.items !== undefined) effectiveType = "array";
+    else if (schema.properties || Array.isArray(schema.required)) effectiveType = "object";
+  }
 
   switch (effectiveType) {
     case "string":
