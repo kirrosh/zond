@@ -34,6 +34,8 @@ import {
   buildJsonAuthHeaders,
   buildBaselineFromSpec,
 } from "./probe-harness.ts";
+import { applyAntiFp } from "../anti-fp/index.ts";
+import type { BaselineEchoCtx } from "../anti-fp/rules/baseline-echo.ts";
 
 // ──────────────────────────────────────────────
 // Types
@@ -445,6 +447,29 @@ async function probeOneEndpoint(
         continue;
       }
       const finding = classify(hit, payload, resp);
+      // ARV-126: route the 2xx-no-echo low-severity classification
+      // through the anti-FP registry. When the response body deeply
+      // equals the baseline body, the server ignored the attack
+      // payload entirely — no side-effect to verify — and the
+      // `baseline-echo` rule downgrades the finding to OK with a
+      // wontfix banner. Only relevant for `mode === "full"` (we don't
+      // retain per-field baseline response bodies).
+      if (
+        finding.severity === "low"
+        && !finding.echoed
+        && mode === "full"
+        && fullBaseline.kind === "ok"
+      ) {
+        const ctx: BaselineEchoCtx = {
+          responseBody: resp.body_parsed ?? resp.body,
+          baselineBody: fullBaseline.body,
+        };
+        const suppression = applyAntiFp(ctx, "probe:security");
+        if (suppression) {
+          finding.severity = "ok";
+          finding.reason = `${suppression.reason} (${suppression.ruleId})`;
+        }
+      }
       // Annotate which body shape was used for this attack — useful for
       // case-studies and emit-tests.
       finding.reason = mode === "partial"
