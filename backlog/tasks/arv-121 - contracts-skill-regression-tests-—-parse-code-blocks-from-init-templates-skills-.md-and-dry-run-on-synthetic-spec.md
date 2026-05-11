@@ -3,9 +3,10 @@ id: ARV-121
 title: >-
   contracts: skill regression tests — parse code-blocks from
   init/templates/skills/*.md and dry-run on synthetic spec
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 10:13'
+updated_date: '2026-05-11 10:46'
 labels:
   - m-19
   - contracts
@@ -32,8 +33,14 @@ tests/contracts/skill-examples.test.ts:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 tests/contracts/skill-examples.test.ts существует
-- [ ] #2 synthetic spec fixture в tests/fixtures/synthetic-spec/
-- [ ] #3 тест зелёный на текущих skill'ах после ARV-84..93 фиксов
-- [ ] #4 при добавлении заведомо broken примера (например zond run --json) тест падает
+- [x] #1 tests/contracts/skill-examples.test.ts существует
+- [x] #2 synthetic spec fixture в tests/fixtures/synthetic-spec/
+- [x] #3 тест зелёный на текущих skill'ах после ARV-84..93 фиксов
+- [x] #4 при добавлении заведомо broken примера (например zond run --json) тест падает
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implementation: in-process commander tree walk via buildProgram() rather than spawn(zond). Faster (~200ms for 101 snippets), more precise (validates flag membership against the real commander spec including inherited options and --no-X negations), no workspace fixture needed. The synthetic-spec fixture (tests/fixtures/synthetic-spec/) ships per AC#2 but is currently unused by this test — kept for future deeper variants that may spawn real commands. AC#4 is exercised inline by three negative tests: zond run --json, zond bogus-cmd, zond probe security ssrf --no-such-flag — each must be rejected. Skill examples in prose (inline-code backticks) are NOT validated; only fenced bash/shell blocks. Skip via <!-- skip-regression --> on the line directly above the opening fence.
+<!-- SECTION:NOTES:END -->
