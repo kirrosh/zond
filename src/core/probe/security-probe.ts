@@ -7,7 +7,7 @@
  * payload (SSRF / CRLF / open-redirect) and classifies the response.
  *
  * Why a CLI command rather than the markdown templates the audit skill
- * shipped with: the templates produced one HIGH (stored CRLF on Sentry) in
+ * shipped with: the templates produced one HIGH (stored CRLF in one real-world API) in
  * 5 minutes — but it was hand-copied per endpoint. Spec-driven autodetection
  * + a baseline-OK gate (TASK-138) turns that into a one-liner.
  */
@@ -339,7 +339,7 @@ async function probeOneEndpoint(
   verdict.baseline = { status: fullBaseline.status };
 
   // ── Partial-body fallback (TASK-152) ──────────────────────────────────
-  // Sentry / Stripe / GitHub-style APIs accept partial PUT — full bodies
+  // common SaaS-style APIs accept partial PUT — full bodies
   // generated from spec get rejected (422 / 400). Walking each detected
   // field with a single-key body recovers the proven-HIGH cases that
   // otherwise fall into INCONCLUSIVE-BASELINE.
@@ -481,7 +481,7 @@ async function probeOneEndpoint(
       // PUT-rename'd resource would wipe a live entity, restore-PUT puts
       // it back to the captured original. Only restore the single field
       // this attack mutated — sending a multi-key body trips
-      // `422 use partial PUT` on Sentry / Stripe / GitHub-shaped APIs.
+      // `422 use partial PUT` on common SaaS-shaped APIs.
       if (resp.status >= 200 && resp.status < 300 && !opts.noCleanup) {
         if (snapshot) {
           await restoreOriginal(
@@ -593,7 +593,7 @@ async function snapshotOriginal(
  * Restore the original state captured by `snapshotOriginal`. Sends a
  * minimal PUT/PATCH containing only the fields the probe mutated —
  * sending the full snapshot body trips `422 use partial PUT` on
- * Sentry/Stripe-shaped APIs (round-4 regression), so we replay each
+ * SaaS-shaped APIs (round-4 regression), so we replay each
  * dirty field as its own single-key request.
  *
  * `verdict.cleanup.error` is **accumulated** across calls (not
@@ -625,7 +625,7 @@ async function restoreOriginal(
     f => !READ_ONLY.has(f) && f in snapshot.body,
   );
 
-  // Per-field PUT — works for both partial-PUT APIs (Sentry) and
+  // Per-field PUT — works for both partial-PUT APIs and
   // full-PUT APIs (the body just carries one of the legal keys).
   const failures: string[] = [];
   let lastSuccessStatus = 0;

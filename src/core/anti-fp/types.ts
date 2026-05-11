@@ -12,7 +12,7 @@
  * They share the same shape — "given a finding plus its context, return
  * a structured suppression with attribution" — but each has its own
  * ad-hoc API, which makes it hard to (a) discover the full set, (b)
- * attribute a suppression to its source (schemathesis #N, Sentry
+ * attribute a suppression to its source (schemathesis #N, vendor
  * plan-limit doc, etc.), and (c) test rules in isolation.
  *
  * This module gives them a common contract. Migration of existing rules
@@ -48,7 +48,7 @@ export interface FpRule<Ctx = unknown> {
    *  context without composing a runtime string. Optional — most rules
    *  prefer to build a context-specific reason inside `applies`. */
   reason?: string;
-  /** Backing evidence — schemathesis issue numbers, Sentry docs, etc.
+  /** Backing evidence — schemathesis issue numbers, vendor docs, etc.
    *  Surfaced verbatim in the suppression so an agent reading the
    *  output can locate the upstream debate. */
   references?: string[];

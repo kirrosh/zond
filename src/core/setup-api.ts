@@ -108,7 +108,7 @@ export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
  *
  * Resolution order:
  *   1. URL (http/https) — return as-is.
- *   2. Workspace-relative path (e.g. `apis/resend/spec.json`) that exists.
+ *   2. Workspace-relative path (e.g. `apis/<name>/spec.json`) that exists.
  *   3. Absolute filesystem path that exists. Treated as legacy: the spec
  *      is outside the workspace and not snapshotted into `apis/<name>/`.
  *      We let it through, but `assertLocalSpec` (used by run/report/doctor)

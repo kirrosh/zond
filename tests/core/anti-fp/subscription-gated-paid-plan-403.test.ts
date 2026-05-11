@@ -6,13 +6,13 @@
  * 403, never on empty messages, and surfaces the wontfix reason.
  */
 import { describe, test, expect } from "bun:test";
-import { PAID_PLAN_403_RULE } from "../../../src/core/anti-fp/rules/sentry/paid-plan-403.ts";
+import { PAID_PLAN_403_RULE } from "../../../src/core/anti-fp/rules/subscription-gated/paid-plan-403.ts";
 import { applyAntiFp } from "../../../src/core/anti-fp/index.ts";
 import { bootstrapAntiFp, resetAntiFpBootstrap } from "../../../src/core/anti-fp/bootstrap.ts";
 
-describe("sentry/paid-plan-403 (ARV-125)", () => {
+describe("subscription-gated/paid-plan-403 (ARV-125)", () => {
   test("rule metadata is wired", () => {
-    expect(PAID_PLAN_403_RULE.id).toBe("sentry/paid-plan-403");
+    expect(PAID_PLAN_403_RULE.id).toBe("subscription-gated/paid-plan-403");
     const scope = Array.isArray(PAID_PLAN_403_RULE.scope)
       ? PAID_PLAN_403_RULE.scope
       : [PAID_PLAN_403_RULE.scope];
@@ -54,6 +54,6 @@ describe("sentry/paid-plan-403 (ARV-125)", () => {
       "probe:mass-assignment",
     );
     expect(sup).not.toBeNull();
-    expect(sup!.ruleId).toBe("sentry/paid-plan-403");
+    expect(sup!.ruleId).toBe("subscription-gated/paid-plan-403");
   });
 });

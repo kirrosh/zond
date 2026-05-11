@@ -3,13 +3,13 @@
  * for an API (TASK-170, m-10). Companion to `.env.yaml` which references
  * keys here via `@secret:<name>`.
  *
- *     # apis/sentry/.secrets.yaml (NEVER committed)
- *     auth_token: "sntryu_..."
- *     dsn: "https://...@sentry.io/..."
+ *     # apis/<name>/.secrets.yaml (NEVER committed)
+ *     auth_token: "tok_..."
+ *     dsn: "https://...@example.com/..."
  *
- *     # apis/sentry/.env.yaml (committable)
+ *     # apis/<name>/.env.yaml (committable)
  *     auth_token: "@secret:auth_token"
- *     base_url: "https://us.sentry.io"
+ *     base_url: "https://api.example.com"
  *
  * Mental model: anything in `.secrets.yaml` is registered with the
  * `SecretRegistry` at load-time, so it gets redacted in any persisted

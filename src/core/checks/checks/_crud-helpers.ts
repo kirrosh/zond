@@ -37,7 +37,7 @@ export function extractIdFromCreateResponse(body: unknown, idParam: string): str
     const v = obj[k];
     if (typeof v === "string" || typeof v === "number") return v;
   }
-  // Sentry-style { data: { id } } envelope.
+  // common SaaS-style { data: { id } } envelope.
   const data = obj.data as Record<string, unknown> | undefined;
   if (data && typeof data === "object") {
     for (const k of candidates) {

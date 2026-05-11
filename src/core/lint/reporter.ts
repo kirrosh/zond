@@ -50,8 +50,9 @@ export function formatNdjson(issues: Issue[]): string {
 
 /**
  * TASK-279: rule × severity rollup. The flat `formatHuman` output has a habit
- * of producing 700+ lines on real-world specs (Sentry: 385 of 714 issues are
- * a single rule). This collapses them to one row per rule so a human can
+ * of producing 700+ lines on real-world specs (one large SaaS spec we
+ * benchmarked had 385 of 714 issues from a single rule). This collapses
+ * them to one row per rule so a human can
  * triage by impact instead of `grep '(B1)' | wc -l`.
  */
 export interface RuleSummaryEntry {

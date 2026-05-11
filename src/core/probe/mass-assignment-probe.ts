@@ -27,7 +27,7 @@ import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
 import { classify } from "../classifier/recommended-action.ts";
 import { applyAntiFp } from "../anti-fp/index.ts";
-import { matchesSubscriptionGated as matchesPaidPlan403 } from "../anti-fp/rules/sentry/paid-plan-403.ts";
+import { matchesSubscriptionGated as matchesPaidPlan403 } from "../anti-fp/rules/subscription-gated/paid-plan-403.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { executeRequest } from "../runner/http-client.ts";
 import type { HttpRequest } from "../runner/types.ts";
@@ -704,7 +704,7 @@ function inconclusiveBaselineSummary(
   // names a subscription/scope gate (paid plan, feature flag, role/scope
   // insufficient), the right answer isn't "fix fixture" — there's
   // nothing to fix. The pattern set + suppression text now live in the
-  // anti-FP registry as `sentry/paid-plan-403`; we route through
+  // anti-FP registry as `subscription-gated/paid-plan-403`; we route through
   // `applyAntiFp` so the rule body, references, and identifier stay in
   // one place.
   const suppression = hint !== undefined
@@ -727,7 +727,7 @@ function inconclusiveBaselineSummary(
 }
 
 /** ARV-104 (F9) → ARV-125: pattern set + suppression text moved to the
- *  anti-FP registry (`sentry/paid-plan-403`). This re-export keeps
+ *  anti-FP registry (`subscription-gated/paid-plan-403`). This re-export keeps
  *  pre-migration callers (existing unit test in
  *  mass-assignment-probe.test.ts) working through a thin shim. New
  *  callers should depend on the rule module directly or route

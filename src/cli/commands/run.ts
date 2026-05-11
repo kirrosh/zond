@@ -327,7 +327,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
   // explicitly, default to an adaptive limiter. Adaptive is a no-op until
   // a response carries RateLimit-* headers (RFC 9568) — in which case it
   // learns the policy and throttles subsequent requests so a burst can't
-  // blow through small windows like Resend's 5/1s. Without this default
+  // blow through small windows like small windows (e.g. 5 req/s). Without this default
   // `zond run` ignored server-published rate-limit headers entirely and
   // 22% of a typical sweep landed in 429.
   let rateLimiter: ReturnType<typeof createAdaptiveRateLimiter> | undefined;

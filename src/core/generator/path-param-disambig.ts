@@ -1,8 +1,8 @@
 /**
  * Disambiguate generic path-parameter names that collide across resources.
  *
- * Some OpenAPI specs (Resend, Pipedream, parts of GitHub legacy) declare item
- * paths as `/<resource>/{id}` instead of `/<resource>/{<resource>_id}` — fine
+ * Some OpenAPI specs declare item paths as `/<resource>/{id}` instead of
+ * `/<resource>/{<resource>_id}` — fine
  * within one resource, catastrophic across many: the manifest derives one
  * global `id` var, `.env.yaml` stores one value, and N>1 CRUD suites end up
  * pointing at the same uuid (false 404 at best; false 200 against a stranger's

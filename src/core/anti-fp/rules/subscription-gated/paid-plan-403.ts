@@ -2,19 +2,18 @@
  * ARV-125: migrated from `core/probe/mass-assignment-probe.ts` —
  * inline pattern match for subscription/scope-gated 403 responses.
  *
- * Background (ARV-104 / F9): mass-assignment probing against Sentry's
- * 46-endpoint org slice produced an INCONCLUSIVE baseline on every
- * paid-plan endpoint. The default `inconclusiveBaselineSummary` tail
- * tells the triage agent to "fix fixture / FK / path-params and
- * re-probe" — but there's nothing to fix: the endpoint is gated by
- * subscription/scope, and the agent will crank-turn fixture edits
+ * Background (ARV-104 / F9): mass-assignment probing against a
+ * paid-plan-gated API slice produced an INCONCLUSIVE baseline on
+ * every gated endpoint. The default `inconclusiveBaselineSummary`
+ * tail tells the triage agent to "fix fixture / FK / path-params
+ * and re-probe" — but there's nothing to fix: the endpoint is gated
+ * by subscription/scope, and the agent will crank-turn fixture edits
  * forever. The pattern match swaps the tail to a wontfix banner.
  *
- * Lives in the anti-FP registry as `sentry/paid-plan-403`. Scope is
- * `probe:mass-assignment` (with `probe:security` listed too — the
- * live security probe hits the same surface and surfaces the same
- * gated bodies through ARV-126's migration of its baseline-echo
- * check).
+ * Lives in the anti-FP registry as `subscription-gated/paid-plan-403`.
+ * Scope is `probe:mass-assignment` (with `probe:security` listed too —
+ * the live security probe hits the same surface and surfaces the same
+ * gated bodies through ARV-126's migration of its baseline-echo check).
  *
  * Context payload: `{ status, message }`. The mass-assignment probe
  * already extracts the hint string from the response body; passing
@@ -29,7 +28,7 @@ export interface PaidPlan403Ctx {
   status: number;
   /** Server-supplied message extracted from the response body. The
    *  rule does not parse JSON — callers extract their preferred field
-   *  (Sentry uses `detail` / `message`) and pass the string. */
+   *  (commonly `detail` / `message`) and pass the string. */
   message?: string;
 }
 
@@ -58,19 +57,19 @@ export function matchesSubscriptionGated(message: string): boolean {
 }
 
 export const PAID_PLAN_403_RULE: FpRule<PaidPlan403Ctx> = {
-  id: "sentry/paid-plan-403",
+  id: "subscription-gated/paid-plan-403",
   scope: ["probe:mass-assignment", "probe:security"],
-  references: ["ARV-104", "Sentry plan-limit doc"],
+  references: ["ARV-104"],
   applies(ctx) {
     if (ctx.status !== 403) return null;
     if (!ctx.message || !matchesSubscriptionGated(ctx.message)) return null;
     return {
-      ruleId: "sentry/paid-plan-403",
+      ruleId: "subscription-gated/paid-plan-403",
       scope: "probe:mass-assignment",
       reason:
         "endpoint is env/subscription-gated (paid plan, role/scope, feature flag); " +
         "not a fixture issue — wontfix unless scope changes",
-      references: ["ARV-104", "Sentry plan-limit doc"],
+      references: ["ARV-104"],
     };
   },
 };

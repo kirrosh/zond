@@ -118,7 +118,7 @@ function selectHealthcheckEndpoint(gets: EndpointInfo[]): EndpointInfo | undefin
  * Order:
  *   1. First 2xx declared in the spec (most authoritative).
  *   2. Method-aware default when the spec lists only non-2xx responses or none
- *      at all (Resend OpenAPI is silent for several mutating endpoints — the
+ *      at all (many OpenAPI specs is silent for several mutating endpoints — the
  *      actual runtime returns 201/204, while the old default of 200 caused
  *      tests to fail at runtime). We never assert a 4xx/5xx as the success
  *      status — that would generate guaranteed-failing tests.
@@ -218,7 +218,7 @@ function getSuiteHeaders(
 }
 
 /** Common id-like field names looked up after `id` itself.
- *  TASK-139: Sentry / many real APIs return `slug`, `uuid`, `version`, `key`,
+ *  TASK-139: many real-world APIs return `slug`, `uuid`, `version`, `key`,
  *  or `name` instead of an `id` field on create responses. Without these,
  *  CRUD chains fall back to capturing `"id"` from a body that doesn't have
  *  one, breaking the `{id}` substitution in follow-up reads. */
@@ -401,7 +401,7 @@ export interface DetectCrudResult {
  *  Match logic (TASK-139):
  *    - basePath = POST endpoint's path with any trailing slash trimmed.
  *    - item path = `<basePath>/{param}` with optional trailing slash.
- *  This catches Sentry-style `POST /alert-rules/` + `GET /alert-rules/{id}/`
+ *  This catches common SaaS-style `POST /alert-rules/` + `GET /alert-rules/{id}/`
  *  pairs that previously fell through because the regex required the same
  *  slash form on both. */
 export function detectCrudGroups(endpoints: EndpointInfo[]): CrudGroup[] {
@@ -423,13 +423,13 @@ export function detectCrudGroupsWithDiagnostics(
 
     // Match `<basePath>/{param}` with optional trailing slash. Tolerates
     // both `POST /alerts/` + `GET /alerts/{id}` and `POST /alerts` +
-    // `GET /alerts/{id}/`, which Sentry mixes within the same spec.
+    // `GET /alerts/{id}/`, which some real-world specs mix.
     const itemPattern = new RegExp(`^${escapeRegex(basePath)}/\\{([^}]+)\\}/?$`);
     const itemEndpoints = endpoints.filter(
       ep => !ep.deprecated && itemPattern.test(ep.path),
     );
 
-    // Fallback for "subdomain"/nested-item routing (Sentry-style):
+    // Fallback for "subdomain"/nested-item routing (common SaaS-style):
     // create lives under one root (`/api/0/organizations/{org}/teams/`)
     // but item-path lives under another (`/api/0/teams/{org}/{team}/`).
     // The strict basePath/{id} regex misses these. Match instead by:
@@ -935,7 +935,7 @@ export function generateSuites(opts: {
     // (with skip_if guards). TASK-240 — unified naming convention:
     // always emit `smoke-<tag>-positive.yaml`, never the bare
     // `smoke-<tag>.yaml`, so file listings don't have to explain why a
-    // tag has only `-negative` (e.g. Sentry's Explore tag) or why two
+    // tag has only `-negative` (e.g. a vendor-specific tag) or why two
     // siblings differ in suffix shape.
     const positiveTests = [
       ...paramlessGets.map(ep => {

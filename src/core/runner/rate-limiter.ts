@@ -32,8 +32,8 @@ export interface RateLimitMeta {
 /**
  * When `remaining` is at or below this number we proactively pause until reset.
  * Conservative threshold — at 2, we still have buffer for one in-flight retry
- * (if we paused at 5 we'd over-throttle on small windows like Resend's 5/1s,
- * where every request would trigger a sleep).
+ * (if we paused at 5 we'd over-throttle on small windows like 5-req/1-sec
+ * policies, where every request would trigger a sleep).
  */
 const THROTTLE_THRESHOLD = 2;
 
@@ -125,7 +125,7 @@ export function createRateLimiter(reqPerSec: number | undefined): RateLimiter | 
  * (a) pauses the request stream until the API's reset window elapses when
  * remaining headroom drops; (b) once a `RateLimit-Policy` is seen, paces
  * subsequent requests at the policy's `W/N` spacing — this prevents bursts
- * from blowing through small windows (Resend 5/1s, etc.).
+ * from blowing through small windows (e.g. 5-req/1-sec policies).
  */
 export function createAdaptiveRateLimiter(): RateLimiter {
   return new AdaptiveRateLimiter();

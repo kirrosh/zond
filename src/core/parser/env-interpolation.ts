@@ -3,8 +3,8 @@
  *
  * Lets a workspace commit `.env.yaml` without bare secrets:
  *
- *     auth_token: "${SENTRY_AUTH_TOKEN}"
- *     base_url:   "${SENTRY_BASE_URL:-https://us.sentry.io}"
+ *     auth_token: "${MYAPI_AUTH_TOKEN}"
+ *     base_url:   "${MYAPI_BASE_URL:-https://api.example.com}"
  *
  * Rules:
  *   - `${VAR}`           → process.env.VAR (throws if missing).
@@ -36,7 +36,7 @@ export interface EnvInterpolationContext {
 }
 
 /** Module-level set of variable names we've already warned about, so the
- *  same `${SENTRY_AUTH_TOKEN}` reference doesn't yell once per env file. */
+ *  same `${MYAPI_AUTH_TOKEN}` reference doesn't yell once per env file. */
 const warned = new Set<string>();
 
 export function _resetEnvInterpolationWarnings(): void {

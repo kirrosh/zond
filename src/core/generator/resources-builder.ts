@@ -95,7 +95,7 @@ function getCaptureField(create: EndpointInfo): string {
  *    later have to hope is wired up correctly.
  *  • Two-strategy lookup so it survives both canonical nesting
  *    (`/orgs/{org}/projects/{proj}/...` — prev seg `projects` is a list)
- *    and Sentry-style sibling-param chains
+ *    and common SaaS-style sibling-param chains
  *    (`/projects/{org}/{proj}/...` — prev seg is itself a param;
  *    we walk back to the nearest non-param segment and search for any
  *    GET path ending with that hint).

@@ -34,7 +34,7 @@ Run `zond --version` first; if missing:
   sandbox).
 - **NEVER hardcode tokens** — put values in `apis/<name>/.secrets.yaml`
   (auto-gitignored), reference from `.env.yaml` as `@secret:auth_token`.
-  Plain shell-env references (`${SENTRY_AUTH_TOKEN}`) also work. Tests
+  Plain shell-env references (`${MYAPI_AUTH_TOKEN}`) also work. Tests
   read the resolved value as `{{auth_token}}` like before.
 - **NEVER read `.secrets.yaml` directly.** Use `zond doctor --api <name> --json`
   — it reports `set | unset` and value length only, never the raw value.
@@ -133,7 +133,7 @@ Reference syntax in `.env.yaml`:
 ```yaml
 auth_token: "@secret:auth_token"            # from .secrets.yaml
 organization_id_or_slug: "@identity:organization_id_or_slug"
-base_url: "${SENTRY_BASE_URL:-https://us.sentry.io}"  # from shell env
+base_url: "${MYAPI_BASE_URL:-https://api.example.com}"  # from shell env
 ```
 
 Iron rule: do not `cat` `.secrets.yaml`. `zond doctor --api <name> --json`
@@ -236,7 +236,7 @@ Static lint of the OpenAPI document — finds spec-level bugs (path-param
 without `format: uuid`, timestamp without `format: date-time`,
 request-body without `additionalProperties: false`, integer query without
 `min`/`max`, ...) before they cascade into depth-check noise. Cheap
-(no HTTP), high signal — a typical Resend-style spec turns up 150+ issues
+(no HTTP), high signal — a typical real-world SaaS spec turns up 150+ issues
 across 5 severity levels (HIGH/MEDIUM/LOW × B1..B9 classes).
 
 Run BEFORE depth-checks. The HIGH-severity classes (`B1` path-param
@@ -264,7 +264,7 @@ If a CRUD chain you expected isn't in the output, run
 `zond generate <spec> --explain` (no `--output` needed). The diagnostic
 table shows every POST endpoint with its verdict and reason — usually one
 of: no GET-by-id, item path uses a non-`{id}` param the detector couldn't
-match, or trailing-slash mismatch (Sentry-style — already auto-handled
+match, or trailing-slash mismatch (common SaaS-style — already auto-handled
 since TASK-139, but the table lets you confirm).
 
 ## Phase 2.5 — Fixture pack
@@ -377,7 +377,7 @@ backend bugs — treat them like 5xx, do not edit the expectation away.
 
 **Rate limit.** Since ARV-64, `zond run` defaults to an adaptive rate
 limiter (no-op until a response carries `RateLimit-*` headers, then paces
-requests to the server's policy). On rate-limited APIs (Resend: 5 req/s,
+requests to the server's policy). On rate-limited APIs (small windows like 5 req/s,
 Stripe, GitHub) the default is what you want — no flag needed. Pass
 `--rate-limit auto` explicitly when you want to be loud about it, or
 `--rate-limit <N>` for a hard cap. On older binaries (pre-ARV-64), or
@@ -616,7 +616,7 @@ namespace-isolated test envs.
 For CI: `grep -q "Cleanup failures" digest.md` is a reliable signal of
 the second case.
 
-**Partial PUT support (TASK-152).** Sentry / Stripe / GitHub-shaped
+**Partial PUT support (TASK-152).** common SaaS-shaped
 APIs reject the full spec body on PUT (`422 use partial PUT`). When
 that happens, probe security retries the baseline with a single-key
 body per detected field; if any partial baseline succeeds, attacks
