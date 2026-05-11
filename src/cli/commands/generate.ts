@@ -18,6 +18,7 @@ import { generateFromSchema, classifyFieldSource } from "../../core/generator/da
 import { filterByTag, collectTags } from "../../core/generator/chunker.ts";
 import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
 import { parse } from "../../core/parser/yaml-parser.ts";
+import { loadEnvironment } from "../../core/parser/variables.ts";
 import { printError, printSuccess } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { getDb } from "../../db/schema.ts";
@@ -255,6 +256,17 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
     // to fill `.env.yaml` for positive smoke / CRUD reads to actually run.
     // Without this hint, the path-param `*-smoke-positive` suites silently
     // skip via skip_if and look like phantom passes.
+    // ARV-76 (feedback round-03 / F17): also consult the API's .env.yaml so
+    // a param that's already filled there (e.g. `id: <uuid>`) doesn't keep
+    // firing the "no examples" warning. zond run resolves placeholders from
+    // .env.yaml at runtime — generate's job is to tell the user which gaps
+    // *remain*, not to ignore filled values.
+    const envForWarnings: Record<string, unknown> = {};
+    try {
+      const envDir = resolveApiRoot(options.output, baseUrl) ?? options.output;
+      Object.assign(envForWarnings, await loadEnvironment(undefined, envDir));
+    } catch { /* env load failures stay silent — original behaviour for missing files */ }
+
     const missingPathParams = new Set<string>();
     let endpointsMissingPathExamples = 0;
     for (const ep of endpoints) {
@@ -265,7 +277,11 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
           p.example !== undefined ||
           (p.schema && (p.schema as any).example !== undefined) ||
           (p.schema && (p.schema as any).default !== undefined);
-        if (!hasExample) {
+        const filledInEnv = (() => {
+          const v = envForWarnings[p.name];
+          return typeof v === "string" && v.length > 0 && !v.startsWith("{{");
+        })();
+        if (!hasExample && !filledInEnv) {
           missingPathParams.add(p.name);
           epHadMiss = true;
         }
