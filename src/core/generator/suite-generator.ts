@@ -19,7 +19,14 @@ import { getAuthHeaders as sharedGetAuthHeaders } from "../probe/shared.ts";
  */
 export function singularizeResource(word: string): string {
   if (word.length > 3 && /ies$/i.test(word)) return word.slice(0, -3) + "y";
-  if (word.length > 3 && /(ch|sh|x|s|z)es$/i.test(word)) return word.slice(0, -2);
+  // ARV-100 (F5): the inner alternative was `s` — but a single trailing `s`
+  // catches every regular plural whose stem ends in any vowel + `s` (e.g.
+  // `releases`, `phases`, `houses`), and `slice(-2)` then chops "es" instead
+  // of just "s". The result was `releas_id` / `phas_id` capture vars that
+  // matched nothing on the manifest side. Restrict the rule to the genuine
+  // sibilant double — `ss` — so `addresses → address` keeps working without
+  // dragging single-s plurals along.
+  if (word.length > 3 && /(ch|sh|x|ss|z)es$/i.test(word)) return word.slice(0, -2);
   if (word.length > 1 && /[^s]s$/i.test(word)) return word.slice(0, -1);
   return word;
 }
@@ -28,10 +35,16 @@ export function singularizeResource(word: string): string {
  * Build a `<resource>_id` capture/var name. Strips dashes so the result is
  * a safe template variable identifier — `contact-properties` becomes
  * `contact_property_id` rather than `contact-propertie_id` (TASK-214).
+ *
+ * ARV-100 (F5): always lowercase. Path-params/headers in fixtures-builder
+ * are normalised to lowercase (line 157), so capture vars must match — a
+ * `Groups` resource would otherwise produce `Group_id` while path-params on
+ * the same endpoint produce `group_id`, splitting the `{{var}}` namespace
+ * and triggering "Undefined variables" in `zond run`.
  */
 export function resourceVar(resource: string, suffix: string): string {
   const singular = singularizeResource(resource);
-  return `${singular.replace(/[^a-zA-Z0-9]+/g, "_")}_${suffix}`;
+  return `${singular.replace(/[^a-zA-Z0-9]+/g, "_")}_${suffix}`.toLowerCase();
 }
 
 /** Convert OpenAPI path params {param} to test interpolation {{param}} */
