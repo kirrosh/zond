@@ -33,6 +33,15 @@ export interface OrphanRecord {
    *  (api, runId, deletePath, id) tuple. Used by `cleanup --orphans` to
    *  mark replayed-and-now-gone resources. */
   removed?: boolean;
+  /** ARV-102 (F7): probe knew the resource was created but couldn't
+   *  derive a DELETE plan (response had no usable id, or the spec has no
+   *  DELETE counterpart for the create endpoint). The record is still
+   *  worth keeping so `cleanup --orphans` can surface "manual cleanup
+   *  required" — DELETE retry isn't possible, but the user must know.
+   *  When set, deletePath / id may be empty and `lastCleanupError`
+   *  carries the reason from the probe (e.g. "cleanup skipped: response
+   *  had no usable id"). */
+  requires_manual_cleanup?: boolean;
 }
 
 export function orphansRoot(): string {
@@ -60,7 +69,33 @@ export async function persistVerdictsAsOrphans(api: string, runId: string, verdi
   let written = 0;
   for (const v of verdicts) {
     const c = v.cleanup;
-    if (!c?.attempted || c.id === undefined || !c.deletePath) continue;
+    if (!c?.attempted) continue;
+    // ARV-102 (F7): pre-fix this branch dropped any verdict whose
+    // cleanup had no usable id OR no DELETE path (e.g. "no DELETE
+    // counterpart for POST /symbol-sources/", "response had no usable
+    // id"). Probe digest still counted these as cleanup-failures, but
+    // they never reached the orphan registry — `cleanup --orphans` then
+    // reported zero, hiding live API leakage. Now we persist a
+    // `requires_manual_cleanup: true` record so the operator at least
+    // sees "5 resources need manual cleanup".
+    const haveDeletePlan = c.id !== undefined && !!c.deletePath;
+    if (!haveDeletePlan) {
+      const record: OrphanRecord = {
+        api,
+        runId,
+        createdAt: new Date().toISOString(),
+        method: v.method.toUpperCase(),
+        path: v.path,
+        id: c.id !== undefined ? String(c.id) : "",
+        deletePath: c.deletePath ?? "",
+        lastCleanupStatus: c.status ?? null,
+        lastCleanupError: c.error ?? "cleanup skipped: no DELETE plan",
+        requires_manual_cleanup: true,
+      };
+      await appendOrphanRecord(record);
+      written++;
+      continue;
+    }
     const removed = c.status != null && c.status >= 200 && c.status < 300;
     const record: OrphanRecord = {
       api,
@@ -119,13 +154,20 @@ export async function loadOrphans(filter: { api?: string; runId?: string } = {})
       // De-dup: later records on the same (api, runId, deletePath, id) win.
       // `removed: true` cancels the entry; non-removed records keep the
       // most recent cleanup status / error.
+      // ARV-102 (F7): manual-only records (requires_manual_cleanup) often
+      // have empty deletePath / id (probe couldn't derive them), so the
+      // standard key would collapse all of them onto a single bucket.
+      // Fold method/path into the key for that branch — every distinct
+      // (method, path) on which probe gave up survives independently.
       const byKey = new Map<string, OrphanRecord>();
       for (const line of raw.split("\n")) {
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
           const r = JSON.parse(trimmed) as OrphanRecord;
-          const key = `${r.api}|${r.runId}|${r.deletePath}|${r.id}`;
+          const key = r.requires_manual_cleanup
+            ? `${r.api}|${r.runId}|manual|${r.method}|${r.path}|${r.id}`
+            : `${r.api}|${r.runId}|${r.deletePath}|${r.id}`;
           if (r.removed) {
             byKey.delete(key);
           } else {
