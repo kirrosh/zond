@@ -8,12 +8,18 @@
  */
 import { register, reset } from "./registry.ts";
 import { SCHEMATHESIS_RULES } from "./rules/schemathesis/index.ts";
+import { SENTRY_RULES } from "./rules/sentry/index.ts";
 
 let bootstrapped = false;
 
 export function bootstrapAntiFp(): void {
   if (bootstrapped) return;
   for (const rule of SCHEMATHESIS_RULES) register(rule);
+  // ARV-125: Sentry-attributed rules (paid-plan / subscription-gated
+  // 403 → wontfix tail in mass-assignment baseline summaries). The
+  // baseline-echo / boundary check from security-probe lands here in
+  // ARV-126.
+  for (const rule of SENTRY_RULES) register(rule);
   bootstrapped = true;
 }
 
