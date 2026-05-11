@@ -42,8 +42,12 @@ Run `zond --version` first; if missing:
   `<redacted:<name>>` in DB rows / HTML / JSON / JUnit / case-study /
   digest, so reading the secret to "double-check" is both unsafe and
   redundant.
-- **`recommended_action: report_backend_bug` / any 5xx → STOP.** Surface the
-  request/response excerpt to the user; do NOT edit `expect:` to mask it.
+- **`recommended_action: report_backend_bug` / any 5xx → STOP** in
+  *interactive* mode: surface the request/response excerpt to the user, get
+  a decision. Do NOT edit `expect:` to mask it. In *autonomous / loop /
+  audit-sweep* mode (no user-in-the-loop), log to `api-bugs-<NN>.md`,
+  continue the sweep, and don't mask via `expect:` either — the loop
+  collects bugs across the whole run; bailing on bug #1 forfeits #2..#N.
 - **CRUD-run сплошь 401/403 / `permission_denied` → `env_issue`, не баг.** Если
   ≥80% шагов CRUD-сьюта (или весь сьют) свалились на permission/scope errors,
   это нехватка прав токена, а не баг API. Действия: `zond db diagnose <run-id>
@@ -54,7 +58,10 @@ Run `zond --version` first; if missing:
 - `--safe` enforces GET-only — required for first-pass smoke against unknown
   envs.
 - For multi-suite tag filters always include `setup`: `--tag crud,setup`.
-- Re-run after each fix with `--json`; don't batch edits without verifying.
+- Re-run after each fix with `--report json [--report-out <file>]` (NOT
+  `--json` — that flag is reserved for the small `{ok,data,errors}` envelope
+  on read-only subcommands; `zond run --json` errors); don't batch edits
+  without verifying.
 - **NEVER run destructive ops on a shared / production org without `--dry-run`
   first.** Why: probes, `prepare-fixtures --apply`, `cleanup` all hit live APIs and
   can delete user data. The dry-run path is in every command's `--help`; use
@@ -218,6 +225,26 @@ genuinely outside the API path (ownership-proof / email-verify /
 manual-only setup / TOS limits). "User can paste an ID into `.env.yaml`"
 is **not** a reason — you should have seeded it.
 
+## Phase 1.5 — Static spec audit
+
+```bash
+zond check spec --api <name>                     # 0 network requests, instant
+zond check spec --api <name> --json | jq '.data.summary.by_severity'
+```
+
+Static lint of the OpenAPI document — finds spec-level bugs (path-param
+without `format: uuid`, timestamp without `format: date-time`,
+request-body without `additionalProperties: false`, integer query without
+`min`/`max`, ...) before they cascade into depth-check noise. Cheap
+(no HTTP), high signal — a typical Resend-style spec turns up 150+ issues
+across 5 severity levels (HIGH/MEDIUM/LOW × B1..B9 classes).
+
+Run BEFORE depth-checks. The HIGH-severity classes (`B1` path-param
+formats, `B5` timestamp formats, `B8` open object schemas) amplify
+`response_schema_conformance` findings — fixing the spec first lets the
+depth-check signal stay focused on contract drift instead of "we already
+knew this format was missing".
+
 ## Phase 2 — Generate (autogen smoke + CRUD)
 
 ```bash
@@ -347,6 +374,16 @@ zond session end
 enum drift, extra/missing fields) is invisible without it. Schema violations
 land as `schema_violation` root_cause in `zond db diagnose` and are real
 backend bugs — treat them like 5xx, do not edit the expectation away.
+
+**Rate limit.** Since ARV-64, `zond run` defaults to an adaptive rate
+limiter (no-op until a response carries `RateLimit-*` headers, then paces
+requests to the server's policy). On rate-limited APIs (Resend: 5 req/s,
+Stripe, GitHub) the default is what you want — no flag needed. Pass
+`--rate-limit auto` explicitly when you want to be loud about it, or
+`--rate-limit <N>` for a hard cap. On older binaries (pre-ARV-64), or
+when a run lands in `429`-storm despite the adaptive limiter, fall back
+to `--sequential --rate-limit auto`. If you saw 308 of 1300 requests
+land as 429 in a run, the limiter was off — upgrade the binary.
 
 ### Phase 3-CI — Single run per build (TASK-116)
 
@@ -682,11 +719,19 @@ stay live.
 ## Phase 6 — Coverage report & spec drift
 
 ```bash
-zond coverage --api <name>                              # latest run; covered = endpoint had a passing 2xx
-zond coverage --api <name> --run-id <id>                # pin a specific run
-zond coverage --api <name> --fail-on-coverage 80
+# Recommended default — folds all relevant runs into one coverage number.
+zond coverage --api <name> --union since:1h             # last hour (typical audit window)
 zond coverage --api <name> --union session              # tests-run + probes-run from one `session start` block
-zond coverage --api <name> --union since:24h            # every run of the API in the last 24h
+
+# Single-run snapshot — usually NOT what you want during an audit
+# (a partial follow-up run silently drops percentages 30+% vs. previous run).
+# Note: ARV-71 — when a session is active with >1 runs, the bare command
+# auto-promotes to --union session and prints a stderr footer. Without a
+# session it stays single-run.
+zond coverage --api <name>                              # single run
+zond coverage --api <name> --run-id <id>                # pin a specific run
+
+zond coverage --api <name> --fail-on-coverage 80
 zond coverage --api <name> --union tag:smoke            # every run whose suites carried `tags: [smoke]`
 zond coverage --api <name> --union runs:58,59           # explicit list (release-vs-release)
 zond refresh-api <name> --spec <new-spec>               # re-snapshot when upstream spec changed
@@ -778,6 +823,25 @@ zond audit --api <name> --out reports/audit-<name>.html
 
 Когда _не_ использовать: узкие задачи ("починить run X", "почему
 этот endpoint 500-ит") — иди по фазам ниже, не оборачивай в audit.
+
+### Known gotchas (audit)
+
+- **Active session is overwritten.** `zond audit` runs under its own
+  internal session (`session start` → ... → `session end`). If you had a
+  prior `zond session start --label foo` open in this workspace, audit
+  silently closes it. Open the audit-internal session id (printed in the
+  HTML report) for downstream `zond coverage --session-id <id>` (ARV-65
+  tracks the fix; for now: don't wrap audit in your own session).
+- **Exit 0 on failed stages.** A "3 failed stages" warning can ride on top
+  of `exit_code=0`. Don't rely on `$?` alone — parse stdout for the
+  `Warning: N failed` line or read `audit-report.html` (ARV-66).
+- **`audit-report.html` path not echoed.** Look in `$PWD/audit-report.html`
+  by default, or pass `--out reports/<path>.html` to make it explicit
+  (ARV-80).
+- **Rate-limit propagation.** `zond audit` shells out to `zond run`
+  internally, which uses the adaptive rate limiter as of ARV-64. Older
+  binaries: pass `--rate-limit auto` to the wrapper or downgrade to a
+  serial-by-default flow.
 
 ## Auth / environments
 
