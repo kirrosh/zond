@@ -103,6 +103,53 @@ commands cover the whole lifecycle:
 POST-create one record from a schema-derived body and capture its id. Skip
 this on production/shared orgs without `--dry-run` first.
 
+### Write-only / SDK-only resources (ARV-113)
+
+Some ids cannot be acquired through `discover` or `--seed` because they
+**have no list/GET endpoint and no spec-described POST**. They're created
+through an SDK-style ingest endpoint with its own auth scheme, and the
+OpenAPI spec doesn't describe that route at all. Common examples:
+
+| Resource     | Created by              | Why discover/--seed can't help              |
+|--------------|-------------------------|---------------------------------------------|
+| Sentry `event_id`   | `POST /api/<project>/store/` with `X-Sentry-Auth: DSN<public-key>` | not in OpenAPI; auth is DSN, not Bearer |
+| Sentry `issue_id`   | side-effect of the same ingest call | derived from an event after Sentry groups it |
+| Sentry `replay_id`  | replay SDK only         | requires a real browser session |
+| Sentry-app `uuid`   | UI / paid plan          | OpenAPI describes GET only |
+
+**Workflow when prepare-fixtures reports `failed:miss-empty-no-seed-endpoint`:**
+
+1. Read the failure reason — it names whether the owner has *no* create
+   endpoint or *no* owner resource at all. `--seed` cannot help; do not
+   keep re-running it.
+2. If the resource is SDK-only and the ingest endpoint is public-DSN-style,
+   you can harvest it by hand:
+   ```
+   zond request POST https://o<org>.ingest.<region>.sentry.io/api/<project>/store/ \
+     --header "X-Sentry-Auth: Sentry sentry_key=<dsn-public-key>,sentry_version=7" \
+     --header "Content-Type: application/json" \
+     --body '{"message":"zond fixture seed","level":"info","platform":"javascript"}' \
+     --json-path id
+   ```
+   Then write the captured value into `apis/<name>/.env.yaml`
+   directly — see `feedback_env_yaml_editable` memory: `.env.yaml`
+   holds **only values**, never secrets, so editing it is the
+   sanctioned workaround.
+3. When ARV-111 lands, the manual harvest will be replaced by
+   `zond api extend <api>` (CLI to register custom endpoints alongside
+   the spec, surviving `refresh-api`).
+
+**Known dead-ends — do NOT add to the backlog:**
+
+- `POST /monitors/` on Sentry returns `400 Invalid project` regardless of
+  whether `project` is a slug or a numeric id. This is a Sentry API quirk,
+  not a zond bug. Move on or seed by hand via the Sentry UI.
+- `POST /api/0/teams/<org>/<team>/external-teams/` requires a paid plan;
+  same shape — not a zond bug.
+- Fixtures gated by SCIM provisioning, paid SSO, or data forwarders
+  cannot be acquired through any CLI flow. Mark them with a placeholder
+  in `.env.yaml` and document the gap in the case-study.
+
 **Important — what `zond init` does NOT do.** `zond init` is **only** a
 workspace refresher: it writes/updates `zond.config.yml`, `AGENTS.md`,
 `.claude/skills/`, and the `apis/` directory marker. It does **not** touch
