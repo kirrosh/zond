@@ -49,6 +49,44 @@ function preferredFieldFromVar(varName: string): string {
   return "id";
 }
 
+/** Strip a trailing FK-shape suffix (`_id`, `Id`, `_uuid`, `_slug`, `_name`,
+ *  `_code`) from a var name and return the stem. Used by ARV-69 to find an
+ *  owner resource when the resource map doesn't link the var to a list
+ *  endpoint explicitly (Resend-style {id} placeholders).
+ */
+function stemFromVarName(varName: string): string | null {
+  const lower = varName.toLowerCase();
+  for (const suffix of ["_id", "_uuid", "_slug", "_name", "_code"]) {
+    if (lower.endsWith(suffix)) return lower.slice(0, -suffix.length);
+  }
+  // CamelCase: `domainId` → `domain`.
+  const m = varName.match(/^(.+?)(Id|Uuid)$/);
+  if (m) return m[1]!.toLowerCase();
+  return null;
+}
+
+/** ARV-69 (feedback round-02 / F10): try to find a resource whose
+ *  list endpoint is a plausible source for `varName` based on the var's
+ *  name stem. Matches singular ↔ plural and is case-insensitive. Returns
+ *  the FkTarget on hit, undefined on miss.
+ */
+export function inferOwnerFromVarName(
+  varName: string,
+  map: ApiResourceMapYaml,
+): FkTarget | undefined {
+  const stem = stemFromVarName(varName);
+  if (!stem) return undefined;
+  const candidates = new Set([stem, `${stem}s`, stem.endsWith("s") ? stem.slice(0, -1) : stem]);
+  for (const r of map.resources) {
+    if (!r.endpoints?.list) continue;
+    const lower = r.resource.toLowerCase();
+    if (candidates.has(lower)) {
+      return { varName, ownerResource: r.resource, listLabel: r.endpoints.list };
+    }
+  }
+  return undefined;
+}
+
 function pickFieldFromObject(item: unknown, preferred: string): string | undefined {
   if (!item || typeof item !== "object") return undefined;
   const obj = item as Record<string, unknown>;
@@ -675,7 +713,20 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
         // /audiences/{id}); resource map's collectBodyFkDeps already does
         // name-stemming inference for us. A miss here means we have nothing
         // to GET — the entry stays in the table as failed:no-list-endpoint.
-        const target = targetsByVar.get(entry.name);
+        let target = targetsByVar.get(entry.name);
+        if (!target) {
+          // ARV-69 (feedback round-02 / F10): the resource map only links a
+          // var to a list endpoint when the path explicitly carries it as a
+          // path-param (e.g. /audiences/{audience_id}). Resend-style APIs
+          // commonly use the generic {id} placeholder, so vars like
+          // `domain_id` / `segment_id` / `log_id` end up with no fkDep edge
+          // even though /domains, /segments, /logs are perfectly usable as
+          // list endpoints. Try a name-stemming fallback: strip the FK
+          // suffix and match a resource whose name is the singular or plural
+          // form.
+          const inferred = inferOwnerFromVarName(entry.name, resourceMap);
+          if (inferred) target = inferred;
+        }
         if (!target) {
           placeholder.status = "miss-no-list";
           placeholder.manifestStatus = "failed:no-list-endpoint";
