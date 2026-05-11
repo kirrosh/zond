@@ -9,21 +9,53 @@ function hasHeaderCI(headers: Record<string, string>, name: string): boolean {
 }
 
 export function extractByPath(obj: unknown, path: string): unknown {
-  const segments = path.replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+  return extractByPathWithDiagnostic(obj, path).value;
+}
+
+/** ARV-70 (feedback round-01 / F11): same extractor as above but also
+ *  reports *why* the path failed. The CLI surfaces this on stderr when
+ *  `--json-path` returns undefined so users don't lose minutes debugging
+ *  "empty stdout despite data[0].id is right there in the JSON" — the
+ *  hint pinpoints the segment that didn't resolve (e.g. "body is a string
+ *  — content-type was not application/json"). */
+export function extractByPathWithDiagnostic(
+  obj: unknown,
+  path: string,
+): { value: unknown; resolved: string[]; failedAt?: string; reason?: string } {
+  const segments = path.replace(/\[(\d+)\]/g, ".$1").split(".").filter(Boolean);
+  const resolved: string[] = [];
   let current: unknown = obj;
   for (const seg of segments) {
-    if (current === null || current === undefined) return undefined;
+    if (current === null || current === undefined) {
+      return { value: undefined, resolved, failedAt: seg, reason: "previous segment resolved to null/undefined" };
+    }
     if (Array.isArray(current)) {
       const idx = parseInt(seg, 10);
-      if (isNaN(idx)) return undefined;
+      if (isNaN(idx)) {
+        return { value: undefined, resolved, failedAt: seg, reason: `expected an array index, got non-numeric segment "${seg}"` };
+      }
+      if (idx < 0 || idx >= current.length) {
+        return { value: undefined, resolved, failedAt: seg, reason: `array index ${idx} out of bounds (length ${current.length})` };
+      }
       current = current[idx];
-    } else if (typeof current === 'object') {
-      current = (current as Record<string, unknown>)[seg];
+    } else if (typeof current === "object") {
+      const obj = current as Record<string, unknown>;
+      if (!(seg in obj)) {
+        const keys = Object.keys(obj).slice(0, 8).join(", ");
+        return { value: undefined, resolved, failedAt: seg, reason: `key "${seg}" not in object (keys: ${keys || "<empty>"})` };
+      }
+      current = obj[seg];
     } else {
-      return undefined;
+      return {
+        value: undefined,
+        resolved,
+        failedAt: seg,
+        reason: `cannot traverse "${seg}" — body is a ${typeof current === "string" ? "string (content-type may not be application/json)" : typeof current}`,
+      };
     }
+    resolved.push(seg);
   }
-  return current;
+  return { value: current, resolved };
 }
 
 export interface SendAdHocRequestOptions {
@@ -49,6 +81,9 @@ export interface SendAdHocRequestResult {
   headers: Record<string, string>;
   body: unknown;
   duration_ms: number;
+  /** ARV-70: when --json-path failed to resolve, this carries which
+   *  segment broke and why so the CLI can surface a hint on stderr. */
+  jsonPathDiagnostic?: { resolved: string[]; failedAt?: string; reason?: string };
 }
 
 export interface ResolvedRequest {
@@ -140,9 +175,14 @@ export async function sendAdHocRequest(options: SendAdHocRequestOptions): Promis
   );
 
   let responseBody: unknown = response.body_parsed ?? response.body;
+  let jsonPathDiagnostic: SendAdHocRequestResult["jsonPathDiagnostic"];
 
   if (options.jsonPath && responseBody !== undefined) {
-    responseBody = extractByPath(responseBody, options.jsonPath);
+    const diag = extractByPathWithDiagnostic(responseBody, options.jsonPath);
+    responseBody = diag.value;
+    if (diag.value === undefined && diag.failedAt) {
+      jsonPathDiagnostic = { resolved: diag.resolved, failedAt: diag.failedAt, reason: diag.reason };
+    }
   }
 
   const result: SendAdHocRequestResult = {
@@ -150,6 +190,7 @@ export async function sendAdHocRequest(options: SendAdHocRequestOptions): Promis
     headers: response.headers,
     body: responseBody,
     duration_ms: response.duration_ms,
+    ...(jsonPathDiagnostic ? { jsonPathDiagnostic } : {}),
   };
 
   return result;
