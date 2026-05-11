@@ -3,9 +3,10 @@ id: ARV-133
 title: >-
   prepare-fixtures --cascade --seed: path-params без FK-edge не атакуются, хотя
   list-endpoint возвращает данные
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 17:53'
+updated_date: '2026-05-11 18:06'
 labels:
   - feedback-loop
   - api-resend
@@ -38,8 +39,8 @@ Log: ~/Projects/zond-test/.fb-loop/rounds/raw-01.log секция === prepare-fi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 cascade kandidates строятся из union(manifest.required, fkDependencies), а не только из fk-edges
-- [ ] #2 var name matches existing resource (по basePath / idParam / суффиксу _id) → используется list-endpoint этого ресурса для harvest
-- [ ] #3 если list-endpoint вернул [] или 404 — explicit «no-data» miss-status (ARV-99), а не silent skip
-- [ ] #4 regression: 9 missing vars в resend (domain_id/api_key_id/webhook_id/segment_id/log_id/run_id/identifier/attachment_id/automation_id) попадают в attempt-список после --cascade
+- [x] #1 cascade kandidates строятся из union(manifest.required, fkDependencies), а не только из fk-edges
+- [x] #2 var name matches existing resource (по basePath / idParam / суффиксу _id) → используется list-endpoint этого ресурса для harvest
+- [x] #3 если list-endpoint вернул [] или 404 — explicit «no-data» miss-status (ARV-99), а не silent skip
+- [x] #4 regression: 9 missing vars в resend (domain_id/api_key_id/webhook_id/segment_id/log_id/run_id/identifier/attachment_id/automation_id) попадают в attempt-список после --cascade
 <!-- AC:END -->
