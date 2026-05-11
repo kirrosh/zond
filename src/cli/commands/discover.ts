@@ -291,7 +291,35 @@ export async function readResourceMap(apiDir: string): Promise<ApiResourceMapYam
   const parsed = Bun.YAML.parse(text);
   if (!parsed || typeof parsed !== "object") return null;
   const obj = parsed as { resources?: ResourceYaml[] };
-  return { resources: obj.resources ?? [] };
+  const base = obj.resources ?? [];
+
+  // ARV-111: merge in user-maintained extensions from `.api-resources.local.yaml`
+  // — a sibling file that survives `refresh-api`. Lets the user describe
+  // write-only / SDK-only endpoints (Sentry's /store/ ingest, etc.) that
+  // aren't in the OpenAPI spec, so prepare-fixtures --seed can still
+  // POST-create them. Extensions append to the resource list; when a name
+  // collides with a spec-derived resource, the extension wins (user-override).
+  const extensions = await readResourceExtensions(apiDir);
+  if (extensions.length === 0) return { resources: base };
+  const byName = new Map<string, ResourceYaml>();
+  for (const r of base) byName.set(r.resource, r);
+  for (const ext of extensions) byName.set(ext.resource, ext);
+  return { resources: Array.from(byName.values()) };
+}
+
+/** ARV-111: read `apis/<name>/.api-resources.local.yaml`. Same `resources:`
+ *  shape as the main file (top-level `extensions:` key is the only
+ *  difference, so the user can recognise it as a sibling). Returns [] when
+ *  missing or empty so the merge path stays simple. */
+export async function readResourceExtensions(apiDir: string): Promise<ResourceYaml[]> {
+  const path = join(apiDir, ".api-resources.local.yaml");
+  const file = Bun.file(path);
+  if (!(await file.exists())) return [];
+  const text = await file.text();
+  const parsed = Bun.YAML.parse(text);
+  if (!parsed || typeof parsed !== "object") return [];
+  const obj = parsed as { extensions?: ResourceYaml[] };
+  return obj.extensions ?? [];
 }
 
 export interface FixtureManifestEntry {
