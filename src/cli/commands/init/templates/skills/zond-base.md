@@ -88,6 +88,35 @@ go through `resolveCollectionSpec()` which resolves `apis/<name>/spec.json`.
 **Never** read `.secrets.yaml` directly — use
 `zond doctor --api <name> --json` (returns `set | unset` and length only).
 
+## Fixture & env workflow (canonical loop)
+
+The fixture loop replaces the old `bootstrap` + `discover` pair. Three
+commands cover the whole lifecycle:
+
+| Step | Command | Reads | Writes |
+|---|---|---|---|
+| 1. Gap report | `zond doctor --api <name> --missing-only` | `.api-fixtures.yaml`, `.env.yaml` | nothing |
+| 2. Inspect manifest (optional) | `cat apis/<name>/.api-fixtures.yaml` | manifest | nothing |
+| 3. Fill values | `zond prepare-fixtures --api <name> --apply [--seed] [--cascade]` | `.api-fixtures.yaml`, live API | `.env.yaml` (with `.bak`) |
+
+`--seed` (new vs old `discover`): when a list endpoint returns `200 []`,
+POST-create one record from a schema-derived body and capture its id. Skip
+this on production/shared orgs without `--dry-run` first.
+
+**Important — what `zond init` does NOT do.** `zond init` is **only** a
+workspace refresher: it writes/updates `zond.config.yml`, `AGENTS.md`,
+`.claude/skills/`, and the `apis/` directory marker. It does **not** touch
+`.env.yaml`, does **not** rebuild manifests, does **not** call `doctor`
+or `prepare-fixtures`. Re-running `zond init` after a CLI upgrade is safe
+and *expected* (it picks up new skill files) — fixtures stay exactly as
+they were. The loop above is the only path that fills `.env.yaml`.
+
+**Important — what `zond add api` DOES do for fixtures.** Registers the
+API, copies `spec.json`, and emits `.api-fixtures.yaml` (manifest) +
+seeds a skeleton `.env.yaml` with empty placeholders for every required
+var. Values are still empty — `doctor` will report them all as UNSET
+until you run `prepare-fixtures --apply` (or fill them by hand).
+
 ## Cross-cutting iron rules
 
 These apply to every sibling skill. The siblings extend with their own

@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from "node:fs";
 import { setupApi, type SetupApiResult } from "../../../core/setup-api.ts";
 import { printError, printSuccess } from "../../output.ts";
 import { jsonOk, jsonError, printJson } from "../../json-envelope.ts";
@@ -142,6 +143,38 @@ function printBootstrapResult(b: BootstrapResult, writeAgents: boolean): void {
     printSuccess("Workspace ready. Run `zond init --spec <path>` to register your first API.");
   } else {
     printSuccess("Workspace ready. See AGENTS.md for the CLI workflow.");
+  }
+  const apiNames = listExistingApis(b.cwd);
+  if (apiNames.length === 0) {
+    process.stderr.write(
+      `\nNext steps:\n` +
+      `  1. zond add api <name> --spec <path|url>   # register API → builds .api-fixtures.yaml (manifest)\n` +
+      `  2. zond doctor --api <name>                 # gap report: which vars are UNSET in .env.yaml\n` +
+      `  3. zond prepare-fixtures --api <name> --apply [--seed]   # fill .env.yaml values\n` +
+      `\nNote: zond init only refreshes workspace files (skills, AGENTS.md, zond.config.yml).\n` +
+      `      It does NOT touch fixtures or .env.yaml — that's the doctor/prepare-fixtures loop above.\n`
+    );
+  } else {
+    const sample = apiNames[0]!;
+    process.stderr.write(
+      `\nFixtures untouched. zond init only refreshes skills/AGENTS.md/zond.config.yml.\n` +
+      `Verify env state with:\n` +
+      `  zond doctor --api ${sample} --missing-only   # show UNSET vars + blocked endpoints\n` +
+      `  zond prepare-fixtures --api ${sample} --apply [--seed]   # discover/seed values\n`
+    );
+  }
+}
+
+function listExistingApis(cwd: string): string[] {
+  try {
+    const apisDir = `${cwd}/apis`;
+    if (!existsSync(apisDir)) return [];
+    return readdirSync(apisDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && existsSync(`${apisDir}/${d.name}/spec.json`))
+      .map((d) => d.name)
+      .sort();
+  } catch {
+    return [];
   }
 }
 

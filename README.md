@@ -15,25 +15,31 @@ curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
 iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex        # Windows
 ```
 
-Bootstrap a workspace, register your first API, then check what fixtures it needs:
+Bootstrap a workspace, register your first API, then fill its fixtures:
 
 ```bash
-zond init                                              # bootstrap workspace
-zond add api my-api --spec ./openapi.json              # register: copies spec.json + emits artifacts
-zond doctor --api my-api                               # what to fill in apis/my-api/.env.yaml
+zond init                                              # bootstrap workspace (no fixture changes)
+zond add api my-api --spec ./openapi.json              # register: copies spec.json + emits manifest
+zond doctor --api my-api --missing-only                # gap report: which vars are UNSET
+zond prepare-fixtures --api my-api --apply [--seed]    # fill apis/my-api/.env.yaml from live API
 ```
 
 `zond init` writes a self-contained [`AGENTS.md`](AGENTS.md) and Claude Code
 skills — agents read it and use the CLI directly (`zond run`,
 `zond probe static`, `zond db diagnose`, …). No daemon, no transport, no
-extra configuration.
+extra configuration. `init` is workspace-only — it never touches
+`.env.yaml`; the fixture loop above is the canonical path.
 
 Each registered API gets four files in `apis/<name>/`:
 
 - `spec.json` — dereferenced OpenAPI snapshot (canonical machine source).
 - `.api-catalog.yaml` — endpoint index for agents (cheap to read).
 - `.api-resources.yaml` — CRUD chains, FK dependencies, ETag/soft-delete flags.
-- `.api-fixtures.yaml` — required `{{vars}}` you must fill in `.env.yaml`.
+- `.api-fixtures.yaml` — **manifest** of required `{{vars}}` (read-only, auto-generated).
+
+Plus a sibling `.env.yaml` that you (or `zond prepare-fixtures`) fill with
+the **values** for those vars. The manifest/values split is strict — see
+the [workspace contract](AGENTS.md#workspace-contract) for details.
 
 Run `zond refresh-api <name> [--spec <new-source>]` to re-snapshot when the
 upstream spec changes.

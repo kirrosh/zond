@@ -86,11 +86,16 @@ CLI — единственная поверхность интеграции.
 
 > **Что произойдёт?** Агент пойдёт по фазам, описанным в скилле `zond.md`:
 >
-> 1. `zond doctor` — проверит, что фикстуры в `.env.yaml` заполнены
-> 2. `zond prepare-fixtures --apply` — заполнит ID-фикстуры из live-API (если нужно)
+> 1. `zond doctor --api myapi --missing-only` — gap-отчёт: какие vars в `.env.yaml` UNSET и сколько endpoint'ов каждый блокирует
+> 2. `zond prepare-fixtures --api myapi --apply [--seed]` — заполнит FK-ids из live-API; `--seed` POST-создаст ресурс, если list endpoint вернул `[]`
 > 3. `zond generate` — сгенерирует YAML-сьюты в `apis/myapi/tests/`
 > 4. `zond run apis/myapi/tests --safe` — запустит только GET-запросы
 > 5. Покажет сводку: сколько тестов прошло, сколько упало и почему
+>
+> Важно: `zond init` (шаг 3 выше) **не трогает** `.env.yaml` — он лишь
+> обновляет workspace-файлы (skills, AGENTS.md, zond.config.yml).
+> Заполнением `.env.yaml` занимается только цикл `doctor` →
+> `prepare-fixtures` выше.
 
 Хотите запустить весь pipeline одной командой? `zond audit --api myapi`
 делает шаги 2–4 + probes + coverage + HTML-отчёт за один проход
@@ -238,7 +243,8 @@ my-api-tests/
         ├── spec.json       ← снепшот OpenAPI-спецификации
         ├── .api-catalog.yaml      ← компактный реестр эндпоинтов
         ├── .api-resources.yaml    ← CRUD-связи между ресурсами
-        ├── .env.yaml       ← base_url, токены, FK-фикстуры
+        ├── .api-fixtures.yaml     ← MANIFEST: список required {{vars}} (read-only)
+        ├── .env.yaml       ← VALUES: base_url, токены, FK-фикстуры
         ├── .secrets.yaml   ← сами секреты (опционально)
         └── tests/
             ├── smoke.yaml          ← GET-тесты

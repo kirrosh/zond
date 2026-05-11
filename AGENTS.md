@@ -40,6 +40,33 @@ finding'и). Источник правды — [decision-7](backlog/decisions/de
 «discover ходит по env-keys» — **отвергнутый дизайн**, ведущий к двум
 расходящимся источникам правды (см. feedback-13 F1+F2 как иллюстрацию).
 
+### Fixture & env flow (как заполнять `.env.yaml`)
+
+Канонический loop, который заменил пары `bootstrap` + `discover`:
+
+| Шаг | Команда | Читает | Пишет |
+|---|---|---|---|
+| 1. Gap-отчёт | `zond doctor --api <name> --missing-only` | manifest + env | — |
+| 2. Manifest (опц.) | `cat apis/<name>/.api-fixtures.yaml` | manifest | — |
+| 3. Заполнить values | `zond prepare-fixtures --api <name> --apply [--seed] [--cascade]` | manifest + live API | `.env.yaml` (+`.bak`) |
+
+`--seed` — новинка vs старого `discover`: когда list endpoint возвращает
+`200 []`, POST-создаёт ресурс из schema-derived body и забирает его id.
+На prod/shared org — сперва `--dry-run`.
+
+**Что `zond init` НЕ делает.** Init — это только воркспейс-рефрешер:
+обновляет `zond.config.yml`, `AGENTS.md`, `.claude/skills/`, маркер
+`apis/`. Он **не трогает** `.env.yaml`, **не пересобирает** manifest, **не
+вызывает** `doctor`/`prepare-fixtures`. Re-run `zond init` после
+обновления CLI — безопасно и ожидаемо (подтянет новые скилл-файлы);
+фикстуры останутся как были. Заполнение `.env.yaml` — только через
+3-шаговый цикл выше.
+
+**Что `zond add api` делает.** Регистрирует API, кладёт `spec.json` +
+эмиттит `.api-fixtures.yaml` (manifest) + сидит скелетный `.env.yaml`
+с пустыми плейсхолдерами. Доктор после `add api` покажет всех required
+vars в статусе UNSET — это нормально, дальше идёт `prepare-fixtures`.
+
 ## Backlog (project tasks)
 
 Все задачи проекта живут в `backlog/` и управляются [Backlog.md](https://backlog.md).
