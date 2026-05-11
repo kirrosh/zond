@@ -524,6 +524,101 @@ describe("zond bootstrap", () => {
     expect(bad!.repro).toContain("/baddies");
   });
 
+  // ARV-98 (F3): when --seed was already passed but the cascade-level reason
+  // is still `miss-empty (re-run with --seed --apply)`, the hint loops the
+  // user back to the same flag they already set. Replace the cascade reason
+  // with what seed *actually did* (or, when no attempt landed because the
+  // resource lacks a create endpoint in spec, spell that out).
+  test("--seed with miss-empty + no create endpoint: reason explains the dead-end", async () => {
+    const f3Dir = join(tmpDir, "apis", "arv98");
+    await mkdir(f3Dir, { recursive: true });
+    const f3Server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        const u = new URL(req.url);
+        if (u.pathname === "/replays" && req.method === "GET") {
+          return Response.json([]);
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    const f3Base = `http://localhost:${f3Server.port}`;
+    const f3Spec = join(f3Dir, "spec.json");
+    await writeFile(f3Spec, JSON.stringify({
+      openapi: "3.0.0",
+      info: { title: "f3", version: "1" },
+      paths: {
+        // List-only — NO POST exists in spec. Seed has nothing to call.
+        "/replays": { get: { responses: { "200": { description: "ok" } } } },
+        // Consumer of replay_id so it enters the target list.
+        "/sessions/{replay_id}": {
+          get: {
+            parameters: [{ name: "replay_id", in: "path", required: true, schema: { type: "string" } }],
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    }));
+    await writeFile(join(f3Dir, ".api-resources.yaml"),
+      [
+        "resources:",
+        "  - resource: replays",
+        "    basePath: /replays",
+        "    itemPath: /replays/{replay_id}",
+        "    idParam: replay_id",
+        "    captureField: id",
+        "    hasFullCrud: false",
+        // Critically: no `create` entry. seed-fallback owner lookup will find
+        // the resource but skip because endpoints.create is absent.
+        "    endpoints:",
+        "      list: GET /replays",
+        "    fkDependencies: []",
+        "  - resource: sessions",
+        "    basePath: /sessions/{replay_id}",
+        "    itemPath: \"\"",
+        "    idParam: \"\"",
+        "    captureField: id",
+        "    hasFullCrud: false",
+        "    endpoints: {}",
+        "    fkDependencies:",
+        "      - var: replay_id",
+        "        param: replay_id",
+        "        in: path",
+        "        ownerResource: replays",
+        "",
+      ].join("\n"));
+    const envPath = join(f3Dir, ".env.yaml");
+    await writeFile(envPath, `base_url: ${f3Base}\n`);
+
+    const origWrite = process.stdout.write;
+    const chunks: string[] = [];
+    process.stdout.write = ((c: unknown) => { chunks.push(typeof c === "string" ? c : String(c)); return true; }) as typeof process.stdout.write;
+    let exit: number;
+    try {
+      exit = await bootstrapCommand({ specPath: f3Spec, apiDir: f3Dir, envPath, apply: false, seed: true, json: true });
+    } finally {
+      process.stdout.write = origWrite;
+      f3Server.stop();
+    }
+    expect(exit).toBe(0);
+
+    const out = JSON.parse(chunks.join("")) as {
+      data: { perTarget: Array<{ var: string; status: string; reason?: string }> };
+    };
+    const replay = out.data.perTarget.find(t => t.var === "replay_id");
+    expect(replay).toBeDefined();
+    // The new ARV-98 reason explicitly cites the missing create endpoint —
+    // the user should NOT be told to "re-run with --seed" when --seed is
+    // already on AND the resource is structurally unseedable.
+    expect(replay!.reason ?? "").not.toMatch(/re-run with .*--seed.*--apply/);
+    // Either branch of the new reason is valid: "no .api-resources.yaml
+    // owner produces X" (owner heuristic missed) or "owner resource X has
+    // no create endpoint" (owner found but endpoint absent in spec).
+    expect(replay!.reason ?? "").toMatch(/no .*owner|no create endpoint/i);
+    expect(replay!.reason ?? "").toMatch(/--seed cannot help/);
+    expect(replay!.status).toMatch(/miss-empty-no-seed/);
+  });
+
   test("missing base_url returns exit 2", async () => {
     const envPath = join(apiDir, ".env.nobase.yaml");
     await writeFile(envPath, "auth_token: abc\n");

@@ -497,18 +497,42 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
         const lastItem = [...passes].reverse()
           .flatMap(p => p.items)
           .find(i => i.varName === t.varName);
+        const lastSeed = [...seeds].reverse().find(s => s.varName === t.varName);
         if (lastItem) {
           reason = lastItem.reason ?? lastItem.status;
           status = `failed:${lastItem.status}`;
-        } else {
-          const lastSeed = [...seeds].reverse().find(s => s.varName === t.varName);
-          if (lastSeed) {
-            reason = lastSeed.reason ?? lastSeed.status;
-            status = `failed:${lastSeed.status}`;
-          } else {
-            reason = "no list endpoint and no create endpoint to seed from";
-            status = "failed:no-route";
+          // ARV-98 (F3): when --seed was already passed, the cascade reason
+          // for `miss-empty` still shouts "re-run with --seed --apply"
+          // because discover.ts is context-blind. Replace it with what the
+          // seed-fallback actually did so agents stop re-running the same
+          // flag. Two sub-cases:
+          //   (a) seed was tried for this var → splice in its outcome.
+          //   (b) seed was on but no attempt landed → owner lookup couldn't
+          //       find a POST/create endpoint (common for SDK-only writes
+          //       like Sentry replays). Spell that out.
+          if (options.seed && lastItem.status === "miss-empty") {
+            if (lastSeed) {
+              reason = `${lastItem.reason ?? lastItem.status}; seed attempt: ${lastSeed.reason ?? lastSeed.status}`;
+              status = `failed:${lastSeed.status}`;
+            } else {
+              const owner = findOwnerResourceForSeed(t.varName, resourceMap.resources);
+              if (!owner) {
+                reason = `no .api-resources.yaml owner produces ${t.varName} — --seed cannot help (extend .api-resources.yaml or create the resource yourself).`;
+                status = "failed:miss-empty-no-seed-owner";
+              } else if (!owner.endpoints?.create) {
+                reason = `owner resource '${owner.resource}' has no create endpoint in spec — --seed cannot help (resource likely write-only via SDK). Create the resource yourself.`;
+                status = "failed:miss-empty-no-seed-endpoint";
+              }
+              // Else: owner has a create endpoint but no attempt landed in
+              // this loop iteration — leave the cascade reason untouched.
+            }
           }
+        } else if (lastSeed) {
+          reason = lastSeed.reason ?? lastSeed.status;
+          status = `failed:${lastSeed.status}`;
+        } else {
+          reason = "no list endpoint and no create endpoint to seed from";
+          status = "failed:no-route";
         }
       }
       perTarget.push({ var: t.varName, resource: t.ownerResource, status, ...(isPlaceholder(value) ? {} : { value }), ...(reason ? { reason } : {}) });
