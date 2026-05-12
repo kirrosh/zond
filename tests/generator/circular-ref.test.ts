@@ -45,7 +45,10 @@ describe("circular references", () => {
 
     const parsed = JSON.parse(JSON.stringify(decycled));
     expect(parsed.name).toBe("root");
-    expect(parsed.self.$ref).toBe("[Circular]");
+    // ARV-146: sentinel switched from { $ref: "[Circular]" } to
+    // { "x-circular": true } so downstream parsers don't try to resolve
+    // the sentinel as a JSON pointer.
+    expect(parsed.self["x-circular"]).toBe(true);
   });
 
   test("decycleSchema handles dereferenced OpenAPI spec", async () => {
