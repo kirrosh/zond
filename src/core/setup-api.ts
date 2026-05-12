@@ -52,9 +52,10 @@ export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
   // mutually-recursive `$ref` chains that resolve to true object cycles after
   // dereference, and raw JSON.stringify crashes on those with "cannot
   // serialize cyclic structures" (ARV-145). decycleSchema collapses the
-  // second visit to `{ "$ref": "[Circular]" }` so the on-disk snapshot is
-  // self-contained, parseable JSON, and downstream consumers (probe/generate)
-  // see a sentinel they can ignore instead of an unwritten file.
+  // second visit to `{ "x-circular": true }` (vendor-extension sentinel —
+  // NOT `$ref`, otherwise the parser tries to resolve "[Circular]" as a
+  // file path when re-reading spec.json, ARV-146) so the on-disk snapshot
+  // is self-contained, parser-safe JSON.
   let serialized: string;
   try {
     serialized = JSON.stringify(decycleSchema(doc), null, 2);

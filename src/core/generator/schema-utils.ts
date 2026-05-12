@@ -1,8 +1,16 @@
 import type { OpenAPIV3 } from "openapi-types";
 
 /**
- * Deep-clone an object, replacing circular references with `{ "$ref": "[Circular]" }`.
- * Uses WeakSet to track visited objects.
+ * Deep-clone an object, replacing circular references with the vendor-extension
+ * sentinel `{ "x-circular": true }`. Uses WeakSet to track visited objects.
+ *
+ * Why a vendor extension and not `$ref`: the decycled doc is now written to
+ * disk (apis/<name>/spec.json) and re-read by `@readme/openapi-parser` in
+ * downstream commands (check spec, describe, generate). If the sentinel
+ * carried a `$ref` field, the parser would try to resolve its value as a
+ * JSON pointer / file path — e.g. `apis/stripe/[Circular]` — and fail
+ * (ARV-146). `x-*` keys are explicitly reserved for vendor extensions in
+ * OpenAPI 3.x and pass through every parser untouched.
  */
 export function decycleSchema(obj: unknown): unknown {
   const seen = new WeakSet<object>();
@@ -16,7 +24,7 @@ export function decycleSchema(obj: unknown): unknown {
 
     const obj = value as Record<string, unknown>;
     if (seen.has(obj)) {
-      return { $ref: "[Circular]" };
+      return { "x-circular": true };
     }
     seen.add(obj);
 

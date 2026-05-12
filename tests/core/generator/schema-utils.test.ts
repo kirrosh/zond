@@ -94,12 +94,12 @@ describe("decycleSchema", () => {
     expect(result.b).not.toBe(obj.b);
   });
 
-  test("replaces circular references with $ref marker", () => {
+  test("replaces circular references with x-circular sentinel", () => {
     const node: any = { name: "root" };
     node.self = node;
     const result = decycleSchema(node) as any;
     expect(result.name).toBe("root");
-    expect(result.self).toEqual({ $ref: "[Circular]" });
+    expect(result.self).toEqual({ "x-circular": true });
   });
 
   test("handles deeply nested circular references", () => {
@@ -108,7 +108,7 @@ describe("decycleSchema", () => {
     parent.children = [child];
     const result = decycleSchema(parent) as any;
     expect(result.children[0].name).toBe("child");
-    expect(result.children[0].parent).toEqual({ $ref: "[Circular]" });
+    expect(result.children[0].parent).toEqual({ "x-circular": true });
   });
 
   test("handles arrays with circular refs", () => {
@@ -118,7 +118,7 @@ describe("decycleSchema", () => {
     const result = decycleSchema(obj) as any;
     expect(result.arr[0]).toBe(1);
     expect(result.arr[1]).toBe(2);
-    expect(result.arr[2]).toEqual({ $ref: "[Circular]" });
+    expect(result.arr[2]).toEqual({ "x-circular": true });
   });
 });
 
