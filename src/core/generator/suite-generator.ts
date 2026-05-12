@@ -5,6 +5,7 @@ import type { SourceMetadata } from "../parser/types.ts";
 import { generateFromSchema, generateMultipartFromSchema } from "./data-factory.ts";
 import { groupEndpointsByTag } from "./chunker.ts";
 import { getAuthHeaders as sharedGetAuthHeaders } from "../probe/shared.ts";
+import { flattenToFormFields } from "../runner/form-encode.ts";
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -349,6 +350,12 @@ export function generateStep(
   if (["POST", "PUT", "PATCH"].includes(method) && ep.requestBodySchema) {
     if (ep.requestBodyContentType === "multipart/form-data") {
       step.multipart = generateMultipartFromSchema(ep.requestBodySchema);
+    } else if (ep.requestBodyContentType === "application/x-www-form-urlencoded") {
+      // ARV-149: form-encoded endpoints (Stripe v1 et al.) — emit `form:` so
+      // the runner posts URL-encoded bodies with bracket notation. Without
+      // this, generate baked `json:` blocks and every POST 400'd with
+      // "wrong content type".
+      step.form = flattenToFormFields(generateFromSchema(ep.requestBodySchema));
     } else {
       step.json = generateFromSchema(ep.requestBodySchema);
     }

@@ -3,9 +3,10 @@ id: ARV-149
 title: >-
   zond request: --body always JSON; add --form for
   application/x-www-form-urlencoded (Stripe v1)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 09:11'
+updated_date: '2026-05-12 11:57'
 labels:
   - feedback-loop
   - api-stripe
@@ -31,3 +32,9 @@ Spec to follow: Stripe Customers POST → requestBody.content has only applicati
 
 Log: $HANDOFF/rounds/raw-02.log (grep 'Invalid request')
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented: --form flag on zond request, auto-detection from spec requestBody.content, form: emission in zond generate. Tests in tests/runner/form-encode.test.ts.
+<!-- SECTION:NOTES:END -->

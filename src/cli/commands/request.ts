@@ -4,7 +4,7 @@ import { jsonOk, jsonError, printJson, zerr } from "../json-envelope.ts";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
-import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
+import { readOpenApiSpec, extractEndpoints } from "../../core/generator/openapi-reader.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
 import { getDb } from "../../db/schema.ts";
@@ -93,6 +93,10 @@ export interface RequestOptions {
   /** TASK-142: explicit "METHOD:/path" override when path-templating heuristics
    *  fail or the user wants to validate against a different endpoint. */
   validateAgainst?: string;
+  /** ARV-149: send the body as `application/x-www-form-urlencoded` (Stripe v1
+   *  style). When omitted but `--api` is set, zond auto-detects from the
+   *  spec's requestBody.content. */
+  form?: boolean;
 }
 
 interface SchemaValidationOutcome {
@@ -115,6 +119,15 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
       }
     }
 
+    // ARV-149: when --form is not set but --api is, peek at the spec to see
+    // whether the matching endpoint declares only application/x-www-form-urlencoded
+    // (Stripe v1 pattern). If so, default to form encoding so users don't get
+    // a 400 "wrong content type" on every POST against form-only APIs.
+    let useForm = options.form === true;
+    if (!useForm && options.api) {
+      useForm = await detectFormFromSpec(options).catch(() => false);
+    }
+
     const result = await sendAdHocRequest({
       method: options.method.toUpperCase(),
       url: options.url,
@@ -125,6 +138,7 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
       collectionName: options.api,
       jsonPath: options.jsonPath,
       dbPath: options.dbPath,
+      form: useForm,
     });
 
     let validation: SchemaValidationOutcome | null = null;
@@ -317,6 +331,33 @@ function parseMethodPathArg(raw: string): { method: string; path: string } | nul
   return { method: m[1]!.toUpperCase(), path: m[2]! };
 }
 
+/** ARV-149: peek at the OpenAPI spec for the matching endpoint and return
+ *  true when its requestBody declares only application/x-www-form-urlencoded
+ *  (no JSON variant). Cheap-failing — any spec/db error returns false so the
+ *  caller falls back to the JSON default. */
+async function detectFormFromSpec(options: RequestOptions): Promise<boolean> {
+  if (!options.api || !options.body) return false;
+  getDb(options.dbPath);
+  const col = findCollectionByNameOrId(options.api);
+  if (!col?.openapi_spec) return false;
+  const doc = await readOpenApiSpec(resolveCollectionSpec(col.openapi_spec));
+  const endpoints = extractEndpoints(doc);
+  const method = options.method.toUpperCase();
+  const path = extractPath(options.url);
+  // The OpenAPI reader normalises requestBodyContentType (prefers JSON when
+  // present, otherwise records the first declared content type). For a true
+  // form-only endpoint that field is "application/x-www-form-urlencoded".
+  const exact = endpoints.find(e => e.method.toUpperCase() === method && e.path === path);
+  const matched = exact ?? endpoints.find(e => {
+    if (e.method.toUpperCase() !== method) return false;
+    const re = new RegExp(
+      "^" + e.path.replace(/\{[^}]+\}/g, "[^/]+").replace(/\//g, "\\/") + "$",
+    );
+    return re.test(path);
+  });
+  return matched?.requestBodyContentType === "application/x-www-form-urlencoded";
+}
+
 function extractPath(url: string): string {
   // Absolute URL → use URL parser. Relative URL ("/users/1") → use as-is.
   if (/^https?:\/\//i.test(url)) {
@@ -360,6 +401,7 @@ export function registerRequest(program: Command): void {
     .option("--db <path>", "Path to SQLite database file")
     .option("--validate-schema", "TASK-142: validate the response body against the OpenAPI response schema (requires --api). Endpoint is auto-resolved from the request method + URL.path; templated paths like /users/{id} are matched via regex. Falls back gracefully if no endpoint matches — pass --validate-against to override.")
     .option("--validate-against <method:path>", "TASK-142: explicit endpoint override for --validate-schema, e.g. \"GET:/users/{id}\". Use the spec template form (with \"{...}\" placeholders).")
+    .option("--form", "ARV-149: send --body as application/x-www-form-urlencoded (Stripe v1, Rails/PHP-style APIs). Parses --body as JSON to lift fields, re-encodes with bracket notation. Auto-detected when --api is set and the spec endpoint declares only the form content type.")
     .action(async (method: string, url: string, opts, cmd: Command) => {
       const headers = (opts.header as string[] | undefined)?.length ? (opts.header as string[]) : undefined;
       // ARV-53.
@@ -384,6 +426,7 @@ export function registerRequest(program: Command): void {
         json: globalJson(cmd),
         validateSchema: opts.validateSchema === true || typeof opts.validateAgainst === "string",
         validateAgainst: opts.validateAgainst,
+        form: opts.form === true,
       });
     });
 }

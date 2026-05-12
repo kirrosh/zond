@@ -3,9 +3,10 @@ id: ARV-153
 title: >-
   probe security cleanup-feasibility too strict: skips endpoints without DELETE
   even when ops are immutable/action
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 10:02'
+updated_date: '2026-05-12 11:57'
 labels:
   - feedback-loop
   - api-stripe
@@ -29,3 +30,9 @@ Workaround: --allow-leaks exists but applies to whole run, not per-endpoint. Doe
 
 Log: $HANDOFF/rounds/raw-03.log, apis/stripe/probes/security-digest-03.md
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Security probe cleanup-feasibility: action-verb POSTs (capture/verify/cancel/…) attacked without requiring DELETE counterpart. New CleanupFeasibility.actionNoCleanupNeeded counter. Test: security-probe-cleanup-feasibility.test.ts ARV-153.
+<!-- SECTION:NOTES:END -->

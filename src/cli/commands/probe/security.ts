@@ -298,6 +298,9 @@ export async function probeSecurityCommand(
               cleanup_feasibility: {
                 skipped_no_cleanup: result.cleanupFeasibility.skippedNoCleanup,
                 forced_no_cleanup: result.cleanupFeasibility.forcedNoCleanup,
+                // ARV-153: action POSTs attacked even without a DELETE
+                // counterpart (e.g. /capture, /verify, /cancel).
+                action_no_cleanup_needed: result.cleanupFeasibility.actionNoCleanupNeeded,
               },
             } : {}),
           },

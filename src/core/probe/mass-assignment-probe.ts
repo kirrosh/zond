@@ -30,6 +30,7 @@ import { applyAntiFp } from "../anti-fp/index.ts";
 import { matchesSubscriptionGated as matchesPaidPlan403 } from "../anti-fp/rules/subscription-gated/paid-plan-403.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { executeRequest } from "../runner/http-client.ts";
+import { flattenToFormFields } from "../runner/form-encode.ts";
 import type { HttpRequest } from "../runner/types.ts";
 import {
   convertPath,
@@ -37,14 +38,16 @@ import {
   findDeleteCounterpart,
   findGetByIdCounterpart,
   captureFieldFor,
-  hasJsonBody,
   liveAuthHeaders,
   getAuthHeaders,
+  classifyPostSemantics,
 } from "./shared.ts";
 import {
   buildProbeUrl,
-  buildJsonAuthHeaders,
+  buildBodyAuthHeaders,
   buildBaselineFromSpec,
+  hasProbeBody,
+  serializeProbeBody,
 } from "./probe-harness.ts";
 import {
   createDiscoveryCache,
@@ -269,8 +272,11 @@ export async function runMassAssignmentProbes(
     if (m !== "POST" && m !== "PATCH" && m !== "PUT") continue;
     totalEndpoints++;
 
-    if (!hasJsonBody(ep)) {
-      verdicts.push(skipped(ep, "no JSON request body"));
+    // ARV-150: accept form-urlencoded endpoints in addition to JSON. Stripe
+    // v1 declares only application/x-www-form-urlencoded for every mutating
+    // operation — 265 endpoints were SKIPPED before this loosening.
+    if (!hasProbeBody(ep)) {
+      verdicts.push(skipped(ep, "no JSON or form-urlencoded request body"));
       continue;
     }
 
@@ -428,7 +434,9 @@ async function probeEndpoint(
     );
   }
 
-  const headers = buildJsonAuthHeaders(ep, schemes, vars);
+  // ARV-150: Content-Type follows the spec — form-urlencoded for Stripe v1,
+  // JSON otherwise. `serializeProbeBody` encodes the actual wire payload.
+  const headers = buildBodyAuthHeaders(ep, schemes, vars);
 
   const verdict: EndpointVerdict = {
     method: m,
@@ -457,7 +465,7 @@ async function probeEndpoint(
   let baselineResp;
   try {
     baselineResp = await executeRequest(
-      { method: m, url, headers, body: JSON.stringify(baseline) },
+      { method: m, url, headers, body: serializeProbeBody(ep, baseline).content },
       { timeout: opts.timeoutMs ?? 30000, retries: 0 },
     );
   } catch (err) {
@@ -479,7 +487,7 @@ async function probeEndpoint(
   let resp;
   try {
     resp = await executeRequest(
-      { method: m, url, headers, body: JSON.stringify(body) },
+      { method: m, url, headers, body: serializeProbeBody(ep, body).content },
       { timeout: opts.timeoutMs ?? 30000, retries: 0 },
     );
   } catch (err) {
@@ -627,7 +635,14 @@ async function probeEndpoint(
           verdict.cleanup = { attempted: false, error: "unresolved DELETE path placeholders" };
         }
       } else {
-        verdict.cleanup = { attempted: false, error: "no DELETE counterpart in spec" };
+        // ARV-153: action POSTs (`/capture`, `/verify`, `/cancel`, …) never
+        // allocate a new resource — surface that instead of the alarming
+        // "no DELETE counterpart" line that triggered F7's leak-risk noise.
+        const reason =
+          classifyPostSemantics(ep) === "action"
+            ? "no cleanup needed (action endpoint — no resource created)"
+            : "no DELETE counterpart in spec";
+        verdict.cleanup = { attempted: false, error: reason };
       }
     }
   }
@@ -969,6 +984,13 @@ export function emitRegressionSuites(
     if (!ep) continue;
     const suiteHeaders = getAuthHeaders(ep, schemes);
     const probeExpectedStatus = v.severity === "ok" ? ACCEPTABLE_4XX : [200, 201, 202, 204];
+    // ARV-150: emit `form:` instead of `json:` when the endpoint uses
+    // form-urlencoded bodies — otherwise the regression suite would send
+    // JSON and re-hit the original "wrong content-type" 400.
+    const bodyField =
+      ep.requestBodyContentType === "application/x-www-form-urlencoded"
+        ? { form: flattenToFormFields(v.request.body) }
+        : { json: v.request.body };
     const probeStep: RawStep = {
       name: `mass-assignment: extras must ${v.severity === "ok" ? "be rejected" : "not apply"}`,
       source: {
@@ -977,7 +999,7 @@ export function emitRegressionSuites(
         response_branch: probeExpectedStatus.map(String).join("|"),
       },
       [v.method]: convertPath(ep.path),
-      json: v.request.body,
+      ...bodyField,
       expect: {
         status: probeExpectedStatus,
       },
