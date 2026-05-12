@@ -361,9 +361,14 @@ export function liveAuthHeaders(
   vars: Record<string, string>,
 ): Record<string, string> {
   if (ep.security.length === 0) return {};
-  for (const secName of ep.security) {
-    const scheme = schemes.find(s => s.name === secName);
-    if (!scheme) continue;
+
+  // Two-pass walk: prefer bearer/apiKey over basic (ARV-148, mirrors the
+  // generator-side fix in `getAuthHeaders` above). Without this, every
+  // prepare-fixtures discover/seed request on Stripe-style APIs picks the
+  // first declared scheme (basicAuth) and ships the raw `sk_test_…` token
+  // as Basic Auth credentials → Stripe base64-decodes the garbage and
+  // returns 401 across 98/98 vars.
+  const tryScheme = (scheme: SecuritySchemeInfo): Record<string, string> | undefined => {
     if (scheme.type === "http") {
       if (scheme.scheme === "bearer" || !scheme.scheme) {
         const tok = vars["auth_token"];
@@ -382,6 +387,25 @@ export function liveAuthHeaders(
       const key = vars["api_key"];
       if (key) return { [scheme.apiKeyName]: key };
     }
+    return undefined;
+  };
+
+  const isBasic = (s: SecuritySchemeInfo): boolean =>
+    s.type === "http" && s.scheme === "basic";
+
+  // Pass 1: skip basic.
+  for (const secName of ep.security) {
+    const scheme = schemes.find(s => s.name === secName);
+    if (!scheme || isBasic(scheme)) continue;
+    const headers = tryScheme(scheme);
+    if (headers) return headers;
+  }
+  // Pass 2: basic fallback.
+  for (const secName of ep.security) {
+    const scheme = schemes.find(s => s.name === secName);
+    if (!scheme || !isBasic(scheme)) continue;
+    const headers = tryScheme(scheme);
+    if (headers) return headers;
   }
   return {};
 }
