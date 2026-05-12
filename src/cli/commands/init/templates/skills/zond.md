@@ -321,7 +321,17 @@ or fall back to `zond request`:
 
 ```bash
 zond request GET /domains | jq '.data[] | select(.status=="verified") | .id'
+
+# POST a JSON body — flag is `--body`, NOT `--json` (which controls
+# envelope output, not request body):
+zond request POST /v1/widgets --api <name> --body '{"name":"x"}'
 ```
+
+Note: `zond request --body` always sets `Content-Type: application/json`.
+For form-encoded APIs (Stripe v1, some legacy SaaS) this returns 400
+("expected application/x-www-form-urlencoded") — see ARV-149 for the
+planned `--form` flag; meanwhile, generate YAML tests via `zond generate`
+which derives the right Content-Type from `requestBody.content`.
 
 For one-off contract checks without writing a YAML test, pair it with
 `--validate-schema` (TASK-142):
