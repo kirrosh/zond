@@ -346,7 +346,7 @@ function recordFinding(
     recommended_action: recommendForCheck(check.id, resp.status),
   };
   out.push(finding);
-  if (onEvent) onEvent({ type: "finding", ts: nowIso(), finding });
+  if (onEvent) onEvent({ type: "finding", ts: nowIso(), check: check.id, finding });
 }
 
 export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult> {
@@ -462,7 +462,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           recommended_action: recommendForCheck("network_error", 0),
         };
         localFindings.push(finding);
-        if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), finding });
+        if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), check: "network_error", finding });
         continue;
       }
 
@@ -561,7 +561,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       collected.push(f);
       summary.findings += 1;
       summary.by_severity[f.severity] += 1;
-      if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), finding: f });
+      if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), check: f.check, finding: f });
     }
     for (const check of activeStateful) {
       if (check.phase === "auth") {

@@ -157,6 +157,12 @@ export const NdjsonCheckResultEventSchema = z.object({
 export const NdjsonFindingEventSchema = z.object({
   type: z.literal("finding"),
   ts: z.string(),
+  // ARV-156: mirror the top-level `check` field carried by check_start /
+  // check_result so consumer pipelines can `jq -c '.check'` uniformly
+  // across event types without branching on `.type`. The same value lives
+  // inside `.finding.check` — existing consumers reading the nested form
+  // keep working (back-compat addition, not a rename).
+  check: z.string(),
   finding: CheckFindingSchema,
 });
 

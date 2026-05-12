@@ -119,6 +119,9 @@
         "ts": {
           "type": "string"
         },
+        "check": {
+          "type": "string"
+        },
         "finding": {
           "type": "object",
           "properties": {
@@ -214,6 +217,7 @@
       "required": [
         "type",
         "ts",
+        "check",
         "finding"
       ],
       "additionalProperties": false
