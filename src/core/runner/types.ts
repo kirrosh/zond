@@ -59,6 +59,18 @@ export interface StepResult {
    *  before this step settled. Omitted (or 0) when no retry was needed.
    *  Surfaced in the JSON report so flaky-network steps are visible. */
   network_retry?: number;
+  /** ARV-157: summary of `--validate-schema` outcome for this step. Present
+   *  only when the runner had a schema validator attached AND a JSON body
+   *  was returned (so consumers can distinguish "no drift" from "never
+   *  validated"). Granular failures still live in `assertions[]` with
+   *  `kind: "schema"`; this block is the at-a-glance shape skill docs
+   *  describe and JSON-report consumers grep for. */
+  schema_validation?: {
+    result: "PASS" | "FAIL" | "no-endpoint" | "no-schema";
+    matched_endpoint: { method: string; path: string } | null;
+    matched_response_status: string | null;
+    error_count: number;
+  };
 }
 
 export interface TestRunResult {
