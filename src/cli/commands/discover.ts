@@ -201,7 +201,12 @@ export interface DiscoveryItem {
     | "verify-stale"
     | "verify-unknown"
     | "verify-no-read"
-    | "verify-skip-empty";
+    | "verify-skip-empty"
+    // ARV-143: filled var classified as trusted user input — manifest source
+    // is user-config (auth/server/header) or there's no read-by-id endpoint
+    // for its resource. Refresh has no verification path, so we mark it as
+    // such instead of silently omitting (the doctor view that says set:true).
+    | "verify-user-config";
   /** ARV-46: manifest-grade status enum projected onto agent-readable
    *  envelope. Filled when discover ran in manifest-driven mode.
    *  filled | failed:no-list-endpoint | failed:list-empty | failed:miss-network
@@ -215,6 +220,11 @@ export interface DiscoveryItem {
    *  miss-network → `fix_network_config`.
    *  write / skip-* / verify-live → undefined. */
   recommended_action?: RecommendedAction;
+  /** ARV-142: when --refresh re-resolves a verify-stale item, the original
+   *  verify-stale entry is replaced with the refresh outcome. This flag
+   *  preserves the "was stale before refresh" signal so summary can
+   *  report stale_fixed vs still_stale honestly. */
+  wasStale?: boolean;
 }
 
 /** TASK-294: derive recommended_action from a DiscoveryItem's status. */
@@ -782,8 +792,53 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
             options.timeoutMs ?? 30000,
           );
           // Replace the verify-stale entry with the refresh outcome.
+          // ARV-142: preserve the wasStale marker so summary can count
+          // stale_fixed (refresh succeeded) vs still_stale (refresh failed).
           const idx = items.findIndex(i => i.varName === target.varName);
-          if (idx >= 0) items[idx] = refreshed;
+          if (idx >= 0) {
+            refreshed.wasStale = true;
+            items[idx] = refreshed;
+          }
+        }
+      }
+
+      // ARV-143: surface filled vars that verify can't validate so the user
+      // doesn't think they're missing. Two buckets:
+      //   1. manifest user-config sources (auth / server / header) — never
+      //      had a read endpoint, refresh just trusts the value.
+      //   2. targets whose verifyOne returned verify-no-read (resource exists
+      //      but `.api-resources.yaml` has no read endpoint) — same story.
+      // Without this, refresh emitted "0 stale" + silence on these vars,
+      // contradicting doctor's set:true reporting (feedback-02 F12).
+      if (manifest) {
+        const seen = new Set(items.map(i => i.varName));
+        for (const entry of manifest.fixtures) {
+          if (seen.has(entry.name)) continue;
+          const current = env[entry.name];
+          if (!current || isPlaceholder(current)) continue;
+          const isUserConfig =
+            entry.source === "auth" ||
+            entry.source === "server" ||
+            entry.source === "header";
+          if (!isUserConfig) continue;
+          items.push({
+            varName: entry.name,
+            resource: "",
+            listPath: "",
+            current,
+            status: "verify-user-config",
+            manifestSource: entry.source,
+            reason: `${entry.source} var — no verification path, value trusted from .env.yaml`,
+          });
+        }
+        // Promote verify-no-read items with a filled value to the same bucket
+        // so they show up under "trusted user input" in the summary instead of
+        // being lumped with empty/skip items.
+        for (const item of items) {
+          if (item.status === "verify-no-read" && item.current && !isPlaceholder(item.current)) {
+            item.status = "verify-user-config";
+            item.reason = `no read-by-id endpoint in .api-resources.yaml — value trusted from .env.yaml`;
+          }
         }
       }
     } else if (manifest) {
@@ -919,7 +974,16 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     const requiredManifestCount = manifest
       ? manifest.fixtures.filter(f => f.required).length
       : 0;
-    const filledCount = items.filter(i => i.manifestStatus === "filled").length;
+    // ARV-143: in verify/refresh mode `manifestStatus` is not populated by
+    // the verify loop (it uses verify-* statuses instead). Count verify-live
+    // and verify-user-config as "filled" so the "Filled X/Y" line agrees with
+    // doctor and the user_config bucket isn't double-counted as UNSET.
+    const filledCount = items.filter(i =>
+      i.manifestStatus === "filled" ||
+      i.status === "verify-live" ||
+      i.status === "verify-user-config" ||
+      (i.wasStale === true && i.status === "write"),
+    ).length;
 
     if (options.json) {
       printJson(jsonOk("discover", {
@@ -942,9 +1006,20 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
           ...(options.verify ? {
             verify: {
               live: items.filter(i => i.status === "verify-live").length,
+              // ARV-142: items currently classified as stale (refresh didn't
+              // overwrite them — either --apply was off, or refresh failed).
               stale: items.filter(i => i.status === "verify-stale").length,
+              // ARV-142: stale items that --refresh successfully re-resolved.
+              stale_fixed: items.filter(i => i.wasStale === true && i.status === "write").length,
+              // ARV-142: stale items where --refresh ran but couldn't write a
+              // new value (e.g. list endpoint empty / unreachable).
+              still_stale: items.filter(i => i.wasStale === true && i.status !== "write").length,
               unknown: items.filter(i => i.status === "verify-unknown").length,
               skipped: items.filter(i => i.status === "verify-skip-empty" || i.status === "verify-no-read").length,
+              // ARV-143: filled vars with no verify path (user-config /
+              // resource-without-read). Doctor reports these as set:true;
+              // refresh now agrees by surfacing them in their own bucket.
+              user_config: items.filter(i => i.status === "verify-user-config").length,
             },
           } : {}),
         },
@@ -971,7 +1046,9 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
                   ? `(live: ${i.current})`
                   : i.status === "verify-stale"
                     ? `(stale: ${i.current})${i.reason ? ` — ${i.reason}` : ""}`
-                    : (i.reason ?? ""),
+                    : i.status === "verify-user-config"
+                      ? `(trusted: ${i.current})`
+                      : (i.reason ?? ""),
       ]);
       const widths = cols.map((h, i) => Math.max(h.length, ...rows.map(r => r[i]!.length)));
       const fmt = (cells: string[]) => cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
@@ -983,7 +1060,18 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
         const live = items.filter(i => i.status === "verify-live").length;
         const stale = items.filter(i => i.status === "verify-stale").length;
         const unknown = items.filter(i => i.status === "verify-unknown").length;
-        console.log(`Verify summary: ${live} live, ${stale} stale, ${unknown} unknown.`);
+        // ARV-142: split stale-fixed vs still-stale so refresh telemetry no
+        // longer hides "0 stale" while quietly overwriting on disk.
+        const staleFixed = items.filter(i => i.wasStale === true && i.status === "write").length;
+        const stillStale = items.filter(i => i.wasStale === true && i.status !== "write").length;
+        // ARV-143: filled vars verify can't reach — call them out as trusted.
+        const userConfig = items.filter(i => i.status === "verify-user-config").length;
+        const parts = [`${live} live`, `${stale} stale`];
+        if (staleFixed > 0) parts.push(`${staleFixed} stale-fixed`);
+        if (stillStale > 0) parts.push(`${stillStale} still-stale`);
+        parts.push(`${unknown} unknown`);
+        if (userConfig > 0) parts.push(`${userConfig} trusted (no-verify-path)`);
+        console.log(`Verify summary: ${parts.join(", ")}.`);
         if (stale > 0 && !options.apply) {
           printWarning(`${stale} stale fixture(s) detected. Re-run with --refresh to drop and re-resolve them.`);
         }

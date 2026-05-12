@@ -83,6 +83,27 @@ describe("send-request — extractByPathWithDiagnostic (ARV-70)", () => {
     expect(out.reason).toContain("string");
     expect(out.reason).toContain("content-type");
   });
+
+  // ARV-144: top-level array bodies (Sentry/GitHub-style REST).
+  test("top-level array: [0].id resolves directly", () => {
+    const out = extractDiag([{ id: "x" }, { id: "y" }], "[0].id");
+    expect(out.value).toBe("x");
+    expect(out.failedAt).toBeUndefined();
+  });
+
+  test("top-level array: 0.id (no brackets) also resolves", () => {
+    const out = extractDiag([{ id: "x" }], "0.id");
+    expect(out.value).toBe("x");
+    expect(out.failedAt).toBeUndefined();
+  });
+
+  test("top-level array: data[0].id fails with array-index reason (used by CLI hint)", () => {
+    const out = extractDiag([{ id: "x" }], "data[0].id");
+    expect(out.value).toBeUndefined();
+    expect(out.failedAt).toBe("data");
+    expect(out.resolved).toEqual([]);
+    expect(out.reason).toMatch(/^expected an array index/);
+  });
 });
 
 describe("send-request — resolveAdHocRequest (TASK-200)", () => {

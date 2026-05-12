@@ -124,6 +124,23 @@ export interface SecurityProbeOptions {
    *  own resources, so isolation is automatic, with cleanup falling back to
    *  the existing DELETE-counterpart + orphan-tracker flow (TASK-278). */
   isolated?: boolean;
+  /** ARV-140: opt-in to attacks that have no cleanup path (POSTs without a
+   *  DELETE counterpart). By default we now skip them — round-01/02 Sentry
+   *  runs left ~18 manually-cleanable orphans in prod because the probe
+   *  happily POSTed to `/teams/`, `/symbol-sources/`, etc., where the spec
+   *  has no DELETE. The pre-flight feasibility map drops these unless the
+   *  caller explicitly accepts the leak. */
+  allowLeaks?: boolean;
+}
+
+/** ARV-140: cleanup-feasibility map. Built once before the live loop so
+ *  every POST verdict can see whether the spec has a DELETE counterpart;
+ *  the summary digest also reports counts for skipped/forced endpoints. */
+export interface CleanupFeasibility {
+  /** Per-endpoint key (`POST /path`) → "has-delete" | "no-delete-counterpart". */
+  status: Record<string, "has-delete" | "no-delete-counterpart">;
+  skippedNoCleanup: number;
+  forcedNoCleanup: number;
 }
 
 export interface SecurityProbeResult {
@@ -132,6 +149,8 @@ export interface SecurityProbeResult {
   specProbed: number;
   verdicts: SecurityVerdict[];
   warnings: string[];
+  /** ARV-140: cleanup-feasibility digest (POSTs without DELETE counterpart). */
+  cleanupFeasibility?: CleanupFeasibility;
 }
 
 // ──────────────────────────────────────────────
@@ -217,11 +236,44 @@ export async function runSecurityProbes(
   const warnings: string[] = [];
   let totalEndpoints = 0;
 
+  // ARV-140: pre-flight cleanup-feasibility scan. For each POST target, look
+  // up the DELETE counterpart in the spec once. Without --allow-leaks any
+  // attack against a POST-without-DELETE is dropped — orphan tracker can't
+  // clean it (no DELETE path to retry) so it would linger in the user's
+  // tenant indefinitely (feedback round-01/02 Sentry: 18 manual cleanups).
+  const feasibility: CleanupFeasibility = {
+    status: {},
+    skippedNoCleanup: 0,
+    forcedNoCleanup: 0,
+  };
+  for (const ep of opts.endpoints) {
+    if (ep.deprecated) continue;
+    if (ep.method.toUpperCase() !== "POST") continue;
+    const key = `POST ${ep.path}`;
+    const hasDelete = findDeleteCounterpart(ep, opts.endpoints) !== undefined;
+    feasibility.status[key] = hasDelete ? "has-delete" : "no-delete-counterpart";
+    if (!hasDelete) {
+      if (opts.allowLeaks) feasibility.forcedNoCleanup += 1;
+      else feasibility.skippedNoCleanup += 1;
+    }
+  }
+
   for (const ep of opts.endpoints) {
     if (ep.deprecated) continue;
     const m = ep.method.toUpperCase();
     if (m !== "POST" && m !== "PUT" && m !== "PATCH") continue;
     totalEndpoints++;
+
+    // ARV-140: cleanup-feasibility gate. POST without a DELETE counterpart
+    // (and without --allow-leaks) is dropped before any live request fires.
+    // PUT/PATCH have snapshot/restore so they're unaffected here.
+    if (m === "POST" && !opts.allowLeaks) {
+      const status = feasibility.status[`POST ${ep.path}`];
+      if (status === "no-delete-counterpart") {
+        verdicts.push(skipped(ep, "skipped: no DELETE counterpart in spec (cleanup-feasibility pre-flight; pass --allow-leaks to override)"));
+        continue;
+      }
+    }
 
     // TASK-264: --isolated guard. Mutation on a seeded fixture would corrupt
     // user data the next `zond run` depends on; skip the endpoint instead.
@@ -275,6 +327,7 @@ export async function runSecurityProbes(
     specProbed: verdicts.length,
     verdicts,
     warnings,
+    cleanupFeasibility: feasibility,
   };
 }
 
@@ -1005,6 +1058,16 @@ export function formatSecurityDigest(
   lines.push(`Spec: \`${specPath}\``);
   lines.push(`Classes: ${result.classes.join(", ")}`);
   lines.push(`Endpoints scanned: ${result.totalEndpoints} · probed: ${result.specProbed}`);
+  // ARV-140 AC#4: surface the cleanup-feasibility outcome up front so a
+  // green run doesn't hide "we attacked 14 leak-prone POSTs anyway".
+  if (result.cleanupFeasibility) {
+    const f = result.cleanupFeasibility;
+    if (f.skippedNoCleanup > 0) {
+      lines.push(`Cleanup pre-flight: ${f.skippedNoCleanup} endpoint(s) skipped (no DELETE counterpart). Pass \`--allow-leaks\` to attack anyway.`);
+    } else if (f.forcedNoCleanup > 0) {
+      lines.push(`Cleanup pre-flight: ${f.forcedNoCleanup} endpoint(s) attacked despite no DELETE counterpart (--allow-leaks).`);
+    }
+  }
   lines.push("");
 
   // Cleanup failures section is mandatory and goes FIRST when present —

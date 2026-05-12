@@ -25,6 +25,7 @@ describe("runSecurityProbes — TASK-151 snapshot+restore on PUT", () => {
     const { put: putEp, get: getEp } = projectPutGetPair(projectSchema, { attachResponseSchema: true });
 
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [putEp, getEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test", id: "p1" },
@@ -67,6 +68,7 @@ describe("runSecurityProbes — TASK-151 snapshot+restore on PUT", () => {
       ],
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [postEp, delEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
@@ -85,6 +87,7 @@ describe("runSecurityProbes — TASK-151 snapshot+restore on PUT", () => {
       properties: { subjectPrefix: { type: "string" } },
     });
     await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [putEp, getEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test", id: "p1" },
@@ -109,6 +112,7 @@ describe("runSecurityProbes — TASK-151 snapshot+restore on PUT", () => {
       properties: { subjectPrefix: { type: "string" } },
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [putEp, getEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test", id: "p1" },
@@ -151,6 +155,7 @@ describe("runSecurityProbes — TASK-151 snapshot+restore on PUT", () => {
         properties: { subjectPrefix: { type: "string" } },
       });
       const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
         endpoints: [putEp, getEp],
         securitySchemes: [],
         vars: { base_url: "https://api.test", id: "p1" },
@@ -188,6 +193,7 @@ describe("runSecurityProbes — TASK-152 partial-body fallback on PUT", () => {
       },
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [putEp, getEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test", id: "p1" },
@@ -217,6 +223,7 @@ describe("runSecurityProbes — TASK-152 partial-body fallback on PUT", () => {
       },
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [postEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
@@ -240,6 +247,7 @@ describe("runSecurityProbes — TASK-152 partial-body fallback on PUT", () => {
       ],
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [putEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test", id: "p1" },

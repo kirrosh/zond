@@ -80,6 +80,7 @@ describe("runSecurityProbes --isolated (TASK-264)", () => {
       vars: { base_url: "https://api.test" },
       classes: ["ssrf"],
       isolated: true,
+      allowLeaks: true, // ARV-140: this test asserts isolated-mode (PUT/PATCH-only) and shouldn't be gated by feasibility
     });
 
     expect(calls).toBeGreaterThan(0);

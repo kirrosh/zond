@@ -3,6 +3,7 @@ import { mkdir, writeFile, readFile, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { discoverCommand } from "../../src/cli/commands/discover.ts";
+import { captureOutput } from "../_helpers/output.ts";
 
 // TASK-281: --verify GETs each fixture's read-by-id endpoint and classifies
 // the result. --refresh = --verify --apply: stale ids are dropped and re-
@@ -141,6 +142,79 @@ describe("zond discover --verify (TASK-281)", () => {
     expect(after).not.toContain(`aud_stale_999`);
     // team_id was live → not touched (still raw, not JSON-quoted by upsertEnvLine).
     expect(after).toMatch(/team_id:\s*team_real_7/);
+  });
+
+  // ARV-142: --refresh used to report "0 stale" while quietly overwriting on
+  // disk because the verify-stale item was replaced by the write-outcome before
+  // counting. Summary must surface stale_fixed/still_stale counters.
+  test("--refresh summary reports stale_fixed>=1 after re-resolving a stale id", async () => {
+    const envPath = join(apiDir, ".env.refresh-counter.yaml");
+    await writeFile(envPath, [
+      `base_url: ${baseUrl}`,
+      `audience_id: aud_stale_999`,
+      ``,
+    ].join("\n"));
+
+    const out = captureOutput({ console: true });
+    const exit = await discoverCommand({ specPath, apiDir, envPath, verify: true, apply: true, json: true });
+    expect(exit).toBe(0);
+    const env = JSON.parse(out.out);
+    expect(env.ok).toBe(true);
+    expect(env.data.summary.verify.stale_fixed).toBeGreaterThanOrEqual(1);
+    // After successful refresh, currently-stale count drops to 0.
+    expect(env.data.summary.verify.stale).toBe(0);
+    expect(env.data.summary.verify.still_stale).toBe(0);
+  });
+
+  // ARV-143: filled vars without a read-by-id endpoint used to be invisible
+  // in refresh output (silent miss). Now they appear under user_config so
+  // doctor (set:true) and refresh agree.
+  test("--refresh surfaces filled user-config vars under trusted bucket", async () => {
+    const envPath = join(apiDir, ".env.user-config.yaml");
+    const manifestPath = join(apiDir, ".api-fixtures.yaml");
+    // Write a manifest with an auth-source var; the resource map already
+    // exists from beforeAll, but the manifest is per-test.
+    await writeFile(manifestPath, [
+      "fixtures:",
+      "  - name: api_token",
+      "    source: auth",
+      "    required: true",
+      "  - name: audience_id",
+      "    source: path",
+      "    required: true",
+      "",
+    ].join("\n"));
+    await writeFile(envPath, [
+      `base_url: ${baseUrl}`,
+      `api_token: secret-abc`,
+      `audience_id: aud_real_42`,
+      ``,
+    ].join("\n"));
+
+    const out = captureOutput({ console: true });
+    const exit = await discoverCommand({ specPath, apiDir, envPath, verify: true, apply: true, json: true });
+    expect(exit).toBe(0);
+    const env = JSON.parse(out.out);
+    expect(env.data.summary.verify.user_config).toBe(1);
+    // Item is present with the new status so the table renders it.
+    const item = (env.data.items as Array<{ varName: string; status: string }>)
+      .find(i => i.varName === "api_token");
+    expect(item?.status).toBe("verify-user-config");
+    await rm(manifestPath, { force: true });
+  });
+
+  test("--refresh text summary surfaces stale-fixed in addition to stale", async () => {
+    const envPath = join(apiDir, ".env.refresh-text.yaml");
+    await writeFile(envPath, [
+      `base_url: ${baseUrl}`,
+      `audience_id: aud_stale_999`,
+      ``,
+    ].join("\n"));
+
+    const out = captureOutput({ console: true });
+    const exit = await discoverCommand({ specPath, apiDir, envPath, verify: true, apply: true, json: false });
+    expect(exit).toBe(0);
+    expect(out.out).toMatch(/Verify summary:.*stale-fixed/);
   });
 
   test("5xx on read-by-id is classified unknown — fixture is preserved", async () => {

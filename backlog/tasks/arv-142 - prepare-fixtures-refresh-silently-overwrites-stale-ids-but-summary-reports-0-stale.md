@@ -3,9 +3,10 @@ id: ARV-142
 title: >-
   prepare-fixtures --refresh: silently overwrites stale ids but summary reports
   '0 stale'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 07:40'
+updated_date: '2026-05-12 08:03'
 labels:
   - bug
   - prepare-fixtures

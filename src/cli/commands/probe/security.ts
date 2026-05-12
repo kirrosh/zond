@@ -73,6 +73,10 @@ export interface ProbeSecurityOptions {
    *  from `.env.yaml` (seeded fixtures). Trade coverage for guaranteed
    *  fixture safety. */
   isolated?: boolean;
+  /** ARV-140: opt-in to POST attacks on endpoints with no DELETE counterpart
+   *  in the spec. Defaults to off so probes can't leak resources the CLI
+   *  has no way to clean up afterwards. */
+  allowLeaks?: boolean;
   /** m-17 / ARV-51: structured report format for `--output` and the
    *  non-`--json` stdout path. `--json` envelope is always structured
    *  (no markdown blob) regardless of this flag. Default: "markdown" so
@@ -205,6 +209,7 @@ export async function probeSecurityCommand(
       timeoutMs: options.timeoutMs,
       dryRun: options.dryRun,
       isolated: options.isolated === true,
+      allowLeaks: options.allowLeaks === true,
     });
 
     // TASK-168 (m-10): register env vars + redact the digest before
@@ -287,6 +292,14 @@ export async function probeSecurityCommand(
             totalEndpoints: result.totalEndpoints,
             probed: result.specProbed,
             by_status: byStatus(structuredEndpoints),
+            // ARV-140: pre-flight cleanup-feasibility counts. Lets CI gate on
+            // "no leak-prone POSTs slipped in" independently of HIGH findings.
+            ...(result.cleanupFeasibility ? {
+              cleanup_feasibility: {
+                skipped_no_cleanup: result.cleanupFeasibility.skippedNoCleanup,
+                forced_no_cleanup: result.cleanupFeasibility.forcedNoCleanup,
+              },
+            } : {}),
           },
           orphans,
           emittedTests: emittedSuites,

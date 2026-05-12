@@ -481,6 +481,44 @@ describe("requestCommand", () => {
     expect(env.ok).toBe(true);
   });
 
+  // ARV-144: top-level array bodies (Sentry, GitHub-style REST).
+  test("--json-path [0].id resolves a top-level array element to stdout", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify([{ id: "a" }, { id: "b" }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    const code = await requestCommand({
+      method: "GET",
+      url: "http://example.com/list",
+      jsonPath: "[0].id",
+    });
+    expect(code).toBe(0);
+    expect(output.out.trim()).toBe("a");
+  });
+
+  test("--json-path data[0].id on top-level array body emits top-level-array hint (not envelope hint)", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify([{ id: "a" }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    await requestCommand({
+      method: "GET",
+      url: "http://example.com/list",
+      jsonPath: "data[0].id",
+    });
+    expect(output.err).toMatch(/response body is a top-level array/);
+    expect(output.err).toMatch(/\[0\]\.id/);
+    expect(output.err).not.toMatch(/extracts from the response body, not the zond envelope/);
+  });
+
   test("no envelope hint when path failed deeper than the first segment", async () => {
     // `items[0].id` on a body that has items but the inner object lacks `id`
     // should NOT trigger the envelope hint — the user clearly meant to walk

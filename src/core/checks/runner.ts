@@ -90,6 +90,14 @@ export interface RunChecksOptions {
    *  bursts of parallel workers respect a global RPS budget (also
    *  reacts to RateLimit-* headers via `note()`). */
   rateLimiter?: RateLimiter;
+  /** ARV-141: substitute real fixture values into path-param placeholders so
+   *  the deterministic synthetic 404 (`/issues/x`) becomes a real-id 200/422
+   *  whenever `.env.yaml` actually has a fixture. This makes `checks run`
+   *  reactive to fixture-pack growth — without it, two runs against the same
+   *  spec emit pixel-identical findings/skip counts regardless of how many
+   *  vars are filled. Keyed by path-param name (e.g. `issue_id`); falls back
+   *  to the legacy schema-driven placeholder when the name isn't in the map. */
+  pathVars?: Record<string, string>;
 }
 
 export interface RunChecksResult {
@@ -106,8 +114,17 @@ function placeholderForParam(p: OpenAPIV3.ParameterObject): string {
   return "x";
 }
 
-function fillPathParams(path: string, op: EndpointInfo): string {
+function fillPathParams(
+  path: string,
+  op: EndpointInfo,
+  pathVars?: Record<string, string>,
+): string {
   return path.replace(/\{([^}]+)\}/g, (_, name) => {
+    // ARV-141: real fixture wins over schema-derived placeholder.
+    const real = pathVars?.[name];
+    if (typeof real === "string" && real.length > 0) {
+      return encodeURIComponent(real);
+    }
     const match = op.parameters.find(
       (p) => (p as OpenAPIV3.ParameterObject).in === "path"
         && (p as OpenAPIV3.ParameterObject).name === name,
@@ -150,8 +167,8 @@ interface BuiltCase {
   case: CheckCase;
 }
 
-function buildPositive(op: EndpointInfo, baseUrl: string): BuiltCase {
-  const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op)}`;
+function buildPositive(op: EndpointInfo, baseUrl: string, pathVars?: Record<string, string>): BuiltCase {
+  const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op, pathVars)}`;
   const headers = buildBaseHeaders(op, { withRequired: true });
   const body = buildBody(op);
   const req: HttpRequest = { method: op.method.toUpperCase(), url, headers, body };
@@ -164,11 +181,11 @@ function buildPositive(op: EndpointInfo, baseUrl: string): BuiltCase {
   return { req, case: c };
 }
 
-function buildMissingHeader(op: EndpointInfo, baseUrl: string): BuiltCase | null {
+function buildMissingHeader(op: EndpointInfo, baseUrl: string, pathVars?: Record<string, string>): BuiltCase | null {
   const required = requiredHeaders(op);
   if (required.length === 0) return null;
   const dropped = required[0]!.name;
-  const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op)}`;
+  const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op, pathVars)}`;
   const headers = buildBaseHeaders(op, { withRequired: true });
   delete headers[dropped];
   const body = buildBody(op);
@@ -192,13 +209,13 @@ function buildMissingHeader(op: EndpointInfo, baseUrl: string): BuiltCase | null
 function buildCoverageCases(
   op: EndpointInfo,
   baseUrl: string,
-  opts: { allowX00?: boolean },
+  opts: { allowX00?: boolean; pathVars?: Record<string, string> },
 ): BuiltCase[] {
   if (!op.requestBodySchema) return [];
   const m = op.method.toUpperCase();
   if (m === "GET" || m === "DELETE") return [];
   const cases = enumerateBoundaryCases(op.requestBodySchema, { allowX00: opts.allowX00 });
-  const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op)}`;
+  const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op, opts.pathVars)}`;
   const headers = buildBaseHeaders(op, { withRequired: true });
   const out: BuiltCase[] = [];
   for (const cc of cases) {
@@ -224,13 +241,13 @@ function buildCoverageCases(
   return out;
 }
 
-function buildNegativeData(op: EndpointInfo, baseUrl: string): BuiltCase | null {
+function buildNegativeData(op: EndpointInfo, baseUrl: string, pathVars?: Record<string, string>): BuiltCase | null {
   if (!op.requestBodySchema) return null;
   const m = op.method.toUpperCase();
   if (m === "GET" || m === "DELETE") return null;
   const mutated = buildNegativeBody(op.requestBodySchema);
   if (!mutated) return null;
-  const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op)}`;
+  const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op, pathVars)}`;
   const headers = buildBaseHeaders(op, { withRequired: true });
   const body = JSON.stringify(mutated.body);
   const req: HttpRequest = { method: m, url, headers, body };
@@ -402,17 +419,17 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       });
     }
     const cases: BuiltCase[] = [];
-    if (wantsExamples && neededKinds.has("positive")) cases.push(buildPositive(op, opts.baseUrl));
+    if (wantsExamples && neededKinds.has("positive")) cases.push(buildPositive(op, opts.baseUrl, opts.pathVars));
     if (neededKinds.has("missing_required_header")) {
-      const c = buildMissingHeader(op, opts.baseUrl);
+      const c = buildMissingHeader(op, opts.baseUrl, opts.pathVars);
       if (c) cases.push(c);
     }
     if (wantsExamples && neededKinds.has("negative_data")) {
-      const c = buildNegativeData(op, opts.baseUrl);
+      const c = buildNegativeData(op, opts.baseUrl, opts.pathVars);
       if (c) cases.push(c);
     }
     if (wantsCoverage && (neededKinds.has("negative_data") || neededKinds.has("positive"))) {
-      const boundary = buildCoverageCases(op, opts.baseUrl, { allowX00: opts.allowX00 });
+      const boundary = buildCoverageCases(op, opts.baseUrl, { allowX00: opts.allowX00, pathVars: opts.pathVars });
       for (const b of boundary) {
         if (neededKinds.has(b.case.kind)) cases.push(b);
       }

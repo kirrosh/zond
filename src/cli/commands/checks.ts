@@ -128,6 +128,34 @@ function parseAuthHeaders(values: string[] | undefined): Record<string, string> 
   return out;
 }
 
+/** ARV-141: lift filled fixtures from `apis/<name>/.env.yaml` so the runner
+ *  can substitute them into path-params. Keeps the result string-only (drops
+ *  numeric/object values silently — they can't be URL-encoded path segments
+ *  anyway) and skips obvious placeholders so a TODO-string doesn't masquerade
+ *  as a real id and produce phantom-200s. */
+async function derivePathVarsFromApi(apiName: string | undefined, dbPath: string | undefined): Promise<Record<string, string>> {
+  if (!apiName) return {};
+  const col = resolveApiCollection(apiName, dbPath);
+  if ("error" in col || !col.baseDir) return {};
+  try {
+    const env = await loadEnvironment(undefined, col.baseDir);
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(env)) {
+      if (typeof v !== "string" || v.length === 0) continue;
+      if (k === "base_url" || k === "auth_token" || k === "api_key") continue;
+      const trimmed = v.trim().toLowerCase();
+      // Mirror prepare-fixtures' placeholder filter — a "string"/"example"
+      // value would routinely 404 and undo the whole reactivity point.
+      if (trimmed === "" || trimmed === "string" || trimmed === "example") continue;
+      if (trimmed.startsWith("todo") || trimmed.startsWith("<")) continue;
+      out[k] = v;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
 async function deriveAuthHeadersFromApi(apiName: string | undefined, dbPath: string | undefined): Promise<Record<string, string>> {
   if (!apiName) return {};
   const col = resolveApiCollection(apiName, dbPath);
@@ -286,6 +314,11 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   const fromFlags = parseAuthHeaders(opts.authHeader);
   const authHeaders = { ...fromEnv, ...fromFlags };
 
+  // ARV-141: feed filled fixtures into path-params so the run reacts to
+  // fixture-pack growth (otherwise findings/skips are pixel-identical across
+  // rounds and CI can't distinguish "spec stable" from "checks ignored deltas").
+  const pathVars = await derivePathVarsFromApi(apiName, opts.db);
+
   const phaseRaw = typeof opts.phase === "string" ? opts.phase : "examples";
   if (phaseRaw !== "examples" && phaseRaw !== "coverage" && phaseRaw !== "all") {
     const msg = `Unknown --phase: "${phaseRaw}". Available: examples, coverage, all`;
@@ -371,6 +404,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       exclude: splitList(opts.excludeCheck),
       timeoutMs: typeof opts.timeout === "number" ? opts.timeout : undefined,
       authHeaders: Object.keys(authHeaders).length > 0 ? authHeaders : undefined,
+      pathVars: Object.keys(pathVars).length > 0 ? pathVars : undefined,
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed === true,
       phase: phaseRaw as "examples" | "coverage" | "all",
       allowX00: opts.allowX00 === true,

@@ -329,6 +329,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
     .option("--list-tags", "List available tags from spec and exit")
     .option("--no-cleanup", "Skip follow-up DELETE on resources created by baseline / 2xx attacks")
     .option("--isolated", "TASK-264: refuse to attack PUT/PATCH endpoints whose path-params come from .env.yaml — protects seeded fixtures from probe-induced mutation. Lower coverage in exchange for guaranteed fixture safety.")
+    .option("--allow-leaks", "ARV-140: attack POST endpoints even when the spec has no DELETE counterpart. Default: skip — without DELETE there is no cleanup path and resources accumulate in the target tenant (round-01/02 Sentry left 18 manual orphans). Use when you've vetted manual cleanup or are in a throwaway env.")
     .option(
       "--include <selector>",
       "Filter operations (m-15 ARV-9 grammar: path:/users/.* | tag:Webhooks | method:POST,PATCH). Repeatable.",
@@ -383,6 +384,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
         json,
         apiName,
         isolated: opts.isolated === true,
+        allowLeaks: opts.allowLeaks === true,
         report: rep.report,
         include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
         exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,

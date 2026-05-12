@@ -1,9 +1,10 @@
 ---
 id: ARV-144
 title: 'zond request --json-path can''t address top-level array body (e.g. [0].id)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 07:40'
+updated_date: '2026-05-12 08:03'
 labels:
   - bug
   - request
