@@ -1,28 +1,29 @@
 ---
 id: ARV-10
 title: 'report: NDJSON streaming reporter с published JSON Schema'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 15:47'
+updated_date: '2026-05-09 17:54'
 labels:
   - report
   - m-15
   - depth
   - ndjson
   - agent
+milestone: m-15
 dependencies:
   - ARV-1
-milestone: m-15
 priority: medium
 ---
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Каждое событие — snapshot JSON-line с правильным type
-- [ ] #2 Pipe-test: bun zond checks run --ndjson | head -3 | jq -c '.type' не ломается
-- [ ] #3 JSON Schema опубликована в docs/json-schema/ndjson-events.schema.json
-- [ ] #4 ajv-валидация: каждое сгенерированное событие валидно по schema
-- [ ] #5 Stdout discipline: при --ndjson stdout содержит только NDJSON, stderr — прогресс
+- [x] #1 Каждое событие — snapshot JSON-line с правильным type
+- [x] #2 Pipe-test: bun zond checks run --ndjson | head -3 | jq -c '.type' не ломается
+- [x] #3 JSON Schema опубликована в docs/json-schema/ndjson-events.schema.json
+- [x] #4 ajv-валидация: каждое сгенерированное событие валидно по schema
+- [x] #5 Stdout discipline: при --ndjson stdout содержит только NDJSON, stderr — прогресс
 <!-- AC:END -->
 
 ## Implementation Plan

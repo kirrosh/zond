@@ -1,7 +1,7 @@
 import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
-import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, clusterEnvIssues, buildEnvIssue, recommendedAction, softDeleteHint, type RecommendedAction, type EnvIssue } from "./failure-hints.ts";
+import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, clusterEnvIssues, buildEnvIssue, recommendedActionForGenerated, isGeneratedTest, softDeleteHint, type RecommendedAction, type EnvIssue } from "./failure-hints.ts";
 import { buildSuggestedFixes, type SuggestedFix } from "./suggested-fixes.ts";
 import { AUTH_PATH_RE } from "../runner/auth-path.ts";
 
@@ -40,6 +40,32 @@ const USEFUL_HEADERS = new Set([
   "www-authenticate", "allow",
 ]);
 const USEFUL_PREFIXES = ["x-", "ratelimit"];
+
+/** ARV-103 (F8): true when at least one assertion on the failing step is
+ *  a schema-validation kind. `--validate-schema` annotates each violated
+ *  field with `kind: "schema"` (set in src/core/runner/schema-validator.ts).
+ *  The assertions column is stored as JSON in SQLite; parse defensively. */
+function hasSchemaAssertion(raw: string | unknown[] | null | undefined): boolean {
+  if (raw === null || raw === undefined) return false;
+  let arr: unknown[];
+  if (Array.isArray(raw)) {
+    arr = raw;
+  } else if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return false;
+      arr = parsed;
+    } catch {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  for (const a of arr) {
+    if (a && typeof a === "object" && (a as { kind?: unknown }).kind === "schema") return true;
+  }
+  return false;
+}
 
 function filterHeaders(raw: string | null | undefined): Record<string, string> | undefined {
   if (!raw) return undefined;
@@ -170,8 +196,23 @@ export interface DiagnoseResult {
     response_headers?: Record<string, string>;
     assertions: unknown;
     duration_ms: number | null;
+    /** ARV-159: when this entry is the representative of a collapsed group
+     *  (status|failure_type signature), the total size of that group. Lets
+     *  consumers reading `.data.failures[]` see "this signature stands for
+     *  N underlying tests" without cross-referencing `.grouped_failures[]`.
+     *  Omitted when no collapsing occurred (failures ≤ 5 or
+     *  --verbose). */
+    group_count?: number;
   }>;
   grouped_failures?: FailureGroup[];
+  /** ARV-101 (F6): top-level aggregation keyed by `recommended_action`
+   *  enum so triage agents (zond-triage skill) can route on the canonical
+   *  action without re-folding `failures[].recommended_action` through
+   *  `jq | group_by`. Built from the *full* failure set (not the compact
+   *  subset), so counts match `.summary.failed`. Each bucket carries
+   *  total count + a small examples list (`<suite>/<test>`). Empty when
+   *  there are no failures. */
+  by_recommended_action?: Record<string, { count: number; examples: string[] }>;
 }
 
 export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, maxExamples?: number): DiagnoseResult {
@@ -196,7 +237,16 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
         softDeleteHint(r.response_status, r.request_method, parsedBody) ??
         statusHint(r.response_status);
       const failure_type = classifyFailure(r.status, r.response_status);
-      const rec_action = recommendedAction(failure_type, r.response_status);
+      // ARV-42: generator-emitted suites should not route to fix_test_logic —
+      // editing the YAML gets clobbered on the next `zond audit`.
+      const generated = isGeneratedTest(r.provenance, r.suite_file);
+      // ARV-103 (F8): walk the assertions array to detect a schema-kind
+      // failure (--validate-schema annotates each assertion with its kind).
+      // When present, propagate the flag so the classifier routes to
+      // report_backend_bug — schema violations are real contract bugs, not
+      // test-logic mistakes.
+      const schema_violation = hasSchemaAssertion(r.assertions);
+      const rec_action = recommendedActionForGenerated(failure_type, r.response_status, generated, schema_violation);
       const sHint = schemaHint(failure_type, r.response_status);
       return {
         suite_name: r.suite_name,
@@ -339,6 +389,26 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
     envFilePath,
   });
 
+  // ARV-101 (F6): aggregate failures by recommended_action enum so triage
+  // agents read .data.by_recommended_action.fix_env.count instead of
+  // re-folding failures[].recommended_action through `jq | group_by`. Built
+  // from the full failure set (not compactFailures) so counts match
+  // .summary.failed. Bounded examples list (5) keeps payload small while
+  // still pointing at concrete suites the agent can open.
+  const by_recommended_action: Record<string, { count: number; examples: string[] }> = {};
+  for (const f of failures) {
+    const key = f.recommended_action;
+    let bucket = by_recommended_action[key];
+    if (!bucket) {
+      bucket = { count: 0, examples: [] };
+      by_recommended_action[key] = bucket;
+    }
+    bucket.count += 1;
+    if (bucket.examples.length < 5) {
+      bucket.examples.push(`${f.suite_name}/${f.test_name}`);
+    }
+  }
+
   return {
     run: {
       id: diagRun.id,
@@ -361,10 +431,11 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
     ...(suggestedFixes.length > 0 ? { suggested_fixes: suggestedFixes } : {}),
     failures: compactFailures,
     ...(grouped_failures ? { grouped_failures } : {}),
+    ...(failures.length > 0 ? { by_recommended_action } : {}),
   };
 }
 
-type FailureItem = { suite_name: string; test_name: string; failure_type: string; recommended_action: RecommendedAction; hint?: string; response_status: number | null };
+type FailureItem = { suite_name: string; test_name: string; failure_type: string; recommended_action: RecommendedAction; hint?: string; response_status: number | null; group_count?: number };
 
 /** Group similar failures for compact output. Exported for testing. */
 export function groupFailures<T extends FailureItem>(failures: T[], maxExamples = 2): { grouped_failures?: FailureGroup[]; compactFailures: T[] } {
@@ -418,7 +489,10 @@ export function groupFailures<T extends FailureItem>(failures: T[], maxExamples 
     if (isApiError) {
       compactFailures.push(...group.items);
     } else {
-      compactFailures.push(group.items[0]!);
+      // ARV-159: tag the representative with the group size so
+      // `.data.failures[]` carries the multiplier inline.
+      const rep = { ...group.items[0]!, group_count: group.items.length };
+      compactFailures.push(rep as T);
     }
   }
 

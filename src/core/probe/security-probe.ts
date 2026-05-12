@@ -7,13 +7,14 @@
  * payload (SSRF / CRLF / open-redirect) and classifies the response.
  *
  * Why a CLI command rather than the markdown templates the audit skill
- * shipped with: the templates produced one HIGH (stored CRLF on Sentry) in
+ * shipped with: the templates produced one HIGH (stored CRLF in one real-world API) in
  * 5 minutes — but it was hand-copied per endpoint. Spec-driven autodetection
  * + a baseline-OK gate (TASK-138) turns that into a one-liner.
  */
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
+import { classify as classifyRecommendedAction } from "../classifier/recommended-action.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
 import { executeRequest } from "../runner/http-client.ts";
@@ -27,12 +28,16 @@ import {
   liveAuthHeaders,
   getAuthHeaders,
   pathTouchesSeededVar,
+  classifyPostSemantics,
 } from "./shared.ts";
+import { hasProbeBody, buildBodyAuthHeaders, serializeProbeBody } from "./probe-harness.ts";
 import {
   buildProbeUrl,
   buildJsonAuthHeaders,
   buildBaselineFromSpec,
 } from "./probe-harness.ts";
+import { applyAntiFp } from "../anti-fp/index.ts";
+import type { BaselineEchoCtx } from "../anti-fp/rules/baseline-echo.ts";
 
 // ──────────────────────────────────────────────
 // Types
@@ -121,6 +126,32 @@ export interface SecurityProbeOptions {
    *  own resources, so isolation is automatic, with cleanup falling back to
    *  the existing DELETE-counterpart + orphan-tracker flow (TASK-278). */
   isolated?: boolean;
+  /** ARV-140: opt-in to attacks that have no cleanup path (POSTs without a
+   *  DELETE counterpart). By default we now skip them — round-01/02 Sentry
+   *  runs left ~18 manually-cleanable orphans in prod because the probe
+   *  happily POSTed to `/teams/`, `/symbol-sources/`, etc., where the spec
+   *  has no DELETE. The pre-flight feasibility map drops these unless the
+   *  caller explicitly accepts the leak. */
+  allowLeaks?: boolean;
+}
+
+/** ARV-140: cleanup-feasibility map. Built once before the live loop so
+ *  every POST verdict can see whether the spec has a DELETE counterpart;
+ *  the summary digest also reports counts for skipped/forced endpoints.
+ *
+ *  ARV-153 extends the status enum with "action": POSTs whose last path
+ *  segment is a known action verb (`/capture`, `/verify`, `/cancel`, …)
+ *  operate on an existing resource and never allocate a new one, so a
+ *  DELETE counterpart isn't meaningful. These are attacked the same way
+ *  as POSTs with a real DELETE — without `--allow-leaks` — because there
+ *  is no resource to leak. */
+export interface CleanupFeasibility {
+  status: Record<string, "has-delete" | "no-delete-counterpart" | "action">;
+  skippedNoCleanup: number;
+  forcedNoCleanup: number;
+  /** ARV-153: POSTs we attacked even though no DELETE counterpart exists,
+   *  because the operation is semantically an action (no resource created). */
+  actionNoCleanupNeeded: number;
 }
 
 export interface SecurityProbeResult {
@@ -129,6 +160,8 @@ export interface SecurityProbeResult {
   specProbed: number;
   verdicts: SecurityVerdict[];
   warnings: string[];
+  /** ARV-140: cleanup-feasibility digest (POSTs without DELETE counterpart). */
+  cleanupFeasibility?: CleanupFeasibility;
 }
 
 // ──────────────────────────────────────────────
@@ -214,11 +247,55 @@ export async function runSecurityProbes(
   const warnings: string[] = [];
   let totalEndpoints = 0;
 
+  // ARV-140: pre-flight cleanup-feasibility scan. For each POST target, look
+  // up the DELETE counterpart in the spec once. Without --allow-leaks any
+  // attack against a POST-without-DELETE is dropped — orphan tracker can't
+  // clean it (no DELETE path to retry) so it would linger in the user's
+  // tenant indefinitely (feedback round-01/02 Sentry: 18 manual cleanups).
+  const feasibility: CleanupFeasibility = {
+    status: {},
+    skippedNoCleanup: 0,
+    forcedNoCleanup: 0,
+    actionNoCleanupNeeded: 0,
+  };
+  for (const ep of opts.endpoints) {
+    if (ep.deprecated) continue;
+    if (ep.method.toUpperCase() !== "POST") continue;
+    const key = `POST ${ep.path}`;
+    // ARV-153: action POSTs (`/capture`, `/verify`, `/cancel`, …) don't
+    // allocate a new resource — there is nothing to DELETE. Attacking them
+    // without `--allow-leaks` is safe; classifying them up front prevents
+    // the feasibility pre-flight from masking 18/22 Stripe action endpoints.
+    const semantics = classifyPostSemantics(ep);
+    if (semantics === "action") {
+      feasibility.status[key] = "action";
+      feasibility.actionNoCleanupNeeded += 1;
+      continue;
+    }
+    const hasDelete = findDeleteCounterpart(ep, opts.endpoints) !== undefined;
+    feasibility.status[key] = hasDelete ? "has-delete" : "no-delete-counterpart";
+    if (!hasDelete) {
+      if (opts.allowLeaks) feasibility.forcedNoCleanup += 1;
+      else feasibility.skippedNoCleanup += 1;
+    }
+  }
+
   for (const ep of opts.endpoints) {
     if (ep.deprecated) continue;
     const m = ep.method.toUpperCase();
     if (m !== "POST" && m !== "PUT" && m !== "PATCH") continue;
     totalEndpoints++;
+
+    // ARV-140: cleanup-feasibility gate. POST without a DELETE counterpart
+    // (and without --allow-leaks) is dropped before any live request fires.
+    // PUT/PATCH have snapshot/restore so they're unaffected here.
+    if (m === "POST" && !opts.allowLeaks) {
+      const status = feasibility.status[`POST ${ep.path}`];
+      if (status === "no-delete-counterpart") {
+        verdicts.push(skipped(ep, "skipped: no DELETE counterpart in spec (cleanup-feasibility pre-flight; pass --allow-leaks to override)"));
+        continue;
+      }
+    }
 
     // TASK-264: --isolated guard. Mutation on a seeded fixture would corrupt
     // user data the next `zond run` depends on; skip the endpoint instead.
@@ -227,8 +304,13 @@ export async function runSecurityProbes(
       continue;
     }
 
-    if (!hasJsonBody(ep)) {
-      verdicts.push(skipped(ep, "no JSON request body"));
+    // ARV-161 (round-08 F18): parity with mass-assignment — accept
+    // application/x-www-form-urlencoded endpoints too. Stripe v1 declares
+    // user-controlled URL fields (webhook url, return_url, ...) only on
+    // form-encoded bodies; the previous JSON-only gate hid 78+ POSTs from
+    // SSRF/CRLF/open-redirect probing.
+    if (!hasProbeBody(ep)) {
+      verdicts.push(skipped(ep, "no JSON or form-urlencoded request body"));
       continue;
     }
 
@@ -272,6 +354,7 @@ export async function runSecurityProbes(
     specProbed: verdicts.length,
     verdicts,
     warnings,
+    cleanupFeasibility: feasibility,
   };
 }
 
@@ -311,7 +394,11 @@ async function probeOneEndpoint(
     return skipped(ep, `cannot resolve path placeholders: ${unresolved.join(", ")}`);
   }
 
-  const headers = buildJsonAuthHeaders(ep, schemes, vars);
+  // ARV-161: Content-Type follows the spec — form-urlencoded for Stripe v1,
+  // JSON otherwise. All outbound payloads in this function (baseline, per-
+  // attack, restore-PUT) flow through serializeProbeBody for matching wire
+  // encoding.
+  const headers = buildBodyAuthHeaders(ep, schemes, vars);
 
   // ── Snapshot original state (TASK-151) ────────────────────────────────
   // For PUT/PATCH we MUST capture original state before any mutation. The
@@ -327,7 +414,7 @@ async function probeOneEndpoint(
   // Eliminates the "5 × 404" output the markdown template produced in the
   // audit. If baseline isn't 2xx, attacks would just hit the same 4xx
   // wall and tell us nothing.
-  const fullBaseline = await sendBaseline(m, url, headers, baseline, opts);
+  const fullBaseline = await sendBaseline(ep, m, url, headers,baseline, opts);
   if (fullBaseline.kind === "network") {
     verdict.severity = "high";
     verdict.summary = `baseline network error: ${fullBaseline.reason}`;
@@ -336,7 +423,7 @@ async function probeOneEndpoint(
   verdict.baseline = { status: fullBaseline.status };
 
   // ── Partial-body fallback (TASK-152) ──────────────────────────────────
-  // Sentry / Stripe / GitHub-style APIs accept partial PUT — full bodies
+  // common SaaS-style APIs accept partial PUT — full bodies
   // generated from spec get rejected (422 / 400). Walking each detected
   // field with a single-key body recovers the proven-HIGH cases that
   // otherwise fall into INCONCLUSIVE-BASELINE.
@@ -350,7 +437,7 @@ async function probeOneEndpoint(
       const partial: Record<string, unknown> = {};
       if (hit.field in baseline) partial[hit.field] = baseline[hit.field];
       else partial[hit.field] = "";
-      const partResp = await sendBaseline(m, url, headers, partial, opts);
+      const partResp = await sendBaseline(ep, m, url, headers,partial, opts);
       if (partResp.kind === "ok" && partResp.status >= 200 && partResp.status < 300) {
         perFieldBaseline.set(hit.field, partial);
       }
@@ -428,7 +515,7 @@ async function probeOneEndpoint(
       let resp;
       try {
         resp = await executeRequest(
-          { method: m, url, headers, body: JSON.stringify(body) },
+          { method: m, url, headers, body: serializeProbeBody(ep, body).content },
           { timeout: opts.timeoutMs ?? 30000, retries: 0 },
         );
       } catch (err) {
@@ -444,6 +531,29 @@ async function probeOneEndpoint(
         continue;
       }
       const finding = classify(hit, payload, resp);
+      // ARV-126: route the 2xx-no-echo low-severity classification
+      // through the anti-FP registry. When the response body deeply
+      // equals the baseline body, the server ignored the attack
+      // payload entirely — no side-effect to verify — and the
+      // `baseline-echo` rule downgrades the finding to OK with a
+      // wontfix banner. Only relevant for `mode === "full"` (we don't
+      // retain per-field baseline response bodies).
+      if (
+        finding.severity === "low"
+        && !finding.echoed
+        && mode === "full"
+        && fullBaseline.kind === "ok"
+      ) {
+        const ctx: BaselineEchoCtx = {
+          responseBody: resp.body_parsed ?? resp.body,
+          baselineBody: fullBaseline.body,
+        };
+        const suppression = applyAntiFp(ctx, "probe:security");
+        if (suppression) {
+          finding.severity = "ok";
+          finding.reason = `${suppression.reason} (${suppression.ruleId})`;
+        }
+      }
       // Annotate which body shape was used for this attack — useful for
       // case-studies and emit-tests.
       finding.reason = mode === "partial"
@@ -455,7 +565,7 @@ async function probeOneEndpoint(
       // PUT-rename'd resource would wipe a live entity, restore-PUT puts
       // it back to the captured original. Only restore the single field
       // this attack mutated — sending a multi-key body trips
-      // `422 use partial PUT` on Sentry / Stripe / GitHub-shaped APIs.
+      // `422 use partial PUT` on common SaaS-shaped APIs.
       if (resp.status >= 200 && resp.status < 300 && !opts.noCleanup) {
         if (snapshot) {
           await restoreOriginal(
@@ -494,6 +604,7 @@ type BaselineResult =
   | { kind: "network"; reason: string };
 
 async function sendBaseline(
+  ep: EndpointInfo,
   method: string,
   url: string,
   headers: Record<string, string>,
@@ -501,8 +612,13 @@ async function sendBaseline(
   opts: ProbeStepOpts,
 ): Promise<BaselineResult> {
   try {
+    // ARV-161: serialize via serializeProbeBody so form-encoded endpoints
+    // get x-www-form-urlencoded payload matching Content-Type.
+    const wire = body && typeof body === "object" && !Array.isArray(body)
+      ? serializeProbeBody(ep, body as Record<string, unknown>).content
+      : JSON.stringify(body);
     const resp = await executeRequest(
-      { method, url, headers, body: JSON.stringify(body) },
+      { method, url, headers, body: wire },
       { timeout: opts.timeoutMs ?? 30000, retries: 0 },
     );
     return {
@@ -567,7 +683,7 @@ async function snapshotOriginal(
  * Restore the original state captured by `snapshotOriginal`. Sends a
  * minimal PUT/PATCH containing only the fields the probe mutated —
  * sending the full snapshot body trips `422 use partial PUT` on
- * Sentry/Stripe-shaped APIs (round-4 regression), so we replay each
+ * SaaS-shaped APIs (round-4 regression), so we replay each
  * dirty field as its own single-key request.
  *
  * `verdict.cleanup.error` is **accumulated** across calls (not
@@ -599,7 +715,7 @@ async function restoreOriginal(
     f => !READ_ONLY.has(f) && f in snapshot.body,
   );
 
-  // Per-field PUT — works for both partial-PUT APIs (Sentry) and
+  // Per-field PUT — works for both partial-PUT APIs and
   // full-PUT APIs (the body just carries one of the legal keys).
   const failures: string[] = [];
   let lastSuccessStatus = 0;
@@ -610,7 +726,7 @@ async function restoreOriginal(
     let resp;
     try {
       resp = await executeRequest(
-        { method: m, url, headers, body: JSON.stringify(body) },
+        { method: m, url, headers, body: serializeProbeBody(ep, body).content },
         { timeout: opts.timeoutMs ?? 30000, retries: 0 },
       );
     } catch (err) {
@@ -639,11 +755,13 @@ async function restoreOriginal(
   };
 }
 
-/** TASK-294: stamp `recommended_action` on every finding before returning. */
+/** ARV-56: route through the single classifier. */
 function stampAction(f: SecurityFinding): SecurityFinding {
-  if (f.severity === "high" || f.severity === "low") {
-    f.recommended_action = "report_backend_bug";
-  }
+  const action = classifyRecommendedAction({
+    finding_class: "probe:security",
+    severity: f.severity as Parameters<typeof classifyRecommendedAction>[0]["severity"],
+  });
+  if (action) f.recommended_action = action;
   return f;
 }
 
@@ -977,6 +1095,21 @@ export function formatSecurityDigest(
   lines.push(`Spec: \`${specPath}\``);
   lines.push(`Classes: ${result.classes.join(", ")}`);
   lines.push(`Endpoints scanned: ${result.totalEndpoints} · probed: ${result.specProbed}`);
+  // ARV-140 AC#4: surface the cleanup-feasibility outcome up front so a
+  // green run doesn't hide "we attacked 14 leak-prone POSTs anyway".
+  if (result.cleanupFeasibility) {
+    const f = result.cleanupFeasibility;
+    if (f.skippedNoCleanup > 0) {
+      lines.push(`Cleanup pre-flight: ${f.skippedNoCleanup} endpoint(s) skipped (no DELETE counterpart). Pass \`--allow-leaks\` to attack anyway.`);
+    } else if (f.forcedNoCleanup > 0) {
+      lines.push(`Cleanup pre-flight: ${f.forcedNoCleanup} endpoint(s) attacked despite no DELETE counterpart (--allow-leaks).`);
+    }
+    // ARV-153: surface action-verb POSTs we now attack without a DELETE
+    // counterpart so green runs make the recall win visible.
+    if (f.actionNoCleanupNeeded > 0) {
+      lines.push(`Cleanup pre-flight: ${f.actionNoCleanupNeeded} action POST(s) attacked (no resource created — DELETE counterpart not needed).`);
+    }
+  }
   lines.push("");
 
   // Cleanup failures section is mandatory and goes FIRST when present —

@@ -3,28 +3,29 @@ id: ARV-2
 title: >-
   checks: 7 conformance checks
   (status_code/content_type/headers/schema/missing_required_header/unsupported_method/not_a_server_error)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 15:46'
+updated_date: '2026-05-09 16:11'
 labels:
   - checks
   - m-15
   - depth
   - conformance
+milestone: m-15
 dependencies:
   - ARV-1
-milestone: m-15
 priority: high
 ---
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Все 7 checks зарегистрированы и видны в zond checks list
-- [ ] #2 Каждый check имеет fixture-based unit-тест с минимум 3 кейсами (ok/fail/edge)
-- [ ] #3 response_schema_conformance переиспользует runner/schema-validator.ts без дублирования
-- [ ] #4 unsupported_method разделяет код с method-probe через shared util
-- [ ] #5 Integration-тест: mock-server с инжектированным 502 → not_a_server_error выдаёт finding с правильным severity
-- [ ] #6 Edge-тест: response с 'default' в spec для status_code_conformance — не считается finding'ом
+- [x] #1 Все 7 checks зарегистрированы и видны в zond checks list
+- [x] #2 Каждый check имеет fixture-based unit-тест с минимум 3 кейсами (ok/fail/edge)
+- [x] #3 response_schema_conformance переиспользует runner/schema-validator.ts без дублирования
+- [x] #4 unsupported_method разделяет код с method-probe через shared util
+- [x] #5 Integration-тест: mock-server с инжектированным 502 → not_a_server_error выдаёт finding с правильным severity
+- [x] #6 Edge-тест: response с 'default' в spec для status_code_conformance — не считается finding'ом
 <!-- AC:END -->
 
 ## Implementation Plan

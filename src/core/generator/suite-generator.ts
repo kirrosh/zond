@@ -5,6 +5,7 @@ import type { SourceMetadata } from "../parser/types.ts";
 import { generateFromSchema, generateMultipartFromSchema } from "./data-factory.ts";
 import { groupEndpointsByTag } from "./chunker.ts";
 import { getAuthHeaders as sharedGetAuthHeaders } from "../probe/shared.ts";
+import { flattenToFormFields } from "../runner/form-encode.ts";
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -19,7 +20,14 @@ import { getAuthHeaders as sharedGetAuthHeaders } from "../probe/shared.ts";
  */
 export function singularizeResource(word: string): string {
   if (word.length > 3 && /ies$/i.test(word)) return word.slice(0, -3) + "y";
-  if (word.length > 3 && /(ch|sh|x|s|z)es$/i.test(word)) return word.slice(0, -2);
+  // ARV-100 (F5): the inner alternative was `s` — but a single trailing `s`
+  // catches every regular plural whose stem ends in any vowel + `s` (e.g.
+  // `releases`, `phases`, `houses`), and `slice(-2)` then chops "es" instead
+  // of just "s". The result was `releas_id` / `phas_id` capture vars that
+  // matched nothing on the manifest side. Restrict the rule to the genuine
+  // sibilant double — `ss` — so `addresses → address` keeps working without
+  // dragging single-s plurals along.
+  if (word.length > 3 && /(ch|sh|x|ss|z)es$/i.test(word)) return word.slice(0, -2);
   if (word.length > 1 && /[^s]s$/i.test(word)) return word.slice(0, -1);
   return word;
 }
@@ -28,10 +36,16 @@ export function singularizeResource(word: string): string {
  * Build a `<resource>_id` capture/var name. Strips dashes so the result is
  * a safe template variable identifier — `contact-properties` becomes
  * `contact_property_id` rather than `contact-propertie_id` (TASK-214).
+ *
+ * ARV-100 (F5): always lowercase. Path-params/headers in fixtures-builder
+ * are normalised to lowercase (line 157), so capture vars must match — a
+ * `Groups` resource would otherwise produce `Group_id` while path-params on
+ * the same endpoint produce `group_id`, splitting the `{{var}}` namespace
+ * and triggering "Undefined variables" in `zond run`.
  */
-function resourceVar(resource: string, suffix: string): string {
+export function resourceVar(resource: string, suffix: string): string {
   const singular = singularizeResource(resource);
-  return `${singular.replace(/[^a-zA-Z0-9]+/g, "_")}_${suffix}`;
+  return `${singular.replace(/[^a-zA-Z0-9]+/g, "_")}_${suffix}`.toLowerCase();
 }
 
 /** Convert OpenAPI path params {param} to test interpolation {{param}} */
@@ -105,7 +119,7 @@ function selectHealthcheckEndpoint(gets: EndpointInfo[]): EndpointInfo | undefin
  * Order:
  *   1. First 2xx declared in the spec (most authoritative).
  *   2. Method-aware default when the spec lists only non-2xx responses or none
- *      at all (Resend OpenAPI is silent for several mutating endpoints — the
+ *      at all (many OpenAPI specs is silent for several mutating endpoints — the
  *      actual runtime returns 201/204, while the old default of 200 caused
  *      tests to fail at runtime). We never assert a 4xx/5xx as the success
  *      status — that would generate guaranteed-failing tests.
@@ -205,7 +219,7 @@ function getSuiteHeaders(
 }
 
 /** Common id-like field names looked up after `id` itself.
- *  TASK-139: Sentry / many real APIs return `slug`, `uuid`, `version`, `key`,
+ *  TASK-139: many real-world APIs return `slug`, `uuid`, `version`, `key`,
  *  or `name` instead of an `id` field on create responses. Without these,
  *  CRUD chains fall back to capturing `"id"` from a body that doesn't have
  *  one, breaking the `{id}` substitution in follow-up reads. */
@@ -336,6 +350,12 @@ export function generateStep(
   if (["POST", "PUT", "PATCH"].includes(method) && ep.requestBodySchema) {
     if (ep.requestBodyContentType === "multipart/form-data") {
       step.multipart = generateMultipartFromSchema(ep.requestBodySchema);
+    } else if (ep.requestBodyContentType === "application/x-www-form-urlencoded") {
+      // ARV-149: form-encoded endpoints (Stripe v1 et al.) — emit `form:` so
+      // the runner posts URL-encoded bodies with bracket notation. Without
+      // this, generate baked `json:` blocks and every POST 400'd with
+      // "wrong content type".
+      step.form = flattenToFormFields(generateFromSchema(ep.requestBodySchema));
     } else {
       step.json = generateFromSchema(ep.requestBodySchema);
     }
@@ -388,7 +408,7 @@ export interface DetectCrudResult {
  *  Match logic (TASK-139):
  *    - basePath = POST endpoint's path with any trailing slash trimmed.
  *    - item path = `<basePath>/{param}` with optional trailing slash.
- *  This catches Sentry-style `POST /alert-rules/` + `GET /alert-rules/{id}/`
+ *  This catches common SaaS-style `POST /alert-rules/` + `GET /alert-rules/{id}/`
  *  pairs that previously fell through because the regex required the same
  *  slash form on both. */
 export function detectCrudGroups(endpoints: EndpointInfo[]): CrudGroup[] {
@@ -410,13 +430,13 @@ export function detectCrudGroupsWithDiagnostics(
 
     // Match `<basePath>/{param}` with optional trailing slash. Tolerates
     // both `POST /alerts/` + `GET /alerts/{id}` and `POST /alerts` +
-    // `GET /alerts/{id}/`, which Sentry mixes within the same spec.
+    // `GET /alerts/{id}/`, which some real-world specs mix.
     const itemPattern = new RegExp(`^${escapeRegex(basePath)}/\\{([^}]+)\\}/?$`);
     const itemEndpoints = endpoints.filter(
       ep => !ep.deprecated && itemPattern.test(ep.path),
     );
 
-    // Fallback for "subdomain"/nested-item routing (Sentry-style):
+    // Fallback for "subdomain"/nested-item routing (common SaaS-style):
     // create lives under one root (`/api/0/organizations/{org}/teams/`)
     // but item-path lives under another (`/api/0/teams/{org}/{team}/`).
     // The strict basePath/{id} regex misses these. Match instead by:
@@ -534,7 +554,15 @@ export function generateCrudSuite(
   securitySchemes: SecuritySchemeInfo[],
 ): RawSuite {
   const captureField = group.create ? getCaptureField(group.create, group.idParam) : "id";
-  const captureVar = resourceVar(group.resource, "id");
+  // ARV-137: use the spec's path-param name as the capture var. Previously
+  // we synthesised `<resource>_id` via `resourceVar(...)`, which produced
+  // phantom manifest dupes whenever the spec named the path-param anything
+  // other than `<resource>_id` (e.g. `monitor_id_or_slug`, `version`, or
+  // collection-stem mismatches like resource=`saved`/idParam=`query_id`).
+  // Aligning on `group.idParam` keeps tests, manifest, and spec consistent.
+  // Fallback to `resourceVar` only when the group has no idParam (defensive
+  // — shouldn't happen for any group with a read/update/delete endpoint).
+  const captureVar = group.idParam || resourceVar(group.resource, "id");
   const tests: RawStep[] = [];
 
   const allEps = [group.create, group.list, group.read, group.update, group.delete].filter(Boolean) as EndpointInfo[];
@@ -922,7 +950,7 @@ export function generateSuites(opts: {
     // (with skip_if guards). TASK-240 — unified naming convention:
     // always emit `smoke-<tag>-positive.yaml`, never the bare
     // `smoke-<tag>.yaml`, so file listings don't have to explain why a
-    // tag has only `-negative` (e.g. Sentry's Explore tag) or why two
+    // tag has only `-negative` (e.g. a vendor-specific tag) or why two
     // siblings differ in suffix shape.
     const positiveTests = [
       ...paramlessGets.map(ep => {

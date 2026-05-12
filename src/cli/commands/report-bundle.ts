@@ -164,6 +164,7 @@ export async function reportBundleCommand(options: ReportBundleOptions): Promise
     if (include.includes("case-study")) {
       const failure = pickPrimaryFailure(results);
       if (failure) {
+        const specDoc = await loadSpecDoc(run);
         const md = applySanitizer(renderCaseStudy({
           result: failure,
           run,
@@ -171,6 +172,8 @@ export async function reportBundleCommand(options: ReportBundleOptions): Promise
           specVersion: null,
           zondVersion: VERSION,
           bodyCapBytes: bodyCap,
+          apiName: collectionApiName(run),
+          specDoc: specDoc as Parameters<typeof renderCaseStudy>[0]["specDoc"],
         }));
         const file = join(runDir, "case-study.md");
         await Bun.write(file, md);
@@ -244,6 +247,26 @@ async function loadSpecTitle(run: RunRecord): Promise<string | null> {
   } catch {
     return collection.name ?? null;
   }
+}
+
+/** ARV-107: load the parsed spec document for the run's collection so the
+ *  case-study renderer can auto-extract the operation slice. */
+async function loadSpecDoc(run: RunRecord): Promise<unknown | null> {
+  if (run.collection_id == null) return null;
+  const collection = getCollectionById(run.collection_id);
+  if (!collection?.openapi_spec) return null;
+  try {
+    return await readOpenApiSpec(resolveCollectionSpec(collection.openapi_spec));
+  } catch {
+    return null;
+  }
+}
+
+/** ARV-106/107: short registry slug (`--api <name>` form) for the run's
+ *  collection, used to fill the case-study `apiName` option. */
+function collectionApiName(run: RunRecord): string | null {
+  if (run.collection_id == null) return null;
+  return getCollectionById(run.collection_id)?.name ?? null;
 }
 
 function pickPrimaryFailure(results: StoredStepResult[]): StoredStepResult | null {

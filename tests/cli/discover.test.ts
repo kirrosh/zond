@@ -234,7 +234,10 @@ describe("zond discover", () => {
     const empty = env.data.items.find((i: { varName: string }) => i.varName === "empty_id");
     expect(empty.status).toBe("miss-empty");
     expect(empty.reason).toMatch(/no empties in target API/);
-    expect(empty.reason).toMatch(/create one first/);
+    // ARV-31: hint should point at `--seed --apply` so tester knows the auto-create
+    // path exists, instead of being told only "create one first" in the product UI.
+    expect(empty.reason).toMatch(/--seed --apply/);
+    expect(empty.reason).toMatch(/POST-create/);
 
     // TASK-294: every miss-* item carries a recommended_action for agent routing.
     type Item = { varName: string; status: string; recommended_action?: string };
@@ -249,6 +252,104 @@ describe("zond discover", () => {
     for (const i of items.filter(i => i.status === "write")) {
       expect(i.recommended_action).toBeUndefined();
     }
+  });
+
+  // ARV-46: when .api-fixtures.yaml is present, discover iterates the
+  // manifest (not env keys / FK deps) and surfaces every entry — including
+  // env keys without a manifest entry, which become a warning.
+  test("manifest-driven discover: one row per manifest entry + unknown-env-key warning", async () => {
+    const mfDir = join(tmpDir, "apis", "demo-mf");
+    await mkdir(mfDir, { recursive: true });
+    await writeFile(join(mfDir, "spec.json"), JSON.stringify({
+      openapi: "3.0.0",
+      info: { title: "demo-mf", version: "1" },
+      paths: {
+        "/audiences": { get: { responses: { "200": { description: "ok" } } } },
+        "/audiences/{audience_id}": {
+          get: { parameters: [{ name: "audience_id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "ok" } } },
+        },
+      },
+    }));
+    await writeFile(join(mfDir, ".api-resources.yaml"),
+      [
+        "resources:",
+        "  - resource: audiences",
+        "    basePath: /audiences",
+        "    itemPath: /audiences/{audience_id}",
+        "    idParam: audience_id",
+        "    captureField: id",
+        "    hasFullCrud: false",
+        "    endpoints:",
+        "      list: GET /audiences",
+        "    fkDependencies: []",
+        "",
+      ].join("\n"));
+    await writeFile(join(mfDir, ".api-fixtures.yaml"),
+      [
+        "fixtures:",
+        "  - name: base_url",
+        "    source: server",
+        "    required: true",
+        "    description: server",
+        "    affectedEndpoints: ['*']",
+        "  - name: auth_token",
+        "    source: auth",
+        "    required: true",
+        "    description: bearer",
+        "    affectedEndpoints: []",
+        "  - name: audience_id",
+        "    source: path",
+        "    required: true",
+        "    description: path param",
+        "    affectedEndpoints: ['GET /audiences/{audience_id}']",
+        "  - name: capture_var",
+        "    source: capture-chain",
+        "    required: false",
+        "    description: chain var",
+        "    affectedEndpoints: []",
+        "",
+      ].join("\n"));
+
+    const envPath = join(mfDir, ".env.yaml");
+    // Note: legacy_var is present in env but not in manifest → must surface
+    // as unknownEnvKeys.
+    await writeFile(envPath, `base_url: ${baseUrl}\nlegacy_var: leftover\n`);
+
+    const origWrite = process.stdout.write;
+    let captured = "";
+    process.stdout.write = ((chunk: unknown) => {
+      captured += typeof chunk === "string" ? chunk : String(chunk);
+      return true;
+    }) as typeof process.stdout.write;
+    try {
+      const exit = await discoverCommand({
+        specPath: join(mfDir, "spec.json"),
+        apiDir: mfDir,
+        envPath,
+        apply: false,
+        json: true,
+      });
+      expect(exit).toBe(0);
+    } finally {
+      process.stdout.write = origWrite;
+    }
+
+    const env = JSON.parse(captured);
+    const items = env.data.items as Array<{ varName: string; manifestStatus?: string; manifestSource?: string }>;
+    // AC#4: one row per manifest entry (4 entries here).
+    expect(items.length).toBe(4);
+    const byName = Object.fromEntries(items.map(i => [i.varName, i]));
+    expect(byName.base_url!.manifestStatus).toBe("skipped:not-required");
+    expect(byName.auth_token!.manifestStatus).toBe("skipped:not-required");
+    // audience_id is path-source, list endpoint /audiences responds with array → filled.
+    expect(byName.audience_id!.manifestStatus).toBe("filled");
+    // capture-chain entries are not the discover loop's responsibility.
+    expect(byName.capture_var!.manifestStatus).toBe("skipped:not-required");
+    // Manifest summary: filled = 1, required (manifest) = 3.
+    expect(env.data.summary.manifest).toBeDefined();
+    expect(env.data.summary.manifest.required).toBe(3);
+    expect(env.data.summary.manifest.filled).toBe(1);
+    expect(env.data.summary.manifest.unknownEnvKeys).toContain("legacy_var");
   });
 
   test("missing base_url returns exit 2", async () => {

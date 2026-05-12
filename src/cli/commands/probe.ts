@@ -13,16 +13,113 @@
 
 import type { Command } from "commander";
 
-import { probeStaticCommand, resolveStaticClasses } from "./probe-static.ts";
-import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from "./probe-mass-assignment.ts";
-import { probeSecurityCommand } from "./probe-security.ts";
-import { globalJson, resolveSpecArg, resolveApiEnv } from "../resolve.ts";
+// ARV-129: action handlers relocated from top-level commands/probe-*.ts
+// into commands/probe/ — the orchestrator (this file) stays at top level,
+// the per-subcommand modules are no longer mistaken for siblings.
+import { probeStaticCommand, resolveStaticClasses } from "./probe/static.ts";
+import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from "./probe/mass-assignment.ts";
+import { probeSecurityCommand } from "./probe/security.ts";
+import { SECURITY_CLASSES } from "../../core/probe/security-probe.ts";
+import { globalJson, resolveSpecArg, resolveApiEnv, resolveApiCollection } from "../resolve.ts";
+import { getApi } from "../util/api-context.ts";
 import { existsSync } from "fs";
-import { dirname } from "node:path";
+import { join, dirname } from "node:path";
 import { parsePositiveInt } from "../argv.ts";
 import { printError } from "../output.ts";
+import { jsonError, printJson } from "../json-envelope.ts";
 import { loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
+import { resolveOutput, OutputSpecError, type OutputSpec, type ResolvedOutput } from "../../core/output/index.ts";
+
+/**
+ * ARV-119 (m-19): typed declaration of the `--report` / `--output`
+ * surface shared by the live-probe subcommands (mass-assignment +
+ * security). Both render a markdown digest by default, with `--report
+ * json` switching to a structured JSON file body. `--output <path>`
+ * routes the rendered body to a file; without it the body lands on
+ * stdout (when `--json` is not set — see m-17 / ARV-51: the `--json`
+ * envelope is a separate channel that wraps the structured result).
+ *
+ * `probe static` is *not* on this spec — its `--output` is a directory
+ * where YAML probe suites are written, semantics not output-format.
+ */
+export const PROBE_OUTPUT_SPEC: OutputSpec<unknown> = {
+  command: "probe",
+  defaultFormat: "markdown",
+  formats: {
+    markdown: { defaultChannel: "stdout", description: "Human-readable digest (default)" },
+    json:     { defaultChannel: "stdout", description: "Structured JSON body — same shape as the --json envelope's data." },
+  },
+};
+
+/**
+ * ARV-119: shared `--report` / `--output` / `--overwrite` option set
+ * for the two live-probe subcommands. Resolution goes through
+ * `resolveProbeOutputFlags` so unknown formats and mutually-exclusive
+ * combinations surface the same error for both subcommands instead of
+ * each one reimplementing the validation.
+ */
+function addProbeReportOutputOptions(cmd: Command): Command {
+  return cmd
+    .option("--output <file>", "ARV-119: write the rendered report to this file (default: stdout). Pairs with --report to pick the format.")
+    .option(
+      "--report <format>",
+      "ARV-119: format for --output / non-json stdout (markdown|json). Default markdown. The --json envelope (m-17 ARV-51) is a separate channel and is always structured.",
+      "markdown",
+    )
+    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)");
+}
+
+interface ProbeReportOutputOpts {
+  report?: string;
+  output?: string;
+}
+
+/**
+ * ARV-119: resolve --report / --output through PROBE_OUTPUT_SPEC. On
+ * unknown format / mutual-exclusion violation, prints the consistent
+ * error (envelope when --json) and returns null — caller exits 2.
+ */
+function resolveProbeOutputFlags(
+  command: string,
+  opts: ProbeReportOutputOpts,
+  json: boolean,
+): { resolved: ResolvedOutput; report: "markdown" | "json"; output?: string } | null {
+  let resolved: ResolvedOutput;
+  try {
+    resolved = resolveOutput(PROBE_OUTPUT_SPEC, { report: opts.report, output: opts.output });
+  } catch (err) {
+    if (err instanceof OutputSpecError) {
+      if (json) printJson(jsonError(command, [err.message]));
+      else printError(err.message);
+      return null;
+    }
+    throw err;
+  }
+  const report: "markdown" | "json" = resolved.format === "json" ? "json" : "markdown";
+  const output = resolved.channel === "file" ? resolved.path : undefined;
+  return { resolved, report, output };
+}
+
+/**
+ * ARV-53: thin wrapper kept for the existing call-sites — the real chain
+ * (local → ancestor → ZOND_API_GLOBAL/ZOND_API/.zond/current-api) lives in
+ * cli/util/api-context.ts. `resolveProbeApi` predates that helper (ARV-33).
+ */
+export function resolveProbeApi(
+  optsApi: string | undefined,
+  cmd: { opts?: () => Record<string, unknown>; parent?: { opts(): Record<string, unknown> } | null } | undefined,
+): string | undefined {
+  // Adapt the loose mock shape used at the old call-sites to CommandLike.
+  if (cmd === undefined) {
+    return getApi(undefined, { api: optsApi });
+  }
+  const adapted = {
+    opts: () => (typeof cmd.opts === "function" ? cmd.opts() : {}),
+    parent: cmd.parent ?? null,
+  };
+  return getApi(adapted, { api: optsApi });
+}
 
 /**
  * TASK-233: pick the env file to feed live-probe commands.
@@ -83,7 +180,10 @@ function defineProbeStatic(parent: Command, name: string): void {
     )
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
-    .requiredOption("--output <dir>", "Output directory for generated probe files")
+    // ARV-30: --output is optional when --api (or current-api) is set —
+    // probes land in apis/<name>/probes/static/ alongside generate's tests/.
+    // Required only when probing a bare spec with no registered collection.
+    .option("--output <dir>", "Output directory for generated probe files (default: apis/<api>/probes/static when --api / current-api is set)")
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .option("--list-tags", "List available tags from spec and exit")
     .option("--max-per-endpoint <N>", "Cap negative-input probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
@@ -92,16 +192,33 @@ function defineProbeStatic(parent: Command, name: string): void {
     .option("--include <classes>", "Comma-separated subset of {validation, methods} (default: both)")
     .option("--exclude <classes>", "Comma-separated subset to skip (mutually exclusive with --include)")
     .action(async (specPos: string | undefined, optsArg, cmdRef: Command) => {
-      const resolved = resolveSpecArg(specPos, optsArg.api, optsArg.db);
+      // ARV-33: see resolveProbeApi — keep the chain consistent with the
+      // sibling subcommands (mass-assignment, security).
+      const apiName = resolveProbeApi(optsArg.api, cmdRef);
+      const resolved = resolveSpecArg(specPos, apiName, optsArg.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
 
       const r = resolveStaticClasses(optsArg.include, optsArg.exclude);
       if ("error" in r) { printError(r.error); process.exitCode = 2; return; }
 
+      // ARV-30: derive --output from the registered API's base_dir when the
+      // user didn't pass one. Bare-spec invocations (positional only, no --api,
+      // no current-api) still must pass --output explicitly.
+      let outputDir: string | undefined = optsArg.output;
+      if (!outputDir && apiName) {
+        const col = resolveApiCollection(apiName, optsArg.db);
+        if (!("error" in col) && col.baseDir) outputDir = join(col.baseDir, "probes", "static");
+      }
+      if (!outputDir) {
+        printError("--output <dir> is required when no --api / current-api can resolve apis/<name>/probes/static.");
+        process.exitCode = 2;
+        return;
+      }
+
       const useReal = optsArg.useSyntheticParents !== true;
       process.exitCode = await probeStaticCommand({
         specPath: resolved.spec,
-        output: optsArg.output,
+        output: outputDir,
         tag: optsArg.tag,
         maxPerEndpoint: optsArg.maxPerEndpoint,
         noCleanup: optsArg.cleanup === false,
@@ -114,7 +231,7 @@ function defineProbeStatic(parent: Command, name: string): void {
 }
 
 function defineProbeMassAssignment(parent: Command, name: string): void {
-  parent
+  const sub = parent
     .command(`${name} [spec]`)
     .description(
       "Live probe for mass-assignment / privilege-escalation: classifies POST/PATCH/PUT against suspected extra fields (is_admin, role, account_id, owner_id, user_id, verified, is_system) as rejected (4xx) | accepted-and-applied (HIGH) | accepted-and-ignored (LOW) via follow-up GET",
@@ -122,17 +239,34 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
     .option("--env <file>", "Env YAML with base_url + auth_token (live calls require this; auto-derived from apis/<name>/.env.yaml when --api is given)")
-    .option("--output <file>", "Write markdown digest to file (default: stdout)")
     .option("--emit-tests <dir>", "Also emit YAML regression suites locking in safe behaviour for CI")
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .option("--list-tags", "List available tags from spec and exit")
     .option("--no-cleanup", "Skip follow-up DELETE for resources accidentally created by 2xx probes")
     .option("--no-discover", "Disable auto-discovery of path-param fixtures via GET-on-list (TASK-92)")
+    .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests (m-17 ARV-52)")
+    .option(
+      "--include <selector>",
+      "Filter operations (m-15 ARV-9 grammar: path:/users/.* | tag:Webhooks | method:POST,PATCH | operation-id:create.*). Repeatable.",
+      (v: string, prev: string[] = []) => prev.concat(v),
+      [] as string[],
+    )
+    .option(
+      "--exclude <selector>",
+      "Drop operations matching <selector>. Repeatable. Same grammar as --include.",
+      (v: string, prev: string[] = []) => prev.concat(v),
+      [] as string[],
+    )
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
-    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
-    .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.")
-    .action(async (specPos: string | undefined, opts, cmd: Command) => {
-      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+    .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.");
+  addProbeReportOutputOptions(sub);
+  sub.action(async (specPos: string | undefined, opts, cmd: Command) => {
+      // ARV-33: resolve --api via the same fallback chain as prepare-fixtures /
+      // ARV-29 — direct opts, then parent opts, then ZOND_API_GLOBAL /
+      // .zond/current-api. Otherwise `zond probe mass-assignment --api foo`
+      // hits commander's global-option absorption and `opts.api` is empty.
+      const apiName = resolveProbeApi(opts.api, cmd);
+      const resolved = resolveSpecArg(specPos, apiName, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
 
       // --emit-template short-circuits the live probe.
@@ -146,13 +280,21 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         return;
       }
 
-      const envFile = resolveProbeEnv(opts.env, opts.api, opts.db);
+      // m-17 / ARV-52 + ARV-58: dry-run and list-tags paths tolerate a
+      // missing env file the way probe-security does — the user wants
+      // to inspect the plan / available tags, not hit a live API.
+      const envFile = resolveProbeEnv(opts.env, apiName, opts.db, {
+        tolerateMissing: opts.dryRun === true || opts.listTags === true,
+      });
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
-      const timeoutMs = await resolveProbeTimeout(opts.timeout, opts.api, envFile.env);
+      const timeoutMs = await resolveProbeTimeout(opts.timeout, apiName, envFile.env);
+      const json = globalJson(cmd);
+      const rep = resolveProbeOutputFlags("probe-mass-assignment", opts, json);
+      if (!rep) { process.exitCode = 2; return; }
       process.exitCode = await probeMassAssignmentCommand({
         specPath: resolved.spec,
         env: envFile.env,
-        output: opts.output,
+        output: rep.output,
         emitTests: opts.emitTests,
         tag: opts.tag,
         listTags: opts.listTags,
@@ -160,42 +302,78 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         noDiscover: opts.discover === false,
         timeoutMs,
         overwrite: opts.overwrite === true,
-        json: globalJson(cmd),
+        json,
+        dryRun: opts.dryRun === true,
+        include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
+        exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
+        report: rep.report,
       });
     });
 }
 
 function defineProbeSecurity(parent: Command, name: string): void {
-  parent
-    .command(`${name} <classes> [spec]`)
+  const sub = parent
+    // ARV-36: classes is technically required but kept optional in commander
+    // so the missing-arg branch can produce the same actionable list of
+    // available classes that --unknown-class already prints (data already in
+    // SECURITY_CLASSES — no reason to force a --help read for first-time users).
+    .command(`${name} [classes] [spec]`)
     .description(
       "Live security probes (TASK-138): SSRF / CRLF / open-redirect. Detects vulnerable fields by name+format, sends a baseline-OK then per-field payloads, classifies HIGH (5xx or echo) / LOW (2xx no echo) / OK (4xx). <classes> is a comma-separated subset of: ssrf, crlf, open-redirect.",
     )
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--db <path>", "Path to SQLite database file")
     .option("--env <file>", "Env YAML with base_url + auth_token (live calls require this; --dry-run can run without; auto-derived from apis/<name>/.env.yaml when --api is given)")
-    .option("--output <file>", "Write markdown digest to file (default: stdout)")
     .option("--emit-tests <dir>", "Also emit YAML regression suites locking in safe behaviour for CI")
     .option("--tag <tag>", "Probe only endpoints with this tag")
     .option("--list-tags", "List available tags from spec and exit")
     .option("--no-cleanup", "Skip follow-up DELETE on resources created by baseline / 2xx attacks")
     .option("--isolated", "TASK-264: refuse to attack PUT/PATCH endpoints whose path-params come from .env.yaml — protects seeded fixtures from probe-induced mutation. Lower coverage in exchange for guaranteed fixture safety.")
+    .option("--allow-leaks", "ARV-140: attack POST endpoints even when the spec has no DELETE counterpart. Default: skip — without DELETE there is no cleanup path and resources accumulate in the target tenant (round-01/02 Sentry left 18 manual orphans). Use when you've vetted manual cleanup or are in a throwaway env.")
+    .option(
+      "--include <selector>",
+      "Filter operations (m-15 ARV-9 grammar: path:/users/.* | tag:Webhooks | method:POST,PATCH). Repeatable.",
+      (v: string, prev: string[] = []) => prev.concat(v),
+      [] as string[],
+    )
+    .option(
+      "--exclude <selector>",
+      "Drop operations matching <selector>. Repeatable.",
+      (v: string, prev: string[] = []) => prev.concat(v),
+      [] as string[],
+    )
     .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests")
-    .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
-    .option("--overwrite", "Overwrite existing --output file in place (default: rotate to <stem>-vN.<ext>)")
-    .action(async (classes: string, specPos: string | undefined, opts, cmd: Command) => {
-      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+    .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"));
+  addProbeReportOutputOptions(sub);
+  sub.action(async (classes: string | undefined, specPos: string | undefined, opts, cmd: Command) => {
+      // ARV-36: missing-arg path should list the available classes (parity
+      // with the unknown-class error). Commander's default `missing required
+      // argument` doesn't include them; once we made <classes> optional, we
+      // surface the same hint here.
+      if (typeof classes !== "string" || classes.length === 0) {
+        printError(`Missing required argument <classes>. Available: ${SECURITY_CLASSES.join(", ")}`);
+        process.exitCode = 2;
+        return;
+      }
+      // ARV-33: same fallback chain as mass-assignment so `zond probe security
+      // ssrf --api foo` doesn't fall through to a confusing "base_url is
+      // required" when commander absorbs --api at the global scope.
+      const apiName = resolveProbeApi(opts.api, cmd);
+      const resolved = resolveSpecArg(specPos, apiName, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
       // probe-security tolerates a missing env (--dry-run path), so don't
       // fail when --api is given but the env file isn't on disk yet.
-      const envFile = resolveProbeEnv(opts.env, opts.api, opts.db, { tolerateMissing: true });
+      const envFile = resolveProbeEnv(opts.env, apiName, opts.db, { tolerateMissing: true });
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
-      const timeoutMs = await resolveProbeTimeout(opts.timeout, opts.api, envFile.env);
+      const timeoutMs = await resolveProbeTimeout(opts.timeout, apiName, envFile.env);
+      const json = globalJson(cmd);
+      const rep = resolveProbeOutputFlags("probe-security", opts, json);
+      if (!rep) { process.exitCode = 2; return; }
       process.exitCode = await probeSecurityCommand({
         specPath: resolved.spec,
         classes,
         env: envFile.env,
-        output: opts.output,
+        output: rep.output,
         emitTests: opts.emitTests,
         tag: opts.tag,
         listTags: opts.listTags,
@@ -203,9 +381,13 @@ function defineProbeSecurity(parent: Command, name: string): void {
         dryRun: opts.dryRun === true,
         timeoutMs,
         overwrite: opts.overwrite === true,
-        json: globalJson(cmd),
-        apiName: typeof opts.api === "string" ? opts.api : undefined,
+        json,
+        apiName,
         isolated: opts.isolated === true,
+        allowLeaks: opts.allowLeaks === true,
+        report: rep.report,
+        include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
+        exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
       });
     });
 }

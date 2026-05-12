@@ -19,23 +19,43 @@ apis/<name>/
   spec.json              # dereferenced OpenAPI (machine source — only generators read it)
   .api-catalog.yaml      # endpoint index (cheap to read, agent-friendly)
   .api-resources.yaml    # CRUD chains, FK deps, ETag/soft-delete flags
-  .api-fixtures.yaml     # required {{vars}} for .env.yaml
-  .env.yaml              # user-supplied fixture values (auto-gitignored)
+  .api-fixtures.yaml     # MANIFEST: required {{vars}} (read-only, auto-generated)
+  .env.yaml              # VALUES: variable values (user-edited; auto-gitignored)
   tests/  scenarios/  probes/
 ```
+
+`.api-fixtures.yaml` is the **manifest** (single source of truth for the
+list of vars an API needs) and `.env.yaml` holds their **values**. Don't
+add a key to `.env.yaml` that's not in the manifest — it'll be warned and
+ignored. A missing entry in the manifest is a generator/manifest bug, not
+an env fix.
 
 ### Setup flow
 
 ```bash
-zond init                                              # bootstrap workspace
-zond add api <name> --spec <path-or-url>               # register API + emit artifacts
-zond doctor --api <name>                               # see which fixtures need filling
-# user fills apis/<name>/.env.yaml
+zond init                                              # bootstrap workspace (no fixture changes)
+zond add api <name> --spec <path-or-url>               # register API + emit manifest + seed empty .env.yaml
+zond doctor --api <name> --missing-only                # gap report: which vars are UNSET
+zond prepare-fixtures --api <name> --apply [--seed]    # fill .env.yaml from live API
 zond doctor --api <name>                               # re-check (exit 0 = ready)
 ```
 
+What each step does to `.env.yaml`:
+
+| Command | Touches `.env.yaml`? |
+|---|---|
+| `zond init` | no — only writes workspace/skills files |
+| `zond add api` | seeds skeleton with empty placeholders for every required var |
+| `zond doctor` | no — read-only diagnostic |
+| `zond prepare-fixtures --apply` | writes discovered values (`.bak` backup); `--seed` POST-creates resources when list endpoints return `[]` |
+| `zond refresh-api` | no — only re-snapshots `spec.json` and rebuilds the manifest |
+
 `zond refresh-api <name> [--spec <new-source>]` re-snapshots when the upstream
 spec changes.
+
+**Re-running `zond init`** is safe and expected after a CLI upgrade: it
+re-emits skills/AGENTS.md/zond.config.yml only. Fixtures stay exactly as
+they were — never relies on init to fill `.env.yaml`.
 
 ### Mandatory rules (mirrored from the skills — non-negotiable)
 

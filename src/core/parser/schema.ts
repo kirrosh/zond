@@ -225,7 +225,7 @@ const BODY_KEY_HINTS: Record<string, string> = {
   payload: "json",
   // TASK-257: previous hint pointed only at `form:` which is x-www-form-urlencoded
   // and useless for file uploads. Surface `multipart:` explicitly so users with
-  // file-upload endpoints (Sentry release artifacts, etc.) find it.
+  // file-upload endpoints (file-upload endpoints, etc.) find it.
   raw: "json for raw JSON, multipart: { field: { file: <path> } } for file upload, or form for urlencoded — raw bodies are not parsed",
 };
 

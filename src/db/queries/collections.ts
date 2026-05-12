@@ -4,7 +4,6 @@ import {
   type CollectionRecord,
   type CollectionSummary,
   type CreateCollectionOpts,
-  type LastRunForSuite,
   type RunRecord,
 } from "./types.ts";
 
@@ -28,14 +27,24 @@ export function getCollectionById(id: number): CollectionRecord | null {
   return db.query("SELECT * FROM collections WHERE id = ?").get(id) as CollectionRecord | null;
 }
 
-export function getLatestRunByCollection(collectionId: number): RunRecord | null {
+export function getLatestRunByCollection(
+  collectionId: number,
+  opts: { runKind?: "regular" | "probe" | "check" | "any" } = {},
+): RunRecord | null {
   const db = getDb();
+  // ARV-55: 'regular' is the default so coverage skips probe-only runs
+  // without an explicit predicate. 'any' opts back into the legacy
+  // behaviour (used by `coverage`'s probe-run hint logic).
+  const kind = opts.runKind ?? "regular";
+  const kindClause = kind === "any" ? "" : "AND run_kind = ?";
+  const params: (string | number)[] = [collectionId];
+  if (kind !== "any") params.push(kind);
   const row = db.query(`
     SELECT * FROM runs
-    WHERE collection_id = ? AND finished_at IS NOT NULL
+    WHERE collection_id = ? AND finished_at IS NOT NULL ${kindClause}
     ORDER BY started_at DESC
     LIMIT 1
-  `).get(collectionId) as (Record<string, unknown> & { tags?: unknown }) | null;
+  `).get(...params) as (Record<string, unknown> & { tags?: unknown }) | null;
   if (!row) return null;
   let tags: string[] | null = null;
   if (typeof row.tags === "string") {
@@ -46,7 +55,11 @@ export function getLatestRunByCollection(collectionId: number): RunRecord | null
       // legacy/corrupt — leave null
     }
   }
-  return { ...(row as unknown as RunRecord), tags };
+  // ARV-55: normalise run_kind alongside tags so RunRecord stays consistent.
+  const rk = row.run_kind;
+  const run_kind: import("../../core/runner/run-kind.ts").RunKind =
+    rk === "probe" || rk === "check" ? rk : "regular";
+  return { ...(row as unknown as RunRecord), tags, run_kind };
 }
 
 export function listCollections(): CollectionSummary[] {
@@ -118,32 +131,3 @@ export function findCollectionByNameOrId(nameOrId: string): CollectionRecord | n
   return db.query("SELECT * FROM collections WHERE lower(name) = lower(?)").get(nameOrId) as CollectionRecord | null;
 }
 
-/**
- * Latest run that included `suiteFile` (matched by step_results.suite_file),
- * with per-suite step counts within that run. Used by the Suites browser UI.
- */
-export function getLatestRunForSuite(suiteFile: string): LastRunForSuite | null {
-  const db = getDb();
-  const row = db.query(`
-    SELECT
-      r.id AS run_id,
-      r.started_at AS started_at,
-      COUNT(*) AS total,
-      SUM(CASE WHEN s.status = 'pass' THEN 1 ELSE 0 END) AS passed,
-      SUM(CASE WHEN s.status IN ('fail', 'error') THEN 1 ELSE 0 END) AS failed
-    FROM results s
-    JOIN runs r ON r.id = s.run_id
-    WHERE s.suite_file = ?
-    GROUP BY r.id
-    ORDER BY r.id DESC
-    LIMIT 1
-  `).get(suiteFile) as LastRunForSuite | null;
-  if (!row) return null;
-  return {
-    run_id: row.run_id,
-    started_at: row.started_at,
-    total: Number(row.total) || 0,
-    passed: Number(row.passed) || 0,
-    failed: Number(row.failed) || 0,
-  };
-}

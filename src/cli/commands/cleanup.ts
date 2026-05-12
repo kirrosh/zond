@@ -14,12 +14,16 @@ import { loadEnvironment, loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printWarning, printSuccess } from "../output.ts";
+import { readCurrentApi } from "../../core/context/current.ts";
 import type { Command } from "commander";
 import { globalJson } from "../resolve.ts";
 
 export interface CleanupOptions {
   orphans: boolean;
   api?: string;
+  /** ARV-139: pass true to disable the default current-api scoping and look
+   *  at orphans across every API in the tracker. */
+  allApis?: boolean;
   runId?: string;
   dryRun?: boolean;
   json?: boolean;
@@ -38,10 +42,21 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
     return 2;
   }
 
+  // ARV-139: scope the orphan queue to the active API by default. The on-disk
+  // tracker at ~/.zond/orphans/<api>/... is shared across the workspace, so
+  // switching APIs (e.g. apis/resend → apis/sentry) would otherwise surface
+  // orphans from previous work on unrelated APIs — including DELETE attempts
+  // against endpoints that aren't even part of the active spec. Explicit
+  // `--api <name>` wins; `--all-apis` opts back into the pre-ARV-139 behaviour.
+  let scopedApi = opts.api;
+  if (!scopedApi && !opts.allApis) {
+    scopedApi = readCurrentApi() ?? undefined;
+  }
+
   let records: OrphanRecord[];
   try {
     const filter: { api?: string; runId?: string } = {};
-    if (opts.api) filter.api = opts.api;
+    if (scopedApi) filter.api = scopedApi;
     if (opts.runId) filter.runId = opts.runId;
     records = await loadOrphans(filter);
   } catch (err) {
@@ -51,8 +66,15 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
     return 2;
   }
 
+  // ARV-102 (F7): split orphans into retriable (have a DELETE plan) and
+  // manual-only (probe knew the resource was created but couldn't derive
+  // a deletePath / id). Manual-only entries are surfaced separately —
+  // we can't auto-DELETE them, but the operator must know they exist.
+  const manualOnly = records.filter(r => r.requires_manual_cleanup === true || r.deletePath === "");
+  const retriable = records.filter(r => !(r.requires_manual_cleanup === true || r.deletePath === ""));
+
   if (records.length === 0) {
-    if (opts.json) printJson(jsonOk("cleanup", { retried: 0, removed: 0, failed: 0, items: [] }));
+    if (opts.json) printJson(jsonOk("cleanup", { retried: 0, removed: 0, failed: 0, items: [], manual_cleanup_required: [] }));
     else console.log("No orphan resources to retry.");
     return 0;
   }
@@ -60,15 +82,21 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
   // Group by api so we resolve env once per API instead of per record.
   const baseUrlByApi = new Map<string, string>();
   if (opts.baseUrl) {
-    for (const r of records) baseUrlByApi.set(r.api, opts.baseUrl);
+    for (const r of retriable) baseUrlByApi.set(r.api, opts.baseUrl);
   }
 
   if (opts.dryRun) {
-    if (opts.json) printJson(jsonOk("cleanup", { dryRun: true, items: records }));
+    if (opts.json) printJson(jsonOk("cleanup", { dryRun: true, items: retriable, manual_cleanup_required: manualOnly }));
     else {
-      console.log(`Dry-run: ${records.length} orphan(s) would be retried:`);
-      for (const r of records) {
+      console.log(`Dry-run: ${retriable.length} orphan(s) would be retried:`);
+      for (const r of retriable) {
         console.log(`  ${r.method} ${r.path} (id=${r.id}); DELETE ${r.deletePath} — last status: ${r.lastCleanupStatus ?? "n/a"}`);
+      }
+      if (manualOnly.length > 0) {
+        console.log(`\nManual cleanup required: ${manualOnly.length} resource(s) (no DELETE plan):`);
+        for (const r of manualOnly) {
+          console.log(`  ${r.method} ${r.path}${r.id ? ` (id=${r.id})` : ""} — ${r.lastCleanupError ?? "no DELETE counterpart"}`);
+        }
       }
     }
     return 0;
@@ -91,7 +119,7 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
   }
 
   const results: Array<{ record: OrphanRecord; status: number | null; ok: boolean; error?: string }> = [];
-  for (const r of records) {
+  for (const r of retriable) {
     let baseUrl = baseUrlByApi.get(r.api);
     if (!baseUrl) {
       try {
@@ -139,6 +167,14 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
         ok: r.ok,
         error: r.error ?? null,
       })),
+      manual_cleanup_required: manualOnly.map(r => ({
+        api: r.api,
+        runId: r.runId,
+        method: r.method,
+        path: r.path,
+        id: r.id,
+        reason: r.lastCleanupError ?? "no DELETE counterpart",
+      })),
     }));
   } else {
     if (removed > 0) printSuccess(`${removed} orphan(s) cleaned up.`);
@@ -150,9 +186,17 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
         process.stderr.write(`  ${r.record.method} ${r.record.path} (id=${r.record.id}); DELETE ${r.record.deletePath} ${tail}\n`);
       }
     }
+    if (manualOnly.length > 0) {
+      printWarning(`${manualOnly.length} resource(s) need manual cleanup (no DELETE plan):`);
+      for (const r of manualOnly) {
+        process.stderr.write(`  ${r.method} ${r.path}${r.id ? ` (id=${r.id})` : ""} — ${r.lastCleanupError ?? "no DELETE counterpart"}\n`);
+      }
+    }
   }
 
-  return failed > 0 ? 1 : 0;
+  // Manual-only orphans count as "still alive" for exit-code purposes —
+  // CI must fail loudly when probes leave un-deletable state behind.
+  return failed > 0 || manualOnly.length > 0 ? 1 : 0;
 }
 
 export function registerCleanup(program: Command): void {
@@ -160,7 +204,8 @@ export function registerCleanup(program: Command): void {
     .command("cleanup")
     .description("Retry probe-leftover work. Currently only --orphans (TASK-278) — re-issues DELETE for resources captured in ~/.zond/orphans/.")
     .option("--orphans", "Retry DELETE for resources in the orphan tracker")
-    .option("--api <name>", "Limit to a single API (matches the orphan-tracker subdirectory)")
+    .option("--api <name>", "Limit to a single API (matches the orphan-tracker subdirectory; defaults to the current API)")
+    .option("--all-apis", "Include orphans from every API in the tracker (disables the default current-api scoping)")
     .option("--run <id>", "Limit to a single probe run id")
     .option("--dry-run", "Print the plan without sending DELETEs")
     .option("--timeout <ms>", "Per-request timeout in ms (overrides .env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)")
@@ -168,6 +213,7 @@ export function registerCleanup(program: Command): void {
       process.exitCode = await cleanupCommand({
         orphans: opts.orphans === true,
         api: typeof opts.api === "string" ? opts.api : undefined,
+        allApis: opts.allApis === true,
         runId: typeof opts.run === "string" ? opts.run : undefined,
         dryRun: opts.dryRun === true,
         timeoutMs: typeof opts.timeout === "string" ? Number(opts.timeout) : undefined,

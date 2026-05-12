@@ -35,7 +35,7 @@ export interface ReportExportOptions {
   redactIdentity?: boolean;
 }
 
-/** TASK-164: shared default cap. ≤ 8 KB per body keeps Sentry-class
+/** TASK-164: shared default cap. ≤ 8 KB per body keeps SaaS-class
  *  exports under ~150 KB while preserving the first page of every body. */
 const DEFAULT_BODY_CAP_BYTES = 8192;
 

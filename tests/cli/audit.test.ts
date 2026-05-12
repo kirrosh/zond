@@ -41,7 +41,7 @@ describe("zond audit (TASK-262)", () => {
     rmSync(workdir, { recursive: true, force: true });
   });
 
-  test("--dry-run prints stage plan with default 7 stages and does not execute", async () => {
+  test("--dry-run prints stage plan with default 8 stages and does not execute", async () => {
     const code = await auditCommand({ api: "demo", dryRun: true });
     expect(code).toBe(0);
     const out = suppress.out;
@@ -53,6 +53,9 @@ describe("zond audit (TASK-262)", () => {
     expect(out).toContain("zond session start");
     expect(out).toContain("zond run");
     expect(out).toContain("zond session end");
+    // ARV-108: coverage stage is now part of the default pipeline.
+    expect(out).toContain("zond coverage --api demo --union session --json");
+    expect(out).toContain("(8 stages)");
     // mass-assignment / security stages — opt-in, не должны появляться
     expect(out).not.toContain("mass-assignment");
     expect(out).not.toContain("ssrf,crlf");
@@ -72,8 +75,11 @@ describe("zond audit (TASK-262)", () => {
     expect(out).not.toContain("zond prepare-fixtures --api demo --apply\n");
     expect(out).toContain("zond probe mass-assignment --api demo");
     expect(out).toContain("zond probe security ssrf,crlf,open-redirect --api demo");
-    // 9 stages with both opt-ins (default 7 + mass-assignment + security)
-    expect(out).toContain("(9 stages)");
+    // ARV-108: 10 stages with both opt-ins (default 8 + mass-assignment + security).
+    // Default 8 = 7 historical + the new `coverage (session union)` stage that
+    // surfaces the post-stage capture in the dry-run plan.
+    expect(out).toContain("(10 stages)");
+    expect(out).toContain("coverage (session union)");
   });
 
   test("--dry-run --json emits envelope with stage plan", async () => {
@@ -91,6 +97,8 @@ describe("zond audit (TASK-262)", () => {
     expect(keys).toContain("probe-static");
     expect(keys).toContain("session-start");
     expect(keys).toContain("session-end");
+    // ARV-108: coverage now appears in the plan envelope too.
+    expect(keys).toContain("coverage");
   });
 
   test("HTML report writer produces a self-contained file with stage table and coverage section", async () => {

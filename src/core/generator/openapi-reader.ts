@@ -1,6 +1,7 @@
 import { dereference } from "@readme/openapi-parser";
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, ResponseInfo, SecuritySchemeInfo } from "./types.ts";
+import { disambiguateGenericPathParams } from "./path-param-disambig.ts";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
@@ -168,17 +169,22 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
     }
   }
 
-  return endpoints;
+  // ARV-40: when generic path-param names (`{id}`, `{slug}`, ...) collide
+  // across multiple resources, rewrite each to `<parent_singular>_<param>`
+  // so the manifest derives per-resource vars and tests stop sharing one
+  // global `id`. In-memory only; on-disk spec stays untouched.
+  return disambiguateGenericPathParams(endpoints);
 }
 
 /** Spec authors often mark endpoints as deprecated in the summary or
  *  description text instead of (or in addition to) the `deprecated: true`
- *  flag — Sentry, GitHub legacy, Stripe-like APIs all do this. Without this
+ *  flag — common across many SaaS and legacy specs. Without this
  *  fallback, generator emits CRUD suites whose POST returns 404 from a dead
  *  endpoint. (TASK-245) */
 /** Matches `(DEPRECATED) ...`, `[DEPRECATED] ...`, `DEPRECATED: ...` at the
  *  start of a string. Also matches markdown `## Deprecated` headings, which
- *  Sentry uses in operation `description` to flag end-of-life endpoints. */
+ *  some spec authors use in operation `description` to flag end-of-life
+ *  endpoints. */
 const DEPRECATED_PREFIX_RE = /^\s*[\(\[]?\s*DEPRECATED\s*[\)\]:\-—\s]/i;
 const DEPRECATED_HEADING_RE = /^\s*#+\s*Deprecated\b/im;
 function isMarkedDeprecatedInText(summary?: string, description?: string, operationId?: string): boolean {

@@ -67,7 +67,7 @@ describe("printMutationBanner (TASK-259)", () => {
       printMutationBanner("probe-test", { base_url: "https://x" });
     });
     expect(out).toContain("probe-test mutates live data");
-    expect(out).toContain("zond discover --api");
+    expect(out).toContain("zond prepare-fixtures --api");
     expect(out).toContain("--no-cleanup");
   });
 

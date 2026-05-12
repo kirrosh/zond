@@ -4,7 +4,7 @@ import { jsonOk, jsonError, printJson, zerr } from "../json-envelope.ts";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
-import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
+import { readOpenApiSpec, extractEndpoints } from "../../core/generator/openapi-reader.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
 import { getDb } from "../../db/schema.ts";
@@ -34,6 +34,41 @@ function looksLikeBlockedShellSubstitution(s: string | undefined): boolean {
   return /\$\([^)]+\)|`[^`]+`/.test(s) && /yq|cat|jq|grep|awk|sed|sh /.test(s);
 }
 
+/** ARV-110 / ARV-144: pretty-print --json-path failure to stderr.
+ *  Two distinct hints depending on the failure:
+ *  - top-level array (reason starts with "expected an array index"):
+ *    user wrote `data[0].id` against a body that's already an array →
+ *    suggest `[0].id` / `0.id`.
+ *  - envelope confusion (firstSeg in body/data, resolved is empty):
+ *    user came from `--json | jq .data.body.id` and forgot that --json-path
+ *    addresses the response body, not the envelope. */
+function printJsonPathDiagnostic(
+  jsonPath: string | undefined,
+  diag: { resolved: string[]; failedAt?: string; reason?: string } | undefined,
+): void {
+  if (!jsonPath || !diag?.failedAt) return;
+  const resolved = diag.resolved.length > 0 ? diag.resolved.join(".") : "(root)";
+  process.stderr.write(
+    `zond: --json-path '${jsonPath}' did not resolve — stopped at segment "${diag.failedAt}" after ${resolved}: ${diag.reason ?? "unknown"}\n`,
+  );
+  const firstSeg = jsonPath.replace(/\[\d+\]/g, "").split(".")[0];
+  const isArrayMismatch = diag.resolved.length === 0 && /^expected an array index/.test(diag.reason ?? "");
+  if (isArrayMismatch) {
+    const tail = jsonPath.replace(/^[^.[]+/, "");
+    const suggestion = tail ? `[0]${tail.startsWith(".") || tail.startsWith("[") ? tail : "." + tail}` : "[0]";
+    process.stderr.write(
+      `      Hint: response body is a top-level array — use \`--json-path '${suggestion}'\` or \`--json-path '0${tail}'\` to index it.\n`,
+    );
+    return;
+  }
+  if ((firstSeg === "body" || firstSeg === "data") && diag.resolved.length === 0) {
+    process.stderr.write(
+      `      Hint: --json-path extracts from the response body, not the zond envelope. ` +
+      `To address the envelope's data.body.id, use \`--json\` and pipe to jq.\n`,
+    );
+  }
+}
+
 function authHintLines(apis: string[]): string[] {
   const example = apis[0] ?? "<name>";
   return [
@@ -58,6 +93,10 @@ export interface RequestOptions {
   /** TASK-142: explicit "METHOD:/path" override when path-templating heuristics
    *  fail or the user wants to validate against a different endpoint. */
   validateAgainst?: string;
+  /** ARV-149: send the body as `application/x-www-form-urlencoded` (Stripe v1
+   *  style). When omitted but `--api` is set, zond auto-detects from the
+   *  spec's requestBody.content. */
+  form?: boolean;
 }
 
 interface SchemaValidationOutcome {
@@ -80,6 +119,15 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
       }
     }
 
+    // ARV-149: when --form is not set but --api is, peek at the spec to see
+    // whether the matching endpoint declares only application/x-www-form-urlencoded
+    // (Stripe v1 pattern). If so, default to form encoding so users don't get
+    // a 400 "wrong content type" on every POST against form-only APIs.
+    let useForm = options.form === true;
+    if (!useForm && options.api) {
+      useForm = await detectFormFromSpec(options).catch(() => false);
+    }
+
     const result = await sendAdHocRequest({
       method: options.method.toUpperCase(),
       url: options.url,
@@ -90,6 +138,7 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
       collectionName: options.api,
       jsonPath: options.jsonPath,
       dbPath: options.dbPath,
+      form: useForm,
     });
 
     let validation: SchemaValidationOutcome | null = null;
@@ -99,6 +148,11 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
 
     if (options.json) {
       printJson(jsonOk("request", validation ? { ...result, schema_validation: validation } : result));
+      // ARV-110: surface jsonPath diagnostic on stderr in --json mode too, so
+      // pipelines that read envelope from stdout still see *why* `body` came
+      // back null. Without this, the only signal was a silent null inside the
+      // envelope — easy to misread as "envelope shape differs between modes".
+      printJsonPathDiagnostic(options.jsonPath, result.jsonPathDiagnostic);
     } else if (options.jsonPath) {
       // TASK-133: pipe-friendly mode — print only the extracted value.
       // Scalars (string/number/bool) emit verbatim with no JSON quoting so
@@ -107,6 +161,7 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
       const v = result.body;
       if (v === null || v === undefined) {
         console.log("");
+        printJsonPathDiagnostic(options.jsonPath, result.jsonPathDiagnostic);
       } else if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
         console.log(String(v));
       } else {
@@ -276,6 +331,33 @@ function parseMethodPathArg(raw: string): { method: string; path: string } | nul
   return { method: m[1]!.toUpperCase(), path: m[2]! };
 }
 
+/** ARV-149: peek at the OpenAPI spec for the matching endpoint and return
+ *  true when its requestBody declares only application/x-www-form-urlencoded
+ *  (no JSON variant). Cheap-failing — any spec/db error returns false so the
+ *  caller falls back to the JSON default. */
+async function detectFormFromSpec(options: RequestOptions): Promise<boolean> {
+  if (!options.api || !options.body) return false;
+  getDb(options.dbPath);
+  const col = findCollectionByNameOrId(options.api);
+  if (!col?.openapi_spec) return false;
+  const doc = await readOpenApiSpec(resolveCollectionSpec(col.openapi_spec));
+  const endpoints = extractEndpoints(doc);
+  const method = options.method.toUpperCase();
+  const path = extractPath(options.url);
+  // The OpenAPI reader normalises requestBodyContentType (prefers JSON when
+  // present, otherwise records the first declared content type). For a true
+  // form-only endpoint that field is "application/x-www-form-urlencoded".
+  const exact = endpoints.find(e => e.method.toUpperCase() === method && e.path === path);
+  const matched = exact ?? endpoints.find(e => {
+    if (e.method.toUpperCase() !== method) return false;
+    const re = new RegExp(
+      "^" + e.path.replace(/\{[^}]+\}/g, "[^/]+").replace(/\//g, "\\/") + "$",
+    );
+    return re.test(path);
+  });
+  return matched?.requestBodyContentType === "application/x-www-form-urlencoded";
+}
+
 function extractPath(url: string): string {
   // Absolute URL → use URL parser. Relative URL ("/users/1") → use as-is.
   if (/^https?:\/\//i.test(url)) {
@@ -293,7 +375,7 @@ function extractPath(url: string): string {
 import type { Command } from "commander";
 import { globalJson } from "../resolve.ts";
 import { collect, parsePositiveInt } from "../argv.ts";
-import { readCurrentApi } from "../../core/context/current.ts";
+import { getApi } from "../util/api-context.ts";
 import { loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
 
@@ -308,18 +390,22 @@ export function registerRequest(program: Command): void {
     .option("--api <name>", "Collection name; auto-loads env + Authorization from apis/<name>/.secrets.yaml")
     .option(
       "--json-path <path>",
-      "Extract one field from the response body (dot notation, e.g. 'data.id', " +
-      "'items[0].name'). Without --json, prints the value verbatim — scalars without " +
-      "quotes for shell use (`id=$(zond request --json-path data.id ...)`), " +
-      "objects/arrays as compact JSON. With --json, embeds the extracted value as " +
-      "the envelope's `body` field.",
+      "Extract one field from the RESPONSE BODY (not the zond envelope; " +
+      "to address envelope.data.body.id pipe `--json` through jq instead). " +
+      "Dot notation, e.g. 'data.id', 'items[0].name'. For top-level array " +
+      "responses use '[0].id' or '0.id'. Without --json, prints " +
+      "the value verbatim — scalars without quotes for shell use " +
+      "(`id=$(zond request --json-path data.id ...)`), objects/arrays as compact JSON. " +
+      "With --json, embeds the extracted value as the envelope's `body` field.",
     )
     .option("--db <path>", "Path to SQLite database file")
     .option("--validate-schema", "TASK-142: validate the response body against the OpenAPI response schema (requires --api). Endpoint is auto-resolved from the request method + URL.path; templated paths like /users/{id} are matched via regex. Falls back gracefully if no endpoint matches — pass --validate-against to override.")
     .option("--validate-against <method:path>", "TASK-142: explicit endpoint override for --validate-schema, e.g. \"GET:/users/{id}\". Use the spec template form (with \"{...}\" placeholders).")
+    .option("--form", "ARV-149: send --body as application/x-www-form-urlencoded (Stripe v1, Rails/PHP-style APIs). Parses --body as JSON to lift fields, re-encodes with bracket notation. Auto-detected when --api is set and the spec endpoint declares only the form content type.")
     .action(async (method: string, url: string, opts, cmd: Command) => {
       const headers = (opts.header as string[] | undefined)?.length ? (opts.header as string[]) : undefined;
-      const api = (opts.api as string | undefined) ?? readCurrentApi() ?? undefined;
+      // ARV-53.
+      const api = getApi(cmd, opts);
       let envTimeout: number | undefined;
       if (api) {
         try {
@@ -340,6 +426,7 @@ export function registerRequest(program: Command): void {
         json: globalJson(cmd),
         validateSchema: opts.validateSchema === true || typeof opts.validateAgainst === "string",
         validateAgainst: opts.validateAgainst,
+        form: opts.form === true,
       });
     });
 }

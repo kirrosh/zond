@@ -29,7 +29,7 @@ function slugify(s: string): string {
  *
  * The general rule: drop trailing `_id` / `_slug` / `_or_slug` /
  * `Id` / `Slug`, then slugify and trim to the first segment. We also
- * canonicalise a couple of common Sentry-style names to short aliases
+ * canonicalise a couple of common common SaaS-style names to short aliases
  * (`organization` → `org`, `project` → `proj`).
  */
 export function placeholderAlias(rawName: string): string {
@@ -79,9 +79,16 @@ export function getAuthHeaders(
 ): Record<string, string> | undefined {
   if (ep.security.length === 0) return undefined;
   const tokenVar = (s: SecuritySchemeInfo) => tokenVarFor?.(s) ?? "auth_token";
-  for (const secName of ep.security) {
-    const scheme = schemes.find((s) => s.name === secName);
-    if (!scheme) continue;
+
+  // Prefer bearer / apiKey schemes over basic when an endpoint declares
+  // multiple alternatives (ARV-147). Stripe v1 publishes `security: [basicAuth,
+  // bearerAuth]` with both pointing at the same `auth_token` value, but
+  // basicAuth expects base64(user:password) — feeding it a raw `sk_test_…`
+  // produces a 401. zond request already hardcodes Bearer for this reason
+  // (send-request.ts TASK-231); the generator + probes now agree by walking
+  // ep.security twice: first looking for a non-basic match, then falling
+  // back to basic only if nothing else worked.
+  const tryScheme = (scheme: SecuritySchemeInfo): Record<string, string> | undefined => {
     if (scheme.type === "http") {
       if (scheme.scheme === "bearer" || !scheme.scheme) {
         return { Authorization: `Bearer {{${tokenVar(scheme)}}}` };
@@ -96,6 +103,25 @@ export function getAuthHeaders(
       }
       return { [scheme.apiKeyName]: "{{api_key}}" };
     }
+    return undefined;
+  };
+
+  const isBasic = (s: SecuritySchemeInfo): boolean =>
+    s.type === "http" && s.scheme === "basic";
+
+  // Pass 1: skip basic.
+  for (const secName of ep.security) {
+    const scheme = schemes.find((s) => s.name === secName);
+    if (!scheme || isBasic(scheme)) continue;
+    const headers = tryScheme(scheme);
+    if (headers) return headers;
+  }
+  // Pass 2: basic-only fallback.
+  for (const secName of ep.security) {
+    const scheme = schemes.find((s) => s.name === secName);
+    if (!scheme || !isBasic(scheme)) continue;
+    const headers = tryScheme(scheme);
+    if (headers) return headers;
   }
   return undefined;
 }
@@ -181,7 +207,7 @@ export function printMutationBanner(
     `⚠  ${probeName} mutates live data on the target API.\n` +
     `   It creates and (by default) deletes resources via POST/PUT/PATCH/DELETE.\n` +
     `${fixtureLine}` +
-    `   Recovery if FK fixtures change: re-run \`zond discover --api <name>\` to refresh \`.env.yaml\`.\n` +
+    `   Recovery if FK fixtures change: re-run \`zond prepare-fixtures --api <name>\` to refresh \`.env.yaml\`.\n` +
     `   Pass \`--no-cleanup\` to keep probe-created resources for inspection.\n` +
     `\n`,
   );
@@ -240,7 +266,7 @@ function escapeRegex(s: string): string {
 
 /**
  * Strip a single trailing slash so `/keys/` and `/keys` compare equal.
- * Sentry-style APIs mix both forms; without this normalisation, the
+ * common SaaS-style APIs mix both forms; without this normalisation, the
  * counterpart lookup misses on every collection that ends in `/`,
  * leaking created resources during probe runs.
  */
@@ -259,7 +285,7 @@ function pathsEqual(a: string, b: string): boolean {
  *  - PATCH /collection/{id}      → DELETE /collection/{id}
  *
  *  Trailing-slash tolerant on both sides (TASK-139-style fix carried
- *  into shared.ts after round-4 dogfooding showed POST /keys/ on Sentry
+ *  into shared.ts after round-4 dogfooding showed a real-world `POST /keys/`
  *  leaked DSN keys because the regex required identical slash forms).
  */
 export function findDeleteCounterpart(
@@ -335,9 +361,14 @@ export function liveAuthHeaders(
   vars: Record<string, string>,
 ): Record<string, string> {
   if (ep.security.length === 0) return {};
-  for (const secName of ep.security) {
-    const scheme = schemes.find(s => s.name === secName);
-    if (!scheme) continue;
+
+  // Two-pass walk: prefer bearer/apiKey over basic (ARV-148, mirrors the
+  // generator-side fix in `getAuthHeaders` above). Without this, every
+  // prepare-fixtures discover/seed request on Stripe-style APIs picks the
+  // first declared scheme (basicAuth) and ships the raw `sk_test_…` token
+  // as Basic Auth credentials → Stripe base64-decodes the garbage and
+  // returns 401 across 98/98 vars.
+  const tryScheme = (scheme: SecuritySchemeInfo): Record<string, string> | undefined => {
     if (scheme.type === "http") {
       if (scheme.scheme === "bearer" || !scheme.scheme) {
         const tok = vars["auth_token"];
@@ -356,8 +387,94 @@ export function liveAuthHeaders(
       const key = vars["api_key"];
       if (key) return { [scheme.apiKeyName]: key };
     }
+    return undefined;
+  };
+
+  const isBasic = (s: SecuritySchemeInfo): boolean =>
+    s.type === "http" && s.scheme === "basic";
+
+  // Pass 1: skip basic.
+  for (const secName of ep.security) {
+    const scheme = schemes.find(s => s.name === secName);
+    if (!scheme || isBasic(scheme)) continue;
+    const headers = tryScheme(scheme);
+    if (headers) return headers;
+  }
+  // Pass 2: basic fallback.
+  for (const secName of ep.security) {
+    const scheme = schemes.find(s => s.name === secName);
+    if (!scheme || !isBasic(scheme)) continue;
+    const headers = tryScheme(scheme);
+    if (headers) return headers;
   }
   return {};
+}
+
+// ──────────────────────────────────────────────
+// ARV-153: semantic classification of POST operations
+// ──────────────────────────────────────────────
+
+/**
+ * ARV-153: action verbs that, when they appear as the last path segment,
+ * mark a POST as "operates on an existing resource" rather than
+ * "allocates a new one". A DELETE counterpart is meaningless for these —
+ * there's nothing to delete because nothing new was created.
+ *
+ * Examples that fit this pattern:
+ *   POST /v1/charges/{id}/capture
+ *   POST /v1/customers/{id}/sources/{src}/verify
+ *   POST /v1/payment_intents/{id}/cancel
+ *   POST /v1/users/{id}/activate
+ *   POST /api/messages/{id}/resend
+ *
+ * Compound forms ("mark-as-read", "send-email", "verify-otp") are also
+ * recognised — we look at the first slug segment ("mark", "send", "verify").
+ *
+ * Conservative on purpose: a misclassified create-resource attacked without
+ * cleanup leaks. Verbs that double as nouns ("filter", "lock"…) are kept
+ * out; add only when a real-world spec proves the false-positive risk is
+ * lower than the recall win.
+ */
+const ACTION_VERBS = new Set([
+  "accept", "acknowledge", "activate", "approve", "archive", "attach",
+  "cancel", "capture", "check", "claim", "clone", "close", "complete",
+  "confirm", "copy", "deactivate", "decline", "decrypt", "demote", "deploy",
+  "detach", "disable", "disconnect", "dismiss", "dispatch", "duplicate",
+  "enable", "encrypt", "execute", "expire", "export", "fail", "finalize",
+  "fork", "ignore", "import", "invalidate", "invite", "link", "lookup",
+  "merge", "mute", "notify", "pause", "ping", "preview", "process",
+  "promote", "publish", "purge", "queue", "reactivate", "rebuild", "redeem",
+  "refresh", "refund", "register", "reject", "release", "remind",
+  "render", "renew", "reopen", "report", "reprocess", "request", "resend",
+  "reset", "resolve", "restart", "restore", "resubmit", "resume", "retry",
+  "revert", "review", "revoke", "rollback", "rotate", "run", "schedule",
+  "search", "send", "settle", "share", "snooze", "start", "stop", "submit",
+  "subscribe", "suspend", "swap", "sync", "test", "transfer", "trigger",
+  "unarchive", "unassign", "unblock", "unlink", "unlock", "unmute",
+  "unpublish", "unshare", "unsubscribe", "unsuspend", "validate", "verify",
+  "void", "withdraw",
+]);
+
+export type PostSemantics = "action" | "create-resource" | "unknown";
+
+/** ARV-153: classify a POST endpoint by looking at the last path segment.
+ *  Returns "action" when the verb at the tail clearly identifies the
+ *  operation as a side-effecting verb against an existing resource (no
+ *  new resource allocated → no DELETE counterpart needed). Conservative:
+ *  unknown verbs fall back to "create-resource", which keeps the existing
+ *  cleanup-feasibility gate intact for safety. */
+export function classifyPostSemantics(ep: EndpointInfo): PostSemantics {
+  if (ep.method.toUpperCase() !== "POST") return "unknown";
+  const segments = ep.path.split("/").filter(Boolean);
+  if (segments.length === 0) return "unknown";
+  const last = segments[segments.length - 1]!.toLowerCase();
+  if (last.startsWith("{")) return "unknown";
+  if (ACTION_VERBS.has(last)) return "action";
+  // Compound action forms: "mark-as-read", "send-email", "verify-otp",
+  // "request_reset", "do.export". Use first slug as the verb candidate.
+  const head = last.split(/[-_.]/)[0]!;
+  if (head && ACTION_VERBS.has(head)) return "action";
+  return "create-resource";
 }
 
 export function hasJsonBody(ep: EndpointInfo): boolean {

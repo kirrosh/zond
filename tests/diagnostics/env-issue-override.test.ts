@@ -226,3 +226,133 @@ describe("TASK-98: env_issue scope and per-suite clustering", () => {
     expect(byName.backend!.recommended_action).toBe("report_backend_bug");
   });
 });
+
+// ARV-101 (F6): the diagnose envelope now exposes a top-level
+// `by_recommended_action` aggregation so the zond-triage skill ("route on
+// recommended_action enum") can read it directly instead of folding
+// failures[].recommended_action through `jq | group_by`. Tester saw the
+// missing key on Sentry as a skill-drift indicator.
+describe("ARV-101 (F6): diagnose payload aggregates by recommended_action enum", () => {
+  let dbPath: string;
+  beforeEach(() => {
+    dbPath = tmpDb();
+    getDb(dbPath);
+  });
+  afterEach(() => {
+    closeDb();
+    unlink(dbPath);
+  });
+
+  test("by_recommended_action mirrors the canonical enum and counts the full failure set", () => {
+    // Mix: 2 backend bugs (5xx) + 1 generated-suite 4xx (regenerate_suite or
+    // fix_test_logic depending on classifier) + 1 fixture-related 404.
+    const result: TestRunResult = {
+      suite_name: "Mixed",
+      started_at: "2024-01-01T00:00:00.000Z",
+      finished_at: "2024-01-01T00:00:01.000Z",
+      total: 4, passed: 0, failed: 4, skipped: 0,
+      steps: [
+        failingStep("svr1", "http://api/widgets", 500, ""),
+        failingStep("svr2", "http://api/widgets/2", 500, ""),
+        failingStep("nf", "http://api/widgets/missing", 404, ""),
+        failingStep("nf2", "http://api/widgets/also-missing", 404, ""),
+      ],
+    };
+    const runId = createRun({ started_at: result.started_at });
+    finalizeRun(runId, [result]);
+    saveResults(runId, [result]);
+
+    const diag = diagnoseRun(runId, true, dbPath);
+
+    expect(diag.by_recommended_action).toBeDefined();
+    const agg = diag.by_recommended_action!;
+
+    // Sum of bucket counts must equal the total failure count — proves the
+    // aggregation is built off the FULL set, not the compactFailures subset
+    // (which gets collapsed when grouping kicks in).
+    const total = Object.values(agg).reduce((sum, b) => sum + b.count, 0);
+    expect(total).toBe(diag.summary.failed);
+
+    // Every action key must be one of the documented enum members the
+    // triage skill routes on. Catches drift if a new RecommendedAction is
+    // added without surfacing it in the aggregation.
+    const validActions = new Set([
+      "report_backend_bug",
+      "fix_auth_config",
+      "fix_test_logic",
+      "fix_network_config",
+      "fix_env",
+      "fix_spec",
+      "fix_fixture",
+      "regenerate_suite",
+      "tighten_validation",
+      "add_required_header",
+    ]);
+    for (const k of Object.keys(agg)) {
+      expect(validActions.has(k)).toBe(true);
+    }
+
+    // Every bucket has bounded examples (cap = 5) shaped as <suite>/<test>.
+    for (const bucket of Object.values(agg)) {
+      expect(bucket.count).toBeGreaterThan(0);
+      expect(bucket.examples.length).toBeGreaterThan(0);
+      expect(bucket.examples.length).toBeLessThanOrEqual(5);
+      for (const ex of bucket.examples) {
+        expect(ex).toMatch(/.+\/.+/);
+      }
+    }
+
+    // 5xx still routes to report_backend_bug — so we expect that bucket
+    // populated, with both svr1 + svr2 surfaced as examples.
+    expect(agg.report_backend_bug).toBeDefined();
+    expect(agg.report_backend_bug!.count).toBeGreaterThanOrEqual(2);
+  });
+
+  test("ARV-103 (F8): schema-kind assertions route to report_backend_bug, not fix_test_logic", () => {
+    // --validate-schema annotates each violated field with kind:"schema".
+    // db-analysis must walk the assertions array, detect that, and route
+    // through the classifier's schema_violation branch (skill: "treat them
+    // like 5xx, do not edit the expectation away").
+    const schemaFailStep: TestRunResult["steps"][number] = {
+      name: "Retrieve Ownership Configuration",
+      status: "fail",
+      duration_ms: 12,
+      request: { method: "GET", url: "http://api/projects/acme/frontend/ownership/", headers: {} },
+      response: { status: 200, headers: {}, body: '{"raw": null}', duration_ms: 12 },
+      assertions: [
+        { field: "body.raw", rule: "type=string", passed: false, actual: null, expected: "string", kind: "schema" } as unknown as TestRunResult["steps"][number]["assertions"][number],
+      ],
+      captures: {},
+    };
+    const result: TestRunResult = {
+      suite_name: "Sentry Schema",
+      started_at: "2024-01-01T00:00:00.000Z",
+      finished_at: "2024-01-01T00:00:01.000Z",
+      total: 1, passed: 0, failed: 1, skipped: 0,
+      steps: [schemaFailStep],
+    };
+    const runId = createRun({ started_at: result.started_at });
+    finalizeRun(runId, [result]);
+    saveResults(runId, [result]);
+
+    const diag = diagnoseRun(runId, true, dbPath);
+    expect(diag.failures).toHaveLength(1);
+    expect(diag.failures[0]!.recommended_action).toBe("report_backend_bug");
+  });
+
+  test("payload omits by_recommended_action entirely when there are no failures", () => {
+    const allPass: TestRunResult = {
+      suite_name: "Healthy",
+      started_at: "2024-01-01T00:00:00.000Z",
+      finished_at: "2024-01-01T00:00:01.000Z",
+      total: 1, passed: 1, failed: 0, skipped: 0,
+      steps: [passStep("ok")],
+    };
+    const runId = createRun({ started_at: allPass.started_at });
+    finalizeRun(runId, [allPass]);
+    saveResults(runId, [allPass]);
+
+    const diag = diagnoseRun(runId, true, dbPath);
+    expect(diag.by_recommended_action).toBeUndefined();
+  });
+});

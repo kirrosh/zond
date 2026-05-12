@@ -3,27 +3,28 @@ id: ARV-4
 title: >-
   checks: data-rejection (negative_data_rejection + positive_data_acceptance) с
   anti-FP guards
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 15:46'
+updated_date: '2026-05-09 16:36'
 labels:
   - checks
   - m-15
   - depth
   - anti-fp
+milestone: m-15
 dependencies:
   - ARV-1
-milestone: m-15
 priority: high
 ---
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Оба check реализованы с anti-FP guards 1-в-1 со schemathesis (см. их checks.py)
-- [ ] #2 Регрессионный fixture-pack tests/regression/schemathesis-fps/*.json — 6 кейсов, все green
-- [ ] #3 Unit-тест на каждый guard отдельно (3 unit-таблицы)
-- [ ] #4 Документация в коде ссылается на исходные schemathesis issue номера
-- [ ] #5 Integration: mock с serialize-coerce (string→int на сервере) — finding NOT issued
+- [x] #1 Оба check реализованы с anti-FP guards 1-в-1 со schemathesis (см. их checks.py)
+- [x] #2 Регрессионный fixture-pack tests/regression/schemathesis-fps/*.json — 6 кейсов, все green
+- [x] #3 Unit-тест на каждый guard отдельно (3 unit-таблицы)
+- [x] #4 Документация в коде ссылается на исходные schemathesis issue номера
+- [x] #5 Integration: mock с serialize-coerce (string→int на сервере) — finding NOT issued
 <!-- AC:END -->
 
 ## Implementation Plan

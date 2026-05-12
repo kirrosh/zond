@@ -19,6 +19,9 @@ export interface CoverageOptions {
   /** TASK-274: union across all runs of the API tagged <tag>. */
   tag?: string;
   json?: boolean;
+  /** ARV-28: list not-covered (and partial) endpoints inline so users
+   *  don't need `--json | jq` to see what's missing. */
+  verbose?: boolean;
 }
 
 const RESET = "\x1b[0m";
@@ -193,6 +196,10 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
     // and humans can pick the one they care about.
     console.log(`Pass-coverage (passing 2xx): ${passCount}/${total} endpoints (${passPct}%)${runLabel}`);
     console.log(`Hit-coverage  (any response): ${hitCount}/${total} endpoints (${hitPct}%)`);
+    // ARV-19: explicit gap-disclosure so users running `zond checks run`
+    // alongside don't assume probes contribute. Only `zond run` results
+    // land in the run table that coverage reads from.
+    console.log(`  ${color ? DIM : ""}(source: \`zond run\` results only — \`zond checks run\` probes are not counted)${color ? RESET : ""}`);
     console.log("");
 
     if (passing > 0) {
@@ -209,6 +216,29 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
     }
     if (uncoveredRows.length > 0) {
       console.log(`  ${color ? DIM : ""}⬜ ${uncoveredRows.length} not covered${color ? RESET : ""}`);
+      // ARV-75 (feedback round-03 / F16): when some of the not-covered rows
+      // are deprecated, surface the count so a user reading "5% uncovered"
+      // can attribute the gap to deprecated endpoints (which generate skips
+      // by default) instead of suite regression.
+      const deprecatedUnhit = uncoveredRows.filter((r) => r.deprecated).length;
+      if (deprecatedUnhit > 0) {
+        console.log(`  ${color ? DIM : ""}↳ ${deprecatedUnhit} of those are deprecated (skipped by \`zond generate\` unless --include-deprecated)${color ? RESET : ""}`);
+      }
+    }
+
+    // ARV-28: --verbose lists not-covered endpoints (and partial) inline,
+    // so users don't have to pipe through `--json | jq` for that detail.
+    if (options.verbose && (uncoveredRows.length > 0 || partialRows.length > 0)) {
+      if (partialRows.length > 0) {
+        console.log("");
+        console.log(`${color ? YELLOW : ""}Partial (only non-2xx responses):${color ? RESET : ""}`);
+        for (const row of partialRows) console.log(`  ◐ ${row.endpoint}`);
+      }
+      if (uncoveredRows.length > 0) {
+        console.log("");
+        console.log(`${color ? DIM : ""}Not covered:${color ? RESET : ""}`);
+        for (const row of uncoveredRows) console.log(`  ⬜ ${row.endpoint}`);
+      }
     }
 
     if (cov.matrix.totals.byReason["no-fixtures"] > 0 || cov.matrix.totals.byReason["auth-scope-mismatch"] > 0) {
@@ -221,7 +251,7 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
         console.log(
           `  ${color ? DIM : ""}↳ ${cov.matrix.totals.byReason["no-fixtures"]} ` +
           `cells blocked by no-fixtures (suite generated, awaiting IDs in .env.yaml — ` +
-          `run \`zond discover --api ${cov.apiName}\` or seed manually).${color ? RESET : ""}`,
+          `run \`zond prepare-fixtures --api ${cov.apiName}\` or seed manually).${color ? RESET : ""}`,
         );
       }
       if (cov.matrix.totals.byReason["auth-scope-mismatch"] > 0) {
@@ -265,6 +295,12 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
       covered2xxEndpoints: buckets.covered2xx,
       coveredButNon2xxEndpoints: buckets.coveredButNon2xx,
       unhitEndpoints: buckets.unhit,
+      // ARV-75 (F16): expose deprecated-endpoint counts so CI / agents can
+      // distinguish "we missed coverage on a live endpoint" from "the
+      // remaining uncovered rows are spec-deprecated and explicitly skipped
+      // by zond generate" without re-deriving from the spec.
+      deprecated_unhit: uncoveredRows.filter((r) => r.deprecated).length,
+      deprecated_total: cov.matrix.rows.filter((r) => r.deprecated).length,
     }));
   }
 
@@ -344,11 +380,24 @@ async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
 }
 
 import type { Command } from "commander";
+import { Option } from "commander";
 import { globalJson, resolveApiCollection } from "../resolve.ts";
 import { parseInteger, parsePercentage } from "../argv.ts";
-import { readCurrentApi } from "../../core/context/current.ts";
+import { getApi } from "../util/api-context.ts";
 import { readCurrentSession } from "../../core/context/session.ts";
-import { listRunsBySession } from "../../db/queries.ts";
+import { listRunsBySession, getLatestRunByCollection, getRunById, findCollectionByNameOrId } from "../../db/queries.ts";
+
+/**
+ * ARV-55: probe-run classification moved from path-regex heuristic into the
+ * persisted `runs.run_kind` column. Coverage's default loader query already
+ * filters `run_kind = 'regular'`, so this helper is no longer the gate — it
+ * just powers the human-readable warning when the *latest* run (regardless
+ * of kind) happens to be a probe-only one, which still surprises users.
+ */
+export function isProbeOnlyRun(runId: number): boolean {
+  const run = getRunById(runId);
+  return run?.run_kind === "probe";
+}
 
 export type UnionSpec =
   | { kind: "session" }
@@ -431,6 +480,11 @@ export function registerCoverage(program: Command): void {
       "  pass-coverage  — endpoint had at least one passing 2xx response (strict; what CI usually wants)\n" +
       "  hit-coverage   — endpoint received any response at all, including 5xx and assertion failures (loose; for breadth audits)\n" +
       "\n" +
+      "Source: only `zond run` results are aggregated (ARV-19). `zond checks " +
+      "run` probes hit the API but are not stored as run results, so they " +
+      "don't move either metric — generate suites with `zond generate` and " +
+      "execute them via `zond run` to grow coverage.\n" +
+      "\n" +
       "Defaults to the latest stored run for the resolved API; pass " +
       "--run-id to pin a specific run, or --union <selector> to combine " +
       "multiple runs.\n" +
@@ -471,8 +525,20 @@ export function registerCoverage(program: Command): void {
       "Combine multiple runs. Selector: 'session', 'since:<dur>' (e.g. since:24h), 'tag:<name>', or 'runs:<id1,id2,…>' (bare comma-list also accepted)",
     )
     .option("--db <path>", "Path to SQLite database file")
+    .option("--verbose", "List not-covered (and partial) endpoints inline — same data as `--json` but human-readable")
+    // ARV-35: `--format json` matches the kubectl/gh/aws-cli convention many
+    // users reach for first; until ARV-54 lands a workspace-wide alias layer
+    // we accept it locally and forward to `--json`. Other values are rejected
+    // (no markdown reporter on coverage) so typos still fail loud.
+    .addOption(
+      new Option("--format <fmt>", "Alias for --json (parity with kubectl/gh/aws-cli)").choices(["json"]),
+    )
     .action(async (opts, cmd: Command) => {
-      const apiFlag = (opts.api as string | undefined) ?? (opts.spec ? undefined : readCurrentApi() ?? undefined);
+      if (opts.format === "json") opts.json = true;
+      // ARV-53: only walk the --api chain when --spec wasn't provided —
+      // an explicit spec disables the current-API fallback (coverage's
+      // legacy mode supports bare-spec usage).
+      const apiFlag = opts.spec ? (opts.api as string | undefined) : getApi(cmd, opts);
       let apiName: string | undefined;
       let spec: string | undefined = opts.spec;
 
@@ -530,20 +596,46 @@ export function registerCoverage(program: Command): void {
         return;
       }
 
-      // Hint when an active session has multiple runs but the user defaulted
-      // to "latest run only". Skip when --json (don't pollute envelope) or
-      // any explicit selector is set.
+      // ARV-71 (feedback round-02 / F12): when --api X is set and a zond
+      // session is active with more than one run, auto-promote the default
+      // to `--union session`. The pre-ARV-71 behaviour ("latest run only")
+      // misreads as a coverage regression every time a user runs a partial
+      // suite mid-session, and the previous stderr hint was easy to miss
+      // (the percentage already looked like a regression). Explicit
+      // selectors win, --json keeps the envelope untouched.
       const noSelector = !opts.runId && !sessionId && !runIds && !sinceIso && !tag;
-      if (apiName && noSelector && !globalJson(cmd)) {
+      if (apiName && noSelector) {
         const current = readCurrentSession();
         if (current) {
           const sessRuns = listRunsBySession(current.id);
           if (sessRuns.length > 1) {
-            const hint = `Active session has ${sessRuns.length} runs. ` +
-              `Coverage shows the latest only — pass '--union session' to combine all runs in the session.`;
-            process.stderr.write(`zond: ${hint}\n`);
+            sessionId = current.id;
+            if (!globalJson(cmd)) {
+              process.stderr.write(
+                `zond: active session has ${sessRuns.length} runs — defaulting to --union session (pass --run-id <N> for a single run).\n`,
+              );
+            }
           }
         }
+        // ARV-41: warn when the latest run is probe-only — otherwise
+        // `zond coverage` right after `zond run apis/<api>/probes/...`
+        // looks like a regression vs the prior smoke/CRUD run.
+        try {
+          const collection = findCollectionByNameOrId(apiName);
+          if (collection) {
+            // ARV-55: peek at the absolute latest run (`runKind: 'any'`).
+            // Coverage's default loader query already skips probe runs
+            // via `run_kind = 'regular'`, so the user won't see a
+            // regression — but if their *most recent* invocation was a
+            // probe-only run, the inline warning keeps it visible.
+            const latest = getLatestRunByCollection(collection.id, { runKind: "any" });
+            if (latest && latest.run_kind === "probe") {
+              const hint = `Latest run #${latest.id} only executed probe suites — coverage falls back to the prior smoke/CRUD run. ` +
+                `For combined coverage, wrap your runs in 'zond session start/end' and pass '--union session' here.`;
+              process.stderr.write(`zond: ${hint}\n`);
+            }
+          }
+        } catch { /* DB inspection is best-effort, don't break coverage */ }
       }
 
       process.exitCode = await coverageCommand({
@@ -556,6 +648,7 @@ export function registerCoverage(program: Command): void {
         ...(sinceIso ? { sinceIso } : {}),
         ...(tag ? { tag } : {}),
         json: globalJson(cmd),
+        verbose: opts.verbose === true,
       });
     });
 }

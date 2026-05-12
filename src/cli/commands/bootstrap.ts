@@ -27,7 +27,7 @@ import {
   extractEndpoints,
   extractSecuritySchemes,
 } from "../../core/generator/index.ts";
-import { generateFromSchema } from "../../core/generator/data-factory.ts";
+import { buildCreateRequestBody } from "../../core/generator/create-body.ts";
 import { loadEnvFile, substituteDeep } from "../../core/parser/variables.ts";
 import { liveAuthHeaders } from "../../core/probe/shared.ts";
 import { executeRequest } from "../../core/runner/http-client.ts";
@@ -35,6 +35,7 @@ import {
   collectTargets,
   isPlaceholder,
   probeOne,
+  readFixtureManifest,
   readResourceMap,
   upsertEnvLine,
   type DiscoveryItem,
@@ -64,9 +65,21 @@ interface SeedAttempt {
   varName: string;
   resource: string;
   createPath: string;
-  status: "seeded" | "skip-already-set" | "skip-no-create" | "skip-no-schema" | "miss-network" | "miss-status" | "miss-no-id";
+  status:
+    | "seeded"
+    | "skip-already-set"
+    | "skip-no-create"
+    | "skip-no-schema"
+    | "miss-network"
+    | "miss-status"
+    | "miss-seed-422"
+    | "miss-no-id";
   capturedId?: string;
   reason?: string;
+  /** ARV-47: short curl-style repro printed for 4xx seed failures so the
+   *  user (or downstream agent) can reproduce the exact request without
+   *  poking through structured envelopes. */
+  repro?: string;
 }
 
 interface Pass {
@@ -137,6 +150,42 @@ function findOwnerResourceForSeed(
   return undefined;
 }
 
+/** ARV-47: build a one-line `curl` invocation that reproduces the failed
+ *  seed request. Headers carrying secrets (Authorization, X-API-Key) are
+ *  redacted to a `<REDACTED>` placeholder so the repro can ship in stderr
+ *  / JSON envelopes without leaking tokens. */
+function buildCurlRepro(
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+): string {
+  const parts: string[] = [`curl -X ${method} ${JSON.stringify(url)}`];
+  for (const [k, v] of Object.entries(headers)) {
+    const lk = k.toLowerCase();
+    const redacted = lk === "authorization" || lk === "x-api-key" || lk === "api-key";
+    parts.push(`-H ${JSON.stringify(`${k}: ${redacted ? "<REDACTED>" : v}`)}`);
+  }
+  parts.push(`-d ${JSON.stringify(JSON.stringify(body))}`);
+  return parts.join(" ");
+}
+
+/** Pull the first useful validation message out of a 422 response body. */
+function extractFirst422Detail(body: unknown): string | undefined {
+  if (typeof body === "string") return body.length < 200 ? body : undefined;
+  if (!body || typeof body !== "object") return undefined;
+  const obj = body as Record<string, unknown>;
+  if (typeof obj.detail === "string") return obj.detail;
+  if (typeof obj.message === "string") return obj.message;
+  if (typeof obj.error === "string") return obj.error;
+  // FastAPI / many SaaS APIs nest details: { detail: [{ loc, msg }] }
+  if (Array.isArray(obj.detail) && obj.detail.length > 0) {
+    const first = obj.detail[0] as { msg?: string; loc?: unknown[] };
+    if (first?.msg) return `${first.msg}${Array.isArray(first.loc) ? ` at ${first.loc.join(".")}` : ""}`;
+  }
+  return undefined;
+}
+
 /** Substitute path-params in a path with values from vars. Returns
  *  `{ resolved, missing }`; missing is non-empty when a parent fixture is
  *  still absent — caller defers the seed for a later cascade pass. */
@@ -193,7 +242,13 @@ async function trySeed(
       reason: `parent fixtures missing for create path: ${missing.join(", ")}`,
     };
   }
-  const generated = generateFromSchema(ep.requestBodySchema, undefined, { forRequest: true });
+  // ARV-47: spec-aware body builder substitutes parent-FK fields with
+  // values already in env (audience_id ↔ env["audience_id"]) before the
+  // schema-derived random placeholders win. Without this, every nested
+  // POST 422s on a real API because randomly-generated parent ids don't
+  // exist in the target tenant.
+  const known = nonEmptyVars(vars);
+  const generated = buildCreateRequestBody(ep.requestBodySchema, { knownFixtures: known });
   // Resolve `{{$randomSlug}}` etc. into concrete values for the live POST.
   const concreteBody = substituteDeep(generated, vars);
 
@@ -206,9 +261,12 @@ async function trySeed(
 
   let resp;
   try {
+    // ARV-48: 1 network-class retry covers transient DNS/connection-reset
+    // hiccups during seed POSTs. Application-level errors (4xx/5xx) keep
+    // their existing branches and surface to the user.
     resp = await executeRequest(
       { method: parsed.method, url, headers, body: JSON.stringify(concreteBody) },
-      { timeout: timeoutMs, retries: 0 },
+      { timeout: timeoutMs, retries: 0, network_retries: 1 },
     );
   } catch (err) {
     return {
@@ -220,12 +278,21 @@ async function trySeed(
     };
   }
   if (resp.status < 200 || resp.status >= 300) {
+    // ARV-47 AC#4: 422 is the most common failure mode for seed POSTs
+    // (validator complaint, not transport error). Branch it out so agents
+    // can route on the manifest-grade status, and emit a curl-style repro
+    // so the user can reproduce the request manually.
+    const isSeed422 = resp.status === 422;
+    const repro = buildCurlRepro(parsed.method, url, headers, concreteBody);
+    const respBody = resp.body_parsed ?? resp.body;
+    const detailHint = extractFirst422Detail(respBody);
     return {
       varName,
       resource: owner.resource,
       createPath: parsed.path,
-      status: "miss-status",
-      reason: `${parsed.method} ${pathResolved} → ${resp.status}`,
+      status: isSeed422 ? "miss-seed-422" : "miss-status",
+      reason: `${parsed.method} ${pathResolved} → ${resp.status}${detailHint ? ` (${detailHint})` : ""}`,
+      repro,
     };
   }
   const captured = captureFromResponse(
@@ -320,7 +387,12 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
 
     const timeout = options.timeoutMs ?? 30000;
     const maxPasses = options.maxPasses ?? 8;
-    const targets = collectTargets(resourceMap);
+    // ARV-133: manifest-aware cascade — pull every required path/body-fk var
+    // into the target list, not only ones declared as parent-FK edges. Without
+    // the manifest, root-level vars (`domain_id`, `webhook_id`) that have no
+    // fkDep edge to another resource silently dropped out of cascade.
+    const manifest = (await readFixtureManifest(options.apiDir)) ?? undefined;
+    const targets = collectTargets(resourceMap, manifest);
 
     if (targets.length === 0 && !options.seed) {
       const msg = "No path-FK dependencies — nothing to bootstrap.";
@@ -415,37 +487,89 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     // seeded a parent and we captured its id), `failed:<reason>` (still empty
     // — surface why so the operator knows where to step in by hand).
     type TargetStatus = "already" | "discovered" | "seeded" | `failed:${string}`;
-    const perTarget: Array<{ var: string; resource: string; status: TargetStatus; value?: string; reason?: string }> = [];
+    // ARV-112: `sourceEndpoint` records WHERE a filled value came from so
+    // the operator can re-derive it / spot a wrong harvest source without
+    // re-running with --verify. `discovered` → the list GET that surfaced
+    // the id; `seeded` → the POST that created it; `already` → "(pre-set)".
+    const perTarget: Array<{ var: string; resource: string; status: TargetStatus; value?: string; reason?: string; sourceEndpoint?: string }> = [];
     for (const t of targets) {
       const value = env[t.varName];
       let status: TargetStatus;
       let reason: string | undefined;
+      let sourceEndpoint: string | undefined;
       if (preFilled.has(t.varName) && !options.force) {
         status = "already";
+        sourceEndpoint = "(pre-set)";
       } else if (!isPlaceholder(value)) {
         const seeded = seeds.find(s => s.varName === t.varName && s.status === "seeded");
-        status = seeded ? "seeded" : "discovered";
+        if (seeded) {
+          status = "seeded";
+          sourceEndpoint = `POST ${seeded.createPath}`;
+        } else {
+          status = "discovered";
+          // Find the cascade item that actually wrote this var — last pass
+          // where it appeared with status="write" wins. Falls back to any
+          // pass-item for the var if no explicit write status was recorded
+          // (defensive — current code path always sets "write" on success).
+          const writingItem = [...passes].reverse()
+            .flatMap(p => p.items)
+            .find(i => i.varName === t.varName && i.status === "write");
+          const lookupItem = writingItem
+            ?? [...passes].reverse().flatMap(p => p.items).find(i => i.varName === t.varName);
+          if (lookupItem?.listPath) sourceEndpoint = `GET ${lookupItem.listPath}`;
+        }
       } else {
         // Still empty — pick the most recent miss-* item from the cascade as
         // the reason; fallback to the seed attempt's reason.
         const lastItem = [...passes].reverse()
           .flatMap(p => p.items)
           .find(i => i.varName === t.varName);
+        const lastSeed = [...seeds].reverse().find(s => s.varName === t.varName);
         if (lastItem) {
           reason = lastItem.reason ?? lastItem.status;
           status = `failed:${lastItem.status}`;
-        } else {
-          const lastSeed = [...seeds].reverse().find(s => s.varName === t.varName);
-          if (lastSeed) {
-            reason = lastSeed.reason ?? lastSeed.status;
-            status = `failed:${lastSeed.status}`;
-          } else {
-            reason = "no list endpoint and no create endpoint to seed from";
-            status = "failed:no-route";
+          // ARV-98 (F3): when --seed was already passed, the cascade reason
+          // for `miss-empty` still shouts "re-run with --seed --apply"
+          // because discover.ts is context-blind. Replace it with what the
+          // seed-fallback actually did so agents stop re-running the same
+          // flag. Two sub-cases:
+          //   (a) seed was tried for this var → splice in its outcome.
+          //   (b) seed was on but no attempt landed → owner lookup couldn't
+          //       find a POST/create endpoint (common for SDK-only writes
+          //       like ingest-only resources). Spell that out.
+          if (options.seed && lastItem.status === "miss-empty") {
+            if (lastSeed) {
+              reason = `${lastItem.reason ?? lastItem.status}; seed attempt: ${lastSeed.reason ?? lastSeed.status}`;
+              status = `failed:${lastSeed.status}`;
+            } else {
+              const owner = findOwnerResourceForSeed(t.varName, resourceMap.resources);
+              if (!owner) {
+                reason = `no .api-resources.yaml owner produces ${t.varName} — --seed cannot help. Either extend .api-resources.local.yaml (ARV-111: user-maintained sibling that survives refresh-api) or harvest the id by hand into .env.yaml.`;
+                status = "failed:miss-empty-no-seed-owner";
+              } else if (!owner.endpoints?.create) {
+                reason = `owner resource '${owner.resource}' has no create endpoint in spec — --seed cannot help (resource likely write-only / SDK-only). Either extend .api-resources.local.yaml with a custom create endpoint (ARV-111) or harvest the id by hand into .env.yaml.`;
+                status = "failed:miss-empty-no-seed-endpoint";
+              }
+              // Else: owner has a create endpoint but no attempt landed in
+              // this loop iteration — leave the cascade reason untouched.
+            }
           }
+        } else if (lastSeed) {
+          reason = lastSeed.reason ?? lastSeed.status;
+          status = `failed:${lastSeed.status}`;
+        } else {
+          reason = "no list endpoint and no create endpoint to seed from";
+          status = "failed:no-route";
         }
       }
-      perTarget.push({ var: t.varName, resource: t.ownerResource, status, ...(isPlaceholder(value) ? {} : { value }), ...(reason ? { reason } : {}) });
+      perTarget.push({
+        var: t.varName,
+        resource: t.ownerResource,
+        status,
+        ...(isPlaceholder(value) ? {} : { value }),
+        ...(reason ? { reason } : {}),
+        ...(sourceEndpoint ? { sourceEndpoint } : {}),
+      });
     }
 
     const noOp = totalFkVars > 0 && filledFkVars === totalFkVars && writes.size === 0 && seeds.length === 0;
@@ -481,14 +605,18 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
       if (noOp) {
         console.log(`bootstrap: nothing to do — ${filledFkVars}/${totalFkVars} fixtures already present.`);
       } else {
-        // Per-target table.
+        // Per-target table. ARV-112: include `from` column with the endpoint
+        // that produced the value (GET <list> for discovered, POST <create>
+        // for seeded, "(pre-set)" for already-filled) so a wrong harvest is
+        // diagnosable without re-running --verify.
         if (perTarget.length > 0) {
           console.log("Fixture status:");
           for (const r of perTarget) {
             const head = r.status.padEnd(20);
             const value = r.value !== undefined ? `→ ${r.value}` : "";
             const reason = r.reason ? ` (${r.reason})` : "";
-            console.log(`  ${head} ${r.var.padEnd(28)} ${r.resource.padEnd(20)} ${value}${reason}`);
+            const from = r.sourceEndpoint ? `  from ${r.sourceEndpoint}` : "";
+            console.log(`  ${head} ${r.var.padEnd(28)} ${r.resource.padEnd(20)} ${value}${reason}${from}`);
           }
           console.log("");
         }
@@ -504,6 +632,13 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
           for (const s of seeds) {
             const tail = s.status === "seeded" ? `→ ${s.capturedId}` : `(${s.reason ?? ""})`;
             console.log(`  ${s.status.padEnd(18)} ${s.varName.padEnd(28)} ${s.resource.padEnd(20)} ${tail}`);
+          }
+          // ARV-47 AC#4: print curl-style repro for every 422 to stderr so the
+          // user can copy-paste-debug without inspecting the JSON envelope.
+          for (const s of seeds) {
+            if (s.status === "miss-seed-422" && s.repro) {
+              console.error(`  Repro: ${s.repro}`);
+            }
           }
           console.log(`Seed loop stopped: ${seedStop}.`);
         }
@@ -528,6 +663,9 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
   }
 }
 
-// CLI registration moved to ./prepare-fixtures.ts (TASK-299, m-13 D).
-// `bootstrapCommand` above is still the imperative core for the
-// cascade branch and is consumed directly by tests.
+// ARV-130 (m-19): file kept on purpose. CLI registration is owned by
+// ./prepare-fixtures.ts (TASK-299, m-13 D); `bootstrapCommand` above is
+// consumed both by that wrapper and by direct unit tests
+// (`tests/cli/bootstrap.test.ts`). Not to be confused with
+// `./init/bootstrap.ts` — a different module that scaffolds a fresh
+// workspace. See the m-19 audit note in backlog/tasks/arv-130.

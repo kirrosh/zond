@@ -33,6 +33,7 @@ import { loadIdentityFromAncestor } from "../../core/identity/identity-file.ts";
 import { hashSpec } from "../../core/meta/meta-store.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError } from "../output.ts";
+import { getApi } from "../util/api-context.ts";
 
 export interface DoctorOptions {
   api?: string;
@@ -524,7 +525,10 @@ function printHuman(
   if (opts.missingOnly && r.blockedRequired === 0 && r.staleArtifacts.length === 0) {
     out.write(`No missing items. Workspace is ready.\n`);
   } else if (r.blockedRequired > 0) {
-    out.write(`Next: edit ${r.baseDir}/.env.yaml and fill the ${r.blockedRequired} required value${r.blockedRequired === 1 ? "" : "s"}, then re-run \`zond doctor --api ${r.api}\`.\n`);
+    // ARV-16: align with `zond coverage`, which points users at the same
+    // remedy. `prepare-fixtures` auto-seeds from list endpoints; manual edit
+    // is the fallback for fields prepare-fixtures can't infer.
+    out.write(`Next: run \`zond prepare-fixtures --api ${r.api}\` to auto-seed from list endpoints, or edit ${r.baseDir}/.env.yaml and fill the ${r.blockedRequired} required value${r.blockedRequired === 1 ? "" : "s"} manually. Then re-run \`zond doctor --api ${r.api}\`.\n`);
   } else if (r.staleArtifacts.some(s => !s.fresh)) {
     out.write(`Next: artifacts are out of sync — run \`zond refresh-api ${r.api}\`.\n`);
   } else {
@@ -585,8 +589,15 @@ export function registerDoctor(program: Command): void {
     .option("--missing-only", "Show only missing/stale items (hide rows that are already healthy). Applies to both text and --json output.")
     .option("--query <dotpath>", "Resolve a dot-path inside the doctor report and emit just that subtree as JSON (e.g. fixtures.required, staleArtifacts, spec.sha).")
     .action(async (opts, cmd: Command) => {
+      // ARV-96: resolve --api via the shared chain (local opt > ancestor opt
+      // > ZOND_API_GLOBAL > ZOND_API > .zond/current-api). Without this,
+      // `zond --api X doctor` and `zond doctor --api X` on a multi-API
+      // workspace both fell through to the "Multiple APIs registered" branch
+      // because the global --api option (program.ts) absorbs the flag and
+      // leaves opts.api undefined for the subcommand.
+      const resolvedApi = getApi(cmd, opts);
       process.exitCode = await doctorCommand({
-        api: opts.api,
+        api: resolvedApi,
         dbPath: typeof opts.db === "string" ? opts.db : undefined,
         json: globalJsonResolver(cmd),
         missingOnly: opts.missingOnly === true,

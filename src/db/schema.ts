@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { dirname, resolve } from "path";
 import { existsSync, mkdirSync } from "fs";
 import { findWorkspaceRoot } from "../core/workspace/root.ts";
+import { applyMigrations } from "./migrate.ts";
 
 let _db: Database | null = null;
 let _dbPath: string | null = null;
@@ -41,12 +42,56 @@ export function getDb(dbPath?: string): Database {
   // Performance and integrity settings
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
+  // ARV-163: concurrent zond processes (e.g. `probe security` in one terminal
+  // + `checks run` in another) collide on the write-lock and surface as
+  // "database is locked". Letting SQLite spin at the C-level for up to 5s
+  // resolves the overwhelming majority without any per-call retry logic.
+  // `synchronous=NORMAL` is safe under WAL and cuts fsync overhead in the
+  // bulk-insert path (saveResults). withDbRetry() in this file remains the
+  // belt-and-suspenders for the rare long-running transactions.
+  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA synchronous = NORMAL");
 
   runMigrations(db);
+
+  // ARV-127: file-based migrations sit on top of the legacy PRAGMA
+  // path. On an existing DB the runner pre-seeds `schema_migrations`
+  // so the v9→v10 inline migration (now mirrored in
+  // src/db/migrations/0001_run_kind.sql) is treated as applied.
+  applyMigrations(db);
 
   _db = db;
   _dbPath = path;
   return db;
+}
+
+/**
+ * ARV-163: retry wrapper for SQLite write paths that may collide with
+ * concurrent zond processes. `PRAGMA busy_timeout` already absorbs short
+ * contention at the C level — this wrapper only catches the residual cases
+ * where the lock holder runs longer than the timeout (e.g. a big
+ * `saveResults` bulk insert during a parallel `probe security` cleanup).
+ *
+ * Detects bun:sqlite's "database is locked" / "SQLITE_BUSY" message shapes;
+ * other errors propagate immediately. Backoff: 100, 200, 400, 800ms capped at
+ * 4 attempts (≈1.5s total) so we never silently stall a CLI command.
+ */
+export function withDbRetry<T>(label: string, fn: () => T): T {
+  const delaysMs = [100, 200, 400, 800];
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= delaysMs.length; attempt++) {
+    try {
+      return fn();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/database is locked|SQLITE_BUSY/i.test(msg)) throw err;
+      lastError = err;
+      if (attempt === delaysMs.length) break;
+      Bun.sleepSync(delaysMs[attempt]!);
+    }
+  }
+  const msg = lastError instanceof Error ? lastError.message : String(lastError);
+  throw new Error(`SQLite still locked after ${delaysMs.length + 1} attempts (${label}): ${msg}`);
 }
 
 export function closeDb(): void {
@@ -67,7 +112,7 @@ function resetDb(): void {
 // Schema
 // ──────────────────────────────────────────────
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -85,7 +130,11 @@ const SCHEMA = `
     duration_ms   INTEGER,
     collection_id INTEGER REFERENCES collections(id),
     session_id    TEXT,
-    tags          TEXT
+    tags          TEXT,
+    -- ARV-55: classify a run once at INSERT time so coverage / diagnose
+    -- queries don't have to re-derive "is this a probe-only run?" from
+    -- the results' suite_file paths.
+    run_kind      TEXT NOT NULL DEFAULT 'regular' CHECK (run_kind IN ('regular','probe','check'))
   );
 
   CREATE TABLE IF NOT EXISTS results (
@@ -216,6 +265,33 @@ function runMigrations(db: Database): void {
       // of suite-level tags actually executed in the run, plus any explicit
       // --tag filters). Powers `coverage --union tag:<name>` (TASK-274).
       db.exec("ALTER TABLE runs ADD COLUMN tags TEXT");
+    }
+    if (ver >= 9 && ver < 10) {
+      // Migration v9→v10 (ARV-55): classify each historical run by suite
+      // kind so coverage's default query becomes a column compare. The
+      // CHECK constraint can't be added retroactively without a table
+      // rebuild — accept the looser column for legacy rows; new INSERTs
+      // go through `createRun()` which only emits known kinds.
+      db.exec("ALTER TABLE runs ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'regular'");
+      // Backfill: derive kind per existing run from its stored results.
+      // `every` semantics mirror the runtime `detectRunKind` helper —
+      // pure-probe / pure-check vs anything else.
+      db.exec(`
+        UPDATE runs SET run_kind = 'probe'
+        WHERE id IN (
+          SELECT r.id FROM runs r
+          WHERE EXISTS (SELECT 1 FROM results WHERE run_id = r.id AND suite_file IS NOT NULL AND suite_file LIKE '%probes/%')
+            AND NOT EXISTS (SELECT 1 FROM results WHERE run_id = r.id AND suite_file IS NOT NULL AND suite_file NOT LIKE '%probes/%')
+        )
+      `);
+      db.exec(`
+        UPDATE runs SET run_kind = 'check'
+        WHERE id IN (
+          SELECT r.id FROM runs r
+          WHERE EXISTS (SELECT 1 FROM results WHERE run_id = r.id AND suite_file IS NOT NULL AND suite_file LIKE '%checks/%')
+            AND NOT EXISTS (SELECT 1 FROM results WHERE run_id = r.id AND suite_file IS NOT NULL AND suite_file NOT LIKE '%checks/%')
+        )
+      `);
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   })();

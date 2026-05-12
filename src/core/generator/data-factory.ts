@@ -61,11 +61,26 @@ export function generateFromSchema(
   // properties over loose primitives — APIs that accept `Array<{id}>|Array<string>`
   // need the object variant, not a string that 422s. Falls back to first
   // non-null entry.
+  //
+  // ARV-78 (feedback round-04 / F25): when the parent schema declares a
+  // `discriminator: { propertyName, mapping? }` (typical OpenAPI 3 polymorphism —
+  // /automations.steps with type=trigger|action), pick the variant whose
+  // discriminator property carries a const/enum-single value and stamp that
+  // value into the result. Without this, generator emits a random variant and
+  // the API 422s with "Missing <required-by-other-variant>".
   if (schema.oneOf) {
-    return recurse(pickPreferredVariant(schema.oneOf as OpenAPIV3.SchemaObject[]), propertyName);
+    const variants = schema.oneOf as OpenAPIV3.SchemaObject[];
+    const picked = pickDiscriminatorVariant(variants, schema.discriminator?.propertyName)
+      ?? pickPreferredVariant(variants);
+    const result = recurse(picked, propertyName);
+    return stampDiscriminator(result, picked, schema.discriminator?.propertyName);
   }
   if (schema.anyOf) {
-    return recurse(pickPreferredVariant(schema.anyOf as OpenAPIV3.SchemaObject[]), propertyName);
+    const variants = schema.anyOf as OpenAPIV3.SchemaObject[];
+    const picked = pickDiscriminatorVariant(variants, schema.discriminator?.propertyName)
+      ?? pickPreferredVariant(variants);
+    const result = recurse(picked, propertyName);
+    return stampDiscriminator(result, picked, schema.discriminator?.propertyName);
   }
 
   // enum: first value (always valid for the API contract)
@@ -83,9 +98,22 @@ export function generateFromSchema(
 
   // OpenAPI 3.1: type can be `["string", "null"]`. Collapse to the first
   // non-null entry so the switch below routes correctly.
-  const effectiveType = Array.isArray(schema.type)
+  let effectiveType = Array.isArray(schema.type)
     ? (schema.type as string[]).find(t => t !== "null") as OpenAPIV3.SchemaObject["type"] | undefined
     : schema.type;
+
+  // ARV-67 (feedback round-01 / F7): schemas in the wild routinely omit
+  // `type` on nested-object fields and rely on `properties` / `required`
+  // / `items` to convey shape. Without the salvage below, the default
+  // branch returns "{{$randomString}}" for a missing-type field — which
+  // is what made `prepare-fixtures --seed` send a string for nested
+  // objects like `automations.config` / `automations.steps` and earn
+  // "Expected object, received string" 422s. Infer the type
+  // from structural hints when nothing else gives one.
+  if (effectiveType === undefined) {
+    if ((schema as { items?: unknown }).items !== undefined) effectiveType = "array";
+    else if (schema.properties || Array.isArray(schema.required)) effectiveType = "object";
+  }
 
   switch (effectiveType) {
     case "string":
@@ -145,7 +173,7 @@ export function generateFromSchema(
 
 /** Fields the client must not send in a request body: explicit `readOnly: true`,
  *  or the literal name `id`. The latter is a heuristic for under-specified specs
- *  (Sentry, many in-house APIs) that don't mark the server-assigned id readOnly
+ *  (common in in-house APIs) that don't mark the server-assigned id readOnly
  *  but still 4xx on it being present. */
 function shouldSkipForRequest(name: string, schema: OpenAPIV3.SchemaObject): boolean {
   if (schema.readOnly === true) return true;
@@ -171,6 +199,50 @@ function depthLimitDefault(schema: OpenAPIV3.SchemaObject, name?: string): unkno
   }
 }
 
+/** ARV-78 (F25): when a parent oneOf/anyOf carries `discriminator.propertyName`,
+ *  pick the variant whose discriminator property has a single-value enum or
+ *  const so its identity is unambiguous. Returns undefined when nothing
+ *  qualifies — caller falls back to pickPreferredVariant. */
+function pickDiscriminatorVariant(
+  variants: OpenAPIV3.SchemaObject[],
+  propertyName: string | undefined,
+): OpenAPIV3.SchemaObject | undefined {
+  if (!propertyName) return undefined;
+  for (const v of variants) {
+    const prop = v.properties?.[propertyName] as OpenAPIV3.SchemaObject | undefined;
+    if (!prop) continue;
+    const en = (prop as { enum?: unknown[] }).enum;
+    const cn = (prop as { const?: unknown }).const;
+    if (Array.isArray(en) && en.length === 1) return v;
+    if (cn !== undefined && cn !== null) return v;
+  }
+  return undefined;
+}
+
+/** Stamp the discriminator key onto a generated object. Without this the
+ *  variant choice is "anonymous" from the body's point of view — APIs that
+ *  switch on `type` reject the request even when every other field is
+ *  perfect. No-op when the propertyName is missing or the variant lacks an
+ *  enum/const for that property. */
+function stampDiscriminator(
+  result: unknown,
+  variant: OpenAPIV3.SchemaObject,
+  propertyName: string | undefined,
+): unknown {
+  if (!propertyName) return result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return result;
+  const prop = variant.properties?.[propertyName] as OpenAPIV3.SchemaObject | undefined;
+  if (!prop) return result;
+  const en = (prop as { enum?: unknown[] }).enum;
+  const cn = (prop as { const?: unknown }).const;
+  let stamp: unknown;
+  if (Array.isArray(en) && en.length === 1) stamp = en[0];
+  else if (cn !== undefined && cn !== null) stamp = cn;
+  else return result;
+  (result as Record<string, unknown>)[propertyName] = stamp;
+  return result;
+}
+
 /** Prefer the most data-shape-informative variant from a oneOf/anyOf list:
  *  object-with-properties > non-null > first. Skips `type: "null"` entries
  *  introduced by 3.1 nullable shorthand. */
@@ -189,6 +261,34 @@ function pickPreferredVariant(variants: OpenAPIV3.SchemaObject[]): OpenAPIV3.Sch
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Names that strongly imply an email field. Kept in sync with the email
+ *  branch of `guessStringPlaceholder`/`classifyFieldSource`. Used to gate the
+ *  description-based domain heuristic so phrases like "verified sending
+ *  domain" in the description of a `from`/`to` field don't override the
+ *  email mapping. */
+function isEmailContextName(name?: string): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+  return (
+    lower === "email" ||
+    lower === "from" ||
+    lower === "to" ||
+    lower === "cc" ||
+    lower === "bcc" ||
+    lower === "sender" ||
+    lower === "recipient" ||
+    lower === "reply_to" ||
+    lower === "replyto" ||
+    lower.endsWith("_email") ||
+    lower.endsWith("Email") ||
+    lower.endsWith("_reply_to") ||
+    lower.endsWith("_from") ||
+    lower.endsWith("_to") ||
+    lower.endsWith("_cc") ||
+    lower.endsWith("_bcc")
+  );
+}
 
 /** A schema `pattern` that explicitly allows lowercase but not uppercase
  *  letters (typical slug regex like `^[a-z0-9_\-]+$`). Used to switch from
@@ -286,8 +386,15 @@ export function classifyFieldSource(
     : schema.type;
 
   if (t === "string") {
+    // ARV-38: keep --explain in sync with guessStringPlaceholder — when a
+    // default is consumed, label the source as "default", not "random".
+    if (typeof schema.default === "string" && schema.default.length > 0) return "default";
     if (isLowercaseOnlyPattern(schema.pattern)) return "pattern";
-    if (schema.description && /\b(domain|hostname|fqdn)\b/i.test(schema.description)) {
+    if (
+      schema.description &&
+      /\b(domain|hostname|fqdn)\b/i.test(schema.description) &&
+      !isEmailContextName(propertyName)
+    ) {
       return "heuristic:domain-from-description";
     }
     if (propertyName) {
@@ -296,9 +403,12 @@ export function classifyFieldSource(
       if (lower === "domain" || lower === "hostname" || lower === "fqdn" || lower.endsWith("_domain")) return "heuristic:domain";
       if (lower === "platform") return "heuristic:platform";
       if (lower === "language" || lower === "lang" || lower === "locale") return "heuristic:locale";
-      if (lower === "country" || lower === "country_code") return "heuristic:country";
+      if (lower === "country" || lower === "country_code" || lower.endsWith("_country") || lower.endsWith("_country_code")) return "heuristic:country";
       if (lower === "timezone" || lower === "time_zone" || lower === "tz") return "heuristic:timezone";
-      if (lower === "currency" || lower === "currency_code") return "heuristic:currency";
+      if (lower === "currency" || lower === "currency_code" || lower.endsWith("_currency") || lower.endsWith("_currency_code")) return "heuristic:currency";
+      if (lower === "mcc" || lower.endsWith("_mcc") || lower === "merchant_category_code") return "heuristic:mcc";
+      if (lower === "color" || lower.endsWith("_color") || lower === "background_color" || lower === "hex" || lower.endsWith("_hex_color")) return "heuristic:color";
+      if (lower === "ip" || lower === "ip_address" || lower.endsWith("_ip") || lower.endsWith("_ip_address")) return "heuristic:ip";
       if (
         lower === "email" || lower === "from" || lower === "to" || lower === "cc" ||
         lower === "bcc" || lower === "sender" || lower === "recipient" ||
@@ -343,6 +453,20 @@ export function formatToPlaceholder(format: string | undefined): string | undefi
     case "ipv4": return "{{$randomIpv4}}";
     case "ipv6": return "::1";
     case "password": return "TestPass123!";
+    // ARV-165: format-aware helpers. None of these are standard OpenAPI 3.x
+    // formats, but Stripe/GitHub/Shopify/Twilio specs frequently carry them
+    // as ad-hoc `format:` tags. Falling through to {{$randomString}} guarantees
+    // 400 from format-validated APIs (R09 finding: 199 hit-but-fail Stripe steps).
+    case "iso-country-code":
+    case "country-code":
+    case "country": return "{{$randomCountryCode}}";
+    case "iso-currency-code":
+    case "currency-code":
+    case "currency": return "{{$randomCurrencyCode}}";
+    case "mcc": return "{{$randomMCC}}";
+    case "color":
+    case "hex-color":
+    case "rgb-hex": return "{{$randomColorHex}}";
     default: return undefined;
   }
 }
@@ -376,6 +500,15 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
   // Format-based dispatch already happened earlier in generateFromSchema;
   // this branch only sees strings whose format is empty or unrecognised.
 
+  // ARV-38: when the spec declares a JSON-Schema `default` for a string-typed
+  // field with no enum, prefer it over heuristics. PATCH endpoints in
+  // particular rely on this — e.g. a `PATCH /domains/{id}` with
+  // `tls: { type: string, default: "opportunistic" }` would otherwise get
+  // a random fallback and a guaranteed 422 every run.
+  if (typeof schema.default === "string" && schema.default.length > 0) {
+    return schema.default;
+  }
+
   // Pattern-aware: many specs constrain slugs via regex like
   // `^(?![0-9]+$)[a-z0-9_\-]+$` without setting `format`. Default
   // `{{$randomString}}` mixes upper+lower → 400 from the validator.
@@ -384,11 +517,19 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
     return "{{$randomSlug}}";
   }
 
-  // Description-aware: when the schema describes a domain/hostname (Resend
-  // `POST /domains/`, Cloudflare zones, etc.) but the field is generically
-  // named `name`, the default `{{$randomName}}` returns "Bob Wilson" and the
-  // server rejects it. TASK-224.
-  if (schema.description && /\b(domain|hostname|fqdn)\b/i.test(schema.description)) {
+  // Description-aware: when the schema describes a domain/hostname (e.g.
+  // a `POST /domains/`-style endpoint or DNS-zone create route) but the
+  // field is generically named `name`, the default `{{$randomName}}`
+  // returns "Bob Wilson" and the server rejects it. TASK-224.
+  // Skip when the field name is clearly in email vocabulary — email-API
+  // specs often describe `from`/`to`/etc. with phrases like "verified
+  // sending domain" or "Name <user@domain>", which trips the regex but
+  // the field is an email, not a domain. Email vocab > domain-from-description.
+  if (
+    schema.description &&
+    /\b(domain|hostname|fqdn)\b/i.test(schema.description) &&
+    !isEmailContextName(name)
+  ) {
     return "{{$randomDomain}}";
   }
 
@@ -406,10 +547,23 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
     // Pick the most universally-accepted value per dictionary.
     if (lower === "platform") return "python";
     if (lower === "language" || lower === "lang" || lower === "locale") return "en";
-    if (lower === "country" || lower === "country_code") return "US";
+    // ARV-165: country/currency literals (US/USD) were universally accepted
+    // but offered zero variety — added endsWith() patterns so nested fields
+    // like `bank_account.country`, `payout.currency_code`, `from_country`
+    // also resolve. Still emit a literal — picking from the random helper
+    // would weaken the "always-valid" property for downstream assertions
+    // that pin on the first value.
+    if (lower === "country" || lower === "country_code" || lower.endsWith("_country") || lower.endsWith("_country_code")) return "US";
     if (lower === "timezone" || lower === "time_zone" || lower === "tz") return "UTC";
-    if (lower === "currency" || lower === "currency_code") return "USD";
-    // Email-context fields. Email-API specs (Resend, SendGrid, Mailgun) often
+    if (lower === "currency" || lower === "currency_code" || lower.endsWith("_currency") || lower.endsWith("_currency_code")) return "USD";
+    // ARV-165: MCC (merchant category code) — Stripe/Square/issuing APIs.
+    // Random {{$randomString}} → 400 because it's not a 4-digit code.
+    if (lower === "mcc" || lower.endsWith("_mcc") || lower === "merchant_category_code") return "{{$randomMCC}}";
+    // ARV-165: hex color — Stripe brand settings, Slack themes, GitHub labels.
+    if (lower === "color" || lower.endsWith("_color") || lower === "background_color" || lower === "hex" || lower.endsWith("_hex_color")) return "{{$randomColorHex}}";
+    // ARV-165: IP addresses — Stripe tos_acceptance.ip, audit logs, fraud APIs.
+    if (lower === "ip" || lower === "ip_address" || lower.endsWith("_ip") || lower.endsWith("_ip_address")) return "{{$randomIpv4}}";
+    // Email-context fields. Email-API specs often
     // omit `format: email` on `from`/`to`/`reply_to`/`cc`/`bcc` — the field
     // name is the only clue, and `{{$randomString}}` guarantees a 422.
     if (

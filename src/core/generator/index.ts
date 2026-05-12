@@ -12,3 +12,5 @@ export { buildApiResourceMap, serializeApiResourceMap } from "./resources-builde
 export type { ApiResourceMap, ApiResourceEntry, ResourceFkRef } from "./resources-builder.ts";
 export { buildApiFixtureManifest, serializeApiFixtureManifest } from "./fixtures-builder.ts";
 export type { ApiFixtureManifest, FixtureRequirement, FixtureSource } from "./fixtures-builder.ts";
+export { buildCreateRequestBody } from "./create-body.ts";
+export type { BuildCreateRequestBodyOptions } from "./create-body.ts";

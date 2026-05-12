@@ -2,7 +2,7 @@ import { dirname } from "path";
 import { stat } from "node:fs/promises";
 import { parseSafe } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
-import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod } from "../../core/parser/filter.ts";
+import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod, filterSuitesByOperationFilter } from "../../core/parser/filter.ts";
 import { preflightCheckVars, formatMissingVarLine, summarizeMissingVars } from "../../core/runner/preflight-vars.ts";
 import { runSuite } from "../../core/runner/executor.ts";
 import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
@@ -10,8 +10,9 @@ import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
 import { createRateLimiter, createAdaptiveRateLimiter } from "../../core/runner/rate-limiter.ts";
 import { getReporter, generateJsonReport, generateJunitXml } from "../../core/reporter/index.ts";
 import type { ReporterName } from "../../core/reporter/types.ts";
+import { resolveOutput, OutputSpecError, type OutputSpec } from "../../core/output/index.ts";
 import { writeFile, mkdir } from "node:fs/promises";
-import { dirname as pathDirname, isAbsolute, resolve as pathResolve } from "node:path";
+import { dirname as pathDirname, resolve as pathResolve } from "node:path";
 import type { TestSuite } from "../../core/parser/types.ts";
 import type { TestRunResult } from "../../core/runner/types.ts";
 import { printError, printWarning } from "../output.ts";
@@ -20,10 +21,33 @@ import { getDb } from "../../db/schema.ts";
 import { createRun, finalizeRun, saveResults, findCollectionByTestPath } from "../../db/queries.ts";
 import { AUTH_PATH_RE } from "../../core/runner/auth-path.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
+import { findWorkspaceRoot } from "../../core/workspace/root.ts";
+import { existsSync } from "node:fs";
 import { buildSpecPointer } from "../../core/diagnostics/spec-pointer.ts";
 import { detectStatusDrifts, formatDriftPlan, applyDriftsToTests, appendToleratedDrifts } from "../../core/runner/learn-drift.ts";
 import { detectCiContext } from "../../core/runner/ci-context.ts";
+import { detectRunKind } from "../../core/runner/run-kind.ts";
 import { resolveRateLimit } from "../../core/workspace/config.ts";
+
+/**
+ * ARV-117 (m-19): OutputSpec for `zond run`. Three formats; console is
+ * the default (stdout, rich per-suite stream); `json` / `junit` default
+ * to stdout but accept `--output <path>` to redirect. None of the
+ * formats are envelope-wrapped — `--report json` is a test-run report
+ * (per-suite breakdown), NOT the `{ok, data, errors}` envelope that
+ * other commands emit for `--json`. That distinction is intentional
+ * (TASK-134) and remains enforced by the explicit absence of `--json`
+ * on this command.
+ */
+export const RUN_OUTPUT_SPEC: OutputSpec<unknown> = {
+  command: "run",
+  defaultFormat: "console",
+  formats: {
+    console: { defaultChannel: "stdout", description: "Rich per-suite stream (default)" },
+    json:    { defaultChannel: "stdout", description: "Per-test JSON breakdown (`generateJsonReport`)" },
+    junit:   { defaultChannel: "stdout", description: "JUnit XML — CI consumption" },
+  },
+};
 
 export interface RunOptions {
   /**
@@ -47,17 +71,28 @@ export interface RunOptions {
   tag?: string[];
   excludeTag?: string[];
   method?: string;
+  /** ARV-25: parity with `zond generate`/`zond checks run` — selector
+   *  grammar `<path|method|tag|operation-id>:<value>`, repeatable, OR. */
+  include?: string[];
+  /** ARV-25: same grammar as `include`; evaluated after includes. */
+  exclude?: string[];
   envVars?: string[];
   /** Hard-fail (exit 2) on undefined {{var}} references instead of warning. */
   strictVars?: boolean;
   dryRun?: boolean;
   json?: boolean;
-  /** Write the report to a file instead of stdout. */
-  reportOut?: string;
+  /** ARV-117: write the report to a file instead of stdout. Replaces
+   *  the legacy `--report-out` flag (no alias — see m-19 lesson §E).
+   *  Resolved through `core/output`'s OutputSpec policy. */
+  output?: string;
   /** Validate every JSON response against the OpenAPI response schema. */
   validateSchema?: boolean;
   /** Explicit OpenAPI spec path/URL (overrides collection.openapi_spec). */
   specPath?: string;
+  /** ARV-44: --api <name> passed alongside paths — used as the lookup-by-name
+   *  fallback when test-path lookup in DB doesn't yield a spec. Parity with
+   *  ARV-33 (probe mass-assignment / probe security). */
+  apiName?: string;
   /** Group this run under a session id (multi-run campaigns). */
   sessionId?: string;
   /** TASK-144: per-step retry budget for transient network errors
@@ -77,6 +112,11 @@ export interface RunOptions {
   learnTarget?: "test" | "drifts";
   /** TASK-265: console reporter emits only the grand-total summary line. */
   quiet?: boolean;
+  /** ARV-72 (feedback round-02 / F14): default true. Set to false (via
+   *  --no-fail-on-failures) to keep exit code 0 even when steps failed —
+   *  useful for advisory runs (audit pre-pass, surface discovery) where
+   *  CI shouldn't break on a single test red. */
+  failOnFailures?: boolean;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -84,6 +124,16 @@ export async function runCommand(options: RunOptions): Promise<number> {
     printError("No path given");
     return 2;
   }
+  const emptyPaths = options.paths.filter((p) => typeof p !== "string" || p.trim().length === 0);
+  if (emptyPaths.length > 0) {
+    printError(`Empty path argument (got ${emptyPaths.length} blank entr${emptyPaths.length === 1 ? "y" : "ies"}) — pass a non-empty file or directory path`);
+    return 2;
+  }
+  // ARV-39: strip leading/trailing whitespace from path args so a stray space
+  // from copy-paste / shell history doesn't produce an ENOENT that quotes
+  // the rogue character. Mutating options.paths so downstream lookups
+  // (collection by test_path, env-file search) see the cleaned form.
+  options.paths = options.paths.map((p) => p.trim());
   const primaryPath = options.paths[0]!;
 
   // 1. Parse test files from every input path (collect parse errors instead
@@ -96,7 +146,8 @@ export async function runCommand(options: RunOptions): Promise<number> {
       suites.push(...parsed.suites);
       parseErrors.push(...parsed.errors);
     } catch (err) {
-      printError(err instanceof Error ? err.message : String(err));
+      const raw = err instanceof Error ? err.message : String(err);
+      printError(formatPathError(p, raw));
       return 2;
     }
   }
@@ -115,18 +166,44 @@ export async function runCommand(options: RunOptions): Promise<number> {
     return 0;
   }
 
+  // ARV-37: when a selector matches zero suites (typo'd --tag, dead --include
+  // pattern, etc.), exit non-zero. Previous fail-open let CI builds go green
+  // for `--tag smok` instead of `smoke`. For --tag we also surface the tags
+  // actually available so the user can correct without re-reading help.
+  // 1b0. ARV-25: unified --include/--exclude filter (parity with generate/checks).
+  //      Applied before tag/method filters so it can narrow the scope first.
+  if ((options.include && options.include.length > 0) || (options.exclude && options.exclude.length > 0)) {
+    const result = filterSuitesByOperationFilter(suites, options.include ?? [], options.exclude ?? []);
+    if (result.errors.length > 0) {
+      for (const err of result.errors) printError(err);
+      return 2;
+    }
+    suites = result.suites;
+    if (suites.length === 0) {
+      const parts: string[] = [];
+      if (options.include?.length) parts.push(`--include [${options.include.join(", ")}]`);
+      if (options.exclude?.length) parts.push(`--exclude [${options.exclude.join(", ")}]`);
+      printError(`No tests match ${parts.join(" / ")}`);
+      return 1;
+    }
+  }
+
   // 1b. Tag filter
   if (options.tag && options.tag.length > 0) {
+    const availableTags = collectAvailableTags(suites);
     suites = filterSuitesByTags(suites, options.tag);
     if (suites.length === 0) {
+      const tagHint = availableTags.length > 0
+        ? ` Available tags: ${availableTags.join(", ")}.`
+        : " (loaded suites declare no tags.)";
       if (parseErrors.length > 0) {
         printError(
-          `No suites match tags [${options.tag.join(", ")}] — but ${parseErrors.length} file(s) failed to parse (see warnings above). Fix parse errors and retry.`
+          `No suites match tags [${options.tag.join(", ")}] — but ${parseErrors.length} file(s) failed to parse (see warnings above). Fix parse errors and retry.${tagHint}`
         );
         return 1;
       }
-      printWarning("No suites match the specified tags");
-      return 0;
+      printError(`No suites match tags [${options.tag.join(", ")}].${tagHint}`);
+      return 1;
     }
   }
 
@@ -134,8 +211,8 @@ export async function runCommand(options: RunOptions): Promise<number> {
   if (options.excludeTag && options.excludeTag.length > 0) {
     suites = excludeSuitesByTags(suites, options.excludeTag);
     if (suites.length === 0) {
-      printWarning("All suites excluded by --exclude-tag");
-      return 0;
+      printError(`All suites excluded by --exclude-tag [${options.excludeTag.join(", ")}]`);
+      return 1;
     }
   }
 
@@ -143,8 +220,8 @@ export async function runCommand(options: RunOptions): Promise<number> {
   if (options.method) {
     suites = filterSuitesByMethod(suites, options.method);
     if (suites.length === 0) {
-      printWarning(`No tests found with method ${options.method.toUpperCase()}`);
-      return 0;
+      printError(`No tests found with method ${options.method.toUpperCase()}`);
+      return 1;
     }
   }
 
@@ -246,9 +323,21 @@ export async function runCommand(options: RunOptions): Promise<number> {
     envRateLimit = (await loadEnvMeta(options.env, searchDir)).rateLimit;
   } catch { /* meta load failure is non-fatal */ }
   const rateLimit = resolveRateLimit(options.rateLimit, envRateLimit);
-  const rateLimiter = rateLimit === "auto"
-    ? createAdaptiveRateLimiter()
-    : createRateLimiter(rateLimit);
+  // ARV-64 (feedback round-01 / F4): when no rate-limit was configured
+  // explicitly, default to an adaptive limiter. Adaptive is a no-op until
+  // a response carries RateLimit-* headers (RFC 9568) — in which case it
+  // learns the policy and throttles subsequent requests so a burst can't
+  // blow through small windows like small windows (e.g. 5 req/s). Without this default
+  // `zond run` ignored server-published rate-limit headers entirely and
+  // 22% of a typical sweep landed in 429.
+  let rateLimiter: ReturnType<typeof createAdaptiveRateLimiter> | undefined;
+  if (rateLimit === "auto") {
+    rateLimiter = createAdaptiveRateLimiter();
+  } else if (rateLimit !== undefined) {
+    rateLimiter = createRateLimiter(rateLimit);
+  } else {
+    rateLimiter = createAdaptiveRateLimiter();
+  }
 
   // 3c. Resolve OpenAPI spec. Explicit --spec wins; otherwise fall back to the
   // collection record. The doc is reused for --validate-schema (TASK-50) and
@@ -262,6 +351,23 @@ export async function runCommand(options: RunOptions): Promise<number> {
         const collection = findCollectionByTestPath(primaryPath);
         if (collection?.openapi_spec) specPath = resolveCollectionSpec(collection.openapi_spec);
       } catch { /* DB not available — fall through */ }
+    }
+    // ARV-44: parity with ARV-33 (probe mass-assignment / security). When the
+    // user passed --api <name> together with a path, the test-path lookup
+    // above may miss (path normalisation, alias, --all merge). Fall back to
+    // lookup-by-name, then to apis/<name>/spec.json on disk.
+    if (!specPath && options.apiName) {
+      try {
+        const byName = resolveApiCollection(options.apiName, options.dbPath);
+        if (!("error" in byName) && byName.spec) specPath = byName.spec;
+      } catch { /* fall through to disk probe */ }
+      if (!specPath) {
+        try {
+          const ws = findWorkspaceRoot();
+          const onDisk = pathResolve(ws.root, "apis", options.apiName, "spec.json");
+          if (existsSync(onDisk)) specPath = onDisk;
+        } catch { /* workspace not initialised — give up silently */ }
+      }
     }
     if (specPath) {
       try {
@@ -376,25 +482,35 @@ export async function runCommand(options: RunOptions): Promise<number> {
     warnings.push(`${rateLimited.length} request(s) hit rate limit (429). Consider: consolidating login steps, adding --bail, or using retry_until with delay.`);
   }
 
-  // 5b. Report
+  // 5b. Report — ARV-117: route through core/output's OutputSpec so
+  // `--report <format>` + `--output <path>` follow the same policy as
+  // every other command. `--output` (was `--report-out`) is honoured for
+  // any format; with `console` format it falls back to JSON in the file
+  // (most useful), matching prior behaviour.
+  let resolvedOutput;
+  try {
+    resolvedOutput = resolveOutput(RUN_OUTPUT_SPEC, {
+      report: options.report,
+      output: options.output,
+    });
+  } catch (err) {
+    if (err instanceof OutputSpecError) {
+      printError(err.message);
+      return 2;
+    }
+    throw err;
+  }
   if (!options.json) {
-    if (options.reportOut) {
-      // Write report to a file via fs (bypass stdout). Console reporter falls
-      // back to a single-line summary on stdout; json/junit produce no stdout.
-      const outPath = isAbsolute(options.reportOut)
-        ? options.reportOut
-        : pathResolve(process.cwd(), options.reportOut);
+    if (resolvedOutput.channel === "file") {
+      const outPath = resolvedOutput.path!;
       let content: string;
       let label: string;
-      switch (options.report) {
-        case "json":
-          content = generateJsonReport(results);
-          label = "JSON";
-          break;
+      switch (resolvedOutput.format) {
         case "junit":
           content = generateJunitXml(results);
           label = "JUnit XML";
           break;
+        case "json":
         default: // "console" — fall back to JSON in the file (most useful)
           content = generateJsonReport(results);
           label = "JSON";
@@ -405,7 +521,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
         await writeFile(outPath, content, "utf-8");
         process.stderr.write(`zond: ${label} report written to ${outPath}\n`);
       } catch (err) {
-        printError(`Failed to write --report-out file ${outPath}: ${(err as Error).message}`);
+        printError(`Failed to write --output file ${outPath}: ${(err as Error).message}`);
         return 2;
       }
       for (const w of warnings) {
@@ -493,6 +609,10 @@ export async function runCommand(options: RunOptions): Promise<number> {
       // `--trigger ci`). Manual runs default to trigger=manual with no
       // commit/branch — preserving prior behaviour.
       const ci = detectCiContext();
+      // ARV-55: classify the run by what kinds of suite files it executed
+      // *before* INSERT, so coverage's default query becomes a simple
+      // run_kind='regular' compare instead of a per-result regex scan.
+      const runKind = detectRunKind(suites.map((s) => s.filePath ?? null));
       savedRunId = createRun({
         started_at: results[0]?.started_at ?? new Date().toISOString(),
         environment: options.env,
@@ -502,6 +622,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
         commit_sha: ci.commit_sha ?? undefined,
         branch: ci.branch ?? undefined,
         ...(tags.length > 0 ? { tags } : {}),
+        run_kind: runKind,
       });
       finalizeRun(savedRunId, results);
       saveResults(savedRunId, results);
@@ -518,6 +639,23 @@ export async function runCommand(options: RunOptions): Promise<number> {
     return 0;
   }
   const hasFailures = results.some((r) => r.failed > 0 || r.steps.some((s) => s.status === "error"));
+
+  // ARV-105 (F10): a suite where every step was skipped (e.g. probe-emitted
+  // regression suite that needs an unfilled capture-chain var) reports
+  // total>0, passed=0, failed=0, skipped=total. Without surfacing this,
+  // CI sees "0 failed" and the run looks green even though nothing was
+  // actually tested. Compute the list once and expose it in both the
+  // JSON envelope and the stderr tail.
+  const allSkippedSuites = results
+    .filter(r => r.total > 0 && r.passed === 0 && r.failed === 0 && r.skipped === r.total)
+    .map(r => ({
+      suite: r.suite_name,
+      ...(r.suite_file ? { file: r.suite_file } : {}),
+      total: r.total,
+      // Sample skip reason from the first step — usually "missing variable
+      // {{X}}" or similar. Helps the operator route to fixtures vs spec.
+      first_skip_reason: r.steps[0]?.error ?? null,
+    }));
 
   if (options.json) {
     const total = results.reduce((s, r) => s + r.total, 0);
@@ -539,9 +677,55 @@ export async function runCommand(options: RunOptions): Promise<number> {
       }))
     );
     const fiveXx = failures.filter(f => f.is_5xx).length;
-    printJson(jsonOk("run", { summary: { total, passed, failed, fiveXx }, failures, warnings, runId: savedRunId }));
+    printJson(jsonOk("run", {
+      summary: { total, passed, failed, fiveXx, allSkippedSuites: allSkippedSuites.length },
+      failures,
+      ...(allSkippedSuites.length > 0 ? { all_skipped_suites: allSkippedSuites } : {}),
+      warnings,
+      runId: savedRunId,
+    }));
   }
 
+  // ARV-105 (F10): non-json — name the all-skipped suites on stderr so a
+  // tail-eyeballing operator notices the visibility-pitfall. Doesn't gate
+  // exit code (skipping isn't a failure) but is loud enough that a green
+  // "0 failed" can no longer hide a regression suite that ran zero steps.
+  if (allSkippedSuites.length > 0 && !options.json) {
+    process.stderr.write(`zond: ${allSkippedSuites.length} suite(s) ran with every step skipped (no test executed — likely missing fixtures or capture-chain ids).\n`);
+    for (const s of allSkippedSuites) {
+      const reason = s.first_skip_reason ? ` — ${s.first_skip_reason}` : "";
+      process.stderr.write(`  - ${s.suite}${s.file ? ` (${s.file})` : ""}: ${s.total} step(s) skipped${reason}\n`);
+    }
+  }
+
+  // ARV-162 (round-08 F19): when suites failed parse-time validation
+  // (`zond check tests` reject — e.g. form value emitted unquoted, parsed
+  // as int), per-file warnings already went to stderr at the top of the
+  // run, but they easily get lost in long output. Add a loud trailing
+  // summary so "47/68 ran" doesn't silently hide 21 invalid files.
+  if (parseErrors.length > 0 && !options.json) {
+    process.stderr.write(
+      `zond: ${parseErrors.length} test file(s) skipped due to validation errors — ` +
+      `run \`zond check tests <path>\` to see why. Coverage numbers below exclude these files.\n`,
+    );
+  }
+
+  // ARV-72 (feedback round-02 / F14): make the exit-code → failures
+  // mapping visible. Tester reported "545 failed, exit_code=0" which is
+  // not what this function returns — but the symptom is real: the reader
+  // can't tell whether the surrounding shell or a wrapper script swallowed
+  // the non-zero exit. Print a one-line tail to stderr that names the
+  // exit code so wrapper scripts that hide it become obvious. Skipped in
+  // --json so the JSON envelope stays alone on stdout (this is stderr
+  // anyway, but skip avoids confusing parsers that capture both streams).
+  if (hasFailures && !options.json) {
+    const total = results.reduce((s, r) => s + r.failed, 0);
+    process.stderr.write(`zond: ${total} test step(s) failed — exiting with code 1 (pass --no-fail-on-failures to suppress, e.g. for advisory runs).\n`);
+  }
+
+  if (hasFailures && options.failOnFailures === false) {
+    return 0;
+  }
   return hasFailures ? 1 : 0;
 }
 
@@ -550,9 +734,8 @@ import { Option } from "commander";
 import { resolveApiCollection } from "../resolve.ts";
 import { collect, flatSplit, parseNonNegativeInt, parsePositiveInt, parseRateLimit, parseReporter } from "../argv.ts";
 import { resolveSessionId } from "../../core/context/session.ts";
-import { readCurrentApi } from "../../core/context/current.ts";
-import { findWorkspaceRoot } from "../../core/workspace/root.ts";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { getApi } from "../util/api-context.ts";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -567,6 +750,59 @@ function emitMissingVarWarnings(hits: import("../../core/runner/preflight-vars.t
     return;
   }
   for (const line of summarizeMissingVars(hits)) printWarning(line);
+}
+
+/**
+ * ARV-39: rewrite an ENOENT bubbling up from `parseSafe` so the user sees
+ * a clean path quote and an actionable hint. Bun's raw glob/open error
+ * quotes the path with a trailing space ("'foo.yaml '"), which makes users
+ * think the path itself has a typo. We strip the noise and, when the file's
+ * parent directory exists, suggest either the dir form (`apis/<api>/tests`)
+ * or list its YAML siblings so the right invocation is discoverable.
+ */
+function formatPathError(path: string, raw: string): string {
+  const isEnoent = /ENOENT/i.test(raw) || /no such file or directory/i.test(raw);
+  if (!isEnoent) return raw;
+  const cleanPath = path.trim();
+  const parent = pathDirname(cleanPath);
+  const lines: string[] = [`Path not found: ${cleanPath}`];
+  // Parent directory exists → list known YAML suites to make the right
+  // invocation obvious. Parent missing → just say so; nothing useful to add.
+  try {
+    if (parent && existsSync(parent) && statSync(parent).isDirectory()) {
+      const siblings = readdirSync(parent)
+        .filter((f) => /\.ya?ml$/i.test(f))
+        .sort();
+      if (siblings.length === 0) {
+        lines.push(`(${parent}/ has no YAML files — did you forget to run \`zond generate\`?)`);
+      } else {
+        // Prefer suggesting the directory itself — that's the parity command
+        // most users actually want ("run all suites under apis/<api>/tests").
+        lines.push(`Did you mean \`zond run ${parent}\` (runs ${siblings.length} suite${siblings.length === 1 ? "" : "s"})?`);
+        const preview = siblings.slice(0, 6).map((s) => `  - ${parent}/${s}`).join("\n");
+        const more = siblings.length > 6 ? `\n  … ${siblings.length - 6} more` : "";
+        lines.push(`Known suites in ${parent}/:\n${preview}${more}`);
+      }
+    }
+  } catch { /* readdir / stat failed — fall through with the basic message */ }
+  return lines.join("\n");
+}
+
+/**
+ * ARV-37: list distinct tags across loaded suites so a fail-loud `--tag`
+ * mismatch can suggest the user-facing values without forcing them into
+ * `--help`. Order is alphabetical for stable output across runs.
+ */
+function collectAvailableTags(suites: { tags?: string[] }[]): string[] {
+  const seen = new Set<string>();
+  for (const s of suites) {
+    if (!s.tags) continue;
+    for (const t of s.tags) {
+      const trimmed = t.trim();
+      if (trimmed) seen.add(trimmed);
+    }
+  }
+  return [...seen].sort();
 }
 
 /**
@@ -622,7 +858,7 @@ export function registerRun(program: Command): void {
         .argParser(parseReporter),
     )
     .option("--timeout <ms>", "Override request timeout", parsePositiveInt("--timeout"))
-    .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers (overrides .env.yaml `rateLimit` and zond.config.yml `defaults.rate_limit`)", parseRateLimit)
+    .option("--rate-limit <N|auto>", "Throttle requests to at most N per second, or `auto` to adapt from ratelimit-* response headers. Default: adaptive (ARV-64) — no-op until the server publishes RateLimit-* headers, then paces requests automatically. Pass a number for hard caps; `off` is not supported (set --workers 1 + no flag for sequential).", parseRateLimit)
     .option("--bail", "Stop on first suite failure")
     .option("--sequential", "Run regular suites one after another instead of in parallel (opt-out of Promise.all)")
     .option("--all", "TASK-116: discover every apis/<name>/tests/ directory in the workspace and merge them into a single run row (one runs.id per CI invocation, even with multiple registered APIs). Implies CI-style aggregation; pairs with auto-detected commit_sha / branch / trigger=ci.")
@@ -633,6 +869,14 @@ export function registerRun(program: Command): void {
     .option("--tag <tag>", "Filter suites by tag (repeatable, comma-separated)", collect, [])
     .option("--exclude-tag <tag>", "Exclude suites by tag (repeatable, comma-separated)", collect, [])
     .option("--method <method>", "Filter tests by HTTP method (e.g. GET, POST)")
+    .option(
+      "--include <spec...>",
+      "ARV-25: keep only steps matching <selector>:<value> (path|method|tag|operation-id). Same grammar as `zond generate` / `zond checks run`. Repeatable, combines with OR.",
+    )
+    .option(
+      "--exclude <spec...>",
+      "ARV-25: drop steps matching <selector>:<value>. Same grammar as --include. Excludes evaluated after includes.",
+    )
     .option("--env-var <KEY=VALUE>", "Inject env variable (repeatable, overrides env file)", collect, [])
     .option("--strict-vars", "Hard-fail (exit 2) when a {{var}} reference has no producer (default: warn and continue)")
     .option("--dry-run", "Show requests without sending them (exit code always 0)")
@@ -640,7 +884,7 @@ export function registerRun(program: Command): void {
       "--quiet",
       "TASK-265: emit only the grand-total summary line — drops per-suite/per-test detail and warning footers. Exit code (0/1) still differentiates pass/fail. For CI logs and watcher loops where step-level output is noise.",
     )
-    .option("--report-out <file>", "Write the report to a file via fs (bypass stdout). Useful when the bun wrapper or other shells contaminate stdout.")
+    .option("--output <file>", "ARV-117: write the report to a file instead of stdout. Replaces the legacy --report-out flag. With --report console, falls back to JSON in the file (machine-parseable). Path is resolved relative to cwd; parent directories are auto-created.")
     .option("--validate-schema", "Validate JSON responses against the OpenAPI schema (recommended for CRUD runs — catches contract drift like date-format and enum mismatches; requires --spec or a collection with openapi_spec set)")
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
     .option("--session-id <id>", "Group this run under a session. Resolution order: --session-id flag > ZOND_SESSION_ID env > .zond/current-session file (set by 'zond session start')")
@@ -656,9 +900,18 @@ export function registerRun(program: Command): void {
       parseNonNegativeInt("--retry-on-network"),
       1,
     )
-    .action(async (pathArgs: string[] | undefined, opts, _cmd: Command) => {
+    .option(
+      "--no-fail-on-failures",
+      "ARV-72: keep exit code 0 even when steps failed (advisory runs). Default: exit 1 on any failure. The stderr tail still names the count for visibility.",
+    )
+    .action(async (pathArgs: string[] | undefined, opts, cmd: Command) => {
       let paths = pathArgs ?? [];
-      const apiFlag = (opts.api as string | undefined) ?? (paths.length > 0 || opts.all === true ? undefined : readCurrentApi() ?? undefined);
+      // ARV-53: explicit paths or --all suppress the current-API fallback —
+      // `run path/to/test.yaml` should never silently pick up `.zond/current-api`.
+      // Otherwise resolve via cli/util/api-context.ts.
+      const apiFlag = (paths.length > 0 || opts.all === true)
+        ? (opts.api as string | undefined)
+        : getApi(cmd, opts);
       const dbPath = typeof opts.db === "string" ? opts.db : undefined;
 
       // TASK-116: --all expands to every apis/<name>/tests/ directory in the
@@ -701,6 +954,8 @@ export function registerRun(program: Command): void {
       const tags = flatSplit(opts.tag);
       const excludeTags = flatSplit(opts.excludeTag);
       const envVars = (opts.envVar as string[] | undefined)?.length ? (opts.envVar as string[]) : undefined;
+      const includeSpecs = (opts.include as string[] | undefined)?.length ? (opts.include as string[]) : undefined;
+      const excludeSpecs = (opts.exclude as string[] | undefined)?.length ? (opts.exclude as string[]) : undefined;
 
       process.exitCode = await runCommand({
         paths,
@@ -717,13 +972,17 @@ export function registerRun(program: Command): void {
         tag: tags,
         excludeTag: excludeTags,
         method: opts.method,
+        include: includeSpecs,
+        exclude: excludeSpecs,
         envVars,
         strictVars: opts.strictVars === true,
         dryRun: opts.dryRun === true,
         quiet: opts.quiet === true,
-        reportOut: typeof opts.reportOut === "string" ? opts.reportOut : undefined,
+        failOnFailures: opts.failOnFailures !== false,
+        output: typeof opts.output === "string" ? opts.output : undefined,
         validateSchema: opts.validateSchema === true,
         specPath: typeof opts.spec === "string" ? opts.spec : undefined,
+        apiName: apiFlag,
         sessionId: resolveSessionId({
           flag: typeof opts.sessionId === "string" ? opts.sessionId : null,
           env: process.env.ZOND_SESSION_ID ?? null,

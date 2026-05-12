@@ -1,27 +1,28 @@
 ---
 id: ARV-6
 title: 'generator: coverage phase с детерминированными boundary values'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 15:47'
+updated_date: '2026-05-09 16:58'
 labels:
   - generator
   - m-15
   - depth
   - coverage-phase
+milestone: m-15
 dependencies:
   - ARV-1
-milestone: m-15
 priority: high
 ---
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Snapshot-тест: фиксированная schema из tests/fixtures/coverage-schemas/*.json → стабильное число cases с известным набором меток
-- [ ] #2 Unit на каждую boundary-функцию: integerBoundaries(schema)→Case[], stringBoundaries, arrayBoundaries, objectBoundaries
-- [ ] #3 Integration: mock падающий ровно на maxLength+1 → ровно один finding с meta.boundary='maxLength+1'
-- [ ] #4 Случайность исключена: два запуска coverage phase дают идентичный набор cases (детерминизм)
-- [ ] #5 Флаг --allow-x00 контролирует включение NUL-байта
+- [x] #1 Snapshot-тест: фиксированная schema из tests/fixtures/coverage-schemas/*.json → стабильное число cases с известным набором меток
+- [x] #2 Unit на каждую boundary-функцию: integerBoundaries(schema)→Case[], stringBoundaries, arrayBoundaries, objectBoundaries
+- [x] #3 Integration: mock падающий ровно на maxLength+1 → ровно один finding с meta.boundary='maxLength+1'
+- [x] #4 Случайность исключена: два запуска coverage phase дают идентичный набор cases (детерминизм)
+- [x] #5 Флаг --allow-x00 контролирует включение NUL-байта
 <!-- AC:END -->
 
 ## Implementation Plan

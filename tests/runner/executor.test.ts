@@ -555,7 +555,10 @@ describe("flow control", () => {
 
     const result = await runSuite(suite);
     expect(result.steps[0]!.status).toBe("skip");
-    expect(result.steps[0]!.error).toContain("skipped");
+    // step.error stores the bare reason; the reporter adds "skipped: " when
+    // it renders the line. For a literal-expression skip, the reason IS
+    // the expression so callers can tell why it triggered.
+    expect(result.steps[0]!.error).toBe("1 == 1");
     expect(result.steps[1]!.status).toBe("pass");
   });
 
@@ -597,10 +600,11 @@ describe("flow control", () => {
     expect(result.steps[0]!.status).toBe("skip");
   });
 
-  // TASK-234 / TASK-237: skip_if "{{var}} ==" with empty var must produce a
-  // friendly reason ("skipped: required fixture {{var}} is empty"), not the
-  // raw expression ("Skipped: {{var}} ==") that used to leak into the DB.
-  test("skip_if '{{var}} ==' with empty var produces friendly reason", async () => {
+  // TASK-234 / TASK-237 / ARV-22: skip_if "{{var}} ==" with empty var must
+  // produce a friendly reason. The reporter adds "skipped: " when
+  // rendering, so step.error is the bare reason — no double "skipped:"
+  // prefix in the user-visible line.
+  test("skip_if '{{var}} ==' with empty fixture says 'required fixture'", async () => {
     mockFetchResponses([]);
     const suite: TestSuite = {
       name: "Empty fixture",
@@ -616,9 +620,42 @@ describe("flow control", () => {
 
     const result = await runSuite(suite, { org_id: "" });
     expect(result.steps[0]!.status).toBe("skip");
-    expect(result.steps[0]!.error).toBe("skipped: required fixture {{org_id}} is empty");
-    expect(result.steps[0]!.error).not.toContain("Skipped:");
+    expect(result.steps[0]!.error).toBe("required fixture {{org_id}} is empty");
+    expect(result.steps[0]!.error).not.toContain("skipped:");
     expect(result.steps[0]!.error).not.toContain(" ==");
+  });
+
+  test("skip_if '{{var}} ==' with empty chain capture says 'chain capture'", async () => {
+    mockFetchResponses([]);
+    const suite: TestSuite = {
+      name: "Empty chain capture",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "Create org",
+          method: "POST",
+          path: "http://example.com/orgs",
+          expect: {
+            status: 201,
+            body: { id: { capture: "org_id" } },
+          },
+        },
+        {
+          name: "Read org",
+          method: "GET",
+          path: "http://example.com/orgs/{{org_id}}/",
+          skip_if: "{{org_id}} ==",
+          expect: { status: 200 },
+        },
+      ],
+    };
+    // Dry-run: POST does not execute, so org_id never gets captured. The
+    // empty-var skip should attribute that to the chain, NOT to fixtures.
+    const result = await runSuite(suite, {}, true);
+    const readStep = result.steps.find((s) => s.name === "Read org")!;
+    expect(readStep.status).toBe("skip");
+    expect(readStep.error).toContain("chain capture {{org_id}} unbound");
+    expect(readStep.error).not.toContain("required fixture");
   });
 
   test("set step writes variables without HTTP request", async () => {

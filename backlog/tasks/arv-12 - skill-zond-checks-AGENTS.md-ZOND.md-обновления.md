@@ -1,31 +1,32 @@
 ---
 id: ARV-12
 title: 'skill: zond-checks + AGENTS.md / ZOND.md обновления'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 15:48'
+updated_date: '2026-05-09 18:19'
 labels:
   - skill
   - m-15
   - depth
   - docs
   - agent
+milestone: m-15
 dependencies:
   - ARV-2
   - ARV-3
   - ARV-4
   - ARV-5
   - ARV-11
-milestone: m-15
 priority: medium
 ---
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 skill zond-checks.md в init-template, проходит embed-тесты
-- [ ] #2 AGENTS.md содержит раздел Depth checks с work examples
-- [ ] #3 ZOND.md обновлён по всем новым флагам/командам m-15
-- [ ] #4 README updated table reflects checks/SARIF/workers
+- [x] #1 skill zond-checks.md в init-template, проходит embed-тесты
+- [x] #2 AGENTS.md содержит раздел Depth checks с work examples
+- [x] #3 ZOND.md обновлён по всем новым флагам/командам m-15
+- [x] #4 README updated table reflects checks/SARIF/workers
 - [ ] #5 Vibe-test через /zond-fb-tester: агент запускает zond checks run без подсказок на mock API
 - [ ] #6 Vibe-test: агент использует recommended_action для классификации finding-а
 <!-- AC:END -->

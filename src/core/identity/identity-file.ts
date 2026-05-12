@@ -2,11 +2,11 @@
  * `.identity.yaml` — gitignored flat YAML file holding non-secret-but-
  * personally-identifying values for an API (TASK-174, m-10).
  *
- *     # apis/sentry/.identity.yaml
+ *     # apis/<name>/.identity.yaml
  *     organization_id_or_slug: "acme-eng"
  *     member_id: "12345"
  *
- *     # apis/sentry/.env.yaml
+ *     # apis/<name>/.env.yaml
  *     organization_id_or_slug: "@identity:organization_id_or_slug"
  *     auth_token: "@secret:auth_token"
  *

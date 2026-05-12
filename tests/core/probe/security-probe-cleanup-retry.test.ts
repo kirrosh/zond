@@ -26,6 +26,7 @@ describe("runSecurityProbes — round-4 fixes", () => {
       },
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [putEp, getEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test", id: "p1" },
@@ -56,6 +57,7 @@ describe("runSecurityProbes — round-4 fixes", () => {
       requestBodySchema: { type: "object", properties: { url: { type: "string", format: "uri" } } },
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [postEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
@@ -95,6 +97,7 @@ describe("runSecurityProbes — round-4 fixes", () => {
       ],
     });
     await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [postEp, delEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
@@ -136,6 +139,7 @@ describe("runSecurityProbes — round-4 fixes", () => {
       ],
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [postEp, delEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
@@ -167,6 +171,7 @@ describe("runSecurityProbes — round-4 fixes", () => {
       ],
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [postEp, delEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
