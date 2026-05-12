@@ -196,6 +196,13 @@ export interface DiagnoseResult {
     response_headers?: Record<string, string>;
     assertions: unknown;
     duration_ms: number | null;
+    /** ARV-159: when this entry is the representative of a collapsed group
+     *  (status|failure_type signature), the total size of that group. Lets
+     *  consumers reading `.data.failures[]` see "this signature stands for
+     *  N underlying tests" without cross-referencing `.grouped_failures[]`.
+     *  Omitted when no collapsing occurred (failures ≤ 5 or
+     *  --verbose). */
+    group_count?: number;
   }>;
   grouped_failures?: FailureGroup[];
   /** ARV-101 (F6): top-level aggregation keyed by `recommended_action`
@@ -428,7 +435,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
   };
 }
 
-type FailureItem = { suite_name: string; test_name: string; failure_type: string; recommended_action: RecommendedAction; hint?: string; response_status: number | null };
+type FailureItem = { suite_name: string; test_name: string; failure_type: string; recommended_action: RecommendedAction; hint?: string; response_status: number | null; group_count?: number };
 
 /** Group similar failures for compact output. Exported for testing. */
 export function groupFailures<T extends FailureItem>(failures: T[], maxExamples = 2): { grouped_failures?: FailureGroup[]; compactFailures: T[] } {
@@ -482,7 +489,10 @@ export function groupFailures<T extends FailureItem>(failures: T[], maxExamples 
     if (isApiError) {
       compactFailures.push(...group.items);
     } else {
-      compactFailures.push(group.items[0]!);
+      // ARV-159: tag the representative with the group size so
+      // `.data.failures[]` carries the multiplier inline.
+      const rep = { ...group.items[0]!, group_count: group.items.length };
+      compactFailures.push(rep as T);
     }
   }
 
