@@ -3,6 +3,9 @@ import { dirname, join } from "node:path";
 
 import zondSkill from "./templates/skills/zond.md" with { type: "text" };
 import scenariosSkill from "./templates/skills/scenarios.md" with { type: "text" };
+import checksSkill from "./templates/skills/zond-checks.md" with { type: "text" };
+import triageSkill from "./templates/skills/zond-triage.md" with { type: "text" };
+import baseSkill from "./templates/skills/zond-base.md" with { type: "text" };
 
 export interface SkillResult {
   name: string;
@@ -16,8 +19,14 @@ interface SkillTemplate {
 }
 
 const SKILLS: SkillTemplate[] = [
+  // Foundation: workspace contract + manifest-vs-values rule + cross-cutting
+  // iron rules + sub-skill router. Auto-loads when the user mentions any
+  // workspace artefact; siblings extend it without duplicating its rules.
+  { name: "zond-base", body: baseSkill },
   { name: "zond", body: zondSkill },
   { name: "zond-scenarios", body: scenariosSkill },
+  { name: "zond-checks", body: checksSkill },
+  { name: "zond-triage", body: triageSkill },
 ];
 
 /**

@@ -33,6 +33,9 @@ describe("generateNegativeProbes", () => {
     expect(suite.tests.every(t => Array.isArray(t.expect.status))).toBe(true);
     // None of acceptable statuses include 500
     expect((suite.tests[0]!.expect.status as number[]).includes(500)).toBe(false);
+    // ARV-34: 429 (rate-limited) counts as a valid server-side rejection
+    // — without it, throttled probe runs produce hundreds of false failures.
+    expect((suite.tests[0]!.expect.status as number[]).includes(429)).toBe(true);
     // GET path is rendered with the literal bad value
     const m = suite.tests[0]!.GET as string;
     expect(m).toMatch(/\/webhooks\/(?:not-a-uuid|12345|00000000|\.\.)/);

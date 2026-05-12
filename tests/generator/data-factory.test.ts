@@ -458,6 +458,43 @@ describe("TASK-86 regression — format honoured even when type is missing or ar
   });
 });
 
+describe("ARV-165 — format-aware helpers (country/currency/mcc/color)", () => {
+  test("format=country-code → randomCountryCode", () => {
+    expect(formatToPlaceholder("country-code")).toBe("{{$randomCountryCode}}");
+    expect(formatToPlaceholder("iso-country-code")).toBe("{{$randomCountryCode}}");
+  });
+  test("format=currency-code → randomCurrencyCode", () => {
+    expect(formatToPlaceholder("currency-code")).toBe("{{$randomCurrencyCode}}");
+    expect(formatToPlaceholder("iso-currency-code")).toBe("{{$randomCurrencyCode}}");
+  });
+  test("format=mcc → randomMCC", () => {
+    expect(formatToPlaceholder("mcc")).toBe("{{$randomMCC}}");
+  });
+  test("format=color/hex-color → randomColorHex", () => {
+    expect(formatToPlaceholder("color")).toBe("{{$randomColorHex}}");
+    expect(formatToPlaceholder("hex-color")).toBe("{{$randomColorHex}}");
+  });
+
+  test("name=mcc → randomMCC placeholder", () => {
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "mcc")).toBe("{{$randomMCC}}");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "merchant_category_code")).toBe("{{$randomMCC}}");
+  });
+  test("name=color/background_color → randomColorHex", () => {
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "color")).toBe("{{$randomColorHex}}");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "background_color")).toBe("{{$randomColorHex}}");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "brand_color")).toBe("{{$randomColorHex}}");
+  });
+  test("name endsWith _country / _currency uses literal", () => {
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "bank_account_country")).toBe("US");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "payout_currency")).toBe("USD");
+  });
+  test("name=ip / tos_acceptance.ip → randomIpv4", () => {
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "ip")).toBe("{{$randomIpv4}}");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "remote_ip")).toBe("{{$randomIpv4}}");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "ip_address")).toBe("{{$randomIpv4}}");
+  });
+});
+
 import { generateMultipartFromSchema } from "../../src/core/generator/data-factory.ts";
 import type { OpenAPIV3 as OA } from "openapi-types";
 
@@ -503,6 +540,27 @@ describe("TASK-220 / F12 — email-context name heuristics", () => {
     ["recipient", "{{$randomEmail}}"],
   ])("string field named '%s' (no format) -> %s", (name, expected) => {
     expect(generateFromSchema({ type: "string" } as OA.SchemaObject, name)).toBe(expected);
+  });
+
+  // ARV-23: Resend-style specs describe `from` as "Name <user@domain>" — the
+  // word "domain" used to flip the field to {{$randomDomain}}. Email-vocab
+  // names should beat description-based domain heuristic.
+  test("'from' with description mentioning 'domain' still maps to randomEmail", () => {
+    expect(
+      generateFromSchema(
+        { type: "string", description: "Sender — 'Name <user@domain>' or 'user@domain'" } as OA.SchemaObject,
+        "from",
+      ),
+    ).toBe("{{$randomEmail}}");
+  });
+
+  test("'reply_to' with description mentioning 'verified domain' still maps to randomEmail", () => {
+    expect(
+      generateFromSchema(
+        { type: "string", description: "Reply-To address; must be on a verified sending domain" } as OA.SchemaObject,
+        "reply_to",
+      ),
+    ).toBe("{{$randomEmail}}");
   });
 });
 
@@ -664,10 +722,215 @@ describe("classifyFieldSource (TASK-269)", () => {
     expect(classifyFieldSource({ type: "string" } as OpenAPIV3.SchemaObject, "memo")).toBe("random");
   });
 
+  // ARV-23
+  test("email-vocab name beats domain-from-description for classification", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(
+      classifyFieldSource(
+        { type: "string", description: "Sender — 'Name <user@domain>'" } as OpenAPIV3.SchemaObject,
+        "from",
+      ),
+    ).toBe("heuristic:email");
+  });
+
   test("returns 'min'/'max' for bounded integers", async () => {
     const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
     expect(classifyFieldSource({ type: "integer", maximum: 10 } as OpenAPIV3.SchemaObject, "n")).toBe("max");
     expect(classifyFieldSource({ type: "integer", minimum: 5 } as OpenAPIV3.SchemaObject, "n")).toBe("min");
     expect(classifyFieldSource({ type: "integer" } as OpenAPIV3.SchemaObject, "n")).toBe("random");
+  });
+
+  // ARV-38
+  test("string with default + no enum: classifyFieldSource returns 'default'", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(
+      classifyFieldSource(
+        { type: "string", default: "opportunistic" } as OpenAPIV3.SchemaObject,
+        "tls",
+      ),
+    ).toBe("default");
+  });
+
+  test("string with enum still wins over default", async () => {
+    const { classifyFieldSource } = await import("../../src/core/generator/data-factory.ts");
+    expect(
+      classifyFieldSource(
+        { type: "string", enum: ["a", "b"], default: "z" } as OpenAPIV3.SchemaObject,
+        "x",
+      ),
+    ).toBe("enum");
+  });
+});
+
+// ARV-38
+describe("string default beats randomString fallback", () => {
+  test("PATCH-style default is emitted verbatim instead of {{$randomString}}", () => {
+    const result = generateFromSchema(
+      { type: "string", default: "opportunistic" } as OpenAPIV3.SchemaObject,
+      "tls",
+    );
+    expect(result).toBe("opportunistic");
+  });
+
+  test("empty-string default still falls through to heuristics", () => {
+    const result = generateFromSchema(
+      { type: "string", default: "" } as OpenAPIV3.SchemaObject,
+      "memo",
+    );
+    expect(result).toBe("{{$randomString}}");
+  });
+});
+
+// ARV-67 / feedback round-01 / F7
+describe("typeless schema infers shape from structural hints (ARV-67)", () => {
+  test("typeless schema with `items` → array", () => {
+    const result = generateFromSchema(
+      { items: { type: "object", properties: { kind: { type: "string" } } } } as unknown as OpenAPIV3.SchemaObject,
+      "steps",
+    );
+    expect(Array.isArray(result)).toBe(true);
+    expect((result as Array<{ kind: unknown }>)[0]).toEqual({ kind: "{{$randomString}}" });
+  });
+
+  test("typeless schema with `required` (no `properties`) → object {}", () => {
+    const result = generateFromSchema(
+      { required: ["a", "b"] } as unknown as OpenAPIV3.SchemaObject,
+      "config",
+    );
+    expect(result).toEqual({});
+    expect(typeof result).toBe("object");
+  });
+
+  test("typeless schema with `properties` already emits object (regression guard)", () => {
+    const result = generateFromSchema(
+      { properties: { memo: { type: "string" } } } as unknown as OpenAPIV3.SchemaObject,
+      "config",
+    );
+    expect(result).toEqual({ memo: "{{$randomString}}" });
+  });
+
+  test("F7 repro: nested `automations` body — `steps` / `config` are not strings", () => {
+    const automationsSchema: OpenAPIV3.SchemaObject = {
+      type: "object",
+      required: ["event_name", "steps", "config"],
+      properties: {
+        event_name: { type: "string" },
+        steps: { items: { type: "object", properties: { kind: { type: "string" } } } } as unknown as OpenAPIV3.SchemaObject,
+        config: { required: ["mode"], properties: { mode: { type: "string" } } } as unknown as OpenAPIV3.SchemaObject,
+      },
+    };
+    const body = generateFromSchema(automationsSchema, undefined) as Record<string, unknown>;
+    expect(typeof body).toBe("object");
+    expect(typeof body.event_name).toBe("string");
+    expect(Array.isArray(body.steps)).toBe(true);
+    expect(typeof body.config).toBe("object");
+    expect(typeof body.config).not.toBe("string");
+  });
+
+  test("typeless schema with no hints still falls back to randomString (no behaviour change for bare fields)", () => {
+    const result = generateFromSchema({} as OpenAPIV3.SchemaObject, "memo");
+    expect(result).toBe("{{$randomString}}");
+  });
+});
+
+// ARV-78 / feedback round-04 / F25
+describe("discriminator-aware oneOf variant selection (ARV-78)", () => {
+  test("oneOf with discriminator: picks the variant whose discriminator prop has a single-value enum", () => {
+    const schema: OpenAPIV3.SchemaObject = {
+      type: "object",
+      discriminator: { propertyName: "type" },
+      oneOf: [
+        {
+          type: "object",
+          required: ["type", "config"],
+          properties: {
+            type: { type: "string", enum: ["trigger"] },
+            config: {
+              type: "object",
+              required: ["event_name"],
+              properties: { event_name: { type: "string" } },
+            },
+          },
+        },
+        {
+          type: "object",
+          required: ["type", "name"],
+          properties: {
+            type: { type: "string", enum: ["action"] },
+            name: { type: "string" },
+          },
+        },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const body = generateFromSchema(schema) as Record<string, unknown>;
+    expect(body.type).toBe("trigger");
+    expect(typeof body.config).toBe("object");
+    expect((body.config as Record<string, unknown>).event_name).toBeDefined();
+  });
+
+  test("oneOf with discriminator: discriminator key is stamped onto the result", () => {
+    const schema: OpenAPIV3.SchemaObject = {
+      discriminator: { propertyName: "kind" },
+      oneOf: [
+        {
+          type: "object",
+          properties: { kind: { type: "string", enum: ["A"] }, payload: { type: "string" } },
+        },
+        {
+          type: "object",
+          properties: { kind: { type: "string", enum: ["B"] }, payload: { type: "number" } },
+        },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const body = generateFromSchema(schema) as Record<string, unknown>;
+    expect(["A", "B"]).toContain(String(body.kind));
+  });
+
+  test("oneOf without discriminator: original pickPreferredVariant path still wins", () => {
+    const schema: OpenAPIV3.SchemaObject = {
+      oneOf: [
+        { type: "string" },
+        { type: "object", properties: { x: { type: "string" } } },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const body = generateFromSchema(schema);
+    expect(typeof body).toBe("object");
+  });
+
+  test("F25 repro: automations body — steps[0] gets type=trigger + config.event_name", () => {
+    const stepSchema: OpenAPIV3.SchemaObject = {
+      discriminator: { propertyName: "type" },
+      oneOf: [
+        {
+          type: "object",
+          required: ["type", "config"],
+          properties: {
+            type: { type: "string", enum: ["trigger"] },
+            config: { type: "object", required: ["event_name"], properties: { event_name: { type: "string" } } },
+          },
+        },
+        {
+          type: "object",
+          required: ["type"],
+          properties: {
+            type: { type: "string", enum: ["delay"] },
+            seconds: { type: "integer" },
+          },
+        },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const automationBody: OpenAPIV3.SchemaObject = {
+      type: "object",
+      required: ["name", "steps"],
+      properties: {
+        name: { type: "string" },
+        steps: { type: "array", items: stepSchema } as unknown as OpenAPIV3.SchemaObject,
+      },
+    };
+    const body = generateFromSchema(automationBody) as { steps: Array<{ type: string; config?: { event_name?: string } }> };
+    expect(Array.isArray(body.steps)).toBe(true);
+    expect(body.steps[0]!.type).toBe("trigger");
+    expect(body.steps[0]!.config).toBeDefined();
+    expect(body.steps[0]!.config!.event_name).toBeDefined();
   });
 });

@@ -388,4 +388,155 @@ describe("requestCommand", () => {
     expect(env.data.schema_validation.status).toBe("no-spec");
     expect(env.data.schema_validation.message).toMatch(/requires --api/);
   });
+
+  // ──────────────────────────────────────────────
+  // ARV-110: envelope shape is identical with and without --api
+  //
+  // F17 reported the envelope "differed" between modes when extracting via
+  // --json-path. Empirically the shape is identical — the confusion was that
+  // --json-path addresses the response body, not the envelope. These tests
+  // pin both: (a) envelope keys parity across modes, (b) a stderr hint when
+  // the user writes a path like `body.id` / `data.id` that looks like they
+  // meant to address the envelope.
+  // ──────────────────────────────────────────────
+
+  test("envelope shape matches between bare URL and --api (same HTTP response)", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-env-", marker: "config", chdir: true });
+    try {
+      await setupApi({
+        name: "demo",
+        envVars: { base_url: "https://example.com" },
+        dbPath: join(ws.path, "zond.db"),
+      });
+      closeDb();
+
+      const body = { id: "u-1", value: 42 };
+      globalThis.fetch = mock(async () =>
+        new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }),
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      await requestCommand({ method: "GET", url: "https://example.com/users/1", json: true });
+      const bare = JSON.parse(output.out);
+      output.restore();
+
+      output = captureOutput({ console: true });
+      await requestCommand({
+        method: "GET",
+        url: "/users/1",
+        api: "demo",
+        dbPath: join(ws.path, "zond.db"),
+        json: true,
+      });
+      const withApi = JSON.parse(output.out);
+
+      expect(Object.keys(bare).sort()).toEqual(Object.keys(withApi).sort());
+      expect(Object.keys(bare.data).sort()).toEqual(Object.keys(withApi.data).sort());
+      expect(bare.data.body).toEqual(withApi.data.body);
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--json-path body.id on {id:...} response prints envelope-confusion hint to stderr", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify({ id: "u-1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    const code = await requestCommand({
+      method: "GET",
+      url: "http://example.com/x",
+      jsonPath: "body.id",
+    });
+    expect(code).toBe(0);
+    expect(output.err).toMatch(/did not resolve.*"body"/);
+    expect(output.err).toMatch(/extracts from the response body, not the zond envelope/);
+  });
+
+  test("envelope-confusion hint also fires under --json (stderr) so pipelines see it", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify({ id: "u-1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    const code = await requestCommand({
+      method: "GET",
+      url: "http://example.com/x",
+      jsonPath: "data.id",
+      json: true,
+    });
+    expect(code).toBe(0);
+    expect(output.err).toMatch(/did not resolve.*"data"/);
+    expect(output.err).toMatch(/extracts from the response body, not the zond envelope/);
+    // envelope itself still printed to stdout
+    const env = JSON.parse(output.out);
+    expect(env.ok).toBe(true);
+  });
+
+  // ARV-144: top-level array bodies (Sentry, GitHub-style REST).
+  test("--json-path [0].id resolves a top-level array element to stdout", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify([{ id: "a" }, { id: "b" }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    const code = await requestCommand({
+      method: "GET",
+      url: "http://example.com/list",
+      jsonPath: "[0].id",
+    });
+    expect(code).toBe(0);
+    expect(output.out.trim()).toBe("a");
+  });
+
+  test("--json-path data[0].id on top-level array body emits top-level-array hint (not envelope hint)", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify([{ id: "a" }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    await requestCommand({
+      method: "GET",
+      url: "http://example.com/list",
+      jsonPath: "data[0].id",
+    });
+    expect(output.err).toMatch(/response body is a top-level array/);
+    expect(output.err).toMatch(/\[0\]\.id/);
+    expect(output.err).not.toMatch(/extracts from the response body, not the zond envelope/);
+  });
+
+  test("no envelope hint when path failed deeper than the first segment", async () => {
+    // `items[0].id` on a body that has items but the inner object lacks `id`
+    // should NOT trigger the envelope hint — the user clearly meant to walk
+    // the response body, they just have the wrong key.
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify({ items: [{ uuid: "x" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    await requestCommand({
+      method: "GET",
+      url: "http://example.com/x",
+      jsonPath: "items[0].id",
+    });
+    expect(output.err).toMatch(/did not resolve/);
+    expect(output.err).not.toMatch(/extracts from the response body/);
+  });
 });

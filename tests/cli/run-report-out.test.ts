@@ -7,7 +7,7 @@ import { captureOutput } from "../_helpers/output";
 import { mockFetchOk, restoreFetch } from "../_helpers/fetch-mock";
 import { makeWorkspace } from "../_helpers/workspace";
 
-describe("zond run --report-out (TASK-LOW.1)", () => {
+describe("zond run --output (TASK-LOW.1 / ARV-117 — migrated from --report-out)", () => {
   let workDir: string;
   let cleanupWs: () => void;
   let testFile: string;
@@ -50,7 +50,7 @@ describe("zond run --report-out (TASK-LOW.1)", () => {
       report: "json",
       bail: false,
       noDb: true,
-      reportOut: outPath,
+      output: outPath,
     });
 
     expect(code).toBe(0);
@@ -77,7 +77,7 @@ describe("zond run --report-out (TASK-LOW.1)", () => {
       report: "junit",
       bail: false,
       noDb: true,
-      reportOut: outPath,
+      output: outPath,
     });
 
     expect(code).toBe(0);
@@ -94,7 +94,7 @@ describe("zond run --report-out (TASK-LOW.1)", () => {
       report: "json",
       bail: false,
       noDb: true,
-      reportOut: outPath,
+      output: outPath,
     });
     expect(code).toBe(0);
     expect(existsSync(outPath)).toBe(true);

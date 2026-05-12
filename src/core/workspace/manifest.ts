@@ -260,7 +260,7 @@ export function autoGenHeader(by: string, regenerate?: string): string {
 }
 
 /**
- * Best-effort: derive the API name from a path like `apis/sentry/tests`.
+ * Best-effort: derive the API name from a path like `apis/<name>/tests`.
  * Returns undefined for non-conventional layouts so manifest entries stay
  * un-tagged rather than mis-tagged.
  */

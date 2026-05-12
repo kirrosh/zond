@@ -22,6 +22,11 @@ export interface CreateRunOpts {
    *  any explicit `--tag <x>` filters from the CLI. Persisted as a JSON
    *  array string so `coverage --union tag:<name>` can filter run-rows. */
   tags?: string[];
+  /** ARV-55: 'regular' (default) | 'probe' | 'check'. Determines whether
+   *  coverage's default query picks the run up. Callers compute the kind
+   *  via `detectRunKind(suite_files)` before insert; INSERT defaults to
+   *  'regular' for legacy code paths that don't know about it yet. */
+  run_kind?: import("../../core/runner/run-kind.ts").RunKind;
 }
 
 export interface RunRecord {
@@ -42,6 +47,9 @@ export interface RunRecord {
   /** TASK-274: tag list captured at run time (JSON-encoded in DB). null
    *  on legacy rows persisted before migration v9. */
   tags: string[] | null;
+  /** ARV-55: 'regular' | 'probe' | 'check'. Persisted as TEXT NOT NULL
+   *  (default 'regular'); old rows are backfilled by migration v10. */
+  run_kind: import("../../core/runner/run-kind.ts").RunKind;
 }
 
 export interface RunSummary {
@@ -161,12 +169,4 @@ export interface FlakyTest {
   suite_name: string;
   test_name: string;
   distinct_statuses: number;
-}
-
-export interface LastRunForSuite {
-  run_id: number;
-  started_at: string;
-  total: number;
-  passed: number;
-  failed: number;
 }

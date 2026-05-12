@@ -29,7 +29,8 @@ import { globalJson } from "../resolve.ts";
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
-import { printSuccess, printWarning } from "../output.ts";
+import { printSuccess, printWarning, printError } from "../output.ts";
+import { getApi, MISSING_API_MESSAGE } from "../util/api-context.ts";
 import { jsonOk, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
 
@@ -149,6 +150,14 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
   stages.push({ key: "run-tests", name: "run tests", args: ["run", join(apiDir, "tests"), "--api", api] });
   stages.push({ key: "run-probes", name: "run probes", args: ["run", join(apiDir, "probes"), "--api", api] });
   stages.push({ key: "session-end", name: "session end", args: ["session", "end"] });
+  // ARV-108: surface the post-stage coverage capture in the plan so the
+  // dry-run listing matches the actual pipeline. The stage is special-cased
+  // in auditCommand — we keep stdout for JSON parsing rather than inheriting.
+  stages.push({
+    key: "coverage",
+    name: "coverage (session union)",
+    args: ["coverage", "--api", api, "--union", "session", "--json"],
+  });
 
   return stages;
 }
@@ -174,15 +183,31 @@ async function runStage(stage: Stage, idx: number, total: number, json: boolean)
   };
 }
 
-async function captureCoverage(api: string): Promise<unknown> {
+interface CoverageCapture {
+  data: unknown | null;
+  exitCode: number | null;
+  parseError: string | null;
+  durationMs: number;
+}
+
+async function captureCoverage(api: string): Promise<CoverageCapture> {
+  const t0 = Date.now();
   try {
     const cmd = [...zondInvoker(), "coverage", "--api", api, "--union", "session", "--json"];
     const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
     const stdout = await new Response(proc.stdout).text();
-    await proc.exited;
-    return JSON.parse(stdout);
-  } catch {
-    return null;
+    const code = await proc.exited;
+    const ms = Date.now() - t0;
+    if (code !== 0) {
+      return { data: null, exitCode: code, parseError: null, durationMs: ms };
+    }
+    try {
+      return { data: JSON.parse(stdout), exitCode: code, parseError: null, durationMs: ms };
+    } catch (e) {
+      return { data: null, exitCode: code, parseError: (e as Error).message, durationMs: ms };
+    }
+  } catch (e) {
+    return { data: null, exitCode: null, parseError: (e as Error).message, durationMs: Date.now() - t0 };
   }
 }
 
@@ -228,15 +253,41 @@ export async function auditCommand(options: AuditOptions): Promise<number> {
 
   const t0 = Date.now();
   const results: StageResult[] = [];
+  let coverageJson: unknown = null;
+  let coverageCapture: CoverageCapture | null = null;
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]!;
+    if (stage.key === "coverage") {
+      // ARV-108: coverage runs via captureCoverage so we keep stdout JSON.
+      if (!options.json) console.log(`==> Stage ${i + 1}/${stages.length}: ${stage.name}`);
+      coverageCapture = await captureCoverage(options.api);
+      coverageJson = coverageCapture.data;
+      const status: StageResult["status"] = coverageCapture.data
+        ? "ok"
+        : coverageCapture.exitCode === 0 && coverageCapture.parseError
+          ? "failed"
+          : coverageCapture.exitCode === 0
+            ? "skipped"
+            : "failed";
+      results.push({
+        key: stage.key,
+        name: stage.name,
+        status,
+        exit_code: coverageCapture.exitCode,
+        duration_ms: coverageCapture.durationMs,
+        reason: status === "skipped"
+          ? "no runs in session"
+          : coverageCapture.parseError
+            ? `non-JSON output: ${coverageCapture.parseError}`
+            : status === "failed"
+              ? `coverage exited ${coverageCapture.exitCode}`
+              : undefined,
+      });
+      continue;
+    }
     results.push(await runStage(stage, i + 1, stages.length, options.json === true));
   }
   const totalMs = Date.now() - t0;
-
-  // Post-stage coverage capture for the HTML embed. Non-fatal: a missing
-  // coverage section is preferable to aborting the whole audit.
-  const coverageJson = await captureCoverage(options.api);
 
   await writeAuditReport(out, {
     api: options.api,
@@ -244,10 +295,13 @@ export async function auditCommand(options: AuditOptions): Promise<number> {
     stages: results,
     totalMs,
     coverage: coverageJson,
+    coverageStage: results.find((r) => r.key === "coverage") ?? null,
     options,
   });
 
-  const failedStages = results.filter((r) => r.status === "failed");
+  // ARV-108: coverage is informational — keep it out of the fail count so we
+  // don't regress the "non-fatal coverage" contract.
+  const failedStages = results.filter((r) => r.status === "failed" && r.key !== "coverage");
   const failed = failedStages.length;
 
   if (options.json) {
@@ -277,6 +331,9 @@ interface ReportInput {
   stages: StageResult[];
   totalMs: number;
   coverage: unknown;
+  /** ARV-108: outcome of the post-stage coverage capture, so the HTML can
+   *  distinguish "no session runs" from "coverage subcommand failed". */
+  coverageStage: StageResult | null;
   options: AuditOptions;
 }
 
@@ -314,6 +371,18 @@ async function writeAuditReport(outPath: string, data: ReportInput): Promise<voi
     + (data.options.withMassAssignment ? " --with-mass-assignment" : "")
     + (data.options.withSecurity ? " --with-security" : "");
 
+  const covStage = data.coverageStage;
+  // ARV-108: tailor the warning to what actually happened so the HTML stops
+  // misreporting "stage failed" when the stage was skipped (no runs in the
+  // session) or simply produced unparseable output.
+  const coverageWarning = covStage
+    ? covStage.status === "skipped"
+      ? "No session runs to summarise. Add `--with-mass-assignment` / `--with-security`, or run tests/probes that succeed."
+      : covStage.reason
+        ? `Coverage stage ${covStage.status}: ${escapeHtml(covStage.reason)}.`
+        : `Coverage stage ${covStage.status} (exit ${covStage.exit_code ?? "?"}).`
+    : "Coverage stage was not part of this audit (older binary?).";
+
   const coverageBlock = totals
     ? `<h2>Coverage (session union)</h2>
 <div class="cov">
@@ -323,7 +392,7 @@ async function writeAuditReport(outPath: string, data: ReportInput): Promise<voi
   ${typeof pass === "number" ? `<div><div class="num">${(pass * 100).toFixed(0)}%</div><div class="lbl">pass coverage</div></div>` : ""}
   ${typeof hit === "number" ? `<div><div class="num">${(hit * 100).toFixed(0)}%</div><div class="lbl">hit coverage</div></div>` : ""}
 </div>`
-    : `<h2>Coverage</h2><div class="warn">Coverage data unavailable — coverage stage failed or returned non-JSON.</div>`;
+    : `<h2>Coverage</h2><div class="warn">${coverageWarning}</div>`;
 
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>zond audit — ${escapeHtml(data.api)}</title>
@@ -373,7 +442,13 @@ export function registerAudit(program: Command): void {
   program
     .command("audit")
     .description("Macro: prepare-fixtures → generate → probes → run → coverage → HTML report (TASK-262)")
-    .requiredOption("--api <name>", "Registered API to audit")
+    // ARV-29: not `requiredOption` — same regression that hit prepare-fixtures
+    // (TASK-20) and checks run (TASK-17). Commander routes `--api` to the
+    // program-level option, so the subcommand's opts.api ends up undefined and
+    // requiredOption rejects every form (`--api foo`, `--api=foo`, even
+    // `zond --api foo audit`). Fall back the same way: explicit > program-level
+    // mirror > .zond/current-api.
+    .option("--api <name>", "Registered API to audit. Falls back to ZOND_API / .zond/current-api.")
     .option("--db <path>", "Path to SQLite database file")
     .option("--seed", "Use 'prepare-fixtures --cascade --seed --apply' instead of the plain single-pass prep stage")
     .option("--with-mass-assignment", "Include 'probe mass-assignment' as an extra stage")
@@ -382,6 +457,14 @@ export function registerAudit(program: Command): void {
     .option("--dry-run", "Print the stage plan without executing anything")
     .option("--force", "Disable mtime-based skip (always regenerate, even if tests/ newer than spec)")
     .action(async (opts, cmd: Command) => {
+      // ARV-53.
+      const apiName = getApi(cmd, opts);
+      if (!apiName) {
+        printError(MISSING_API_MESSAGE);
+        process.exitCode = 2;
+        return;
+      }
+      opts.api = apiName;
       process.exitCode = await auditCommand({
         api: opts.api,
         dbPath: opts.db,

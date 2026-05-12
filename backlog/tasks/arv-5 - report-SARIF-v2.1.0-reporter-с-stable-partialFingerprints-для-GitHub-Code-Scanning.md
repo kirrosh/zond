@@ -3,27 +3,28 @@ id: ARV-5
 title: >-
   report: SARIF v2.1.0 reporter с stable partialFingerprints для GitHub Code
   Scanning
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 15:46'
+updated_date: '2026-05-09 16:52'
 labels:
   - report
   - m-15
   - depth
   - sarif
   - ci
+milestone: m-15
 dependencies:
   - ARV-1
-milestone: m-15
 priority: high
 ---
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Sarif-валидация: tests/core/reporter/sarif.test.ts прогоняет вывод через ajv + sarif-2.1.0 schema, всё валидно
-- [ ] #2 Snapshot-тест: 3 finding'а → стабильный SARIF JSON
-- [ ] #3 Stability-тест: один и тот же finding в 2 runs → одинаковый partialFingerprints.primary
-- [ ] #4 ci-init шаблон проходит actionlint
+- [x] #1 Sarif-валидация: tests/core/reporter/sarif.test.ts прогоняет вывод через ajv + sarif-2.1.0 schema, всё валидно
+- [x] #2 Snapshot-тест: 3 finding'а → стабильный SARIF JSON
+- [x] #3 Stability-тест: один и тот же finding в 2 runs → одинаковый partialFingerprints.primary
+- [x] #4 ci-init шаблон проходит actionlint
 - [ ] #5 Реальный SARIF файл успешно загружается в GitHub Code Scanning (ручной smoke-тест)
 <!-- AC:END -->
 

@@ -1,9 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, beforeAll } from "bun:test";
+import { bootstrapAntiFp } from "../../../src/core/anti-fp/bootstrap.ts";
+
+// ARV-125: the inconclusive-baseline summary now consults the anti-FP
+// registry (`subscription-gated/paid-plan-403` rule) instead of an inline regex
+// array. The probe entry-point doesn't bootstrap the registry — the
+// CLI does, in `buildProgram`. Tests bypass that, so we register the
+// shipped rule set explicitly. Idempotent: safe to call repeatedly.
+beforeAll(() => {
+  bootstrapAntiFp();
+});
 import {
   runMassAssignmentProbes,
   formatDigestMarkdown,
   emitRegressionSuites,
   SUSPECTED_FIELDS,
+  isSubscriptionGated,
 } from "../../../src/core/probe/mass-assignment-probe.ts";
 import type { EndpointInfo } from "../../../src/core/generator/types.ts";
 import type { OpenAPIV3 } from "openapi-types";
@@ -589,6 +600,60 @@ describe("runMassAssignmentProbes", () => {
       expect(auth).toBe("Bearer secret-token");
     }
   });
+
+  // ARV-150: Stripe v1 declares only application/x-www-form-urlencoded for
+  // mutating endpoints. Before this fix, all 265 such endpoints reported
+  // SKIPPED "no JSON request body" — masking real mass-assignment vectors.
+  it("ARV-150: probes form-urlencoded endpoints (Stripe v1)", async () => {
+    let originalFetchRef: typeof fetch | undefined;
+    const capturedBodies: string[] = [];
+    const capturedCT: string[] = [];
+
+    originalFetchRef = globalThis.fetch;
+    globalThis.fetch = (async (input: string | Request | URL, init?: RequestInit) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      const body = typeof init?.body === "string" ? init.body : "";
+      const ct =
+        (init?.headers as Record<string, string> | undefined)?.["content-type"]
+        ?? (init?.headers as Record<string, string> | undefined)?.["Content-Type"]
+        ?? "";
+      if (method === "POST") {
+        capturedBodies.push(body);
+        capturedCT.push(ct);
+      }
+      return new Response(JSON.stringify({ id: "ch_1", name: "alice" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      const formEp = ep({
+        method: "POST",
+        path: "/v1/products",
+        requestBodyContentType: "application/x-www-form-urlencoded",
+        requestBodySchema: userSchema,
+        responses: [{ statusCode: 200, description: "ok", schema: userResponseSchema }],
+      });
+      const result = await runMassAssignmentProbes({
+        endpoints: [formEp],
+        securitySchemes: [],
+        vars: { base_url: "https://api.test" },
+        noCleanup: true,
+      });
+      // The endpoint must NOT be skipped with "no JSON body".
+      expect(result.verdicts[0]!.severity).not.toBe("skipped");
+      // Wire payload is x-www-form-urlencoded with the suspected fields.
+      expect(capturedCT[0]).toBe("application/x-www-form-urlencoded");
+      const injected = capturedBodies[1] ?? "";
+      const parsed = new URLSearchParams(injected);
+      for (const key of Object.keys(SUSPECTED_FIELDS)) {
+        expect(parsed.has(key)).toBe(true);
+      }
+    } finally {
+      if (originalFetchRef) globalThis.fetch = originalFetchRef;
+    }
+  });
 });
 
 describe("formatDigestMarkdown", () => {
@@ -741,4 +806,38 @@ describe("emitRegressionSuites", () => {
     const suites = emitRegressionSuites(result, eps, []);
     expect(suites).toHaveLength(0);
   });
+});
+
+// ARV-104 (F9): when the response body of a 403 baseline-failure says
+// the endpoint is subscription-gated (paid plan, scope, feature flag),
+// the user-facing summary must drop the "fix fixture" hint — there's
+// nothing to fix in env. Tester saw 46 INCONCLUSIVE verdicts on Sentry's
+// org endpoints, all with "A paid plan is required to enable this
+// feature." in the body, all advised "fix fixture / FK value / re-probe".
+describe("ARV-104 (F9): subscription-gated 403 detection", () => {
+  it("isSubscriptionGated matches the common SaaS phrasings", () => {
+    expect(isSubscriptionGated("A paid plan is required to enable this feature.")).toBe(true);
+    expect(isSubscriptionGated("This feature is not available on your plan.")).toBe(true);
+    expect(isSubscriptionGated("Your plan does not include this endpoint.")).toBe(true);
+    expect(isSubscriptionGated("Subscription required for this organization.")).toBe(true);
+    expect(isSubscriptionGated("Requires the org:admin scope.")).toBe(true);
+    expect(isSubscriptionGated("Missing the project:write scope")).toBe(true);
+    expect(isSubscriptionGated("Feature is not enabled for this org.")).toBe(true);
+    expect(isSubscriptionGated("Insufficient permissions to perform this action.")).toBe(true);
+    expect(isSubscriptionGated("Insufficient scope")).toBe(true);
+  });
+
+  it("isSubscriptionGated does NOT match generic 4xx errors", () => {
+    expect(isSubscriptionGated("Domain not found")).toBe(false);
+    expect(isSubscriptionGated("Validation failed: name is required")).toBe(false);
+    expect(isSubscriptionGated("Unauthorized")).toBe(false);
+    expect(isSubscriptionGated("Resource does not exist")).toBe(false);
+  });
+
+  // Live integration of the new tail through the inconclusive-baseline
+  // builder is exercised in tests that already drive `runMassAssignmentProbes`
+  // end-to-end (see "does NOT emit suites for INCONCLUSIVE-baseline
+  // verdicts" above). Here we pin only the classifier predicate — that's
+  // the load-bearing piece for ARV-104; the wiring is straight string
+  // concat in inconclusiveBaselineSummary.
 });

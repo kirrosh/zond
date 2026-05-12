@@ -25,8 +25,12 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
+import { classify } from "../classifier/recommended-action.ts";
+import { applyAntiFp } from "../anti-fp/index.ts";
+import { matchesSubscriptionGated as matchesPaidPlan403 } from "../anti-fp/rules/subscription-gated/paid-plan-403.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { executeRequest } from "../runner/http-client.ts";
+import { flattenToFormFields } from "../runner/form-encode.ts";
 import type { HttpRequest } from "../runner/types.ts";
 import {
   convertPath,
@@ -34,14 +38,16 @@ import {
   findDeleteCounterpart,
   findGetByIdCounterpart,
   captureFieldFor,
-  hasJsonBody,
   liveAuthHeaders,
   getAuthHeaders,
+  classifyPostSemantics,
 } from "./shared.ts";
 import {
   buildProbeUrl,
-  buildJsonAuthHeaders,
+  buildBodyAuthHeaders,
   buildBaselineFromSpec,
+  hasProbeBody,
+  serializeProbeBody,
 } from "./probe-harness.ts";
 import {
   createDiscoveryCache,
@@ -266,8 +272,11 @@ export async function runMassAssignmentProbes(
     if (m !== "POST" && m !== "PATCH" && m !== "PUT") continue;
     totalEndpoints++;
 
-    if (!hasJsonBody(ep)) {
-      verdicts.push(skipped(ep, "no JSON request body"));
+    // ARV-150: accept form-urlencoded endpoints in addition to JSON. Stripe
+    // v1 declares only application/x-www-form-urlencoded for every mutating
+    // operation — 265 endpoints were SKIPPED before this loosening.
+    if (!hasProbeBody(ep)) {
+      verdicts.push(skipped(ep, "no JSON or form-urlencoded request body"));
       continue;
     }
 
@@ -425,7 +434,9 @@ async function probeEndpoint(
     );
   }
 
-  const headers = buildJsonAuthHeaders(ep, schemes, vars);
+  // ARV-150: Content-Type follows the spec — form-urlencoded for Stripe v1,
+  // JSON otherwise. `serializeProbeBody` encodes the actual wire payload.
+  const headers = buildBodyAuthHeaders(ep, schemes, vars);
 
   const verdict: EndpointVerdict = {
     method: m,
@@ -454,7 +465,7 @@ async function probeEndpoint(
   let baselineResp;
   try {
     baselineResp = await executeRequest(
-      { method: m, url, headers, body: JSON.stringify(baseline) },
+      { method: m, url, headers, body: serializeProbeBody(ep, baseline).content },
       { timeout: opts.timeoutMs ?? 30000, retries: 0 },
     );
   } catch (err) {
@@ -476,7 +487,7 @@ async function probeEndpoint(
   let resp;
   try {
     resp = await executeRequest(
-      { method: m, url, headers, body: JSON.stringify(body) },
+      { method: m, url, headers, body: serializeProbeBody(ep, body).content },
       { timeout: opts.timeoutMs ?? 30000, retries: 0 },
     );
   } catch (err) {
@@ -624,7 +635,14 @@ async function probeEndpoint(
           verdict.cleanup = { attempted: false, error: "unresolved DELETE path placeholders" };
         }
       } else {
-        verdict.cleanup = { attempted: false, error: "no DELETE counterpart in spec" };
+        // ARV-153: action POSTs (`/capture`, `/verify`, `/cancel`, …) never
+        // allocate a new resource — surface that instead of the alarming
+        // "no DELETE counterpart" line that triggered F7's leak-risk noise.
+        const reason =
+          classifyPostSemantics(ep) === "action"
+            ? "no cleanup needed (action endpoint — no resource created)"
+            : "no DELETE counterpart in spec";
+        verdict.cleanup = { attempted: false, error: reason };
       }
     }
   }
@@ -636,19 +654,14 @@ async function probeEndpoint(
   return verdict;
 }
 
-/** TASK-294: agent-routable action derived from final severity. */
+/** ARV-56: route through the single classifier instead of carrying the
+ *  severity→action switch inline. */
 function stampRecommendedAction(verdict: EndpointVerdict): void {
-  switch (verdict.severity) {
-    case "high":
-    case "medium":
-    case "inconclusive-5xx":
-      verdict.recommended_action = "report_backend_bug";
-      break;
-    case "inconclusive-baseline":
-      verdict.recommended_action = "fix_fixture";
-      break;
-    // low / ok / skipped → no action
-  }
+  const action = classify({
+    finding_class: "probe:mass_assignment",
+    severity: verdict.severity as Parameters<typeof classify>[0]["severity"],
+  });
+  if (action) verdict.recommended_action = action;
 }
 
 async function tryCleanupBaseline(
@@ -702,7 +715,19 @@ function inconclusiveBaselineSummary(
 ): string {
   const hint = extractBaselineHint(body);
   const base = `baseline body invalid — server returned ${status}`;
-  const tail = " — fix fixture / FK value / path-params and re-probe";
+  // ARV-104 (F9) → ARV-125: when status is 403 and the response body
+  // names a subscription/scope gate (paid plan, feature flag, role/scope
+  // insufficient), the right answer isn't "fix fixture" — there's
+  // nothing to fix. The pattern set + suppression text now live in the
+  // anti-FP registry as `subscription-gated/paid-plan-403`; we route through
+  // `applyAntiFp` so the rule body, references, and identifier stay in
+  // one place.
+  const suppression = hint !== undefined
+    ? applyAntiFp({ status, message: hint }, "probe:mass-assignment")
+    : null;
+  const tail = suppression
+    ? ` — ${suppression.reason}`
+    : " — fix fixture / FK value / path-params and re-probe";
   // TASK-137: if body-FK auto-discovery couldn't fill required FK fields, name
   // them in the summary so the user knows exactly what to add to env (or
   // why discover-fk missed — e.g. nested list endpoint, 403 from scope).
@@ -715,6 +740,14 @@ function inconclusiveBaselineSummary(
     ? `${base} (${hint})${fkClause}${tail}`
     : `${base}${fkClause}${tail}`;
 }
+
+/** ARV-104 (F9) → ARV-125: pattern set + suppression text moved to the
+ *  anti-FP registry (`subscription-gated/paid-plan-403`). This re-export keeps
+ *  pre-migration callers (existing unit test in
+ *  mass-assignment-probe.test.ts) working through a thin shim. New
+ *  callers should depend on the rule module directly or route
+ *  through `applyAntiFp(ctx, "probe:mass-assignment")`. */
+export const isSubscriptionGated = matchesPaidPlan403;
 
 function extractBaselineHint(body: unknown): string | undefined {
   if (typeof body === "string") {
@@ -951,6 +984,13 @@ export function emitRegressionSuites(
     if (!ep) continue;
     const suiteHeaders = getAuthHeaders(ep, schemes);
     const probeExpectedStatus = v.severity === "ok" ? ACCEPTABLE_4XX : [200, 201, 202, 204];
+    // ARV-150: emit `form:` instead of `json:` when the endpoint uses
+    // form-urlencoded bodies — otherwise the regression suite would send
+    // JSON and re-hit the original "wrong content-type" 400.
+    const bodyField =
+      ep.requestBodyContentType === "application/x-www-form-urlencoded"
+        ? { form: flattenToFormFields(v.request.body) }
+        : { json: v.request.body };
     const probeStep: RawStep = {
       name: `mass-assignment: extras must ${v.severity === "ok" ? "be rejected" : "not apply"}`,
       source: {
@@ -959,7 +999,7 @@ export function emitRegressionSuites(
         response_branch: probeExpectedStatus.map(String).join("|"),
       },
       [v.method]: convertPath(ep.path),
-      json: v.request.body,
+      ...bodyField,
       expect: {
         status: probeExpectedStatus,
       },

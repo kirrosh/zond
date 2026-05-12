@@ -26,6 +26,7 @@ import { discoverCommand } from "./discover.ts";
 import { bootstrapCommand } from "./bootstrap.ts";
 import { loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
+import { getApi, MISSING_API_MESSAGE } from "../util/api-context.ts";
 
 export function registerPrepareFixtures(program: Command): void {
   program
@@ -35,7 +36,12 @@ export function registerPrepareFixtures(program: Command): void {
       "or `--cascade` for the multi-pass discover+seed flow (replaces the legacy " +
       "`discover` and `bootstrap` commands; TASK-299).",
     )
-    .requiredOption("--api <name>", "Registered API to prepare (apis/<name>/.env.yaml)")
+    // Not `requiredOption` — the value can also come from the program-level
+    // --api flag (parsed by program.ts and mirrored into ZOND_API_GLOBAL),
+    // ZOND_API env, or .zond/current-api. Commander would otherwise reject
+    // `zond prepare-fixtures --api foo` because it routes `--api` to the
+    // global option, leaving the subcommand's opts.api undefined.
+    .option("--api <name>", "Registered API to prepare (apis/<name>/.env.yaml). Falls back to ZOND_API / .zond/current-api.")
     .option("--db <path>", "Path to SQLite database file")
     .option("--api-dir <path>", "Override apis/<name>/ root (defaults to the collection's base_dir)")
     .option("--env <path>", "Override .env.yaml path (defaults to <api-dir>/.env.yaml)")
@@ -48,6 +54,16 @@ export function registerPrepareFixtures(program: Command): void {
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--max-passes <n>", "Cap on cascade passes (default 8; cascade only)", parsePositiveInt("--max-passes"))
     .action(async (opts, cmd: Command) => {
+      // ARV-53: --api resolution lives in cli/util/api-context.ts —
+      // local opt > ancestor opt > ZOND_API_GLOBAL/ZOND_API/.zond/current-api.
+      const apiName = getApi(cmd, opts);
+      if (!apiName) {
+        printError(MISSING_API_MESSAGE);
+        process.exitCode = 2;
+        return;
+      }
+      opts.api = apiName;
+
       const cascade = opts.cascade === true || opts.seed === true;
       const refresh = opts.refresh === true;
       const verify = opts.verify === true || refresh;

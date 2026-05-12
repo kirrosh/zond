@@ -22,8 +22,14 @@ what to do next**. Sibling `zond` does the full audit; sibling
 - **Route on `recommended_action`, not on the message string.** Every zond
   artifact stamps a closed enum: `report_backend_bug | fix_test_logic |
   fix_auth_config | fix_network_config | fix_env | fix_spec |
-  fix_fixture`. Group by enum, then summarise. Never re-classify with
-  prose heuristics.
+  fix_fixture | regenerate_suite | tighten_validation | add_required_header |
+  wontfix_known_limitation`. The last three (m-15 ARV-11) carry
+  depth-check findings from `zond checks run`; `regenerate_suite`
+  (m-16 ARV-42) means the failing YAML was emitted by `zond generate`
+  and editing it would be clobbered — re-run `zond generate --api
+  <name>` (or refine `.api-resources.yaml`) instead. Same triage rules
+  apply across the board: route by enum value. Group by enum, then
+  summarise. Never re-classify with prose heuristics.
 - **One actionable line per group.** The agent-directive *is* the next
   command — don't pad with "consider checking...".
 - **`report_backend_bug` / 5xx → STOP, surface, do not edit `expect:`.**
@@ -119,9 +125,15 @@ priority first):
    --orphans` (TASK-278) before retrying.
 6. `fix_network_config` — connect-refused / DNS / TLS. Check `base_url`
    reachability; `--proxy` may be needed.
-7. `fix_test_logic` — 4xx (400/422) on stub-generated body. Phase 4a of
-   the `zond` skill: fixture pack first, typed generator second, literal
-   third.
+7. `regenerate_suite` (ARV-42) — 4xx (400/422) on a generator-emitted
+   suite under `apis/<name>/tests/`. Editing the YAML is wrong: the
+   next `zond audit` overwrites it. Re-run `zond generate --api <name>`
+   so newer heuristics apply (e.g. ARV-38 default-string), or refine
+   `.api-resources.yaml` hints when the body shape can't be inferred.
+8. `fix_test_logic` — 4xx (400/422) on a manually-authored suite, or any
+   leftover assertion failure not absorbed by the buckets above. Phase 4a
+   of the `zond` skill: fixture pack first, typed generator second,
+   literal third.
 
 Within each bucket, collapse by `(suite_name, response_status,
 request_method, root_cause)` and report a count + 1-2 examples. Do

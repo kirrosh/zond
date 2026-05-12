@@ -1,27 +1,28 @@
 ---
 id: ARV-11
 title: 'agent: recommended_action enum для каждого check finding'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 15:48'
+updated_date: '2026-05-09 18:09'
 labels:
   - agent
   - m-15
   - depth
   - vector-3
+milestone: m-15
 dependencies:
   - ARV-2
   - ARV-3
   - ARV-4
-milestone: m-15
 priority: medium
 ---
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Unit-таблица: [check_id, response_signature] → expected_action на каждой паре
-- [ ] #2 JSON envelope finding содержит recommended_action на каждом check-finding
-- [ ] #3 SARIF result содержит properties.recommendedAction
+- [x] #1 Unit-таблица: [check_id, response_signature] → expected_action на каждой паре
+- [x] #2 JSON envelope finding содержит recommended_action на каждом check-finding
+- [x] #3 SARIF result содержит properties.recommendedAction
 - [ ] #4 Skill zond-checks (ARV-12) использует enum для триажа
 <!-- AC:END -->
 

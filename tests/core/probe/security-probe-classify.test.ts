@@ -70,6 +70,7 @@ describe("runSecurityProbes — happy path", () => {
   it("baseline 4xx → INCONCLUSIVE-BASELINE, no attacks sent", async () => {
     harness.setResponder(() => ({ status: 404, body: { error: "not found" } }));
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [ep({ method: "POST", path: "/webhooks", requestBodySchema: webhookSchema })],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
@@ -90,6 +91,7 @@ describe("runSecurityProbes — happy path", () => {
       return { status: 201, body: { id: "msg_1", subject } };
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [ep({ method: "POST", path: "/messages", requestBodySchema: emailSchema })],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
@@ -120,6 +122,7 @@ describe("runSecurityProbes — happy path", () => {
       return { status: 201, body: { id: "wh_1" } };
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [ep({ method: "POST", path: "/webhooks", requestBodySchema: webhookSchema })],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
@@ -134,6 +137,7 @@ describe("runSecurityProbes — happy path", () => {
 
   it("dry-run lists detected fields without sending requests", async () => {
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [ep({ method: "POST", path: "/webhooks", requestBodySchema: webhookSchema })],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
@@ -156,6 +160,7 @@ describe("runSecurityProbes — happy path", () => {
       return { status: 201, body: { id: "r_1", redirect } };
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [ep({ method: "POST", path: "/r", requestBodySchema: redirectSchema })],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
@@ -179,6 +184,7 @@ describe("runSecurityProbes — happy path", () => {
       return { status: 201, body: { id: "r_1", redirect: r } };
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [ep({ method: "POST", path: "/r", requestBodySchema: redirectSchema })],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
@@ -190,6 +196,7 @@ describe("runSecurityProbes — happy path", () => {
   it("inconclusive-baseline rollup: severity bubbles up when baseline 4xx blocks every attack", async () => {
     harness.setResponder(() => ({ status: 422, body: { error: "baseline locked" } }));
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [
         ep({ method: "POST", path: "/a", requestBodySchema: webhookSchema }),
         ep({ method: "POST", path: "/b", requestBodySchema: redirectSchema }),
@@ -212,6 +219,7 @@ describe("runSecurityProbes — happy path", () => {
       return { status: 201, body: { id: "x", subject: body?.subject } };
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [
         ep({ method: "POST", path: "/webhooks", requestBodySchema: webhookSchema }),
         ep({ method: "POST", path: "/messages", requestBodySchema: emailSchema }),
@@ -235,6 +243,7 @@ describe("runSecurityProbes — happy path", () => {
       requestBodySchema: { type: "object", properties: { count: { type: "integer" } } },
     });
     const result = await runSecurityProbes({
+      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
       endpoints: [noBodyEp],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },

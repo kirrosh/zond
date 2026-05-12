@@ -19,19 +19,18 @@ import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { pathWithByAliases, getAuthHeaders } from "./shared.ts";
+import {
+  ALL_METHODS,
+  ACCEPTABLE_UNSUPPORTED_STATUSES,
+  bucketEndpointsByPath,
+  pathWithMethodPlaceholders,
+  type Method,
+} from "./method-shared.ts";
 
-// ──────────────────────────────────────────────
-// Constants
-// ──────────────────────────────────────────────
-
-const ALL_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
-type Method = (typeof ALL_METHODS)[number];
-
-/** Statuses we accept on a *missing* method. 405 is canonical, 404 is a
- *  common fallback (path not registered for that method), 401/403 are
- *  acceptable when auth is checked before routing. Anything else — notably
- *  5xx (unhandled), 200/201 (silent acceptance) — is a probe failure. */
-const ACCEPTABLE_STATUSES = [401, 403, 404, 405];
+// 405-or-equivalent statuses for an *undeclared* method probe. ARV-2
+// (m-15) extracted this list to method-shared.ts so the live
+// `unsupported_method` check stays in lock-step with the offline probe.
+const ACCEPTABLE_STATUSES = [...ACCEPTABLE_UNSUPPORTED_STATUSES];
 
 // ──────────────────────────────────────────────
 // Types
@@ -76,43 +75,14 @@ function pathStem(path: string): string {
   return slugify(cleaned) || "root";
 }
 
-/** Replace path params with valid-shape placeholders so the request can
- *  reach the routing layer without being rejected purely on path syntax. */
-function pathWithPlaceholders(
-  path: string,
-  parameters: OpenAPIV3.ParameterObject[],
-): string {
-  return path.replace(/\{([^}]+)\}/g, (_, name: string) => {
-    const param = parameters.find((p) => p.name === name && p.in === "path");
-    const schema = param?.schema as OpenAPIV3.SchemaObject | undefined;
-    if (schema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
-    if (schema?.type === "integer" || schema?.type === "number") return "999999999";
-    return "nonexistent-zzzzz";
-  });
-}
-
-
-interface PathBucket {
+// pathWithPlaceholders + bucketByPath moved to ./method-shared.ts for
+// reuse by the live `unsupported_method` check (m-15 ARV-2).
+const pathWithPlaceholders = pathWithMethodPlaceholders;
+const bucketByPath = (endpoints: EndpointInfo[]): Array<{
   path: string;
-  /** Methods declared on this path, normalized to upper-case. */
   declared: Set<string>;
-  /** A representative endpoint we can borrow auth/path-param shape from. */
   sample: EndpointInfo;
-}
-
-function bucketByPath(endpoints: EndpointInfo[]): PathBucket[] {
-  const map = new Map<string, PathBucket>();
-  for (const ep of endpoints) {
-    if (ep.deprecated) continue;
-    let bucket = map.get(ep.path);
-    if (!bucket) {
-      bucket = { path: ep.path, declared: new Set(), sample: ep };
-      map.set(ep.path, bucket);
-    }
-    bucket.declared.add(ep.method.toUpperCase());
-  }
-  return Array.from(map.values());
-}
+}> => Array.from(bucketEndpointsByPath(endpoints).values());
 
 // ──────────────────────────────────────────────
 // Public API

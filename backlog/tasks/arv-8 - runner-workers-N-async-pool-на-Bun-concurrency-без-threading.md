@@ -1,26 +1,27 @@
 ---
 id: ARV-8
 title: 'runner: --workers N async-pool на Bun (concurrency без threading)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 15:47'
+updated_date: '2026-05-09 18:05'
 labels:
   - runner
   - m-15
   - depth
   - perf
-dependencies: []
 milestone: m-15
+dependencies: []
 priority: high
 ---
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Pool-mock с фиксированной задержкой: --workers 8 даёт ~total/8 wall-time
-- [ ] #2 Race-test: 100 concurrent requests на mock — rate-limiter не пропускает > N RPS
-- [ ] #3 Stability: --workers 16 на petstore mock — все CRUD-chains проходят (parents seq, siblings parallel)
-- [ ] #4 Backward-compat: без --workers поведение идентично текущему (default 1)
-- [ ] #5 Документация: --workers auto = min(cpus, 8), max 64
+- [x] #1 Pool-mock с фиксированной задержкой: --workers 8 даёт ~total/8 wall-time
+- [x] #2 Race-test: 100 concurrent requests на mock — rate-limiter не пропускает > N RPS
+- [x] #3 Stability: --workers 16 на petstore mock — все CRUD-chains проходят (parents seq, siblings parallel)
+- [x] #4 Backward-compat: без --workers поведение идентично текущему (default 1)
+- [x] #5 Документация: --workers auto = min(cpus, 8), max 64
 <!-- AC:END -->
 
 ## Implementation Plan

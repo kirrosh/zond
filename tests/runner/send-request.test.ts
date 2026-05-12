@@ -46,6 +46,66 @@ describe("send-request — extractByPath (TASK-200)", () => {
   });
 });
 
+// ARV-70 / feedback round-02 / F11
+describe("send-request — extractByPathWithDiagnostic (ARV-70)", () => {
+  // Lazy-import via the same module — avoids touching the original test
+  // header for an import that's specific to this block.
+  const sr = require("../../src/core/runner/send-request.ts") as typeof import("../../src/core/runner/send-request.ts");
+  const extractDiag = sr.extractByPathWithDiagnostic;
+
+  test("happy path: diagnostic carries the resolved chain and no failedAt", () => {
+    const out = extractDiag({ data: [{ id: "u-1" }] }, "data[0].id");
+    expect(out.value).toBe("u-1");
+    expect(out.failedAt).toBeUndefined();
+    expect(out.resolved).toEqual(["data", "0", "id"]);
+  });
+
+  test("missing key: failedAt names the broken segment and lists actual keys", () => {
+    const out = extractDiag({ data: [{ uuid: "u-1" }] }, "data[0].id");
+    expect(out.value).toBeUndefined();
+    expect(out.failedAt).toBe("id");
+    expect(out.reason).toContain("not in object");
+    expect(out.reason).toContain("uuid");
+    expect(out.resolved).toEqual(["data", "0"]);
+  });
+
+  test("array out-of-bounds: reason cites length + index", () => {
+    const out = extractDiag({ data: [] }, "data[0].id");
+    expect(out.value).toBeUndefined();
+    expect(out.failedAt).toBe("0");
+    expect(out.reason).toContain("out of bounds");
+  });
+
+  test("string body (content-type not application/json): reason hints at content-type", () => {
+    // Repro shape for F11 if body_parsed fell back to the raw string.
+    const out = extractDiag("not json", "data[0].id");
+    expect(out.value).toBeUndefined();
+    expect(out.reason).toContain("string");
+    expect(out.reason).toContain("content-type");
+  });
+
+  // ARV-144: top-level array bodies (Sentry/GitHub-style REST).
+  test("top-level array: [0].id resolves directly", () => {
+    const out = extractDiag([{ id: "x" }, { id: "y" }], "[0].id");
+    expect(out.value).toBe("x");
+    expect(out.failedAt).toBeUndefined();
+  });
+
+  test("top-level array: 0.id (no brackets) also resolves", () => {
+    const out = extractDiag([{ id: "x" }], "0.id");
+    expect(out.value).toBe("x");
+    expect(out.failedAt).toBeUndefined();
+  });
+
+  test("top-level array: data[0].id fails with array-index reason (used by CLI hint)", () => {
+    const out = extractDiag([{ id: "x" }], "data[0].id");
+    expect(out.value).toBeUndefined();
+    expect(out.failedAt).toBe("data");
+    expect(out.resolved).toEqual([]);
+    expect(out.reason).toMatch(/^expected an array index/);
+  });
+});
+
 describe("send-request — resolveAdHocRequest (TASK-200)", () => {
   let ws: WorkspaceHandle;
   let dbPath: string;

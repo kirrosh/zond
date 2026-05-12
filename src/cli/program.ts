@@ -2,6 +2,7 @@ import { Command } from "commander";
 
 import { registerRun } from "./commands/run.ts";
 import { registerCheck } from "./commands/check.ts";
+import { registerChecks } from "./commands/checks.ts";
 import { registerCoverage } from "./commands/coverage.ts";
 import { registerCi } from "./commands/ci-init.ts";
 import { registerClean } from "./commands/clean.ts";
@@ -13,6 +14,8 @@ import { registerRequest } from "./commands/request.ts";
 import { registerGenerate } from "./commands/generate.ts";
 import { registerPrepareFixtures } from "./commands/prepare-fixtures.ts";
 import { registerProbes } from "./commands/probe.ts";
+import { bootstrapProbes } from "../core/probe/bootstrap.ts";
+import { bootstrapAntiFp } from "../core/anti-fp/bootstrap.ts";
 import { registerReport } from "./commands/report.ts";
 import { registerCatalog } from "./commands/catalog.ts";
 import { registerCompletions } from "./commands/completions.ts";
@@ -21,6 +24,7 @@ import { registerSession } from "./commands/session.ts";
 import { registerDoctor } from "./commands/doctor.ts";
 import { registerRefreshApi } from "./commands/refresh-api.ts";
 import { registerAdd } from "./commands/add-api.ts";
+import { registerRemove } from "./commands/remove-api.ts";
 import { registerAudit } from "./commands/audit.ts";
 import { registerReference } from "./commands/reference.ts";
 
@@ -70,6 +74,7 @@ export function buildProgram(): Command {
   registerRun(program);
 
   registerCheck(program);
+  registerChecks(program);
 
   registerCi(program);
 
@@ -82,6 +87,7 @@ export function buildProgram(): Command {
 
   registerInit(program);
   registerAdd(program);
+  registerRemove(program);
 
   registerDescribe(program);
   registerDb(program);
@@ -94,6 +100,13 @@ export function buildProgram(): Command {
   registerPrepareFixtures(program);
   registerAudit(program);
 
+  // m-17 / ARV-49: validate registered probes implement the Probe
+  // contract before commander gets to wire them up. Boot-throws on a
+  // missing slot, so a regression can't slip past CI.
+  bootstrapProbes();
+  // ARV-123/124: populate the anti-FP rule registry before checks run
+  // — checks call applyAntiFp() and need every shipped rule present.
+  bootstrapAntiFp();
   registerProbes(program);
 
   registerCatalog(program);
@@ -110,6 +123,7 @@ export function buildProgram(): Command {
     // setup: register an API, prepare workspace
     "init":         "Setup:",
     "add":          "Setup:",
+    "remove":       "Setup:",
     "use":          "Setup:",
     "refresh-api":  "Setup:",
     "doctor":       "Setup:",
@@ -128,6 +142,7 @@ export function buildProgram(): Command {
     "db":       "Analyze:",
     "audit":    "Analyze:",
     "check":    "Analyze:",
+    "checks":   "Analyze:",
     "describe": "Analyze:",
     // report: outbound artefacts (HTML, bundles, catalog)
     "report":  "Report:",

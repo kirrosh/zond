@@ -1,4 +1,4 @@
-import { getDb } from "../schema.ts";
+import { getDb, withDbRetry } from "../schema.ts";
 import type { TestRunResult } from "../../core/runner/types.ts";
 import type { CreateRunOpts, RunRecord, RunSummary, RunFilters } from "./types.ts";
 
@@ -44,10 +44,10 @@ function buildRunFilterSQL(filters: RunFilters): { where: string; params: unknow
 export function createRun(opts: CreateRunOpts): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch, collection_id, session_id, tags)
-    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch, $collection_id, $session_id, $tags)
+    INSERT INTO runs (started_at, environment, trigger, commit_sha, branch, collection_id, session_id, tags, run_kind)
+    VALUES ($started_at, $environment, $trigger, $commit_sha, $branch, $collection_id, $session_id, $tags, $run_kind)
   `);
-  const result = stmt.run({
+  const result = withDbRetry("createRun", () => stmt.run({
     $started_at: opts.started_at,
     $environment: opts.environment ?? null,
     $trigger: opts.trigger ?? "manual",
@@ -56,7 +56,10 @@ export function createRun(opts: CreateRunOpts): number {
     $collection_id: opts.collection_id ?? null,
     $session_id: opts.session_id ?? null,
     $tags: opts.tags && opts.tags.length > 0 ? JSON.stringify(opts.tags) : null,
-  });
+    // ARV-55: default 'regular' here too — DB default would also catch it,
+    // but spelling it out keeps INSERTs idempotent and matches the type.
+    $run_kind: opts.run_kind ?? "regular",
+  }));
   return Number(result.lastInsertRowid);
 }
 
@@ -74,10 +77,21 @@ function decodeTags(raw: unknown): string[] | null {
   }
 }
 
+function decodeRunKind(raw: unknown): "regular" | "probe" | "check" {
+  // Migration v10 backfills legacy rows; this is a belt-and-suspenders
+  // normaliser for any value SQLite returns from `run_kind`.
+  if (raw === "probe" || raw === "check") return raw;
+  return "regular";
+}
+
 function decodeRunRow(row: unknown): RunRecord | null {
   if (!row || typeof row !== "object") return null;
-  const r = row as Record<string, unknown> & { tags?: unknown };
-  return { ...(r as unknown as RunRecord), tags: decodeTags(r.tags) };
+  const r = row as Record<string, unknown> & { tags?: unknown; run_kind?: unknown };
+  return {
+    ...(r as unknown as RunRecord),
+    tags: decodeTags(r.tags),
+    run_kind: decodeRunKind(r.run_kind),
+  };
 }
 
 export function finalizeRun(runId: number, results: TestRunResult[]): void {
@@ -92,7 +106,7 @@ export function finalizeRun(runId: number, results: TestRunResult[]): void {
   const finished = results[results.length - 1]?.finished_at ?? new Date().toISOString();
   const durationMs = new Date(finished).getTime() - new Date(started).getTime();
 
-  db.prepare(`
+  const stmt = db.prepare(`
     UPDATE runs
     SET finished_at = $finished_at,
         total       = $total,
@@ -101,7 +115,8 @@ export function finalizeRun(runId: number, results: TestRunResult[]): void {
         skipped     = $skipped,
         duration_ms = $duration_ms
     WHERE id = $id
-  `).run({
+  `);
+  withDbRetry("finalizeRun", () => stmt.run({
     $finished_at: finished,
     $total: total,
     $passed: passed,
@@ -109,7 +124,7 @@ export function finalizeRun(runId: number, results: TestRunResult[]): void {
     $skipped: skipped,
     $duration_ms: durationMs,
     $id: runId,
-  });
+  }));
 }
 
 export function getRunById(runId: number): RunRecord | null {
@@ -201,9 +216,11 @@ export function getLatestRunId(): number | null {
 export function deleteRun(runId: number): boolean {
   const db = getDb();
   // results are cascade-deleted via FK; but SQLite FK delete cascade requires explicit config
-  db.prepare("DELETE FROM results WHERE run_id = ?").run(runId);
-  const result = db.prepare("DELETE FROM runs WHERE id = ?").run(runId);
-  return result.changes > 0;
+  return withDbRetry("deleteRun", () => {
+    db.prepare("DELETE FROM results WHERE run_id = ?").run(runId);
+    const result = db.prepare("DELETE FROM runs WHERE id = ?").run(runId);
+    return result.changes > 0;
+  });
 }
 
 export function countRuns(filters?: RunFilters): number {

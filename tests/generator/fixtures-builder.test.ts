@@ -9,6 +9,7 @@ import {
   extractEndpoints,
   extractSecuritySchemes,
   buildApiFixtureManifest,
+  buildApiResourceMap,
   serializeApiFixtureManifest,
 } from "../../src/core/generator/index.ts";
 
@@ -108,6 +109,192 @@ describe("buildApiFixtureManifest", () => {
     expect(names).not.toContain("authorization");
     expect(names).not.toContain("accept");
     expect(names).not.toContain("content_type");
+  });
+
+  test("body-FK fields from request bodies surface as source: body-fk (ARV-45 AC#5)", () => {
+    // Mirrors the AC#5 fixture-test: POST /A {body: {b_id: ref}}, POST /B
+    // → manifest contains b_id with source: body-fk + affectedEndpoints
+    // includes the create endpoint that consumes it.
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1.0" },
+      paths: {
+        "/bs": {
+          get: { responses: { "200": { content: { "application/json": { schema: { type: "array", items: { type: "object", properties: { id: { type: "string" } } } } } } } } },
+          post: {
+            requestBody: { content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" } } } } } },
+            responses: { "201": { content: { "application/json": { schema: { type: "object", properties: { id: { type: "string" } } } } } } },
+          },
+        },
+        "/bs/{id}": {
+          get: { parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": {} } },
+        },
+        "/as": {
+          post: {
+            requestBody: { content: { "application/json": { schema: { type: "object", required: ["b_id"], properties: { b_id: { type: "string" } } } } } },
+            responses: { "201": { content: { "application/json": { schema: { type: "object", properties: { id: { type: "string" } } } } } } },
+          },
+        },
+      },
+    };
+    const endpoints = extractEndpoints(spec as any);
+    const resourceMap = buildApiResourceMap({ endpoints, specHash: "x" });
+    const manifest = buildApiFixtureManifest({
+      endpoints,
+      securitySchemes: [],
+      specHash: "x",
+      resourceMap,
+    });
+    const byName = Object.fromEntries(manifest.fixtures.map(f => [f.name, f]));
+    expect(byName.b_id).toBeDefined();
+    expect(byName.b_id!.source).toBe("body-fk");
+    expect(byName.b_id!.required).toBe(true);
+    expect(byName.b_id!.affectedEndpoints).toContain("POST /as");
+  });
+
+  test("CRUD-chain capture vars surface as source: capture-chain, required: false", () => {
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1.0" },
+      paths: {
+        "/templates": {
+          get: { responses: { "200": { content: { "application/json": { schema: { type: "array", items: { type: "object", properties: { id: { type: "string" } } } } } } } } },
+          post: {
+            requestBody: { content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" } } } } } },
+            responses: { "201": { content: { "application/json": { schema: { type: "object", properties: { id: { type: "string" } } } } } } },
+          },
+        },
+        "/templates/{id}": {
+          get: { parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": {} } },
+          patch: { parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": {} } },
+        },
+      },
+    };
+    const endpoints = extractEndpoints(spec as any);
+    const resourceMap = buildApiResourceMap({ endpoints, specHash: "x" });
+    const manifest = buildApiFixtureManifest({
+      endpoints,
+      securitySchemes: [],
+      specHash: "x",
+      resourceMap,
+    });
+    const byName = Object.fromEntries(manifest.fixtures.map(f => [f.name, f]));
+    // ARV-137: capture var = group.idParam (spec's path-param name), not a
+    // synthesised `<resource>_id`. The capture-chain entry collapses into the
+    // existing path-source entry for the same name (precedence: path wins).
+    expect(byName.id).toBeDefined();
+    expect(byName.id!.source).toBe("path");
+    // No phantom dup: the old `template_id` synthetic var is gone.
+    expect(byName.template_id).toBeUndefined();
+  });
+
+  test("ARV-137: spec path-param name diverges from <resource>_id (no manifest dup)", () => {
+    // Sentry-shape: resource `monitors` with idParam `monitor_id_or_slug`.
+    // Before ARV-137, capture-chain synthesised `monitor_id` via
+    // resourceVar(...), producing TWO manifest entries for one logical id.
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1.0" },
+      paths: {
+        "/monitors": {
+          get: { responses: { "200": { content: { "application/json": { schema: { type: "array", items: { type: "object", properties: { id: { type: "string" } } } } } } } } },
+          post: {
+            requestBody: { content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" } } } } } },
+            responses: { "201": { content: { "application/json": { schema: { type: "object", properties: { id: { type: "string" } } } } } } },
+          },
+        },
+        "/monitors/{monitor_id_or_slug}": {
+          get: { parameters: [{ name: "monitor_id_or_slug", in: "path", required: true, schema: { type: "string" } }], responses: { "200": {} } },
+          put: { parameters: [{ name: "monitor_id_or_slug", in: "path", required: true, schema: { type: "string" } }], responses: { "200": {} } },
+          delete: { parameters: [{ name: "monitor_id_or_slug", in: "path", required: true, schema: { type: "string" } }], responses: { "204": {} } },
+        },
+      },
+    };
+    const endpoints = extractEndpoints(spec as any);
+    const resourceMap = buildApiResourceMap({ endpoints, specHash: "x" });
+    const manifest = buildApiFixtureManifest({
+      endpoints,
+      securitySchemes: [],
+      specHash: "x",
+      resourceMap,
+    });
+    const byName = Object.fromEntries(manifest.fixtures.map(f => [f.name, f]));
+    // Single canonical var matching the spec's path-param name.
+    expect(byName.monitor_id_or_slug).toBeDefined();
+    expect(byName.monitor_id_or_slug!.source).toBe("path");
+    // No phantom synthesised dup.
+    expect(byName.monitor_id).toBeUndefined();
+  });
+
+  test("ARV-138: body-FK camelCase field collapses to canonical snake_case manifest var", () => {
+    // Sentry-shape: path uses `{issue_id}` (snake), but body of a sibling
+    // POST endpoint declares `issueId` (camel) for the same logical id.
+    // Before ARV-138, both surfaced as independent manifest entries.
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1.0" },
+      paths: {
+        "/issues/{issue_id}": {
+          get: { parameters: [{ name: "issue_id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": {} } },
+        },
+        "/external-issues": {
+          post: {
+            requestBody: { content: { "application/json": { schema: { type: "object", required: ["issueId"], properties: { issueId: { type: "integer" } } } } } },
+            responses: { "201": {} },
+          },
+        },
+      },
+    };
+    const endpoints = extractEndpoints(spec as any);
+    const resourceMap = buildApiResourceMap({ endpoints, specHash: "x" });
+    const manifest = buildApiFixtureManifest({
+      endpoints,
+      securitySchemes: [],
+      specHash: "x",
+      resourceMap,
+    });
+    const byName = Object.fromEntries(manifest.fixtures.map(f => [f.name, f]));
+    // Single canonical entry, source=path (precedence over body-fk).
+    expect(byName.issue_id).toBeDefined();
+    expect(byName.issue_id!.source).toBe("path");
+    expect(byName.issue_id!.affectedEndpoints).toContain("POST /external-issues");
+    // No phantom camelCase dup.
+    expect(byName.issueId).toBeUndefined();
+  });
+
+  test("body-FK var that is also a path-param keeps source: path (precedence)", () => {
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1.0" },
+      paths: {
+        "/audiences": {
+          get: { responses: { "200": { content: { "application/json": { schema: { type: "array", items: { type: "object", properties: { id: { type: "string" } } } } } } } } },
+          post: { requestBody: { content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" } } } } } }, responses: { "201": { content: { "application/json": { schema: { type: "object", properties: { id: { type: "string" } } } } } } } },
+        },
+        "/audiences/{audience_id}": {
+          get: { parameters: [{ name: "audience_id", in: "path", required: true, schema: { type: "string" } }], responses: { "200": {} } },
+        },
+        "/contacts": {
+          post: {
+            requestBody: { content: { "application/json": { schema: { type: "object", required: ["audience_id"], properties: { audience_id: { type: "string" } } } } } },
+            responses: { "201": {} },
+          },
+        },
+      },
+    };
+    const endpoints = extractEndpoints(spec as any);
+    const resourceMap = buildApiResourceMap({ endpoints, specHash: "x" });
+    const manifest = buildApiFixtureManifest({
+      endpoints,
+      securitySchemes: [],
+      specHash: "x",
+      resourceMap,
+    });
+    const byName = Object.fromEntries(manifest.fixtures.map(f => [f.name, f]));
+    expect(byName.audience_id).toBeDefined();
+    expect(byName.audience_id!.source).toBe("path");
+    // affectedEndpoints merges the body-FK consumer (POST /contacts) onto the path entry
+    expect(byName.audience_id!.affectedEndpoints).toContain("POST /contacts");
   });
 
   test("serializeApiFixtureManifest produces stable YAML structure", () => {

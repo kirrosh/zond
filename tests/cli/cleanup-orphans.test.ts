@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { cleanupCommand } from "../../src/cli/commands/cleanup.ts";
-import { appendOrphanRecord, loadOrphans } from "../../src/core/probe/orphan-tracker.ts";
+import { appendOrphanRecord, loadOrphans, persistVerdictsAsOrphans } from "../../src/core/probe/orphan-tracker.ts";
 import { captureOutput } from "../_helpers/output";
 import { mockFetchRouter, restoreFetch } from "../_helpers/fetch-mock";
 
@@ -103,5 +103,186 @@ describe("orphan-tracker + zond cleanup --orphans (TASK-278)", () => {
     const code = await cleanupCommand({ orphans: false, json: false });
     expect(code).toBe(2);
     expect(suppress.err).toMatch(/--orphans/);
+  });
+
+  // ARV-139: orphan queue is shared across APIs on disk, but `cleanup --orphans`
+  // must default to the active API. Otherwise, switching APIs leaves stale
+  // orphans from the prior API showing up and triggering DELETE attempts
+  // against an unrelated server. Explicit --api wins; --all-apis opts out.
+  test("ARV-139: defaults to current-api scoping; --all-apis disables it", async () => {
+    const t = new Date().toISOString();
+    await appendOrphanRecord({
+      api: "sentry", runId: "1", createdAt: t,
+      method: "POST", path: "/teams/", id: "s1", deletePath: "/teams/s1",
+      lastCleanupStatus: 500, lastCleanupError: null,
+    });
+    await appendOrphanRecord({
+      api: "resend", runId: "1", createdAt: t,
+      method: "POST", path: "/templates/", id: "r1", deletePath: "/templates/r1",
+      lastCleanupStatus: 500, lastCleanupError: null,
+    });
+
+    // No current-api set, no --api flag, no --all-apis → unscoped (legacy behaviour).
+    const codeAll = await cleanupCommand({ orphans: true, dryRun: true, baseUrl: "http://srv", json: false });
+    expect(codeAll).toBe(0);
+    expect(suppress.out).toMatch(/Dry-run: 2 orphan/);
+
+    // Active API resolves via ZOND_API_GLOBAL: only sentry orphans surface.
+    suppress.outChunks.length = 0;
+    process.env.ZOND_API_GLOBAL = "sentry";
+    try {
+      const codeScoped = await cleanupCommand({ orphans: true, dryRun: true, baseUrl: "http://srv", json: false });
+      expect(codeScoped).toBe(0);
+      expect(suppress.out).toMatch(/Dry-run: 1 orphan/);
+      expect(suppress.out).toMatch(/\/teams\/s1/);
+      expect(suppress.out).not.toMatch(/\/templates\/r1/);
+
+      // --all-apis explicitly opts back into the cross-API view.
+      suppress.outChunks.length = 0;
+      const codeAllOptIn = await cleanupCommand({ orphans: true, allApis: true, dryRun: true, baseUrl: "http://srv", json: false });
+      expect(codeAllOptIn).toBe(0);
+      expect(suppress.out).toMatch(/Dry-run: 2 orphan/);
+
+      // Explicit --api still wins.
+      suppress.outChunks.length = 0;
+      const codeExplicit = await cleanupCommand({ orphans: true, api: "resend", dryRun: true, baseUrl: "http://srv", json: false });
+      expect(codeExplicit).toBe(0);
+      expect(suppress.out).toMatch(/Dry-run: 1 orphan/);
+      expect(suppress.out).toMatch(/\/templates\/r1/);
+    } finally {
+      delete process.env.ZOND_API_GLOBAL;
+    }
+  });
+
+  // ARV-102 (F7): orphan records that the probe couldn't auto-clean
+  // (no DELETE counterpart in spec, response had no usable id) are now
+  // persisted with `requires_manual_cleanup: true`. cleanup --orphans
+  // surfaces them in a dedicated "manual_cleanup_required" bucket and
+  // exits 1 (CI must fail loudly when probes leak un-deletable state).
+  test("requires_manual_cleanup records surface in dedicated bucket and force exit 1", async () => {
+    let httpCalls = 0;
+    fetchHandle = mockFetchRouter(() => {
+      httpCalls++;
+      return { status: 204 };
+    });
+
+    const t = new Date().toISOString();
+    // Auto-cleanable orphan (will be retried via DELETE).
+    await appendOrphanRecord({
+      api: "demo", runId: "1", createdAt: t,
+      method: "POST", path: "/teams/", id: "alive", deletePath: "/teams/alive",
+      lastCleanupStatus: 500, lastCleanupError: null,
+    });
+    // Manual-only — no DELETE counterpart in spec.
+    await appendOrphanRecord({
+      api: "demo", runId: "1", createdAt: t,
+      method: "POST", path: "/symbol-sources/", id: "src_1", deletePath: "",
+      lastCleanupStatus: null, lastCleanupError: "no DELETE counterpart for POST /symbol-sources/",
+      requires_manual_cleanup: true,
+    });
+    // Manual-only — response had no usable id, so id is empty too.
+    await appendOrphanRecord({
+      api: "demo", runId: "1", createdAt: t,
+      method: "POST", path: "/api-keys/", id: "", deletePath: "",
+      lastCleanupStatus: null, lastCleanupError: "cleanup skipped: response had no usable id",
+      requires_manual_cleanup: true,
+    });
+
+    const code = await cleanupCommand({ orphans: true, baseUrl: "http://srv", json: false });
+    expect(code).toBe(1); // manual-only entries push exit code to 1
+    // DELETE was attempted only for the retriable record, not the manual-only ones.
+    expect(httpCalls).toBe(1);
+    expect(suppress.err).toMatch(/2 resource\(s\) need manual cleanup/);
+    expect(suppress.err).toMatch(/symbol-sources/);
+    expect(suppress.err).toMatch(/api-keys/);
+  });
+
+  // ARV-102 (F7): persistVerdictsAsOrphans must capture verdicts whose
+  // probe-side cleanup attempt was *attempted* but had no usable id or
+  // no DELETE counterpart. Pre-fix these were silently dropped, leaving
+  // `cleanup --orphans` blind to them.
+  test("persistVerdictsAsOrphans records cleanup-attempted-but-uncleanable verdicts", async () => {
+    type LooseVerdict = Parameters<typeof persistVerdictsAsOrphans>[2][number];
+    const verdicts: LooseVerdict[] = [
+      // Standard cleanup-failed (has id + deletePath) → recorded as before.
+      {
+        method: "POST", path: "/teams/",
+        cleanup: { attempted: true, id: "team_1", deletePath: "/teams/team_1", status: 500, error: null },
+      } as unknown as LooseVerdict,
+      // No DELETE counterpart in spec → manual_cleanup_required.
+      {
+        method: "POST", path: "/symbol-sources/",
+        cleanup: { attempted: true, id: "src_1", deletePath: "", status: null, error: "no DELETE counterpart for POST /symbol-sources/" },
+      } as unknown as LooseVerdict,
+      // Response had no usable id → manual_cleanup_required.
+      {
+        method: "POST", path: "/api-keys/",
+        cleanup: { attempted: true, id: undefined, deletePath: "", status: null, error: "cleanup skipped: response had no usable id" },
+      } as unknown as LooseVerdict,
+      // Cleanup never attempted (probe didn't enter cleanup phase) → skipped.
+      {
+        method: "GET", path: "/orgs/",
+        cleanup: { attempted: false },
+      } as unknown as LooseVerdict,
+    ];
+
+    const written = await persistVerdictsAsOrphans("demo", "run-99", verdicts);
+    expect(written).toBe(3); // skip the not-attempted one only
+
+    const records = await loadOrphans({ api: "demo", runId: "run-99" });
+    expect(records).toHaveLength(3);
+    const manual = records.filter(r => r.requires_manual_cleanup === true);
+    expect(manual).toHaveLength(2);
+    expect(manual.map(r => r.path).sort()).toEqual(["/api-keys/", "/symbol-sources/"]);
+  });
+
+  // ARV-102 (F7): two manual-only records on different (method, path)
+  // pairs must survive de-dup independently — earlier they all collapsed
+  // to one entry because deletePath/id are empty for the manual branch.
+  test("loadOrphans keeps manual-only records distinct across (method, path)", async () => {
+    const t = new Date().toISOString();
+    await appendOrphanRecord({
+      api: "demo", runId: "1", createdAt: t,
+      method: "POST", path: "/symbol-sources/", id: "", deletePath: "",
+      lastCleanupStatus: null, lastCleanupError: "no DELETE counterpart",
+      requires_manual_cleanup: true,
+    });
+    await appendOrphanRecord({
+      api: "demo", runId: "1", createdAt: t,
+      method: "POST", path: "/api-keys/", id: "", deletePath: "",
+      lastCleanupStatus: null, lastCleanupError: "cleanup skipped: response had no usable id",
+      requires_manual_cleanup: true,
+    });
+
+    const survivors = await loadOrphans({ api: "demo", runId: "1" });
+    expect(survivors.map(r => r.path).sort()).toEqual(["/api-keys/", "/symbol-sources/"]);
+  });
+
+  test("JSON envelope splits items vs manual_cleanup_required", async () => {
+    fetchHandle = mockFetchRouter(() => ({ status: 204 }));
+    const t = new Date().toISOString();
+    await appendOrphanRecord({
+      api: "demo", runId: "1", createdAt: t,
+      method: "POST", path: "/symbol-sources/", id: "src", deletePath: "",
+      lastCleanupStatus: null, lastCleanupError: "no DELETE counterpart",
+      requires_manual_cleanup: true,
+    });
+
+    await cleanupCommand({ orphans: true, baseUrl: "http://srv", json: true });
+
+    const env = JSON.parse(suppress.out) as {
+      ok: boolean;
+      data: {
+        retried: number;
+        items: unknown[];
+        manual_cleanup_required: Array<{ method: string; path: string; reason: string }>;
+      };
+    };
+    expect(env.ok).toBe(true);
+    expect(env.data.retried).toBe(0);
+    expect(env.data.items).toEqual([]);
+    expect(env.data.manual_cleanup_required).toHaveLength(1);
+    expect(env.data.manual_cleanup_required[0]!.path).toBe("/symbol-sources/");
+    expect(env.data.manual_cleanup_required[0]!.reason).toMatch(/no DELETE counterpart/);
   });
 });

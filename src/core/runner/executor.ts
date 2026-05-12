@@ -1,5 +1,5 @@
 import { resolve, dirname, basename } from "node:path";
-import type { TestSuite, TestStep, Environment, SourceMetadata } from "../parser/types.ts";
+import type { TestSuite, TestStep, Environment, SourceMetadata, AssertionRule } from "../parser/types.ts";
 import { substituteString, substituteStep, substituteDeep, extractVariableReferences } from "../parser/variables.ts";
 import type { TestRunResult, StepResult, HttpRequest, AssertionResult } from "./types.ts";
 import { executeRequest, type FetchOptions } from "./http-client.ts";
@@ -28,6 +28,43 @@ function mergeProvenance(
   return { ...(suiteSrc ?? {}), ...(stepSrc ?? {}) };
 }
 
+/** ARV-157: build the top-level `schema_validation` summary for a step that
+ *  was run with `--validate-schema`. Mirrors the shape `zond request
+ *  --validate-schema` already produces (see src/cli/commands/request.ts);
+ *  consumers can `jq '.steps[] | .schema_validation'` instead of digging
+ *  into `assertions[] | select(.kind=="schema")`.
+ *
+ *  Returns undefined when the validator wasn't attached or the response had
+ *  no parseable JSON body — same precondition as `assertions.push(...)` at
+ *  the call site, so the summary is present iff schema actually ran. */
+function buildSchemaValidationSummary(
+  validator: SchemaValidator,
+  method: string,
+  path: string,
+  status: number,
+  schemaAssertions: AssertionResult[],
+): StepResult["schema_validation"] {
+  const ins = validator.inspect(method, path, status);
+  if (!ins.matchedEndpoint) {
+    return { result: "no-endpoint", matched_endpoint: null, matched_response_status: null, error_count: 0 };
+  }
+  if (!ins.hasJsonSchema) {
+    return {
+      result: "no-schema",
+      matched_endpoint: ins.matchedEndpoint,
+      matched_response_status: ins.matchedResponseStatus,
+      error_count: 0,
+    };
+  }
+  const failed = schemaAssertions.filter((a) => !a.passed).length;
+  return {
+    result: failed === 0 ? "PASS" : "FAIL",
+    matched_endpoint: ins.matchedEndpoint,
+    matched_response_status: ins.matchedResponseStatus,
+    error_count: failed,
+  };
+}
+
 /** TASK-256: turn each missed-capture (path didn't resolve in response)
  *  into an auxiliary failed assertion. The step then fails loudly with
  *  "capture <var>: path '<path>' not found in body" instead of producing
@@ -44,6 +81,26 @@ function buildMissedCaptureAssertions(
     expected: `${m.source} '${m.path}' present`,
     kind: "auxiliary",
   }));
+}
+
+function collectChainCaptures(tests: TestStep[]): Set<string> {
+  const out = new Set<string>();
+  const visit = (rules: Record<string, AssertionRule> | undefined) => {
+    if (!rules) return;
+    for (const r of Object.values(rules)) {
+      if (r.capture) out.add(r.capture);
+      if (r.each) visit(r.each);
+      if (r.contains_item) visit(r.contains_item);
+    }
+  };
+  for (const step of tests) visit(step.expect?.body);
+  return out;
+}
+
+function emptyVarSkipReason(varName: string, chainCaptures: Set<string>): string {
+  return chainCaptures.has(varName)
+    ? `chain capture {{${varName}}} unbound (upstream step did not run or did not capture it)`
+    : `required fixture {{${varName}}} is empty`;
 }
 
 function makeSkippedResult(
@@ -145,6 +202,15 @@ export async function runSuite(
     rate_limiter: options.rateLimiter,
     ...(options.networkRetries !== undefined ? { network_retries: options.networkRetries } : {}),
   };
+
+  // Names of every variable a step in this suite tries to capture from a
+  // response (expect.body.<field>.capture: <name>). When a later step
+  // references one of these and the value is empty — under --dry-run, or
+  // because the capturing step was skipped — the missing var is a chain
+  // capture, NOT a fixture in .env.yaml. Distinguishing them in the skip
+  // message stops users from chasing fixture seeding for vars that
+  // shouldn't live in .env.yaml at all.
+  const chainCaptures = collectChainCaptures(suite.tests);
 
   // parameterize cross-product → N iterations of the suite body.
   // Captures and tainted/missing sets are reset per iteration so that
@@ -251,8 +317,8 @@ export async function runSuite(
       if (evaluateExpr(exprAfterSubst)) {
         const varMatch = step.skip_if.match(/\{\{([^{}]+)\}\}/);
         const skipMsg = varMatch
-          ? `skipped: required fixture {{${varMatch[1]!.trim()}}} is empty`
-          : `skipped: ${step.skip_if}`;
+          ? emptyVarSkipReason(varMatch[1]!.trim(), chainCaptures)
+          : step.skip_if;
         pushStep(makeSkippedResult(interpolateName(step.name, variables), skipMsg), step);
         continue;
       }
@@ -306,7 +372,7 @@ export async function runSuite(
       if (emptyVar) {
         pushStep(makeSkippedResult(
           interpolateName(step.name, variables),
-          `skipped: required fixture {{${emptyVar}}} is empty`,
+          emptyVarSkipReason(emptyVar, chainCaptures),
         ), step);
         continue;
       }
@@ -390,8 +456,17 @@ export async function runSuite(
           const missedCaps = findMissedCaptures(resolved.expect.body, response.body_parsed, resolved.expect.headers, response.headers);
           const assertions = checkAssertions(resolved.expect, response);
           assertions.push(...buildMissedCaptureAssertions(missedCaps));
+          let schemaValidationSummary: StepResult["schema_validation"] | undefined;
           if (options.schemaValidator && response.body_parsed !== undefined) {
-            assertions.push(...options.schemaValidator.validate(resolved.method, resolved.path, response.status, response.body_parsed));
+            const schemaAssertions = options.schemaValidator.validate(resolved.method, resolved.path, response.status, response.body_parsed);
+            assertions.push(...schemaAssertions);
+            schemaValidationSummary = buildSchemaValidationSummary(
+              options.schemaValidator,
+              resolved.method,
+              resolved.path,
+              response.status,
+              schemaAssertions,
+            );
           }
           const allPassed = assertions.every((a) => a.passed);
 
@@ -406,6 +481,7 @@ export async function runSuite(
             ...(response.network_retry_count && response.network_retry_count > 0
               ? { network_retry: response.network_retry_count }
               : {}),
+            ...(schemaValidationSummary ? { schema_validation: schemaValidationSummary } : {}),
           };
 
           // Evaluate condition with response context
@@ -460,8 +536,17 @@ export async function runSuite(
       const missedCaps = findMissedCaptures(resolved.expect.body, response.body_parsed, resolved.expect.headers, response.headers);
       const assertions = checkAssertions(resolved.expect, response);
       assertions.push(...buildMissedCaptureAssertions(missedCaps));
+      let schemaValidationSummary: StepResult["schema_validation"] | undefined;
       if (options.schemaValidator && response.body_parsed !== undefined) {
-        assertions.push(...options.schemaValidator.validate(resolved.method, resolved.path, response.status, response.body_parsed));
+        const schemaAssertions = options.schemaValidator.validate(resolved.method, resolved.path, response.status, response.body_parsed);
+        assertions.push(...schemaAssertions);
+        schemaValidationSummary = buildSchemaValidationSummary(
+          options.schemaValidator,
+          resolved.method,
+          resolved.path,
+          response.status,
+          schemaAssertions,
+        );
       }
       const allPassed = assertions.every((a) => a.passed);
 
@@ -476,6 +561,7 @@ export async function runSuite(
         ...(response.network_retry_count && response.network_retry_count > 0
           ? { network_retry: response.network_retry_count }
           : {}),
+        ...(schemaValidationSummary ? { schema_validation: schemaValidationSummary } : {}),
       }, step);
 
       // If step failed, captures that did extract are tainted (value is real

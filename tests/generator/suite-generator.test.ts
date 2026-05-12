@@ -6,6 +6,8 @@ import {
   generateCrudSuite,
   generateSuites,
   generateAuthSuite,
+  singularizeResource,
+  resourceVar,
 } from "../../src/core/generator/suite-generator.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../src/core/generator/types.ts";
 import type { OpenAPIV3 } from "openapi-types";
@@ -426,22 +428,23 @@ describe("generateCrudSuite", () => {
     expect(suite.base_url).toBe("{{base_url}}");
     expect(suite.tests).toHaveLength(5); // create, read, update, delete, verify
 
-    // Create step has capture
+    // Create step has capture — ARV-137: captureVar = group.idParam (the
+    // spec's path-param name `petId`), not synthesised `<resource>_id`.
     const createStep = suite.tests[0]!;
-    expect(createStep.expect.body?.id).toEqual({ capture: "pet_id" });
+    expect(createStep.expect.body?.id).toEqual({ capture: "petId" });
 
     // Read uses captured var
     const readStep = suite.tests[1]!;
-    expect(readStep.GET).toBe("/pets/{{pet_id}}");
+    expect(readStep.GET).toBe("/pets/{{petId}}");
 
     // Delete step
     const deleteStep = suite.tests[3]!;
-    expect(deleteStep.DELETE).toBe("/pets/{{pet_id}}");
+    expect(deleteStep.DELETE).toBe("/pets/{{petId}}");
     expect(deleteStep.expect.status).toBe(204);
 
     // Verify deleted
     const verifyStep = suite.tests[4]!;
-    expect(verifyStep.GET).toBe("/pets/{{pet_id}}");
+    expect(verifyStep.GET).toBe("/pets/{{petId}}");
     expect(verifyStep.expect.status).toBe(404);
   });
 
@@ -482,11 +485,13 @@ describe("generateCrudSuite", () => {
     ];
     const groups = detectCrudGroups(endpoints);
     const suite = generateCrudSuite(groups[0]!, noSecurity);
-    // Create step captures `slug`, not `id`
+    // Create step captures `slug` field — ARV-137: capture var = idParam
+    // (the spec path-param name `slug`), so the response field and the
+    // capture target share the same name. Previously this was synthesised
+    // to `project_id`.
     const createStep = suite.tests[0]!;
-    expect(createStep.expect.body?.slug).toEqual({ capture: "project_id" });
-    // Read uses the captured slug interpolated into the {slug} path-param
-    expect(suite.tests[1]!.GET).toBe("/projects/{{project_id}}");
+    expect(createStep.expect.body?.slug).toEqual({ capture: "slug" });
+    expect(suite.tests[1]!.GET).toBe("/projects/{{slug}}");
   });
 
   test("TASK-139: rule_id path-param maps to id field on response", () => {
@@ -990,5 +995,40 @@ describe("generateCrudSuite ETag", () => {
     // Update step has If-Match header
     const updateStep = suite.tests[updateIdx]!;
     expect((updateStep as any).headers?.["If-Match"]).toBeDefined();
+  });
+});
+
+// ARV-100 (F5): the generator and the manifest-builder must agree on the
+// `{{<resource>_id}}` capture-var name. Two regressions tester hit on the
+// Sentry spec:
+//   1. `singularizeResource("Releases")` → "Releas" (the `s` alternative
+//      in `(ch|sh|x|s|z)es$` greedily consumed the regular -s plural and
+//      `slice(-2)` chopped "es"). The fix narrows it to `ss`.
+//   2. `resourceVar("Groups", "id")` → "Group_id" while path-params with the
+//      same id were normalised to "group_id" by fixtures-builder. Forcing
+//      lowercase in resourceVar keeps both producers in the same namespace.
+describe("ARV-100 (F5): singularizeResource + resourceVar normalise consistently", () => {
+  test("singularizeResource handles regular -s plurals with vowel+s stems", () => {
+    expect(singularizeResource("releases")).toBe("release");
+    expect(singularizeResource("phases")).toBe("phase");
+    expect(singularizeResource("houses")).toBe("house");
+    // Regression guard: genuine sibilant doubles still drop the trailing
+    // "es" — `addresses` → `address`, `boxes` → `box`.
+    expect(singularizeResource("addresses")).toBe("address");
+    expect(singularizeResource("boxes")).toBe("box");
+    // -ies plurals still flip to -y.
+    expect(singularizeResource("properties")).toBe("property");
+  });
+
+  test("resourceVar always lowercases — capitalised resource names normalise", () => {
+    // Capitalised resource (e.g. when a tag/path segment in the spec is
+    // PascalCase) must still produce a lowercase var matching what
+    // fixtures-builder writes for path-params on the same endpoint.
+    expect(resourceVar("Groups", "id")).toBe("group_id");
+    expect(resourceVar("Users", "id")).toBe("user_id");
+    expect(resourceVar("Releases", "id")).toBe("release_id");
+    // Already lowercase / dashed cases stay normalised the same way.
+    expect(resourceVar("templates", "id")).toBe("template_id");
+    expect(resourceVar("contact-properties", "id")).toBe("contact_property_id");
   });
 });

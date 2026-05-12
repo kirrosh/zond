@@ -1,5 +1,5 @@
 import { resolve, join, relative } from "path";
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from "fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "fs";
 import { getDb } from "../db/schema.ts";
 import { createCollection, deleteCollection, findCollectionByNameOrId, normalizePath } from "../db/queries.ts";
 import {
@@ -13,6 +13,7 @@ import {
   buildApiFixtureManifest,
   serializeApiFixtureManifest,
 } from "./generator/index.ts";
+import { decycleSchema } from "./generator/schema-utils.ts";
 import { schemeVarName } from "./generator/suite-generator.ts";
 import type { SecuritySchemeInfo } from "./generator/types.ts";
 import { hashSpec } from "./meta/meta-store.ts";
@@ -47,17 +48,31 @@ interface WriteArtifactsParams {
 export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
   const { doc, baseDir, apiName, baseUrl, workspaceRoot, by = "zond add api" } = params;
   const localSpecAbsPath = join(baseDir, SPEC_SNAPSHOT_FILENAME);
-  writeFileSync(localSpecAbsPath, JSON.stringify(doc, null, 2) + "\n", "utf-8");
+  // Pass through decycleSchema first — large specs (Stripe, GitHub) contain
+  // mutually-recursive `$ref` chains that resolve to true object cycles after
+  // dereference, and raw JSON.stringify crashes on those with "cannot
+  // serialize cyclic structures" (ARV-145). decycleSchema collapses the
+  // second visit to `{ "x-circular": true }` (vendor-extension sentinel —
+  // NOT `$ref`, otherwise the parser tries to resolve "[Circular]" as a
+  // file path when re-reading spec.json, ARV-146) so the on-disk snapshot
+  // is self-contained, parser-safe JSON.
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(decycleSchema(doc), null, 2);
+  } catch (err) {
+    const m = (err as Error).message;
+    throw new Error(
+      `spec_serialize_failed: could not serialize dereferenced spec for '${apiName}' — ${m}. ` +
+      `This usually means the spec contains a structure decycleSchema could not collapse; please open an issue with the spec URL.`,
+    );
+  }
+  writeFileSync(localSpecAbsPath, serialized + "\n", "utf-8");
 
   const endpoints = extractEndpoints(doc as any);
   const securitySchemes = extractSecuritySchemes(doc as any);
   // Hash the on-disk file bytes — this is what `zond doctor` re-hashes when
-  // checking artifact freshness. Hashing the in-memory `decycleSchema(doc)`
-  // form here drifted from doctor's reading because `@readme/openapi-parser`
-  // hands back shared object refs for repeated $refs; decycleSchema marks
-  // those as `[Circular]` only on the second visit, while `JSON.stringify(doc)`
-  // expands every occurrence — so doctor saw a hash for the expanded file
-  // and setup-api recorded a hash for the deduped form (TASK-215).
+  // checking artifact freshness (TASK-215). Both sides now read the decycled
+  // form: setup-api writes it here, doctor re-reads the same file.
   const specHash = hashSpec(readFileSync(localSpecAbsPath, "utf-8"));
   const localSpecRelPath = relative(workspaceRoot, localSpecAbsPath).replace(/\\/g, "/");
 
@@ -82,6 +97,7 @@ export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
     securitySchemes,
     baseUrl: baseUrl || undefined,
     specHash,
+    resourceMap: resources,
   });
   const fixturesPath = join(baseDir, ".api-fixtures.yaml");
   writeFileSync(fixturesPath, serializeApiFixtureManifest(fixtures), "utf-8");
@@ -107,7 +123,7 @@ export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
  *
  * Resolution order:
  *   1. URL (http/https) — return as-is.
- *   2. Workspace-relative path (e.g. `apis/resend/spec.json`) that exists.
+ *   2. Workspace-relative path (e.g. `apis/<name>/spec.json`) that exists.
  *   3. Absolute filesystem path that exists. Treated as legacy: the spec
  *      is outside the workspace and not snapshotted into `apis/<name>/`.
  *      We let it through, but `assertLocalSpec` (used by run/report/doctor)
@@ -224,6 +240,18 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   let authVarNames: string[] = [];
   if (spec) {
     const doc = await readOpenApiSpec(spec, { insecure: options.insecure });
+    // Validate the document looks like OpenAPI/Swagger before we snapshot it.
+    // dereference() happily round-trips arbitrary JSON (e.g. a marketing-site
+    // landing payload), so without this guard `zond add api foo --spec
+    // https://example.com` silently registers a 0-endpoint API.
+    const docAny = doc as any;
+    const hasOpenApiField = typeof docAny?.openapi === "string";
+    const hasSwaggerField = typeof docAny?.swagger === "string";
+    if (!hasOpenApiField && !hasSwaggerField) {
+      throw new Error(
+        `Spec at ${spec} is not an OpenAPI/Swagger document — missing top-level 'openapi' (3.x) or 'swagger' (2.x) field. Check the URL points to the JSON spec, not the API root.`,
+      );
+    }
     dereferencedDoc = doc;
     openapiSpec = spec;
     if ((doc as any).servers?.[0]?.url) {
@@ -253,6 +281,15 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     const endpoints = extractEndpoints(doc);
     endpointCount = endpoints.length;
     authVarNames = deriveAuthVarNames(extractSecuritySchemes(doc));
+
+    if (endpointCount === 0) {
+      const hasPaths = docAny?.paths && typeof docAny.paths === "object" && Object.keys(docAny.paths).length > 0;
+      warnings.push(
+        hasPaths
+          ? `Spec declares paths but no operations were extracted — every method may be filtered out (deprecated, unsupported method, etc.). Verify with \`zond catalog --api <name>\`.`
+          : `Spec contains 0 endpoints — 'paths' field is empty or missing. generate/probe/checks will produce nothing until the spec is fixed or replaced.`,
+      );
+    }
 
     // Collect unique path parameters. The default is empty string so that
     // generated `skip_if: "{{<id>}} =="` checks auto-skip until the user
@@ -292,8 +329,62 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     : resolve(findWorkspaceRoot().root, `apis/${dirName}/`);
   const testPath = join(baseDir, "tests");
 
+  // Track whether we created baseDir from scratch so we can clean it up on
+  // failure — without this, a crash mid-setup (e.g. JSON.stringify on a
+  // cyclic spec, ARV-145) leaves apis/<slug>/tests/ behind and confuses the
+  // next `zond add api` invocation.
+  const baseDirPreExisted = existsSync(baseDir);
+
   // Create directories
   mkdirSync(testPath, { recursive: true });
+
+  try {
+    return await finalizeSetup({
+      name,
+      baseDir,
+      testPath,
+      baseUrl,
+      pathParams,
+      authVarNames,
+      envVarsOverride: options.envVars,
+      spec,
+      dereferencedDoc,
+      openapiSpec,
+      endpointCount,
+      warnings,
+    });
+  } catch (err) {
+    // Roll back partial filesystem state (apis/<slug>/tests/, spec.json, etc.)
+    // when we created the dir from scratch. Without this, the next
+    // `zond add api <same-name>` would still find a stale dir and demand
+    // --force, even though no collection was actually registered. ARV-145.
+    if (!baseDirPreExisted) {
+      try { rmSync(baseDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
+    throw err;
+  }
+}
+
+interface FinalizeSetupParams {
+  name: string;
+  baseDir: string;
+  testPath: string;
+  baseUrl: string;
+  pathParams: Map<string, string>;
+  authVarNames: string[];
+  envVarsOverride?: Record<string, string>;
+  spec?: string;
+  dereferencedDoc: unknown;
+  openapiSpec: string | null;
+  endpointCount: number;
+  warnings: string[];
+}
+
+async function finalizeSetup(p: FinalizeSetupParams): Promise<SetupApiResult> {
+  const {
+    name, baseDir, testPath, baseUrl, pathParams, authVarNames,
+    envVarsOverride, spec, dereferencedDoc, openapiSpec, endpointCount, warnings,
+  } = p;
 
   // Build environment variables
   const envVars: Record<string, string> = {};
@@ -309,8 +400,8 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   for (const v of authVarNames) {
     if (!(v in envVars)) envVars[v] = `@secret:${v}`;
   }
-  if (options.envVars) {
-    Object.assign(envVars, options.envVars);
+  if (envVarsOverride) {
+    Object.assign(envVars, envVarsOverride);
   }
 
   // Spec-less registration is allowed, but we need a base_url from somewhere
