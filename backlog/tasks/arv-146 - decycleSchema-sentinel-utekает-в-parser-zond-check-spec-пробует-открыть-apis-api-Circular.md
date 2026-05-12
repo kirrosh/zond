@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-05-12 08:49'
-updated_date: '2026-05-12 08:49'
+updated_date: '2026-05-12 08:52'
 labels:
   - bug
   - regression
@@ -46,5 +46,5 @@ zond check spec apis/stripe/spec.json
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Fix landed in same commit chain as ARV-145 follow-up. Sentinel changed in src/core/generator/schema-utils.ts; comment updated in src/core/setup-api.ts; tests updated in tests/core/generator/schema-utils.test.ts. Verified: zond check spec apis/stripe/spec.json → ok=true, 788 issues, 460 endpoints, no ENOENT.
+Confirmed by feedback-loop round 01 (Stripe API, 534 endpoints): tester saw spec.json with 3902 occurrences of "[Circular]" string causing ENOENT on apis/stripe/[Circular] across check spec/refresh-api/generate/checks run. After ARV-146 fix (x-circular vendor-extension sentinel): all 4 commands return ok=true. Tester recommendation matched our fix verbatim (sentinel object instead of string).
 <!-- SECTION:NOTES:END -->
