@@ -79,9 +79,16 @@ export function getAuthHeaders(
 ): Record<string, string> | undefined {
   if (ep.security.length === 0) return undefined;
   const tokenVar = (s: SecuritySchemeInfo) => tokenVarFor?.(s) ?? "auth_token";
-  for (const secName of ep.security) {
-    const scheme = schemes.find((s) => s.name === secName);
-    if (!scheme) continue;
+
+  // Prefer bearer / apiKey schemes over basic when an endpoint declares
+  // multiple alternatives (ARV-147). Stripe v1 publishes `security: [basicAuth,
+  // bearerAuth]` with both pointing at the same `auth_token` value, but
+  // basicAuth expects base64(user:password) — feeding it a raw `sk_test_…`
+  // produces a 401. zond request already hardcodes Bearer for this reason
+  // (send-request.ts TASK-231); the generator + probes now agree by walking
+  // ep.security twice: first looking for a non-basic match, then falling
+  // back to basic only if nothing else worked.
+  const tryScheme = (scheme: SecuritySchemeInfo): Record<string, string> | undefined => {
     if (scheme.type === "http") {
       if (scheme.scheme === "bearer" || !scheme.scheme) {
         return { Authorization: `Bearer {{${tokenVar(scheme)}}}` };
@@ -96,6 +103,25 @@ export function getAuthHeaders(
       }
       return { [scheme.apiKeyName]: "{{api_key}}" };
     }
+    return undefined;
+  };
+
+  const isBasic = (s: SecuritySchemeInfo): boolean =>
+    s.type === "http" && s.scheme === "basic";
+
+  // Pass 1: skip basic.
+  for (const secName of ep.security) {
+    const scheme = schemes.find((s) => s.name === secName);
+    if (!scheme || isBasic(scheme)) continue;
+    const headers = tryScheme(scheme);
+    if (headers) return headers;
+  }
+  // Pass 2: basic-only fallback.
+  for (const secName of ep.security) {
+    const scheme = schemes.find((s) => s.name === secName);
+    if (!scheme || !isBasic(scheme)) continue;
+    const headers = tryScheme(scheme);
+    if (headers) return headers;
   }
   return undefined;
 }
