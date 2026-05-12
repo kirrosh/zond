@@ -1,6 +1,6 @@
 import { describe, test, expect, afterEach } from "bun:test";
 import { existsSync } from "fs";
-import { getDb, closeDb } from "../../src/db/schema.ts";
+import { getDb, closeDb, withDbRetry } from "../../src/db/schema.ts";
 import { tmpDb, unlinkDb as tryUnlink } from "../_helpers/tmp-db";
 
 describe("getDb / schema", () => {
@@ -72,6 +72,13 @@ describe("getDb / schema", () => {
     const db = getDb(dbPath);
     const row = db.query("PRAGMA journal_mode").get() as { journal_mode: string };
     expect(row.journal_mode).toBe("wal");
+  });
+
+  test("ARV-163: sets busy_timeout to 5s", () => {
+    dbPath = tmpDb();
+    const db = getDb(dbPath);
+    const row = db.query("PRAGMA busy_timeout").get() as { timeout: number };
+    expect(row.timeout).toBe(5000);
   });
 
   test("enables foreign keys", () => {
@@ -171,5 +178,36 @@ describe("getDb / schema", () => {
     expect(verify(checkRunId)).toBe("check");
     expect(verify(mixedRunId)).toBe("regular");
     expect(verify(regRunId)).toBe("regular");
+  });
+});
+
+describe("ARV-163: withDbRetry", () => {
+  test("retries on 'database is locked' and eventually succeeds", () => {
+    let calls = 0;
+    const result = withDbRetry("test", () => {
+      calls++;
+      if (calls < 3) throw new Error("database is locked");
+      return "ok";
+    });
+    expect(result).toBe("ok");
+    expect(calls).toBe(3);
+  });
+
+  test("propagates non-lock errors immediately", () => {
+    let calls = 0;
+    expect(() => withDbRetry("test", () => {
+      calls++;
+      throw new Error("constraint violation");
+    })).toThrow("constraint violation");
+    expect(calls).toBe(1);
+  });
+
+  test("throws after exhausting retries", () => {
+    let calls = 0;
+    expect(() => withDbRetry("test", () => {
+      calls++;
+      throw new Error("database is locked");
+    })).toThrow(/still locked/);
+    expect(calls).toBe(5); // 1 initial + 4 retries
   });
 });

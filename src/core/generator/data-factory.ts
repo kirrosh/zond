@@ -403,9 +403,12 @@ export function classifyFieldSource(
       if (lower === "domain" || lower === "hostname" || lower === "fqdn" || lower.endsWith("_domain")) return "heuristic:domain";
       if (lower === "platform") return "heuristic:platform";
       if (lower === "language" || lower === "lang" || lower === "locale") return "heuristic:locale";
-      if (lower === "country" || lower === "country_code") return "heuristic:country";
+      if (lower === "country" || lower === "country_code" || lower.endsWith("_country") || lower.endsWith("_country_code")) return "heuristic:country";
       if (lower === "timezone" || lower === "time_zone" || lower === "tz") return "heuristic:timezone";
-      if (lower === "currency" || lower === "currency_code") return "heuristic:currency";
+      if (lower === "currency" || lower === "currency_code" || lower.endsWith("_currency") || lower.endsWith("_currency_code")) return "heuristic:currency";
+      if (lower === "mcc" || lower.endsWith("_mcc") || lower === "merchant_category_code") return "heuristic:mcc";
+      if (lower === "color" || lower.endsWith("_color") || lower === "background_color" || lower === "hex" || lower.endsWith("_hex_color")) return "heuristic:color";
+      if (lower === "ip" || lower === "ip_address" || lower.endsWith("_ip") || lower.endsWith("_ip_address")) return "heuristic:ip";
       if (
         lower === "email" || lower === "from" || lower === "to" || lower === "cc" ||
         lower === "bcc" || lower === "sender" || lower === "recipient" ||
@@ -450,6 +453,20 @@ export function formatToPlaceholder(format: string | undefined): string | undefi
     case "ipv4": return "{{$randomIpv4}}";
     case "ipv6": return "::1";
     case "password": return "TestPass123!";
+    // ARV-165: format-aware helpers. None of these are standard OpenAPI 3.x
+    // formats, but Stripe/GitHub/Shopify/Twilio specs frequently carry them
+    // as ad-hoc `format:` tags. Falling through to {{$randomString}} guarantees
+    // 400 from format-validated APIs (R09 finding: 199 hit-but-fail Stripe steps).
+    case "iso-country-code":
+    case "country-code":
+    case "country": return "{{$randomCountryCode}}";
+    case "iso-currency-code":
+    case "currency-code":
+    case "currency": return "{{$randomCurrencyCode}}";
+    case "mcc": return "{{$randomMCC}}";
+    case "color":
+    case "hex-color":
+    case "rgb-hex": return "{{$randomColorHex}}";
     default: return undefined;
   }
 }
@@ -530,9 +547,22 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
     // Pick the most universally-accepted value per dictionary.
     if (lower === "platform") return "python";
     if (lower === "language" || lower === "lang" || lower === "locale") return "en";
-    if (lower === "country" || lower === "country_code") return "US";
+    // ARV-165: country/currency literals (US/USD) were universally accepted
+    // but offered zero variety — added endsWith() patterns so nested fields
+    // like `bank_account.country`, `payout.currency_code`, `from_country`
+    // also resolve. Still emit a literal — picking from the random helper
+    // would weaken the "always-valid" property for downstream assertions
+    // that pin on the first value.
+    if (lower === "country" || lower === "country_code" || lower.endsWith("_country") || lower.endsWith("_country_code")) return "US";
     if (lower === "timezone" || lower === "time_zone" || lower === "tz") return "UTC";
-    if (lower === "currency" || lower === "currency_code") return "USD";
+    if (lower === "currency" || lower === "currency_code" || lower.endsWith("_currency") || lower.endsWith("_currency_code")) return "USD";
+    // ARV-165: MCC (merchant category code) — Stripe/Square/issuing APIs.
+    // Random {{$randomString}} → 400 because it's not a 4-digit code.
+    if (lower === "mcc" || lower.endsWith("_mcc") || lower === "merchant_category_code") return "{{$randomMCC}}";
+    // ARV-165: hex color — Stripe brand settings, Slack themes, GitHub labels.
+    if (lower === "color" || lower.endsWith("_color") || lower === "background_color" || lower === "hex" || lower.endsWith("_hex_color")) return "{{$randomColorHex}}";
+    // ARV-165: IP addresses — Stripe tos_acceptance.ip, audit logs, fraud APIs.
+    if (lower === "ip" || lower === "ip_address" || lower.endsWith("_ip") || lower.endsWith("_ip_address")) return "{{$randomIpv4}}";
     // Email-context fields. Email-API specs often
     // omit `format: email` on `from`/`to`/`reply_to`/`cc`/`bcc` — the field
     // name is the only clue, and `{{$randomString}}` guarantees a 422.

@@ -3,9 +3,10 @@ id: ARV-164
 title: >-
   probe security/mass-assignment: format-aware baseline POST to avoid
   INCONCLUSIVE-BASE on strict-validated APIs
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 12:46'
+updated_date: '2026-05-12 13:11'
 labels:
   - feedback-loop
   - api-stripe

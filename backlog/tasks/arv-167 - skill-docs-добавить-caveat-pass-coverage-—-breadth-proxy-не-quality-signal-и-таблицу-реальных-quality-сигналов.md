@@ -3,9 +3,10 @@ id: ARV-167
 title: >-
   skill / docs: добавить caveat 'pass-coverage — breadth-proxy, не
   quality-signal' и таблицу реальных quality-сигналов
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 12:46'
+updated_date: '2026-05-12 13:11'
 labels:
   - feedback-loop
   - skill-drift

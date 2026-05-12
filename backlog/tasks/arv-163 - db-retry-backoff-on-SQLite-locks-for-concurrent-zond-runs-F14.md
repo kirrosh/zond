@@ -1,9 +1,10 @@
 ---
 id: ARV-163
 title: 'db: retry/backoff on SQLite locks for concurrent zond runs (F14)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 12:45'
+updated_date: '2026-05-12 13:11'
 labels:
   - feedback-loop
   - api-stripe

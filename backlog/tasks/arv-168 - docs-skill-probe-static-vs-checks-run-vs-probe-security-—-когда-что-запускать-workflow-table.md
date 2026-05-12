@@ -3,9 +3,10 @@ id: ARV-168
 title: >-
   docs / skill: 'probe static vs checks run vs probe security' — когда что
   запускать (workflow table)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 12:46'
+updated_date: '2026-05-12 13:11'
 labels:
   - feedback-loop
   - skill-drift

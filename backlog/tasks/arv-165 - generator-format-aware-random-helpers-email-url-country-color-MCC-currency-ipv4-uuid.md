@@ -3,9 +3,10 @@ id: ARV-165
 title: >-
   generator: format-aware random helpers
   (email/url/country/color/MCC/currency/ipv4/uuid)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 12:46'
+updated_date: '2026-05-12 13:11'
 labels:
   - feedback-loop
   - api-stripe

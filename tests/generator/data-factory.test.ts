@@ -458,6 +458,43 @@ describe("TASK-86 regression — format honoured even when type is missing or ar
   });
 });
 
+describe("ARV-165 — format-aware helpers (country/currency/mcc/color)", () => {
+  test("format=country-code → randomCountryCode", () => {
+    expect(formatToPlaceholder("country-code")).toBe("{{$randomCountryCode}}");
+    expect(formatToPlaceholder("iso-country-code")).toBe("{{$randomCountryCode}}");
+  });
+  test("format=currency-code → randomCurrencyCode", () => {
+    expect(formatToPlaceholder("currency-code")).toBe("{{$randomCurrencyCode}}");
+    expect(formatToPlaceholder("iso-currency-code")).toBe("{{$randomCurrencyCode}}");
+  });
+  test("format=mcc → randomMCC", () => {
+    expect(formatToPlaceholder("mcc")).toBe("{{$randomMCC}}");
+  });
+  test("format=color/hex-color → randomColorHex", () => {
+    expect(formatToPlaceholder("color")).toBe("{{$randomColorHex}}");
+    expect(formatToPlaceholder("hex-color")).toBe("{{$randomColorHex}}");
+  });
+
+  test("name=mcc → randomMCC placeholder", () => {
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "mcc")).toBe("{{$randomMCC}}");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "merchant_category_code")).toBe("{{$randomMCC}}");
+  });
+  test("name=color/background_color → randomColorHex", () => {
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "color")).toBe("{{$randomColorHex}}");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "background_color")).toBe("{{$randomColorHex}}");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "brand_color")).toBe("{{$randomColorHex}}");
+  });
+  test("name endsWith _country / _currency uses literal", () => {
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "bank_account_country")).toBe("US");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "payout_currency")).toBe("USD");
+  });
+  test("name=ip / tos_acceptance.ip → randomIpv4", () => {
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "ip")).toBe("{{$randomIpv4}}");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "remote_ip")).toBe("{{$randomIpv4}}");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "ip_address")).toBe("{{$randomIpv4}}");
+  });
+});
+
 import { generateMultipartFromSchema } from "../../src/core/generator/data-factory.ts";
 import type { OpenAPIV3 as OA } from "openapi-types";
 
