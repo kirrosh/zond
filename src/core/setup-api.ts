@@ -1,5 +1,5 @@
 import { resolve, join, relative } from "path";
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from "fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from "fs";
 import { getDb } from "../db/schema.ts";
 import { createCollection, deleteCollection, findCollectionByNameOrId, normalizePath } from "../db/queries.ts";
 import {
@@ -13,6 +13,7 @@ import {
   buildApiFixtureManifest,
   serializeApiFixtureManifest,
 } from "./generator/index.ts";
+import { decycleSchema } from "./generator/schema-utils.ts";
 import { schemeVarName } from "./generator/suite-generator.ts";
 import type { SecuritySchemeInfo } from "./generator/types.ts";
 import { hashSpec } from "./meta/meta-store.ts";
@@ -47,17 +48,30 @@ interface WriteArtifactsParams {
 export function writeArtifactsFromDoc(params: WriteArtifactsParams): void {
   const { doc, baseDir, apiName, baseUrl, workspaceRoot, by = "zond add api" } = params;
   const localSpecAbsPath = join(baseDir, SPEC_SNAPSHOT_FILENAME);
-  writeFileSync(localSpecAbsPath, JSON.stringify(doc, null, 2) + "\n", "utf-8");
+  // Pass through decycleSchema first — large specs (Stripe, GitHub) contain
+  // mutually-recursive `$ref` chains that resolve to true object cycles after
+  // dereference, and raw JSON.stringify crashes on those with "cannot
+  // serialize cyclic structures" (ARV-145). decycleSchema collapses the
+  // second visit to `{ "$ref": "[Circular]" }` so the on-disk snapshot is
+  // self-contained, parseable JSON, and downstream consumers (probe/generate)
+  // see a sentinel they can ignore instead of an unwritten file.
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(decycleSchema(doc), null, 2);
+  } catch (err) {
+    const m = (err as Error).message;
+    throw new Error(
+      `spec_serialize_failed: could not serialize dereferenced spec for '${apiName}' — ${m}. ` +
+      `This usually means the spec contains a structure decycleSchema could not collapse; please open an issue with the spec URL.`,
+    );
+  }
+  writeFileSync(localSpecAbsPath, serialized + "\n", "utf-8");
 
   const endpoints = extractEndpoints(doc as any);
   const securitySchemes = extractSecuritySchemes(doc as any);
   // Hash the on-disk file bytes — this is what `zond doctor` re-hashes when
-  // checking artifact freshness. Hashing the in-memory `decycleSchema(doc)`
-  // form here drifted from doctor's reading because `@readme/openapi-parser`
-  // hands back shared object refs for repeated $refs; decycleSchema marks
-  // those as `[Circular]` only on the second visit, while `JSON.stringify(doc)`
-  // expands every occurrence — so doctor saw a hash for the expanded file
-  // and setup-api recorded a hash for the deduped form (TASK-215).
+  // checking artifact freshness (TASK-215). Both sides now read the decycled
+  // form: setup-api writes it here, doctor re-reads the same file.
   const specHash = hashSpec(readFileSync(localSpecAbsPath, "utf-8"));
   const localSpecRelPath = relative(workspaceRoot, localSpecAbsPath).replace(/\\/g, "/");
 
@@ -314,8 +328,62 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
     : resolve(findWorkspaceRoot().root, `apis/${dirName}/`);
   const testPath = join(baseDir, "tests");
 
+  // Track whether we created baseDir from scratch so we can clean it up on
+  // failure — without this, a crash mid-setup (e.g. JSON.stringify on a
+  // cyclic spec, ARV-145) leaves apis/<slug>/tests/ behind and confuses the
+  // next `zond add api` invocation.
+  const baseDirPreExisted = existsSync(baseDir);
+
   // Create directories
   mkdirSync(testPath, { recursive: true });
+
+  try {
+    return await finalizeSetup({
+      name,
+      baseDir,
+      testPath,
+      baseUrl,
+      pathParams,
+      authVarNames,
+      envVarsOverride: options.envVars,
+      spec,
+      dereferencedDoc,
+      openapiSpec,
+      endpointCount,
+      warnings,
+    });
+  } catch (err) {
+    // Roll back partial filesystem state (apis/<slug>/tests/, spec.json, etc.)
+    // when we created the dir from scratch. Without this, the next
+    // `zond add api <same-name>` would still find a stale dir and demand
+    // --force, even though no collection was actually registered. ARV-145.
+    if (!baseDirPreExisted) {
+      try { rmSync(baseDir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    }
+    throw err;
+  }
+}
+
+interface FinalizeSetupParams {
+  name: string;
+  baseDir: string;
+  testPath: string;
+  baseUrl: string;
+  pathParams: Map<string, string>;
+  authVarNames: string[];
+  envVarsOverride?: Record<string, string>;
+  spec?: string;
+  dereferencedDoc: unknown;
+  openapiSpec: string | null;
+  endpointCount: number;
+  warnings: string[];
+}
+
+async function finalizeSetup(p: FinalizeSetupParams): Promise<SetupApiResult> {
+  const {
+    name, baseDir, testPath, baseUrl, pathParams, authVarNames,
+    envVarsOverride, spec, dereferencedDoc, openapiSpec, endpointCount, warnings,
+  } = p;
 
   // Build environment variables
   const envVars: Record<string, string> = {};
@@ -331,8 +399,8 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   for (const v of authVarNames) {
     if (!(v in envVars)) envVars[v] = `@secret:${v}`;
   }
-  if (options.envVars) {
-    Object.assign(envVars, options.envVars);
+  if (envVarsOverride) {
+    Object.assign(envVars, envVarsOverride);
   }
 
   // Spec-less registration is allowed, but we need a base_url from somewhere
