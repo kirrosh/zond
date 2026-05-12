@@ -698,6 +698,18 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
+  // ARV-162 (round-08 F19): when suites failed parse-time validation
+  // (`zond check tests` reject — e.g. form value emitted unquoted, parsed
+  // as int), per-file warnings already went to stderr at the top of the
+  // run, but they easily get lost in long output. Add a loud trailing
+  // summary so "47/68 ran" doesn't silently hide 21 invalid files.
+  if (parseErrors.length > 0 && !options.json) {
+    process.stderr.write(
+      `zond: ${parseErrors.length} test file(s) skipped due to validation errors — ` +
+      `run \`zond check tests <path>\` to see why. Coverage numbers below exclude these files.\n`,
+    );
+  }
+
   // ARV-72 (feedback round-02 / F14): make the exit-code → failures
   // mapping visible. Tester reported "545 failed, exit_code=0" which is
   // not what this function returns — but the symptom is real: the reader
