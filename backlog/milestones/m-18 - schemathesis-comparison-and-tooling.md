@@ -5,187 +5,183 @@ title: "schemathesis-comparison-and-tooling"
 
 ## Description
 
-Эмпирический раунд валидации после m-15 (depth-checks) + m-17 (контракты).
-Цель — **проверить, где zond уперся, а где можно срезать дёшево, прогнав
-zond и 4 внешних инструмента на одном target'е (Sentry API) и сравнив
-findings**. Результат — либо подтверждение паритета с schemathesis по
-core-функциям, либо точечный gap-fix.
+Эмпирический раунд **измерения**, а не догона. Цель — прогнать zond и
+schemathesis V4 на одних API (Sentry / Stripe / Resend, уже настроены в
+`~/Projects/zond-test/apis/`) и получить количественный ответ на вопрос
+«стоит ли догонять schemathesis по fuzz-engine или наша архитектура
+state-aware (m-20) обгоняет это естественным образом».
 
-В отличие от m-15 (плановый skoupe фич) и m-16 (открытый bucket мелких
-багов) — m-18 это **бенчмарк**: сравниваем zond + schemathesis + quicktype +
-sentry-sdk + interactsh + mitmproxy2swagger; для каждого инструмента
-формулируем «что он добавляет к нашему пулу findings» и «можно ли это
-дёшево всосать в zond».
+В отличие от первоначального драфта m-18, после R09 (Stripe) известно
+что pass-coverage — breadth-метрика, и приоритет сдвинулся со «всосать
+schemathesis-only findings» на «понять класс этих findings и куда они
+дальше идут (m-19 fuzz / m-20 state-aware / выкинуть)».
 
-Принципиально — никаких архитектурных рефакторов в этом milestone.
-Вся архитектурная санитария была в m-17. Если comparison-раунд вскроет
-новый класс архитектурного долга — он уйдёт в m-19+ отдельным milestone.
+Параллельно — два дешёвых high-ROI блока, которые подтверждаются всеми
+тремя API независимо от диффа: **quicktype-патч** (оживляет
+`response_schema_conformance` на API без объявленных response schemas)
+и **interactsh OOB-oracle** (подтверждает SSRF findings).
+
+Принципиально — никаких архитектурных рефакторов и никакого fuzz-engine
+в m-18. Если comparison-раунд покажет, что schemathesis-only findings —
+это fuzz-классы, открывается m-19. Если state-aware — это уже в m-20.
 
 ## Источники
 
-### Стратегия
-- `strategy/strategy.md` §4 — описание m-18, измерения depth/breadth/trust.
-- `strategy/lessons.md` — выводы fb-loop'а: «real-world API ≫ synthetic spec»,
-  «fb-loop — main QA».
-- `strategy/archive/vector-2-schemathesis-parity.md` — изначальная карта
-  parity-gap'ов, релевантная часть теперь в strategy.md §3.
+### Стратегия / контекст
+- `backlog/milestones/m-15 - depth-checks-coverage-sarif.md` — что
+  закрыто на этапе depth round 1 (12 checks, anti-FP, SARIF).
+- `backlog/milestones/m-20 - state-aware-contract-checks.md` —
+  параллельный milestone, который двигается за m-18; D-блок (diff) даёт
+  данные для priority m-19 vs m-20.
+- `backlog/notes/feedback-r09-impressions.md` — продуктовая оценка после
+  Stripe-цикла, обоснование сдвига приоритетов.
 
 ### Эмпирика
-- Tester-вывод из round-05 (fb-loop): «zond уперся на pass ≈48%, hit ≈71%
-  на Sentry; ~150 endpoint'ов skipped в `response_schema_conformance`
-  потому что spec не объявляет body schemas; 4 LOW SSRF на symbol-sources
-  без подтверждения; 12 endpoint'ов недоступны через REST (replay_id,
-  transaction-id)».
-- Опросник «какие инструменты добавили бы покрытия» — quicktype/sentry-sdk/
-  interactsh/mitmproxy2swagger по убыванию ROI (см. notes ниже).
+- R09 (Stripe, 9 раундов): pass=58% / hit=70% / 245 findings (92H/153M).
+- Tester-вывод round-05 на Sentry: pass ≈48% / hit ≈71%, ~150 endpoint'ов
+  skipped в `response_schema_conformance` из-за отсутствия body schemas
+  в spec, 4 LOW SSRF на symbol-sources без подтверждения.
+- `~/Projects/zond-test/apis/{sentry,stripe,resend}/` — три готовых
+  target'а, разные классы spec drift:
+  - Sentry: spec без response schemas → quicktype-блок
+  - Stripe: spec богатый, но write-only ресурсы → ingest-recipe
+  - Resend: small, контрольная группа
 
-### Внешние инструменты
+### Внешние инструменты (только реально нужные)
+- [schemathesis V4](https://schemathesis.readthedocs.io/) — `--stateful=links --checks all`
+  для diff'а findings. Главный инструмент m-18.
 - [quicktype](https://github.com/glideapps/quicktype) или
-  [genson](https://github.com/wolverdude/GenSON) — генерация JSON Schema
-  из реальных response body. В нашем случае — из `zond.db results.response_body`.
-- [sentry-sdk Python](https://docs.sentry.io/platforms/python/) — SDK
-  ingest для write-only ресурсов (replay_id, transactions).
+  [genson](https://github.com/wolverdude/GenSON) — schema из реальных
+  response body (у нас в `zond.db results.response_body`).
 - [interactsh-client](https://github.com/projectdiscovery/interactsh) —
-  OOB DNS/HTTP oracle для SSRF подтверждения.
-- [mitmproxy2swagger](https://github.com/alufers/mitmproxy2swagger) —
-  HAR → OpenAPI delta для расширения каталога endpoint'ов.
-- [schemathesis V4](https://schemathesis.readthedocs.io/) — параллельный
-  прогон `--stateful=links --checks all` для diff'а finding'ов.
+  OOB DNS/HTTP oracle для подтверждения SSRF.
+
+mitmproxy2swagger и sentry-sdk-ingest из исходного драфта **выкинуты**
+из m-18 — high-cost, низкий ROI на трёх target'ах (см. §«Что не
+покрывает»).
 
 ## Цели майлстоуна
 
-### A. Depth-оживление через quicktype (high ROI)
+### D. Параллель schemathesis — главный блок, замер gap
 
-Главная гипотеза m-18 — `response_schema_conformance` сейчас skipped на
-207/209 endpoint'ах Sentry, потому что spec не объявляет `responses.<code>.content.schema`.
-У zond в `zond.db` уже лежат 296 реальных 2xx body. Генерация schema из них
-и patch'ing spec.json должны «оживить» check на ~150 endpoint'ах.
+**Это main story m-18.** Всё остальное — поддержка.
 
-1. **Pipeline `zond schema-from-runs --run <id>`** — экспорт 2xx body из
-   `results`, прогон через quicktype/genson, выдача `patch.schema.json` с
-   ключами по endpoint+status.
-2. **`zond refresh-api --merge-schema <patch.schema.json>`** — мерж patch
-   в spec.json под `responses.<code>.content['application/json'].schema`.
+1. **`tests/integration/parity/run-schemathesis.sh`** — одноразовый bench-скрипт,
+   запускает `schemathesis run --stateful=links --checks all` на тот же
+   spec + token, что использует zond. Не permanent feature. Результат —
+   JSON-отчёт в `~/Projects/zond-test/.fb-loop/parity/<api>/schemathesis-<round>.json`.
+2. **`tests/integration/parity/diff.ts`** — diff zond findings vs
+   schemathesis findings. Три bucket'а: `zond-only`, `schemathesis-only`,
+   `both`. Schemathesis-only классифицируется на три категории:
+   - **(a) fuzz-генерация** — boundary/edge-case violations, которые
+     schemathesis нашёл за счёт PBT-генератора → сигнал к m-19.
+   - **(b) stateful links** — multi-call invariants → проверка против m-20.
+   - **(c) checks которых у нас нет** — единственный bucket кандидатов
+     на «всосать в zond» в рамках m-18.
+3. **Прогон на трёх API** — Sentry (baseline), Stripe, Resend. Результаты
+   в `backlog/notes/m-18-parity-baseline.md`.
+
+### A. quicktype → response_schema_conformance
+
+Параллельный блок, не зависит от D.
+
+4. **`zond schema-from-runs --run <id>` команда** — экспорт 2xx body из
+   `results`, прогон через quicktype/genson, выдача `patch.schema.json`
+   с ключами по endpoint+status.
+5. **`zond refresh-api --merge-schema <patch.schema.json>`** — мерж в
+   spec.json под `responses.<code>.content['application/json'].schema`.
    Сохранение в `.api-resources.local.yaml` через extension-mechanism
-   (ARV-111), чтобы не терялось на upstream refresh.
-3. **Benchmark на Sentry** — до/после количество schema-drift findings.
-   Ожидание: 5-10× рост (с 14 эндпоинтов до ~80-150).
+   (ARV-111).
+6. **Дельта-замер** на Sentry до/после quicktype-patch:
+   количество `response_schema_conformance` findings. После прогона D
+   на Sentry-baseline — повторяем D на Sentry-patched, фиксируем дельту.
 
-Решение по итогу: либо стандартный путь zond, либо отдельный recipe в skill'е.
+### C. SSRF verdict через interactsh OOB-oracle
 
-### B. Breadth через ingest-SDK и mitmproxy (medium ROI)
+7. **`zond probe security --oob-server <url>`** — флаг, инжектит OOB
+   callback URL'ы в SSRF payloads. После probe-раунда — poll OOB log;
+   HTTP/DNS callback от target → confirmed HIGH (вместо `verify manually`).
+8. **Recipe `docs/recipes/interactsh.md`** — как поднять interactsh-client
+   локально и связать. Если recipe стабилен — кандидат на декларативный
+   `.api-resources.yaml` (как auth-config), но в m-18 — только docs.
 
-Расширение пула endpoint'ов и закрытие write-only пробелов.
+### E. Документация и решение
 
-4. **`zond ingest sentry-sdk` recipe** — Python-скрипт ~30 строк, создающий
-   real event/transaction/replay через Sentry SDK. Получает event_id, issue_id,
-   replay_id, transaction_id. Записывает в `.env.yaml` (allowed per memory
-   `feedback_env_yaml_editable`). Если ROI подтверждён — обобщается до
-   `zond fixture ingest --recipe <name>` с pluggable recipes per API.
-5. **mitmproxy2swagger pipeline** — записать 30 минут реальной работы в
-   Sentry UI, выгрузить HAR через `mitmweb`, прогнать через mitmproxy2swagger,
-   диф против upstream spec → новый набор endpoints. Скормить в zond как
-   patch к spec через `.api-resources.local.yaml`.
-
-   Эффект (гипотеза): +20-50 internal-only endpoints к 209, расширяет пул
-   для всех probe-классов.
-
-### C. SSRF verdict через OOB-oracle (high ROI, low cost)
-
-6. **`zond probe security --oob-server <url>`** — флаг, который инжектит
-   OOB callback URL'ы в SSRF payloads. После каждого probe-раунда zond
-   polls OOB log; HTTP/DNS-callback от target API → confirmed HIGH (а не
-   `verify manually`).
-7. **interactsh integration recipe** — документация как поднять
-   interactsh-client локально и связать с `--oob-server`. Если recipe
-   стабилен — оформить декларативно в `.api-resources.yaml` (как auth-config).
-
-   Эффект: 4 LOW SSRF на Sentry'е получают явный вердикт (confirmed HIGH
-   или confirmed FP). AB9 закрывается за час.
-
-### D. Параллель schemathesis — измерить gap
-
-8. **`zond compare schemathesis --api sentry`** — recipe, который запускает
-   schemathesis V4 (`--stateful=links --checks all`) на том же spec'е и
-   token'е, диффит findings, выдаёт три bucket'а: `zond-only`, `schemathesis-only`,
-   `both`. Это не permanent feature, а одноразовый бенчмарк-script в
-   `tests/integration/parity/`.
-9. **Закрыть top-N schemathesis-only findings** — если их меньше 10 и они
-   укладываются в существующие 12 checks, фиксим как новый sub-mode внутри
-   соответствующего check'а. Если их больше — это сигнал, что vector-2 этап 2
-   (fuzz engine) нужен раньше, и переносим скоуп в m-19.
-
-### E. Документация и skill-обновление
-
-10. **Recipes-документ** — `docs/recipes/{quicktype,ingest-sdk,interactsh,mitmproxy}.md`.
-    Каждый recipe ≤200 строк, copy-paste-ready, на конкретный API (Sentry).
-11. **Skill update** — `zond-base`/`zond` получают reference на recipes
-    в Phase 2.5 (для ingest) и Phase 4 (для quicktype/SSRF/mitmproxy).
-    Apply memory `feedback_update_skills_per_feature`.
+9. **`docs/recipes/{quicktype,interactsh}.md`** — copy-paste-ready,
+   на конкретный API (Sentry для quicktype, любой для interactsh).
+10. **Skill update** — `zond-base`/`zond` ссылаются на recipes
+    (Phase 2.5 / Phase 4). Apply memory `feedback_update_skills_per_feature`.
+11. **Решение по итогам D-блока** — записать в `backlog/notes/m-18-decision.md`:
+    - сколько `schemathesis-only` findings по категориям (a)/(b)/(c)?
+    - если (a) > 10 → m-19 (fuzz engine) получает priority high;
+    - если (b) > 5 → m-20 уже покрывает их или нужны новые задачи;
+    - если (c) > 0 → завести точечные ARV-задачи (внутри 12 checks).
 
 ## Не покрывает
 
-- **`zond fuzz` engine + auto-shrinker** — это vector-2 этап 2, m-19+. m-18
-  только измеряет gap с schemathesis; не имплементит fuzz.
+- **`zond fuzz` engine + auto-shrinker** — vector-2 этап 2, m-19+.
+  m-18 только измеряет gap, не имплементит fuzz.
 - **BOLA / RBAC matrix** — vector-2 этап 3, m-19+.
-- **`zond verify --since main`** — vector-3, depend on knowledge-base, m-19+.
+- **mitmproxy2swagger pipeline** — выкинут из m-18: high-cost (30 минут
+  реальной UI-работы + auth flow), низкий ROI на Stripe/Resend
+  (нет UI traffic'а). Может вернуться в m-19+ как research-pool.
+- **`zond ingest sentry-sdk` recipe** — частично решено через
+  `feedback_env_yaml_editable` + ARV-113. Если quicktype-блок A не
+  закроет write-only пробелы — вернуть как отдельный recipe в m-19.
+  В m-18 — out of scope.
 - **Knowledge base + 3 тира** — vector-4, m-19+.
-- **Skill auto-generation из CLI manifest'а** — отдельный m-19.
-- **GitHub Action + partnership-канал** — vector-5, distribution, не код.
+- **Skill auto-generation из CLI manifest'а** — отдельный milestone.
 
 ## Принципы
 
-- **Эмпирика > спекуляция.** Сначала прогон + сравнение, потом решение
-  «всосать или нет». Каждый блок (A/B/C/D) даёт количественную метрику
-  до/после.
-- **Recipes, не feature creep.** quicktype/ingest-sdk/interactsh — это
-  **рецепты** (документация + ≤30 строк glue-code), не новые подкоманды
-  zond. Если рецепт стабилизируется и приносит value 3+ раза — оформляется
-  как первоклассная команда. До тех пор — `docs/recipes/`.
-- **Один публичный API в качестве benchmark'а** — Sentry. Не размазываем
-  m-18 на 5 API; иначе сравнение не воспроизводится. Resend остаётся как
-  secondary smoke в fb-loop'е.
-- **Анти-FP first.** Любая «оживлённая» schema-violation проверяется на
-  регрессию через fixture-pack из m-15.
+- **Замер > спекуляция.** Прогон + diff даёт количественный ответ на
+  «догонять или нет». До прогона никаких архитектурных решений.
+- **Recipes, не features.** quicktype glue-code оформляется как
+  `zond schema-from-runs` (это первоклассная команда, потому что
+  benchmark показывает 5–10× рост findings на Sentry — высокая
+  переиспользуемость); interactsh — recipe, потому что нужна внешняя
+  инфраструктура.
+- **Три target'а, разные классы drift.** Sentry — baseline + quicktype
+  proving ground; Stripe — богатый spec, проверка что мы ничего не
+  ломаем; Resend — контрольная группа (small spec).
+- **Анти-FP first.** Любая «оживлённая» schema-violation проверяется
+  на регрессию через fixture-pack из m-15.
 - **Никаких архитектурных рефакторов.** Если comparison-раунд вскроет
   новый класс долга — пишется отдельный milestone, не лезет в m-18.
 
 ## Done-критерий
 
-1. **`response_schema_conformance` на Sentry** даёт ≥80 findings (vs 14
-   сейчас) после quicktype-patch. Anti-FP regression-pack m-15 остаётся
-   green.
-2. **`zond fixture ingest sentry-sdk`** (или recipe) закрывает ≥3 write-only
-   var (event_id/issue_id/replay_id) автоматически.
-3. **`zond probe security --oob-server`** даёт явный вердикт для всех 4
-   LOW SSRF на Sentry'е (либо confirmed HIGH, либо confirmed FP).
-4. **mitmproxy2swagger-pipeline** добавляет ≥20 endpoint'ов к каталогу
-   Sentry; они hit'ятся `zond run` после `prepare-fixtures`.
-5. **`zond compare schemathesis --api sentry`** даёт diff-table трёх
-   bucket'ов. Если `schemathesis-only` ≤10 finding'ов — закрыты в zond.
-   Если >10 — milestone m-19 («fuzz engine») получает priority high.
-6. **Recipes-документация** в `docs/recipes/` для всех четырёх инструментов;
-   каждый запускается «вслепую» новым tester'ом за <15 минут.
-7. **Skill update** — zond-base/zond ссылаются на recipes; SD-pass через
-   `/zond-fb-tester` против Sentry не находит drift'а на новых инструментах.
+1. **D — schemathesis diff** прогнан на Sentry / Stripe / Resend.
+   `backlog/notes/m-18-parity-baseline.md` содержит таблицу
+   `zond-only / schemathesis-only / both` по каждому API.
+   `schemathesis-only` классифицирован по (a)/(b)/(c).
+2. **A — quicktype patch** работает: на Sentry дельта
+   `response_schema_conformance` ≥ 5× (с 14 → ≥70 findings), anti-FP
+   regression-pack m-15 остаётся green.
+3. **C — `zond probe security --oob-server`** даёт явный вердикт
+   (confirmed HIGH или confirmed FP) для всех 4 LOW SSRF на Sentry.
+4. **E — Recipes** в `docs/recipes/quicktype.md` + `interactsh.md`,
+   запускается «вслепую» новым tester'ом за <15 минут.
+5. **Decision-документ** `backlog/notes/m-18-decision.md` фиксирует
+   priority m-19 (fuzz engine) на основе данных D.
+6. **Skill update** — zond-base/zond ссылаются на recipes; SD-pass
+   через `/zond-fb-tester` не находит drift'а на новых командах.
 
 ## Что закрывается из накопленного контекста
 
 - F18 (round 04, ARV-111): extension через `.api-resources.local.yaml` —
-  получает реальный use-case через mitmproxy2swagger и quicktype.
-- AB9 (4 LOW SSRF Sentry): получает явный вердикт через interactsh.
-- Manifest write-only gap (F1-14 long tail, SD11): закрывается рецептом
-  ingest-SDK.
-- Parity-question «догнали ли мы schemathesis по core» получает
-  количественный ответ.
+  реальный use-case через quicktype.
+- AB9 (4 LOW SSRF Sentry): явный вердикт через interactsh.
+- Parity-question «догнали ли мы schemathesis по core» — количественный ответ.
 
-## Гипотеза о размере
+## Гипотеза о размере (после m-18)
 
-При успешном раунде m-18:
-- Pass-coverage на Sentry: 48% → ~60-65%.
-- Hit-coverage: 71% → ~85-90%.
-- Depth-finding'и: ×2-3 (response_schema_conformance активный).
-- Security-finding'и: +2-4 confirmed HIGH (через OOB-oracle).
+- `response_schema_conformance` на Sentry: 14 → ≥70 findings (quicktype effect).
+- 4 confirmed-status вердиктов на Sentry SSRF.
+- Чёткое решение по m-19 (go / no-go fuzz engine).
+- 1–5 точечных ARV-задач из bucket'а (c) schemathesis-only — если нашлись
+  checks которых у нас нет.
 
-Если эти числа не достигнуты — формулируется в lessons.md и переоценивается
-приоритет m-19 (fuzz engine vs knowledge base).
+Если D-блок покажет что schemathesis-only ≈ 0 после исключения
+fuzz-классов — это сильный сигнал, что архитектура zond уже на паритете
+и можно фокусироваться на state-aware (m-20) без догона.
