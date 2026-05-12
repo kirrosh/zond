@@ -566,51 +566,99 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     for (const check of activeStateful) {
       if (check.phase === "auth") {
         const applicable = ops.filter((op) => check.applies(op));
-        const findings_per_op = await runPool(applicable, statefulWorkers, async (op) => {
+        // ARV-154: track per-op cases + skip reasons for the stateful auth
+        // path. Previously this loop only forwarded `fail` outcomes; runs
+        // like `--check ignored_auth` on a fully-protected API where every
+        // baseline passes returned `{operations: 48, cases: 0, findings: 0}`
+        // with no skipped_outcomes, making the check look broken when it
+        // was actually working (no auth bypass found). Mirror the
+        // observability of the non-stateful path: count attempted cases
+        // and bucket skip reasons by `<check>: <reason>`.
+        type StatefulOutcome =
+          | { kind: "fail"; finding: CheckFinding }
+          | { kind: "skip"; reason: string }
+          | { kind: "pass" };
+        const opReports = await runPool<typeof applicable[number], StatefulOutcome>(
+          applicable,
+          statefulWorkers,
+          async (op): Promise<StatefulOutcome> => {
           let outcome;
           try {
             outcome = await check.run(op, harness);
           } catch (err) {
             outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
           }
-          if (outcome.kind !== "fail") return null;
-          const finding: CheckFinding = {
-            check: check.id,
-            severity: check.severity,
-            operation: { path: op.path, method: op.method, operationId: op.operationId },
-            request_signature: `${op.method.toUpperCase()} ${op.path}`,
-            response_summary: { status: 0 },
-            message: outcome.message,
-            evidence: outcome.evidence,
-            recommended_action: recommendForCheck(check.id),
-          };
-          return finding;
+          if (outcome.kind === "fail") {
+            const finding: CheckFinding = {
+              check: check.id,
+              severity: check.severity,
+              operation: { path: op.path, method: op.method, operationId: op.operationId },
+              request_signature: `${op.method.toUpperCase()} ${op.path}`,
+              response_summary: { status: 0 },
+              message: outcome.message,
+              evidence: outcome.evidence,
+              recommended_action: recommendForCheck(check.id),
+            };
+            return { kind: "fail", finding };
+          }
+          if (outcome.kind === "skip") {
+            return { kind: "skip", reason: outcome.reason ?? "unspecified" };
+          }
+          return { kind: "pass" };
         });
-        for (const f of findings_per_op) if (f) pushStateful(f);
+        for (const o of opReports) {
+          summary.cases += 1;
+          if (o.kind === "fail") pushStateful(o.finding);
+          else if (o.kind === "skip") {
+            const key = `${check.id}: ${o.reason}`;
+            summary.skipped_outcomes[key] = (summary.skipped_outcomes[key] ?? 0) + 1;
+          }
+        }
       } else {
         const applicable = crudGroups.filter((g) => check.applies(g));
-        const findings_per_group = await runPool(applicable, statefulWorkers, async (group) => {
+        // ARV-154: mirror the auth-phase observability — count CRUD groups
+        // attempted and record skip reasons, not just failures.
+        type StatefulOutcome =
+          | { kind: "fail"; finding: CheckFinding }
+          | { kind: "skip"; reason: string }
+          | { kind: "pass" };
+        const groupReports = await runPool<typeof applicable[number], StatefulOutcome>(
+          applicable,
+          statefulWorkers,
+          async (group): Promise<StatefulOutcome> => {
           let outcome;
           try {
             outcome = await check.run(group, harness);
           } catch (err) {
             outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
           }
-          if (outcome.kind !== "fail") return null;
-          const repOp = group.create ?? group.read!;
-          const finding: CheckFinding = {
-            check: check.id,
-            severity: check.severity,
-            operation: { path: repOp.path, method: repOp.method, operationId: repOp.operationId },
-            request_signature: `${repOp.method.toUpperCase()} ${repOp.path} (chain)`,
-            response_summary: { status: 0 },
-            message: outcome.message,
-            evidence: outcome.evidence,
-            recommended_action: recommendForCheck(check.id),
-          };
-          return finding;
+          if (outcome.kind === "fail") {
+            const repOp = group.create ?? group.read!;
+            const finding: CheckFinding = {
+              check: check.id,
+              severity: check.severity,
+              operation: { path: repOp.path, method: repOp.method, operationId: repOp.operationId },
+              request_signature: `${repOp.method.toUpperCase()} ${repOp.path} (chain)`,
+              response_summary: { status: 0 },
+              message: outcome.message,
+              evidence: outcome.evidence,
+              recommended_action: recommendForCheck(check.id),
+            };
+            return { kind: "fail", finding };
+          }
+          if (outcome.kind === "skip") {
+            return { kind: "skip", reason: outcome.reason ?? "unspecified" };
+          }
+          return { kind: "pass" };
         });
-        for (const f of findings_per_group) if (f) pushStateful(f);
+        for (const o of groupReports) {
+          summary.cases += 1;
+          if (o.kind === "fail") pushStateful(o.finding);
+          else if (o.kind === "skip") {
+            const key = `${check.id}: ${o.reason}`;
+            summary.skipped_outcomes[key] = (summary.skipped_outcomes[key] ?? 0) + 1;
+          }
+        }
       }
     }
     findings.push(...collected);
