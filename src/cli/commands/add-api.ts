@@ -14,7 +14,7 @@
 
 import { setupApi, type SetupApiResult } from "../../core/setup-api.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
-import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
+import { jsonOk, jsonError, printJson, zerr } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 
 export interface AddApiOptions {
@@ -52,7 +52,14 @@ export async function addApiCommand(opts: AddApiOptions): Promise<number> {
     });
   } catch (err) {
     const m = (err as Error).message;
-    if (opts.json) printJson(jsonError("add-api", [m])); else printError(m);
+    // Tag known spec-ingest failures with a structured code so downstream
+    // tooling (skills, retry logic) can branch on it (ARV-145). Cyclic
+    // structures escape decycleSchema only when @readme/openapi-parser
+    // builds an unusual graph — surface that as spec_load_failure with a
+    // pointer to the underlying serializer message.
+    const isCycleError = /cyclic structures|spec_serialize_failed/i.test(m);
+    const errInput = isCycleError ? zerr("spec_load_failure", m) : m;
+    if (opts.json) printJson(jsonError("add-api", [errInput])); else printError(m);
     return 2;
   }
 
