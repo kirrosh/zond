@@ -3,9 +3,10 @@ id: ARV-141
 title: >-
   checks run --phase coverage doesn't react to fixture pack growth
   (deterministic findings count)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 07:39'
+updated_date: '2026-05-12 08:03'
 labels:
   - bug
   - checks

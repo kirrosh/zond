@@ -34,12 +34,14 @@ function looksLikeBlockedShellSubstitution(s: string | undefined): boolean {
   return /\$\([^)]+\)|`[^`]+`/.test(s) && /yq|cat|jq|grep|awk|sed|sh /.test(s);
 }
 
-/** ARV-110: pretty-print --json-path failure to stderr.
- *  Adds a one-line envelope-vs-response-body hint when the user's path
- *  starts at a top-level envelope key (`body`, `data`) but the response
- *  body has no such field — a common confusion when graduating from
- *  `--json | jq .data.body.id` (envelope) to `--json-path body.id`
- *  (response body, NOT envelope). */
+/** ARV-110 / ARV-144: pretty-print --json-path failure to stderr.
+ *  Two distinct hints depending on the failure:
+ *  - top-level array (reason starts with "expected an array index"):
+ *    user wrote `data[0].id` against a body that's already an array →
+ *    suggest `[0].id` / `0.id`.
+ *  - envelope confusion (firstSeg in body/data, resolved is empty):
+ *    user came from `--json | jq .data.body.id` and forgot that --json-path
+ *    addresses the response body, not the envelope. */
 function printJsonPathDiagnostic(
   jsonPath: string | undefined,
   diag: { resolved: string[]; failedAt?: string; reason?: string } | undefined,
@@ -50,6 +52,15 @@ function printJsonPathDiagnostic(
     `zond: --json-path '${jsonPath}' did not resolve — stopped at segment "${diag.failedAt}" after ${resolved}: ${diag.reason ?? "unknown"}\n`,
   );
   const firstSeg = jsonPath.replace(/\[\d+\]/g, "").split(".")[0];
+  const isArrayMismatch = diag.resolved.length === 0 && /^expected an array index/.test(diag.reason ?? "");
+  if (isArrayMismatch) {
+    const tail = jsonPath.replace(/^[^.[]+/, "");
+    const suggestion = tail ? `[0]${tail.startsWith(".") || tail.startsWith("[") ? tail : "." + tail}` : "[0]";
+    process.stderr.write(
+      `      Hint: response body is a top-level array — use \`--json-path '${suggestion}'\` or \`--json-path '0${tail}'\` to index it.\n`,
+    );
+    return;
+  }
   if ((firstSeg === "body" || firstSeg === "data") && diag.resolved.length === 0) {
     process.stderr.write(
       `      Hint: --json-path extracts from the response body, not the zond envelope. ` +
@@ -340,7 +351,8 @@ export function registerRequest(program: Command): void {
       "--json-path <path>",
       "Extract one field from the RESPONSE BODY (not the zond envelope; " +
       "to address envelope.data.body.id pipe `--json` through jq instead). " +
-      "Dot notation, e.g. 'data.id', 'items[0].name'. Without --json, prints " +
+      "Dot notation, e.g. 'data.id', 'items[0].name'. For top-level array " +
+      "responses use '[0].id' or '0.id'. Without --json, prints " +
       "the value verbatim — scalars without quotes for shell use " +
       "(`id=$(zond request --json-path data.id ...)`), objects/arrays as compact JSON. " +
       "With --json, embeds the extracted value as the envelope's `body` field.",

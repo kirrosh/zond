@@ -3,9 +3,10 @@ id: ARV-140
 title: >-
   probe security: cleanup-feasibility pre-flight (skip POSTs without DELETE
   counterpart unless --allow-leaks)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 07:39'
+updated_date: '2026-05-12 08:03'
 labels:
   - bug
   - probe
