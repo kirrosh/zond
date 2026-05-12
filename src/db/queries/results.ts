@@ -1,4 +1,4 @@
-import { getDb } from "../schema.ts";
+import { getDb, withDbRetry } from "../schema.ts";
 import type { TestRunResult } from "../../core/runner/types.ts";
 import { getSecretRegistry } from "../../core/secrets/registry.ts";
 import type { StoredStepResult } from "./types.ts";
@@ -39,7 +39,7 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
     return reg.redact(JSON.stringify(v));
   };
 
-  db.transaction(() => {
+  withDbRetry("saveResults", () => db.transaction(() => {
     for (const suite of suiteResults) {
       for (const step of suite.steps) {
         const maxBodySize = 50_000;
@@ -71,7 +71,7 @@ export function saveResults(runId: number, suiteResults: TestRunResult[]): void 
         });
       }
     }
-  })();
+  })());
 }
 
 export function getResultsByRunId(runId: number): StoredStepResult[] {

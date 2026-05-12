@@ -42,6 +42,15 @@ export function getDb(dbPath?: string): Database {
   // Performance and integrity settings
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
+  // ARV-163: concurrent zond processes (e.g. `probe security` in one terminal
+  // + `checks run` in another) collide on the write-lock and surface as
+  // "database is locked". Letting SQLite spin at the C-level for up to 5s
+  // resolves the overwhelming majority without any per-call retry logic.
+  // `synchronous=NORMAL` is safe under WAL and cuts fsync overhead in the
+  // bulk-insert path (saveResults). withDbRetry() in this file remains the
+  // belt-and-suspenders for the rare long-running transactions.
+  db.exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA synchronous = NORMAL");
 
   runMigrations(db);
 
@@ -54,6 +63,35 @@ export function getDb(dbPath?: string): Database {
   _db = db;
   _dbPath = path;
   return db;
+}
+
+/**
+ * ARV-163: retry wrapper for SQLite write paths that may collide with
+ * concurrent zond processes. `PRAGMA busy_timeout` already absorbs short
+ * contention at the C level — this wrapper only catches the residual cases
+ * where the lock holder runs longer than the timeout (e.g. a big
+ * `saveResults` bulk insert during a parallel `probe security` cleanup).
+ *
+ * Detects bun:sqlite's "database is locked" / "SQLITE_BUSY" message shapes;
+ * other errors propagate immediately. Backoff: 100, 200, 400, 800ms capped at
+ * 4 attempts (≈1.5s total) so we never silently stall a CLI command.
+ */
+export function withDbRetry<T>(label: string, fn: () => T): T {
+  const delaysMs = [100, 200, 400, 800];
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= delaysMs.length; attempt++) {
+    try {
+      return fn();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/database is locked|SQLITE_BUSY/i.test(msg)) throw err;
+      lastError = err;
+      if (attempt === delaysMs.length) break;
+      Bun.sleepSync(delaysMs[attempt]!);
+    }
+  }
+  const msg = lastError instanceof Error ? lastError.message : String(lastError);
+  throw new Error(`SQLite still locked after ${delaysMs.length + 1} attempts (${label}): ${msg}`);
 }
 
 export function closeDb(): void {

@@ -3,9 +3,10 @@ id: ARV-166
 title: >-
   skill drift: surface 'zond run --learn --learn-apply --learn-target
   test|drifts' as obligatory tail-phase in zond.md / zond-max-coverage
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 12:46'
+updated_date: '2026-05-12 13:11'
 labels:
   - feedback-loop
   - skill-drift

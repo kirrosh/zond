@@ -99,6 +99,33 @@ already contains `spec.json` (machine source) plus three artifacts:
 If any artifact is missing or stale (`zond doctor` flags it), run
 `zond refresh-api <name>` before continuing.
 
+## Workflow: probe-static vs checks-run vs probe-security (ARV-168)
+
+These three commands overlap on "validation gaps" but emit different
+catalogs at different severities. A full audit runs **all three** —
+skipping any one leaves a blind spot. Pick by what you want to find:
+
+| Goal | Command | What it uniquely catches |
+|---|---|---|
+| Spec drift / contract violations | `zond checks run --api <name> --phase coverage` | HIGH findings: drift, missing required fields, type mismatches, ignored enums (rule-based, deterministic) |
+| Static spec hygiene (no traffic) | `zond probe static --api <name> --use-synthetic-parents` | `missing-validation` on edge inputs (boundary, null, oversize), method probes (405/501 surface) |
+| Authn / Authz / Injection vectors | `zond probe security ssrf,crlf,open-redirect,prompt-injection --api <name>` | Confirmed/INCONCLUSIVE attack surface; payload-vs-baseline differential |
+| Mass-assignment / privilege escalation | `zond probe mass-assignment --api <name>` | Extra-field acceptance, RBAC bypass via spoofed `owner_id`/`role` |
+| Response conformance (per step) | `zond run --validate-schema --api <name>` | `schema_violation` failure-class on each stored result |
+
+Recommended audit order (also what `zond audit --api <name>` follows):
+
+1. `zond check spec` — fast lint, fail-fast on a broken spec.
+2. `zond checks run --api <name> --phase coverage` — rule-based contract checks.
+3. `zond probe static --api <name> --use-synthetic-parents` — input-validation gaps.
+4. `zond probe mass-assignment --api <name>` — extra-field surface.
+5. `zond probe security <classes> --api <name>` — attack vectors.
+6. `zond run --validate-schema` (smoke → CRUD) + `--learn`/`--learn-apply` tail-phase.
+
+If the user request is narrow (only "security audit" or only "spec drift")
+jump to the relevant row — the table is the map for picking which subset
+to run, not a mandate to always run all five.
+
 ## Entry points (skip phases when the request is narrow)
 
 | User asked... | Start at | Skip |
@@ -768,21 +795,86 @@ all). This is the right shape for CI dashboards: `coveredButNon2xx` is the
 fast lane to triage, `unhit` is the gap to close with `generate
 --uncovered-only`.
 
-### Spec-drift learning (`zond run --learn`, TASK-282)
+### How to read coverage (ARV-167) — **pass-coverage is a breadth-proxy, NOT a quality signal**
 
-When a passing test asserts `200` but the server returns `201` (or vice
-versa), the test is a flake-in-waiting. `zond run --learn` detects the
-drift without failing the run; `--learn-apply` rewrites either the test
-or a `tolerated-drifts.yaml` allowlist:
+A high pass-coverage number means "the test bus visited a lot of endpoints
+and got 2xx back" — it does NOT mean those endpoints are correctly
+implemented or that the spec matches reality. Two reasons the number
+overstates quality:
+
+- `--learn-apply test` rewrites `expect.status` to whatever the server
+  returned. Pass-coverage rises mechanically; assertions get weaker.
+- `coveredButNon2xx` (hit but failed) is usually a **generator/fixture**
+  gap, not an API bug. Counting only `covered2xx` punishes the test
+  harness for not knowing the format of `mcc` or `country` — fix the
+  generator (ARV-165 helpers), don't blame the API.
+
+Sanity checks:
+
+- `pass-coverage ≤ hit-coverage`, always. If your number says otherwise,
+  something is off — re-read the bucket breakdown.
+- `hit ≫ pass` means generator gap. Inspect `coveredButNon2xx` and fill
+  fixtures / re-run `prepare-fixtures --seed --cascade`.
+- `pass ≈ hit` after `--learn-apply test`: assertions were widened; the
+  number is honest about breadth but says nothing about correctness.
+
+**Real quality signals** (the ones you should actually gate CI on):
+
+| Signal | Command | What it catches |
+|---|---|---|
+| Contract drift (spec ⇄ server) | `zond checks run --api <name> --phase coverage` — count HIGH severity | Missing fields, type mismatches, extra-fields, ignored enums |
+| Input-validation gaps (boundary/null/oversize) | `zond probe static --use-synthetic-parents --api <name>` | `missing-validation` findings on edge inputs |
+| Authn / Authz / injection | `zond probe security ssrf,crlf,open-redirect,prompt-injection --api <name>` | confirmed / `INCONCLUSIVE` attack surface |
+| Mass-assignment / privilege escalation | `zond probe mass-assignment --api <name>` | extra-field acceptance, RBAC bypass |
+| Response conformance | `zond run --validate-schema --api <name>` | per-step contract diff, `schema_violation` failure class |
+| Tolerated divergences | `git diff apis/<name>/tolerated-drifts.yaml` after `--learn-apply drifts` | Drift acknowledged but not fixed — review every entry |
+
+Recommended CI gate composition:
+
+- `--fail-on-coverage 50` on **hit-coverage** as a breadth floor.
+- `checks run --phase coverage` HIGH count == 0.
+- `probe security` confirmed count == 0; manual review of `INCONCLUSIVE`.
+- Human review of `tolerated-drifts.yaml` diff before merge.
+
+### Spec-drift learning (`zond run --learn`, TASK-282) — **obligatory audit tail-phase**
+
+After the initial smoke/CRUD run, **always** close the loop with
+`--learn`/`--learn-apply`. R09 of the zond-tester feedback loop measured
+the pass-coverage jump from 28% → 58% as coming entirely from this phase
+— skipping it leaves a third of the hit endpoints flagged as "failed"
+when the only divergence is `expect.status` lagging behind the server.
 
 ```bash
-zond run apis/<name>/tests --learn                           # detect, exit 0, summary in stdout
-zond run apis/<name>/tests --learn-apply --learn-target test    # rewrite expect.status in YAML
-zond run apis/<name>/tests --learn-apply --learn-target drifts  # add to apis/<name>/tolerated-drifts.yaml
+# 1. Detect — read-only sweep that prints rewrite candidates and exits 0.
+zond run apis/<name>/tests --learn
+
+# 2a. Apply to YAML — rewrite each step's expect.status to match the
+#     observed response. Use when the response is correct and the YAML
+#     was stale (e.g. spec asserted 200 but the resource creates with 201).
+zond run apis/<name>/tests --learn-apply --learn-target test
+
+# 2b. Apply to tolerated-drifts.yaml — keep the assertion as-is but
+#     allowlist the divergence for CI. Use when the server's behaviour
+#     is provisional / per-environment and you don't want every CI run
+#     to re-discover it.
+zond run apis/<name>/tests --learn-apply --learn-target drifts
 ```
 
-Use this when `recommended_action: update_spec` (the spec lies, not the
-backend) or to silence a known-tolerable drift in CI.
+**Caveat — `--learn-apply test` weakens assertions, not the code.** Each
+rewrite changes what "pass" means for that step. Diff
+`apis/<name>/tests/*.yaml` + `apis/<name>/tolerated-drifts.yaml` after
+every apply and treat unexpected widenings as a review-blocker. Pair
+this phase with `zond check spec` + `zond checks run --phase coverage`
+so genuine contract violations don't get silently rewritten into
+"tolerated".
+
+CI gate template (matches the quality-signal table below):
+
+```bash
+zond coverage --api <name> --fail-on-coverage 50    # hit-coverage floor, NOT pass-coverage
+zond checks run --api <name> --phase coverage       # HIGH count must be 0
+git diff apis/<name>/tolerated-drifts.yaml          # manual review of widening
+```
 
 ## Phase 7 — Share findings
 
