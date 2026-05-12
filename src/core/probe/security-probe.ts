@@ -30,6 +30,7 @@ import {
   pathTouchesSeededVar,
   classifyPostSemantics,
 } from "./shared.ts";
+import { hasProbeBody, buildBodyAuthHeaders, serializeProbeBody } from "./probe-harness.ts";
 import {
   buildProbeUrl,
   buildJsonAuthHeaders,
@@ -303,8 +304,13 @@ export async function runSecurityProbes(
       continue;
     }
 
-    if (!hasJsonBody(ep)) {
-      verdicts.push(skipped(ep, "no JSON request body"));
+    // ARV-161 (round-08 F18): parity with mass-assignment — accept
+    // application/x-www-form-urlencoded endpoints too. Stripe v1 declares
+    // user-controlled URL fields (webhook url, return_url, ...) only on
+    // form-encoded bodies; the previous JSON-only gate hid 78+ POSTs from
+    // SSRF/CRLF/open-redirect probing.
+    if (!hasProbeBody(ep)) {
+      verdicts.push(skipped(ep, "no JSON or form-urlencoded request body"));
       continue;
     }
 
@@ -388,7 +394,11 @@ async function probeOneEndpoint(
     return skipped(ep, `cannot resolve path placeholders: ${unresolved.join(", ")}`);
   }
 
-  const headers = buildJsonAuthHeaders(ep, schemes, vars);
+  // ARV-161: Content-Type follows the spec — form-urlencoded for Stripe v1,
+  // JSON otherwise. All outbound payloads in this function (baseline, per-
+  // attack, restore-PUT) flow through serializeProbeBody for matching wire
+  // encoding.
+  const headers = buildBodyAuthHeaders(ep, schemes, vars);
 
   // ── Snapshot original state (TASK-151) ────────────────────────────────
   // For PUT/PATCH we MUST capture original state before any mutation. The
@@ -404,7 +414,7 @@ async function probeOneEndpoint(
   // Eliminates the "5 × 404" output the markdown template produced in the
   // audit. If baseline isn't 2xx, attacks would just hit the same 4xx
   // wall and tell us nothing.
-  const fullBaseline = await sendBaseline(m, url, headers, baseline, opts);
+  const fullBaseline = await sendBaseline(ep, m, url, headers,baseline, opts);
   if (fullBaseline.kind === "network") {
     verdict.severity = "high";
     verdict.summary = `baseline network error: ${fullBaseline.reason}`;
@@ -427,7 +437,7 @@ async function probeOneEndpoint(
       const partial: Record<string, unknown> = {};
       if (hit.field in baseline) partial[hit.field] = baseline[hit.field];
       else partial[hit.field] = "";
-      const partResp = await sendBaseline(m, url, headers, partial, opts);
+      const partResp = await sendBaseline(ep, m, url, headers,partial, opts);
       if (partResp.kind === "ok" && partResp.status >= 200 && partResp.status < 300) {
         perFieldBaseline.set(hit.field, partial);
       }
@@ -505,7 +515,7 @@ async function probeOneEndpoint(
       let resp;
       try {
         resp = await executeRequest(
-          { method: m, url, headers, body: JSON.stringify(body) },
+          { method: m, url, headers, body: serializeProbeBody(ep, body).content },
           { timeout: opts.timeoutMs ?? 30000, retries: 0 },
         );
       } catch (err) {
@@ -594,6 +604,7 @@ type BaselineResult =
   | { kind: "network"; reason: string };
 
 async function sendBaseline(
+  ep: EndpointInfo,
   method: string,
   url: string,
   headers: Record<string, string>,
@@ -601,8 +612,13 @@ async function sendBaseline(
   opts: ProbeStepOpts,
 ): Promise<BaselineResult> {
   try {
+    // ARV-161: serialize via serializeProbeBody so form-encoded endpoints
+    // get x-www-form-urlencoded payload matching Content-Type.
+    const wire = body && typeof body === "object" && !Array.isArray(body)
+      ? serializeProbeBody(ep, body as Record<string, unknown>).content
+      : JSON.stringify(body);
     const resp = await executeRequest(
-      { method, url, headers, body: JSON.stringify(body) },
+      { method, url, headers, body: wire },
       { timeout: opts.timeoutMs ?? 30000, retries: 0 },
     );
     return {
@@ -710,7 +726,7 @@ async function restoreOriginal(
     let resp;
     try {
       resp = await executeRequest(
-        { method: m, url, headers, body: JSON.stringify(body) },
+        { method: m, url, headers, body: serializeProbeBody(ep, body).content },
         { timeout: opts.timeoutMs ?? 30000, retries: 0 },
       );
     } catch (err) {

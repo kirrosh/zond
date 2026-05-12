@@ -107,12 +107,20 @@ export function serializeSuite(suite: RawSuite): string {
     // ARV-149: form body (application/x-www-form-urlencoded). The runner
     // serialises this via URLSearchParams; values are flat strings with
     // bracket notation for nested fields (e.g. `address[line1]`).
+    //
+    // ARV-162 (round-08 F19): form values are ALWAYS strings on the wire —
+    // x-www-form-urlencoded has no native numbers/bools/nulls. YAML parsing
+    // `phone: +1234567890` or `width: 12.5` as int/float makes `zond check
+    // tests` reject the suite ("expected string, received number"), and
+    // `zond run` silently skipped 21/68 generated Stripe suites this way.
+    // Force-quote every value regardless of shape; key still uses yamlScalar
+    // because bracket keys (`address[line1]`) need quoting too.
     if (test.form !== undefined && typeof test.form === "object" && test.form !== null) {
       const formEntries = Object.entries(test.form as Record<string, unknown>);
       if (formEntries.length > 0) {
         lines.push("    form:");
         for (const [fk, fv] of formEntries) {
-          lines.push(`      ${yamlScalar(fk)}: ${yamlScalar(String(fv))}`);
+          lines.push(`      ${yamlScalar(fk)}: "${escapeYamlDoubleQuoted(String(fv))}"`);
         }
       }
     }

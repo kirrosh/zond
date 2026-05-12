@@ -220,6 +220,91 @@ describe("serializeSuite", () => {
   });
 });
 
+// ARV-162 (round-08 F19): form values are always strings on the wire —
+// emitting `phone: +1234567890` or `width: 12.5` made YAML parse them as
+// int/float and `zond check tests` reject the suite (21/68 silent skips).
+// Every form value must round-trip as a string.
+describe("ARV-162: form values are force-quoted", () => {
+  test("decimals stay strings", () => {
+    const suite: RawSuite = {
+      name: "s",
+      tests: [
+        {
+          name: "create",
+          POST: "/v1/products",
+          form: { "package_dimensions[height]": "12.5" } as unknown as Record<string, string>,
+          expect: { status: 200 },
+        },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    const parsed = yamlToObject(yaml) as {
+      tests: { form: Record<string, unknown> }[];
+    };
+    expect(typeof parsed.tests[0]!.form["package_dimensions[height]"]).toBe("string");
+    expect(parsed.tests[0]!.form["package_dimensions[height]"]).toBe("12.5");
+  });
+
+  test("phone numbers with leading + stay strings", () => {
+    const suite: RawSuite = {
+      name: "s",
+      tests: [
+        {
+          name: "create",
+          POST: "/v1/customers",
+          form: { phone: "+1234567890" },
+          expect: { status: 200 },
+        },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    const parsed = yamlToObject(yaml) as { tests: { form: { phone: unknown } }[] };
+    expect(typeof parsed.tests[0]!.form.phone).toBe("string");
+    expect(parsed.tests[0]!.form.phone).toBe("+1234567890");
+  });
+
+  test("pure integers stay strings", () => {
+    const suite: RawSuite = {
+      name: "s",
+      tests: [
+        {
+          name: "create",
+          POST: "/v1/charges",
+          form: { application_fee_percent: "25" },
+          expect: { status: 200 },
+        },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    const parsed = yamlToObject(yaml) as {
+      tests: { form: { application_fee_percent: unknown } }[];
+    };
+    expect(typeof parsed.tests[0]!.form.application_fee_percent).toBe("string");
+    expect(parsed.tests[0]!.form.application_fee_percent).toBe("25");
+  });
+
+  test("the suite roundtrips through validateSuite", () => {
+    const suite: RawSuite = {
+      name: "s",
+      tests: [
+        {
+          name: "create",
+          POST: "/v1/products",
+          form: {
+            phone: "+1",
+            "package_dimensions[height]": "12.5",
+            application_fee_percent: "25",
+          },
+          expect: { status: 200 },
+        },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    const obj = yamlToObject(yaml);
+    expect(() => validateSuite(obj)).not.toThrow();
+  });
+});
+
 function yamlToObject(yaml: string): unknown {
   return Bun.YAML.parse(yaml);
 }
