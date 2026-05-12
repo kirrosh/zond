@@ -16,6 +16,10 @@ export interface SessionStartOptions {
   label?: string;
   id?: string;
   json?: boolean;
+  /** ARV-155: replace the existing active session instead of erroring out
+   *  ("Session already active …"). Useful in ralph-loop iterations where a
+   *  previous turn left a stale `.zond/current-session` behind. */
+  force?: boolean;
 }
 
 export interface SessionEndOptions {
@@ -33,11 +37,18 @@ function isValidUuid(s: string): boolean {
 
 export async function sessionStartCommand(opts: SessionStartOptions): Promise<number> {
   const existing = readCurrentSession();
-  if (existing) {
-    const message = `Session already active (${existing.id}). Run 'zond session end' first.`;
+  if (existing && !opts.force) {
+    const message =
+      `Session already active (${existing.id}). Run 'zond session end' first, or pass --force to replace it.`;
     if (opts.json) printJson(jsonError("session", [message]));
     else printError(message);
     return 1;
+  }
+  if (existing && opts.force) {
+    clearCurrentSession();
+    if (!opts.json) {
+      process.stdout.write(`  Replaced active session ${existing.id}${existing.label ? ` (${existing.label})` : ""}.\n`);
+    }
   }
 
   let id = opts.id?.trim();
@@ -195,10 +206,12 @@ export function registerSession(program: Command): void {
     .description("Begin a session — group all subsequent 'zond run' calls under one session_id (.zond/current-session)")
     .option("--label <text>", "Optional human-readable label shown alongside the session in the UI")
     .option("--id <uuid>", "Reuse a specific UUID instead of generating one (useful for CI)")
+    .option("--force", "Replace any already-active session instead of erroring out (ARV-155)")
     .action(async (opts, cmd: Command) => {
       process.exitCode = await sessionStartCommand({
         label: opts.label,
         id: opts.id,
+        force: opts.force === true,
         json: globalJson(cmd),
       });
     });
