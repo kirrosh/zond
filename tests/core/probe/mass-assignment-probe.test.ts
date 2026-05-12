@@ -600,6 +600,60 @@ describe("runMassAssignmentProbes", () => {
       expect(auth).toBe("Bearer secret-token");
     }
   });
+
+  // ARV-150: Stripe v1 declares only application/x-www-form-urlencoded for
+  // mutating endpoints. Before this fix, all 265 such endpoints reported
+  // SKIPPED "no JSON request body" — masking real mass-assignment vectors.
+  it("ARV-150: probes form-urlencoded endpoints (Stripe v1)", async () => {
+    let originalFetchRef: typeof fetch | undefined;
+    const capturedBodies: string[] = [];
+    const capturedCT: string[] = [];
+
+    originalFetchRef = globalThis.fetch;
+    globalThis.fetch = (async (input: string | Request | URL, init?: RequestInit) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      const body = typeof init?.body === "string" ? init.body : "";
+      const ct =
+        (init?.headers as Record<string, string> | undefined)?.["content-type"]
+        ?? (init?.headers as Record<string, string> | undefined)?.["Content-Type"]
+        ?? "";
+      if (method === "POST") {
+        capturedBodies.push(body);
+        capturedCT.push(ct);
+      }
+      return new Response(JSON.stringify({ id: "ch_1", name: "alice" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      const formEp = ep({
+        method: "POST",
+        path: "/v1/products",
+        requestBodyContentType: "application/x-www-form-urlencoded",
+        requestBodySchema: userSchema,
+        responses: [{ statusCode: 200, description: "ok", schema: userResponseSchema }],
+      });
+      const result = await runMassAssignmentProbes({
+        endpoints: [formEp],
+        securitySchemes: [],
+        vars: { base_url: "https://api.test" },
+        noCleanup: true,
+      });
+      // The endpoint must NOT be skipped with "no JSON body".
+      expect(result.verdicts[0]!.severity).not.toBe("skipped");
+      // Wire payload is x-www-form-urlencoded with the suspected fields.
+      expect(capturedCT[0]).toBe("application/x-www-form-urlencoded");
+      const injected = capturedBodies[1] ?? "";
+      const parsed = new URLSearchParams(injected);
+      for (const key of Object.keys(SUSPECTED_FIELDS)) {
+        expect(parsed.has(key)).toBe(true);
+      }
+    } finally {
+      if (originalFetchRef) globalThis.fetch = originalFetchRef;
+    }
+  });
 });
 
 describe("formatDigestMarkdown", () => {

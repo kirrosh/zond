@@ -104,6 +104,19 @@ export function serializeSuite(suite: RawSuite): string {
       serializeValue(test.json, 3, lines);
     }
 
+    // ARV-149: form body (application/x-www-form-urlencoded). The runner
+    // serialises this via URLSearchParams; values are flat strings with
+    // bracket notation for nested fields (e.g. `address[line1]`).
+    if (test.form !== undefined && typeof test.form === "object" && test.form !== null) {
+      const formEntries = Object.entries(test.form as Record<string, unknown>);
+      if (formEntries.length > 0) {
+        lines.push("    form:");
+        for (const [fk, fv] of formEntries) {
+          lines.push(`      ${yamlScalar(fk)}: ${yamlScalar(String(fv))}`);
+        }
+      }
+    }
+
     // query
     if (test.query) {
       lines.push("    query:");

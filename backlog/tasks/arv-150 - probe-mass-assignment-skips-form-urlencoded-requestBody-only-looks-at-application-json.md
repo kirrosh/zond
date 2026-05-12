@@ -3,9 +3,10 @@ id: ARV-150
 title: >-
   probe mass-assignment: skips form-urlencoded requestBody, only looks at
   application/json
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 09:11'
+updated_date: '2026-05-12 11:57'
 labels:
   - feedback-loop
   - api-stripe
@@ -31,3 +32,9 @@ Tied to ARV-149 (zond request --form): once form-encoded body construction lands
 
 Log: apis/stripe/probes/mass-assignment-digest.md
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Mass-assignment probe now accepts application/x-www-form-urlencoded endpoints (Stripe v1). Wire payload encoded via shared form-encode helper. Test: tests/core/probe/mass-assignment-probe.test.ts ARV-150.
+<!-- SECTION:NOTES:END -->

@@ -410,6 +410,73 @@ export function liveAuthHeaders(
   return {};
 }
 
+// ──────────────────────────────────────────────
+// ARV-153: semantic classification of POST operations
+// ──────────────────────────────────────────────
+
+/**
+ * ARV-153: action verbs that, when they appear as the last path segment,
+ * mark a POST as "operates on an existing resource" rather than
+ * "allocates a new one". A DELETE counterpart is meaningless for these —
+ * there's nothing to delete because nothing new was created.
+ *
+ * Examples that fit this pattern:
+ *   POST /v1/charges/{id}/capture
+ *   POST /v1/customers/{id}/sources/{src}/verify
+ *   POST /v1/payment_intents/{id}/cancel
+ *   POST /v1/users/{id}/activate
+ *   POST /api/messages/{id}/resend
+ *
+ * Compound forms ("mark-as-read", "send-email", "verify-otp") are also
+ * recognised — we look at the first slug segment ("mark", "send", "verify").
+ *
+ * Conservative on purpose: a misclassified create-resource attacked without
+ * cleanup leaks. Verbs that double as nouns ("filter", "lock"…) are kept
+ * out; add only when a real-world spec proves the false-positive risk is
+ * lower than the recall win.
+ */
+const ACTION_VERBS = new Set([
+  "accept", "acknowledge", "activate", "approve", "archive", "attach",
+  "cancel", "capture", "check", "claim", "clone", "close", "complete",
+  "confirm", "copy", "deactivate", "decline", "decrypt", "demote", "deploy",
+  "detach", "disable", "disconnect", "dismiss", "dispatch", "duplicate",
+  "enable", "encrypt", "execute", "expire", "export", "fail", "finalize",
+  "fork", "ignore", "import", "invalidate", "invite", "link", "lookup",
+  "merge", "mute", "notify", "pause", "ping", "preview", "process",
+  "promote", "publish", "purge", "queue", "reactivate", "rebuild", "redeem",
+  "refresh", "refund", "register", "reject", "release", "remind",
+  "render", "renew", "reopen", "report", "reprocess", "request", "resend",
+  "reset", "resolve", "restart", "restore", "resubmit", "resume", "retry",
+  "revert", "review", "revoke", "rollback", "rotate", "run", "schedule",
+  "search", "send", "settle", "share", "snooze", "start", "stop", "submit",
+  "subscribe", "suspend", "swap", "sync", "test", "transfer", "trigger",
+  "unarchive", "unassign", "unblock", "unlink", "unlock", "unmute",
+  "unpublish", "unshare", "unsubscribe", "unsuspend", "validate", "verify",
+  "void", "withdraw",
+]);
+
+export type PostSemantics = "action" | "create-resource" | "unknown";
+
+/** ARV-153: classify a POST endpoint by looking at the last path segment.
+ *  Returns "action" when the verb at the tail clearly identifies the
+ *  operation as a side-effecting verb against an existing resource (no
+ *  new resource allocated → no DELETE counterpart needed). Conservative:
+ *  unknown verbs fall back to "create-resource", which keeps the existing
+ *  cleanup-feasibility gate intact for safety. */
+export function classifyPostSemantics(ep: EndpointInfo): PostSemantics {
+  if (ep.method.toUpperCase() !== "POST") return "unknown";
+  const segments = ep.path.split("/").filter(Boolean);
+  if (segments.length === 0) return "unknown";
+  const last = segments[segments.length - 1]!.toLowerCase();
+  if (last.startsWith("{")) return "unknown";
+  if (ACTION_VERBS.has(last)) return "action";
+  // Compound action forms: "mark-as-read", "send-email", "verify-otp",
+  // "request_reset", "do.export". Use first slug as the verb candidate.
+  const head = last.split(/[-_.]/)[0]!;
+  if (head && ACTION_VERBS.has(head)) return "action";
+  return "create-resource";
+}
+
 export function hasJsonBody(ep: EndpointInfo): boolean {
   return (
     ep.method !== "GET" &&

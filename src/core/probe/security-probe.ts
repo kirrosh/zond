@@ -28,6 +28,7 @@ import {
   liveAuthHeaders,
   getAuthHeaders,
   pathTouchesSeededVar,
+  classifyPostSemantics,
 } from "./shared.ts";
 import {
   buildProbeUrl,
@@ -135,12 +136,21 @@ export interface SecurityProbeOptions {
 
 /** ARV-140: cleanup-feasibility map. Built once before the live loop so
  *  every POST verdict can see whether the spec has a DELETE counterpart;
- *  the summary digest also reports counts for skipped/forced endpoints. */
+ *  the summary digest also reports counts for skipped/forced endpoints.
+ *
+ *  ARV-153 extends the status enum with "action": POSTs whose last path
+ *  segment is a known action verb (`/capture`, `/verify`, `/cancel`, …)
+ *  operate on an existing resource and never allocate a new one, so a
+ *  DELETE counterpart isn't meaningful. These are attacked the same way
+ *  as POSTs with a real DELETE — without `--allow-leaks` — because there
+ *  is no resource to leak. */
 export interface CleanupFeasibility {
-  /** Per-endpoint key (`POST /path`) → "has-delete" | "no-delete-counterpart". */
-  status: Record<string, "has-delete" | "no-delete-counterpart">;
+  status: Record<string, "has-delete" | "no-delete-counterpart" | "action">;
   skippedNoCleanup: number;
   forcedNoCleanup: number;
+  /** ARV-153: POSTs we attacked even though no DELETE counterpart exists,
+   *  because the operation is semantically an action (no resource created). */
+  actionNoCleanupNeeded: number;
 }
 
 export interface SecurityProbeResult {
@@ -245,11 +255,22 @@ export async function runSecurityProbes(
     status: {},
     skippedNoCleanup: 0,
     forcedNoCleanup: 0,
+    actionNoCleanupNeeded: 0,
   };
   for (const ep of opts.endpoints) {
     if (ep.deprecated) continue;
     if (ep.method.toUpperCase() !== "POST") continue;
     const key = `POST ${ep.path}`;
+    // ARV-153: action POSTs (`/capture`, `/verify`, `/cancel`, …) don't
+    // allocate a new resource — there is nothing to DELETE. Attacking them
+    // without `--allow-leaks` is safe; classifying them up front prevents
+    // the feasibility pre-flight from masking 18/22 Stripe action endpoints.
+    const semantics = classifyPostSemantics(ep);
+    if (semantics === "action") {
+      feasibility.status[key] = "action";
+      feasibility.actionNoCleanupNeeded += 1;
+      continue;
+    }
     const hasDelete = findDeleteCounterpart(ep, opts.endpoints) !== undefined;
     feasibility.status[key] = hasDelete ? "has-delete" : "no-delete-counterpart";
     if (!hasDelete) {
@@ -1066,6 +1087,11 @@ export function formatSecurityDigest(
       lines.push(`Cleanup pre-flight: ${f.skippedNoCleanup} endpoint(s) skipped (no DELETE counterpart). Pass \`--allow-leaks\` to attack anyway.`);
     } else if (f.forcedNoCleanup > 0) {
       lines.push(`Cleanup pre-flight: ${f.forcedNoCleanup} endpoint(s) attacked despite no DELETE counterpart (--allow-leaks).`);
+    }
+    // ARV-153: surface action-verb POSTs we now attack without a DELETE
+    // counterpart so green runs make the recall win visible.
+    if (f.actionNoCleanupNeeded > 0) {
+      lines.push(`Cleanup pre-flight: ${f.actionNoCleanupNeeded} action POST(s) attacked (no resource created — DELETE counterpart not needed).`);
     }
   }
   lines.push("");

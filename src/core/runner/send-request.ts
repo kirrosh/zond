@@ -2,6 +2,7 @@ import { executeRequest } from "./http-client.ts";
 import { loadEnvironment, substituteString, substituteDeep } from "../parser/variables.ts";
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
+import { encodeFormBody } from "./form-encode.ts";
 
 function hasHeaderCI(headers: Record<string, string>, name: string): boolean {
   const lower = name.toLowerCase();
@@ -74,6 +75,11 @@ export interface SendAdHocRequestOptions {
   extraVars?: Record<string, unknown>;
   /** When true, resolve interpolation but do not actually send the request. */
   dryRun?: boolean;
+  /** ARV-149: when true, send the body as `application/x-www-form-urlencoded`.
+   *  Parses `body` as JSON to lift fields, then re-encodes with bracket notation
+   *  (Stripe-style nested keys). If `body` isn't JSON-parseable it's passed
+   *  through verbatim, and only the Content-Type header is set. */
+  form?: boolean;
 }
 
 export interface SendAdHocRequestResult {
@@ -126,10 +132,30 @@ export async function resolveAdHocRequest(options: SendAdHocRequestOptions): Pro
   const resolvedUrl = substituteString(urlToResolve, vars) as string;
   const parsedHeaders = options.headers ?? {};
   const resolvedHeaders = Object.keys(parsedHeaders).length > 0 ? substituteDeep(parsedHeaders, vars) : {};
-  const resolvedBody = options.body ? substituteString(options.body, vars) as string : undefined;
+  let resolvedBody = options.body ? substituteString(options.body, vars) as string : undefined;
 
   const finalHeaders: Record<string, string> = { ...resolvedHeaders };
-  if (resolvedBody && !finalHeaders["Content-Type"] && !finalHeaders["content-type"]) {
+  const hasContentType =
+    finalHeaders["Content-Type"] !== undefined || finalHeaders["content-type"] !== undefined;
+
+  // ARV-149: `--form` (or auto-detection from spec content type) re-encodes
+  // the JSON body as `application/x-www-form-urlencoded` with bracket
+  // notation. Stripe v1 and other Rails/PHP-style APIs declare ONLY form
+  // bodies on their mutating endpoints — sending JSON yields a 400
+  // "check that your POST content type is application/x-www-form-urlencoded".
+  if (resolvedBody && options.form) {
+    try {
+      const parsed = JSON.parse(resolvedBody);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        resolvedBody = encodeFormBody(parsed as Record<string, unknown>);
+      }
+    } catch {
+      // Body isn't JSON — assume it's already urlencoded; pass through verbatim.
+    }
+    if (!hasContentType) {
+      finalHeaders["Content-Type"] = "application/x-www-form-urlencoded";
+    }
+  } else if (resolvedBody && !hasContentType) {
     try {
       JSON.parse(resolvedBody);
       finalHeaders["Content-Type"] = "application/json";
@@ -160,6 +186,10 @@ export async function resolveAdHocRequest(options: SendAdHocRequestOptions): Pro
     ...(resolvedBody !== undefined ? { body: resolvedBody } : {}),
   };
 }
+
+// Note: `options.form` is consumed inside `resolveAdHocRequest` itself —
+// the encoded `body` string and Content-Type are baked into `finalHeaders`.
+// `sendAdHocRequest` doesn't need to forward the flag separately.
 
 export async function sendAdHocRequest(options: SendAdHocRequestOptions): Promise<SendAdHocRequestResult> {
   const resolved = await resolveAdHocRequest(options);

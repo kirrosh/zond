@@ -22,7 +22,8 @@ import {
   type EndpointVerdict,
   type Severity,
 } from "./mass-assignment-probe.ts";
-import { hasJsonBody, pathTouchesSeededVar } from "./shared.ts";
+import { pathTouchesSeededVar } from "./shared.ts";
+import { hasProbeBody } from "./probe-harness.ts";
 
 const FLAGS: ProbeFlags = {
   api: true,
@@ -142,7 +143,8 @@ export class MassAssignmentProbe implements Probe {
         continue;
       }
 
-      if (!hasJsonBody(ep)) {
+      // ARV-150: parity with the live runner — form-urlencoded counts as a body.
+      if (!hasProbeBody(ep)) {
         out.push({
           path: ep.path,
           method: m,

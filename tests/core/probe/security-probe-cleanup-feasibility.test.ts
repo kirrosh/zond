@@ -67,6 +67,41 @@ describe("runSecurityProbes cleanup-feasibility (ARV-140)", () => {
     expect(result.cleanupFeasibility?.forcedNoCleanup).toBe(1);
   });
 
+  // ARV-153: action POSTs (`/capture`, `/verify`, `/cancel`, …) operate on
+  // an existing resource and never allocate a new one, so the no-DELETE
+  // gate should not skip them. Without this 18/22 Stripe-style action
+  // endpoints were dropped before any payload was sent.
+  it("ARV-153: action POSTs are attacked even without a DELETE counterpart", async () => {
+    let calls = 0;
+    harness.setResponder(() => { calls++; return { status: 400, body: {} }; });
+
+    const result = await runSecurityProbes({
+      endpoints: [
+        ep({
+          method: "POST",
+          path: "/v1/customers/{id}/sources/{src}/verify",
+          requestBodyContentType: "application/json",
+          requestBodySchema: webhookSchema,
+        }),
+        ep({
+          method: "POST",
+          path: "/v1/charges/{id}/capture",
+          requestBodyContentType: "application/json",
+          requestBodySchema: webhookSchema,
+        }),
+      ],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test", id: "cus_1", src: "src_1" },
+      classes: ["ssrf"],
+    });
+
+    expect(calls).toBeGreaterThan(0);
+    expect(result.cleanupFeasibility?.skippedNoCleanup).toBe(0);
+    expect(result.cleanupFeasibility?.actionNoCleanupNeeded).toBe(2);
+    expect(result.cleanupFeasibility?.status["POST /v1/customers/{id}/sources/{src}/verify"]).toBe("action");
+    expect(result.cleanupFeasibility?.status["POST /v1/charges/{id}/capture"]).toBe("action");
+  });
+
   it("POST with DELETE counterpart proceeds (no skip)", async () => {
     let calls = 0;
     harness.setResponder(() => { calls++; return { status: 400, body: {} }; });
