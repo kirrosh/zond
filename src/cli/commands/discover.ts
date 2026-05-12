@@ -146,6 +146,7 @@ export function isEmptyListBody(body: unknown): boolean {
 }
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
+import { getSecretRegistry } from "../../core/secrets/registry.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../core/generator/types.ts";
 import type { RecommendedAction } from "../../core/diagnostics/failure-hints.ts";
 
@@ -704,6 +705,18 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
 
     const envPath = options.envPath ?? join(options.apiDir, ".env.yaml");
     const env = (await loadEnvFile(envPath)) ?? {};
+    // ARV-143 follow-up (security regression fix): register every loaded var
+    // with the SecretRegistry so the user-config bucket (and any other path
+    // that incidentally echoes a value) can't leak `.secrets.yaml`-resolved
+    // tokens to stdout / scrollback / tee. base_url is filtered out because
+    // we have to print it verbatim in the discovery header.
+    {
+      const reg = getSecretRegistry();
+      for (const [k, v] of Object.entries(env)) {
+        if (k === "base_url") continue;
+        reg.register(k, v);
+      }
+    }
     const baseUrl = env["base_url"];
     if (!baseUrl) {
       const msg = `base_url is required in ${envPath} (live API calls need it).`;
@@ -986,11 +999,16 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     ).length;
 
     if (options.json) {
+      // ARV-143 follow-up: strip raw secret values from items[].current so the
+      // JSON envelope can't leak `.secrets.yaml`-resolved tokens. The
+      // SecretRegistry registered every non-base_url env var above, so
+      // redactObject swaps any registered value for `<redacted:<name>>`.
+      const safeItems = getSecretRegistry().redactObject(items);
       printJson(jsonOk("discover", {
         envPath,
         applied,
         backup: backupPath,
-        items,
+        items: safeItems,
         summary: {
           total: items.length,
           writes: writes.length,
@@ -1047,9 +1065,20 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
                   : i.status === "verify-stale"
                     ? `(stale: ${i.current})${i.reason ? ` — ${i.reason}` : ""}`
                     : i.status === "verify-user-config"
-                      ? `(trusted: ${i.current})`
+                      // ARV-143 follow-up: never echo the raw value here —
+                      // auth/header sources routinely carry tokens, and even
+                      // server URLs can be sensitive. Mirror doctor's
+                      // set/length-only contract from .secrets.yaml handling.
+                      ? `(trusted, length=${(i.current ?? "").length})`
                       : (i.reason ?? ""),
       ]);
+      // ARV-143 follow-up: redact every text cell through SecretRegistry so
+      // an `auth_token` that happens to slip into a `(kept: ...)` /
+      // `(live: ...)` cell can't reach stdout / scrollback / tee. The
+      // verify-user-config branch already substitutes length-only — this
+      // is defense in depth for the other status branches.
+      const reg = getSecretRegistry();
+      for (const r of rows) for (let i = 0; i < r.length; i++) r[i] = reg.redact(r[i]!);
       const widths = cols.map((h, i) => Math.max(h.length, ...rows.map(r => r[i]!.length)));
       const fmt = (cells: string[]) => cells.map((c, i) => c.padEnd(widths[i]!)).join("  ");
       console.log(fmt(cols));
