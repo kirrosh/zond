@@ -1,4 +1,4 @@
-# m-18 parity baseline — Sentry smoke (round 1)
+# m-18 parity baseline — Sentry + Resend (round 1)
 
 Saved 2026-05-12. ARV-174 (m-18 D-блок), первая итерация. Цель — валидация
 pipeline'а и направление дальнейшего скоупа.
@@ -108,3 +108,88 @@ pipeline'а и направление дальнейшего скоупа.
 расширить enumeration внутри 3 существующих checks». Если в Resend/Stripe
 картина повторится — m-19 (fuzz engine) можно депри-ораизировать, а в m-18
 финализировать coverage-fix как отдельные ARV-задачи.
+
+---
+
+## Round 2: Resend (full prefer — fuzzing завершилась)
+
+- spec: 47 endpoints, 83 операций.
+- zond `checks run --phase all` — все операции.
+- schemathesis V4 `--checks all --phases examples,coverage,fuzzing` —
+  прервано на stateful (~20 мин), examples+coverage+fuzzing завершились.
+- Overlap: 61 endpoint.
+
+**Числа:**
+
+| метрика | zond | schemathesis |
+|---|---:|---:|
+| уникальных (endpoint, check) findings (overlap) | 99 | 209 |
+
+**Diff:**
+
+| bucket | count |
+|---|---:|
+| BOTH | **94** |
+| ZOND-only | 5 |
+| SCHEMATHESIS-only | 115 |
+
+**SCHEMATHESIS-only breakdown:**
+
+| check | endpoints | категория |
+|---|---:|---|
+| `positive_data_acceptance` | 41 | **(a) fuzz** — schemathesis генерит valid-shape, API reject'ит |
+| `unsupported_method` | 39 | (c') enumeration |
+| `negative_data_rejection` | 12 | **(a) fuzz** — invalid payloads accepted by API |
+| `status_code_conformance` | 10 | (c') |
+| `ignored_auth` | 9 | (c') security — schemathesis тестирует no-auth систематически |
+| `not_a_server_error` | 3 | **(a) fuzz** — fuzz-generated input → 5xx |
+| `response_schema_conformance` | 1 | edge |
+
+**ZOND-only breakdown:**
+
+| check | endpoints | заметка |
+|---|---:|---|
+| `response_schema_conformance` | 5 | depth-checks работает |
+
+## Сравнение Sentry vs Resend
+
+| | Sentry (GET-heavy) | Resend (POST/GET mix) |
+|---|---:|---:|
+| BOTH | 15 | 94 |
+| ZOND-only | 16 | 5 |
+| SCHEMATHESIS-only | 193 | 115 |
+| sch-only fuzz (a) | ~2 | ~56 (positive+negative+5xx) |
+| sch-only enumeration (c') | ~190 | ~58 |
+
+**Резкая разница:** на write-heavy API (Resend) **fuzz-generation реально
+влияет** — 56 findings, которых у zond нет. На GET-heavy API (Sentry)
+fuzz почти не помогает, проблема — узкое enumeration в существующих checks.
+
+## Обновлённый вывод (после двух API)
+
+1. **m-19 (fuzz engine) не закрывается** — Resend показал ~56 fuzz-only
+   findings. На write-heavy API fuzz даёт реальный depth. Но это
+   **не блокирующий gap** — fuzz-engine это medium-priority для
+   write-heavy сценариев, не «must-have для паритета».
+2. **3 cheap-fix checks подтверждены на обоих API**:
+   - `unsupported_method` (Sentry 115, Resend 39)
+   - `status_code_conformance` (Sentry 66, Resend 10)
+   - `ignored_auth` (Resend 9 — на Sentry 1, но проблема та же)
+3. **High overlap на Resend (94 BOTH)** — архитектурно zond ≈ schemathesis
+   на хорошо-описанных API. Расхождения концентрируются в **2 классах**:
+   fuzz (Resend-style) + enumeration (Sentry-style).
+
+## Что заводить как ARV (предварительно, после Stripe — финализация)
+
+- **ARV-cheap-1**: `unsupported_method` — exhaustive HTTP-method enumeration.
+- **ARV-cheap-2**: `status_code_conformance` — широкие parameter permutations
+  (или просто переотчёт через case-by-case вместо per-endpoint).
+- **ARV-cheap-3**: `ignored_auth` — систематический no-auth sweep на всех
+  endpoint'ах с auth-требованием.
+- **ARV-m19-defer**: fuzz engine для `positive_data_acceptance` +
+  `negative_data_rejection` — не блокирует m-18, но открывает m-19 sub-track.
+
+## Следующий шаг
+
+Stripe baseline. Если на Stripe картина = mix Sentry+Resend (как ожидается —
+он write-heavy + большой spec) — m-18 готов к финализации.
