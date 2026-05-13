@@ -6,7 +6,7 @@
  */
 import type { CrudStatefulCheck } from "../stateful.ts";
 import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams } from "./_crud-helpers.ts";
 
 export const ensureResourceAvailability: CrudStatefulCheck = {
   id: "ensure_resource_availability",
@@ -29,7 +29,7 @@ export const ensureResourceAvailability: CrudStatefulCheck = {
       : "{}";
     const createResp = await h.send({
       method: "POST",
-      url: `${h.baseUrl.replace(/\/+$/, "")}${create.path}`,
+      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`,
       headers: { ...baseHeaders, "Content-Type": create.requestBodyContentType ?? "application/json" },
       body,
     });
@@ -41,7 +41,7 @@ export const ensureResourceAvailability: CrudStatefulCheck = {
 
     const readResp = await h.send({
       method: "GET",
-      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(read.path, g.idParam, id)}`,
+      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(fillPathParams(read.path, h.pathVars), g.idParam, id)}`,
       headers: baseHeaders,
     });
     if (readResp.status >= 200 && readResp.status < 300) return { kind: "pass" };
