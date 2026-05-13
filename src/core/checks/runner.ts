@@ -17,7 +17,11 @@ import { extractEndpoints, readOpenApiSpec } from "../generator/index.ts";
 import { detectCrudGroups } from "../generator/suite-generator.ts";
 import type { EndpointInfo } from "../generator/types.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
-import { enumerateBoundaryCases } from "../generator/coverage-phase.ts";
+import {
+  enumerateBoundaryCases,
+  enumerateParamBoundaryCases,
+  type ParamCoverageCase,
+} from "../generator/coverage-phase.ts";
 import { executeRequest } from "../runner/http-client.ts";
 import { createSchemaValidator, type SchemaValidator } from "../runner/schema-validator.ts";
 import type { HttpRequest, HttpResponse } from "../runner/types.ts";
@@ -90,6 +94,12 @@ export interface RunChecksOptions {
    *  bursts of parallel workers respect a global RPS budget (also
    *  reacts to RateLimit-* headers via `note()`). */
   rateLimiter?: RateLimiter;
+  /** ARV-179: opt-in strict-405 semantics for `unsupported_method`.
+   *  Off by default — see `CheckRuntimeOptions.strict405` for rationale. */
+  strict405?: boolean;
+  /** ARV-181: opt-in strict-401 semantics for `ignored_auth`. Off by
+   *  default — see `CheckRuntimeOptions.strict401` for rationale. */
+  strict401?: boolean;
   /** ARV-141: substitute real fixture values into path-param placeholders so
    *  the deterministic synthetic 404 (`/issues/x`) becomes a real-id 200/422
    *  whenever `.env.yaml` actually has a fixture. This makes `checks run`
@@ -181,23 +191,33 @@ function buildPositive(op: EndpointInfo, baseUrl: string, pathVars?: Record<stri
   return { req, case: c };
 }
 
-function buildMissingHeader(op: EndpointInfo, baseUrl: string, pathVars?: Record<string, string>): BuiltCase | null {
+/** ARV-184: emit one BuiltCase per required header — drop that header
+ *  in isolation so `missing_required_header` can identify *which* one
+ *  the server fails to enforce. Pre-fix this emitted just the first
+ *  required header (`required[0]`), which on Stripe-style specs with
+ *  multiple per-op headers (Stripe-Version, Stripe-Account, ...) gave
+ *  ≤1 finding per op vs schemathesis V4 ~42 in the same overlap. */
+function buildMissingHeader(op: EndpointInfo, baseUrl: string, pathVars?: Record<string, string>): BuiltCase[] {
   const required = requiredHeaders(op);
-  if (required.length === 0) return null;
-  const dropped = required[0]!.name;
+  if (required.length === 0) return [];
   const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op, pathVars)}`;
-  const headers = buildBaseHeaders(op, { withRequired: true });
-  delete headers[dropped];
   const body = buildBody(op);
-  const req: HttpRequest = { method: op.method.toUpperCase(), url, headers, body };
-  const c: CheckCase = {
-    operation: op,
-    request: { method: req.method, url: req.url, headers: req.headers, body: req.body },
-    mode: "negative",
-    kind: "missing_required_header",
-    meta: { dropped_header: dropped },
-  };
-  return { req, case: c };
+  const method = op.method.toUpperCase();
+  return required.map((header) => {
+    const headers = buildBaseHeaders(op, { withRequired: true });
+    delete headers[header.name];
+    const req: HttpRequest = { method, url, headers, body };
+    return {
+      req,
+      case: {
+        operation: op,
+        request: { method: req.method, url: req.url, headers: req.headers, body: req.body },
+        mode: "negative" as const,
+        kind: "missing_required_header" as const,
+        meta: { dropped_header: header.name },
+      },
+    };
+  });
 }
 
 /** ARV-6: emit one BuiltCase per (field × boundary) over the body schema.
@@ -241,6 +261,104 @@ function buildCoverageCases(
   return out;
 }
 
+/** ARV-180: build a URL whose path/query parameters reflect a coverage
+ *  mutation. The positive baseline fills every param with a valid
+ *  shape; this helper takes that baseline and swaps the named param
+ *  with the mutation value (or drops it, for `drop-required-query`).
+ *  Path mutations rewrite the placeholder for the named param only —
+ *  all other path-vars keep their valid baseline values, so the URL
+ *  still reaches the routing layer. */
+function buildParamMutatedUrl(
+  baseUrl: string,
+  op: EndpointInfo,
+  mut: ParamCoverageCase,
+  pathVars: Record<string, string> | undefined,
+): string {
+  // Start with the valid baseline path (placeholders filled).
+  let pathStr = op.path;
+  if (mut.location === "path") {
+    // Rewrite only the targeted placeholder; everything else gets the
+    // valid baseline (path-vars > schema-derived placeholder).
+    pathStr = op.path.replace(/\{([^}]+)\}/g, (_, name) => {
+      if (name === mut.paramName) return encodeURIComponent(String(mut.value));
+      const real = pathVars?.[name];
+      if (typeof real === "string" && real.length > 0) return encodeURIComponent(real);
+      const match = op.parameters.find(
+        (p) => (p as OpenAPIV3.ParameterObject).in === "path"
+          && (p as OpenAPIV3.ParameterObject).name === name,
+      );
+      return match
+        ? encodeURIComponent(placeholderForParam(match as OpenAPIV3.ParameterObject))
+        : "1";
+    });
+  } else {
+    pathStr = fillPathParams(op.path, op, pathVars);
+  }
+  let url = `${baseUrl.replace(/\/+$/, "")}${pathStr}`;
+  if (mut.location === "query") {
+    const qp = new URLSearchParams();
+    // Seed required query params with valid baseline values so the
+    // mutation is single-site.
+    for (const p of op.parameters) {
+      const pp = p as OpenAPIV3.ParameterObject;
+      if (pp.in !== "query") continue;
+      if (pp.name === mut.paramName) {
+        if (mut.scenario === "drop-required-query") continue; // drop
+        qp.append(pp.name, String(mut.value));
+        continue;
+      }
+      if (pp.required === true) {
+        qp.append(pp.name, placeholderForParam(pp));
+      }
+    }
+    const qs = qp.toString();
+    if (qs.length > 0) url += `?${qs}`;
+  }
+  return url;
+}
+
+/** ARV-180: emit one BuiltCase per (param × scenario) for the
+ *  operation. All cases ride as `kind: "negative_data"` so
+ *  `negative_data_rejection` evaluates "did the server reject?", and
+ *  `status_code_conformance` (now declares `negative_data` in its
+ *  caseKinds) evaluates "is the resulting status code documented?".
+ *  This is the cheap-fix gap for `status_code_conformance` on
+ *  GET-heavy APIs where the body-coverage walker emits zero cases. */
+function buildParamCoverageCases(
+  op: EndpointInfo,
+  baseUrl: string,
+  opts: { allowX00?: boolean; pathVars?: Record<string, string> },
+): BuiltCase[] {
+  const params = op.parameters as OpenAPIV3.ParameterObject[];
+  const mutations = enumerateParamBoundaryCases(params, { allowX00: opts.allowX00 });
+  if (mutations.length === 0) return [];
+  const m = op.method.toUpperCase();
+  const headers = buildBaseHeaders(op, { withRequired: true });
+  const body = buildBody(op);
+  const out: BuiltCase[] = [];
+  for (const mut of mutations) {
+    const url = buildParamMutatedUrl(baseUrl, op, mut, opts.pathVars);
+    const req: HttpRequest = { method: m, url, headers, body };
+    out.push({
+      req,
+      case: {
+        operation: op,
+        request: { method: req.method, url: req.url, headers: req.headers, body: req.body },
+        mode: "negative",
+        kind: "negative_data",
+        meta: {
+          phase: "coverage",
+          param_scenario: mut.scenario,
+          param_name: mut.paramName,
+          param_location: mut.location,
+          mutation: "param-boundary",
+        },
+      },
+    });
+  }
+  return out;
+}
+
 function buildNegativeData(op: EndpointInfo, baseUrl: string, pathVars?: Record<string, string>): BuiltCase | null {
   if (!op.requestBodySchema) return null;
   const m = op.method.toUpperCase();
@@ -261,35 +379,41 @@ function buildNegativeData(op: EndpointInfo, baseUrl: string, pathVars?: Record<
   return { req, case: c };
 }
 
-/** For `unsupported_method` we send a method that isn't declared on
- *  the *path bucket*. The check operates on the whole path, so we ask
- *  the runner to emit at most one probe per path (using one of the
- *  declared operations as the carrier of `op` metadata). */
+/** For `unsupported_method` we send every method that isn't declared on
+ *  the *path bucket*. ARV-179: pre-fix this emitted just `missing[0]`,
+ *  which produced ≈1 finding per path on real APIs (vs schemathesis's
+ *  per-method enumeration that finds 100+ on the same target). The
+ *  check itself coalesces results per-(path, undeclared-method) pair,
+ *  so a path with 4 missing methods yields up to 4 findings. The
+ *  per-path "one owner" rule still applies — only the owner-op emits
+ *  the bucket — so we don't double-count on multi-method paths. */
 function buildUnsupportedMethod(
   op: EndpointInfo,
   declaredOnPath: Set<string>,
   baseUrl: string,
-): BuiltCase | null {
-  const missing = ALL_METHODS.filter((m) => !declaredOnPath.has(m));
-  if (missing.length === 0) return null;
-  const method = missing[0]!;
+): BuiltCase[] {
+  const declaredUpper = new Set(Array.from(declaredOnPath, (m) => m.toUpperCase()));
+  const missing = ALL_METHODS.filter((m) => !declaredUpper.has(m));
+  if (missing.length === 0) return [];
   const concretePath = pathWithMethodPlaceholders(op.path, op.parameters);
   const url = `${baseUrl.replace(/\/+$/, "")}${concretePath}`;
-  const headers: Record<string, string> = { Accept: "application/json" };
-  let body: string | undefined;
-  if (method === "POST" || method === "PUT" || method === "PATCH") {
-    headers["Content-Type"] = "application/json";
-    body = "{}";
-  }
-  const req: HttpRequest = { method, url, headers, body };
-  const c: CheckCase = {
-    operation: op,
-    request: { method, url, headers, body },
-    mode: "negative",
-    kind: "unsupported_method",
-    meta: { undeclared_method: method },
-  };
-  return { req, case: c };
+  return missing.map((method) => {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    let body: string | undefined;
+    if (method === "POST" || method === "PUT" || method === "PATCH") {
+      headers["Content-Type"] = "application/json";
+      body = "{}";
+    }
+    const req: HttpRequest = { method, url, headers, body };
+    const c: CheckCase = {
+      operation: op,
+      request: { method, url, headers, body },
+      mode: "negative",
+      kind: "unsupported_method",
+      meta: { undeclared_method: method },
+    };
+    return { req, case: c };
+  });
 }
 
 function checkKinds(c: Check): CaseKind[] {
@@ -393,6 +517,11 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     }
   }
 
+  const checkRuntimeOptions = {
+    strict405: opts.strict405 === true,
+    strict401: opts.strict401 === true,
+  };
+
   const phase = opts.phase ?? "examples";
   const wantsExamples = phase === "examples" || phase === "all";
   const wantsCoverage = phase === "coverage" || phase === "all";
@@ -421,8 +550,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     const cases: BuiltCase[] = [];
     if (wantsExamples && neededKinds.has("positive")) cases.push(buildPositive(op, opts.baseUrl, opts.pathVars));
     if (neededKinds.has("missing_required_header")) {
-      const c = buildMissingHeader(op, opts.baseUrl, opts.pathVars);
-      if (c) cases.push(c);
+      cases.push(...buildMissingHeader(op, opts.baseUrl, opts.pathVars));
     }
     if (wantsExamples && neededKinds.has("negative_data")) {
       const c = buildNegativeData(op, opts.baseUrl, opts.pathVars);
@@ -433,11 +561,21 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       for (const b of boundary) {
         if (neededKinds.has(b.case.kind)) cases.push(b);
       }
+      // ARV-180: param-axis coverage. Emits negative_data cases for
+      // path/query parameter mutations (drop-required-query, wrong-type,
+      // invalid-format, invalid-enum, boundary violations). On GET-heavy
+      // APIs the body-axis walker above emits zero cases, so this is the
+      // only coverage signal for `status_code_conformance` and
+      // `negative_data_rejection` on those operations.
+      if (neededKinds.has("negative_data")) {
+        for (const b of buildParamCoverageCases(op, opts.baseUrl, { allowX00: opts.allowX00, pathVars: opts.pathVars })) {
+          cases.push(b);
+        }
+      }
     }
     if (unsupportedMethodOwner.get(op.path) === op) {
       const declared = buckets.get(op.path)?.declared ?? new Set([op.method.toUpperCase()]);
-      const c = buildUnsupportedMethod(op, declared, opts.baseUrl);
-      if (c) cases.push(c);
+      cases.push(...buildUnsupportedMethod(op, declared, opts.baseUrl));
     }
 
     for (const built of cases) {
@@ -481,6 +619,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           response: checkResp,
           schemaValidator,
           doc,
+          options: checkRuntimeOptions,
         });
         if (outcome.kind === "fail") {
           recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent);
@@ -547,6 +686,13 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       authHeaders: opts.authHeaders,
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed,
       timeoutMs: opts.timeoutMs,
+      // ARV-181: stateful checks (ignored_auth) need the same
+      // fixture-driven path-var substitution that ARV-141 wired into
+      // the per-response runner — without this the synthetic baseline
+      // lands on literal `/{event_id}` and the broken-baseline guard
+      // skips the whole op.
+      pathVars: opts.pathVars,
+      options: checkRuntimeOptions,
     });
     const crudGroups = activeStateful.some((c) => c.phase === "crud") ? detectCrudGroups(allOps) : [];
     summary.checks_run += activeStateful.length;

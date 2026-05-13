@@ -277,4 +277,48 @@ describe("unsupported_method", () => {
     ));
     expect(r.kind).toBe("fail");
   });
+
+  // ARV-179: OPTIONS 2xx is legitimate CORS preflight — must pass even
+  // though OPTIONS is itself an "undeclared method" for paths that
+  // don't list it. The check ignores OPTIONS-success.
+  test("ARV-179 — OPTIONS 200 passes (CORS preflight)", () => {
+    const r = unsupportedMethod.run(ctx(
+      makeCase({ kind: "unsupported_method", meta: { undeclared_method: "OPTIONS" }, mode: "negative" }),
+      makeResponse({ status: 200 }),
+    ));
+    expect(r.kind).toBe("pass");
+  });
+  test("ARV-179 — OPTIONS 204 passes (no-body CORS preflight)", () => {
+    const r = unsupportedMethod.run(ctx(
+      makeCase({ kind: "unsupported_method", meta: { undeclared_method: "OPTIONS" }, mode: "negative" }),
+      makeResponse({ status: 204 }),
+    ));
+    expect(r.kind).toBe("pass");
+  });
+
+  // ARV-179 strict-405 mode mirrors schemathesis V4 default policy.
+  test("ARV-179 strict-405 — 404 fails (was pass under pragmatic policy)", () => {
+    const r = unsupportedMethod.run({
+      case: makeCase({ kind: "unsupported_method", meta: { undeclared_method: "PATCH" }, mode: "negative" }),
+      response: makeResponse({ status: 404 }),
+      options: { strict405: true },
+    });
+    expect(r.kind).toBe("fail");
+  });
+  test("ARV-179 strict-405 — 405 still passes", () => {
+    const r = unsupportedMethod.run({
+      case: makeCase({ kind: "unsupported_method", meta: { undeclared_method: "PATCH" }, mode: "negative" }),
+      response: makeResponse({ status: 405 }),
+      options: { strict405: true },
+    });
+    expect(r.kind).toBe("pass");
+  });
+  test("ARV-179 strict-405 — OPTIONS 200 still passes (anti-FP wins over strictness)", () => {
+    const r = unsupportedMethod.run({
+      case: makeCase({ kind: "unsupported_method", meta: { undeclared_method: "OPTIONS" }, mode: "negative" }),
+      response: makeResponse({ status: 200 }),
+      options: { strict405: true },
+    });
+    expect(r.kind).toBe("pass");
+  });
 });

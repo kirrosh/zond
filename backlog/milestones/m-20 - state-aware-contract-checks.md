@@ -34,6 +34,9 @@ m-20 — это **state-aware contract layer**. Не fuzz engine (это m-21+),
   zond verified is correct».
 - Final session evaluation §4 пункты 1–4 (cross-call invariants, state
   machine, idempotency, pagination).
+- `backlog/notes/m-20-validation.md` (2026-05-13) — competitor research +
+  agent-augmented re-framing. **Принципиально меняет approach** на
+  yaml-declarative + LLM-assisted authoring + human review.
 
 ### Стратегия
 - `strategy/strategy.md` §2 «Depth» — куда движемся; m-20 заполняет
@@ -41,6 +44,15 @@ m-20 — это **state-aware contract layer**. Не fuzz engine (это m-21+),
 - `strategy/vector-6-real-api-quality-signals.md` (создаётся параллельно) —
   более широкий research-набор; m-20 берёт только bottom 5 пунктов с
   ясным контуром.
+
+### Конкуренты (research 2026-05-13)
+- Schemathesis V4, EvoMaster, RestTestGen — не покрывают ни один из 5
+  m-20 invariant'ов целиком (greenfield).
+- **Dochia** — closest competitor (CLI + OpenAPI + playbooks, есть
+  idempotency playbook). Deep-dive в ARV-188 перед началом ARV-169.
+- Akto — YAML-templates модель, стоит скопировать структуру.
+- AutoRestTest/KAT — академический LLM-inference resource graph, мы
+  идём дальше: LLM + user-review в declarative yaml.
 
 ## Цели майлстоуна
 
@@ -106,6 +118,15 @@ m-20 — это **state-aware contract layer**. Не fuzz engine (это m-21+),
   interactsh в m-18), не часть core zond.
 - **Skill catch-up.** zond-checks / zond-max-coverage обновляются параллельно;
   без skill-mention новый check останется невидимым (lesson m-15..17 §C).
+- **Agent-authored yaml as first-class.** (added 2026-05-13). Каждый probe —
+  yaml-driven, не auto-detect алгоритм. Inference вынесен в `zond api annotate
+  --<aspect>` (ARV-187) — LLM-pass пишет draft в `.api-resources.local.yaml`,
+  человек ревьюит через git diff. Detail: `backlog/notes/m-20-validation.md`.
+- **Algorithmic minimalism.** Если detection требует >100 строк
+  pattern-matching кода — выносится в annotate, не в core probe. Core probe
+  читает yaml и проверяет invariant.
+- **Review boundary.** LLM пишет только в `.local.yaml` overlay, никогда в
+  основной `.api-resources.yaml`. Чёткая граница «что от LLM, что от человека».
 
 ## Done-критерий
 

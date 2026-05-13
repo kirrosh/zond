@@ -68,6 +68,25 @@ export interface CheckCase {
   meta?: Record<string, unknown>;
 }
 
+/** ARV-179: per-run knobs surfaced from `RunCheckOptions` into the
+ *  check itself. Add new fields here when a check needs an opt-in
+ *  behaviour that doesn't deserve its own check id. Keep this lean —
+ *  most knobs belong upstream in the case-generator, not in the
+ *  check's response-side logic. */
+export interface CheckRuntimeOptions {
+  /** ARV-179: require strict 405 for `unsupported_method` (matches
+   *  schemathesis V4 default). Off by default — zond's pragmatic policy
+   *  accepts 401/403/404 as legitimate rejections of an undeclared
+   *  method (common nginx/gateway behaviour). */
+  strict405?: boolean;
+  /** ARV-181: require strict 401 for `ignored_auth` no-auth / bogus-auth
+   *  variants (matches schemathesis V4 default). Off by default — zond's
+   *  pragmatic policy accepts any 4xx as a legitimate auth-reject (403,
+   *  404, 422 are common). With this on, only 401 passes — a 403 on
+   *  no_auth becomes a finding "expected 401, got 403". */
+  strict401?: boolean;
+}
+
 export interface CheckContext {
   case: CheckCase;
   response: CheckResponse;
@@ -77,6 +96,8 @@ export interface CheckContext {
   /** Original spec doc — checks that need declared headers /
    *  content-types / status codes look them up here. */
   doc?: OpenAPIV3.Document;
+  /** ARV-179: per-run knobs (see CheckRuntimeOptions). */
+  options?: CheckRuntimeOptions;
 }
 
 export type CheckOutcome =

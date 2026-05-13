@@ -1,19 +1,36 @@
 /**
- * `ignored_auth` (m-15 ARV-3) — for every operation that declares a
- * security requirement, send 3 requests:
+ * `ignored_auth` (m-15 ARV-3, refined in ARV-181) — for every operation
+ * that declares a security requirement, send 3 requests:
  *
  *   1. baseline   — full real-auth headers,
- *   2. no_auth    — drop every auth header,
+ *   2. no_auth    — drop every auth-shaped header,
  *   3. bogus_auth — replace each auth header value with a malformed-
  *                   shaped, plausibly-typed bogus.
  *
- * If (2) or (3) returns 2xx, the server is silently ignoring auth →
- * HIGH finding. Anti-FP guards (mandatory):
+ * Verdict logic (ARV-181 differential):
+ *
+ *   - baseline 5xx → skip (server unhealthy; nothing we say is trustworthy).
+ *   - baseline 2xx → strict mode. Any 2xx on no_auth/bogus → HIGH bypass.
+ *   - baseline 4xx → soft mode. The auth token didn't get a 2xx (wrong
+ *     permissions, real path-var not provided, etc.), but we can still
+ *     learn from how the server treats *worse* credentials:
+ *       · no_auth/bogus returns **strictly better** status (lower 4xx
+ *         class, or 2xx/3xx) → HIGH bypass. The classic smoking gun
+ *         is `baseline 403 / no_auth 200`.
+ *       · same or worse status → pass (auth was checked; the resource
+ *         simply isn't accessible to anyone).
+ *
+ * Strictness:
+ *   - default: no_auth/bogus passes if status is in [400..499] (any 4xx).
+ *   - --strict-401 (CheckRuntimeOptions.strict401): only 401 passes; any
+ *     other status — even 403/404 — fails. Mirrors schemathesis V4.
+ *
+ * Anti-FP guards (kept from ARV-3):
  *   - skip operations with `security: []` override (explicitly public),
- *   - skip when baseline ≠ 2xx (auth setup is broken; we'd never see a
- *     valid 2xx, so a 4xx on (2)/(3) is meaningless),
- *   - skip when bootstrap_cleanup_failed (data state corrupted).
+ *   - skip when `bootstrap_cleanup_failed` (data state corrupted),
+ *   - skip when no auth headers provided to the harness at all.
  */
+import type { OpenAPIV3 } from "openapi-types";
 import type { AuthStatefulCheck } from "../stateful.ts";
 import type { HttpRequest } from "../../runner/types.ts";
 
@@ -27,16 +44,47 @@ function buildBogus(name: string, value: string): string {
   return name.toLowerCase().includes("token") ? "ZZZZZZZZZZ" : "bogus-" + "z".repeat(8);
 }
 
-function fillPath(path: string, params: { name: string; value: string }[]): string {
-  return path.replace(/\{([^}]+)\}/g, (_, n) => {
-    const p = params.find((x) => x.name === n);
-    return p ? encodeURIComponent(p.value) : "1";
+/** ARV-181: substitute path placeholders using `h.pathVars` first, then
+ *  fall back to schema-derived placeholders. Mirrors `fillPathParams`
+ *  in `runner.ts` (kept inline to avoid a cross-module dependency that
+ *  would yank generator imports into stateful checks). */
+function fillPath(
+  path: string,
+  op: { parameters: OpenAPIV3.ParameterObject[] },
+  pathVars: Record<string, string> | undefined,
+): string {
+  return path.replace(/\{([^}]+)\}/g, (_, name: string) => {
+    const real = pathVars?.[name];
+    if (typeof real === "string" && real.length > 0) return encodeURIComponent(real);
+    const param = op.parameters.find((p) => p.name === name && p.in === "path");
+    const schema = param?.schema as OpenAPIV3.SchemaObject | undefined;
+    if (schema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
+    if (schema?.type === "integer" || schema?.type === "number") return "1";
+    return "x";
   });
 }
 
 function isAuthHeaderName(name: string): boolean {
   const n = name.toLowerCase();
   return n === "authorization" || n.startsWith("x-api") || n.includes("token") || n.includes("key");
+}
+
+/** ARV-181: classify response status into a single ordering bucket so
+ *  the differential broken-baseline logic can answer "did stripping
+ *  auth give a *better* status than baseline?". Lower index = more
+ *  permissive (worse from auth-enforcement POV). 5xx is its own
+ *  bucket — never compare across it. */
+function statusBucket(status: number): number {
+  if (status >= 200 && status < 400) return 0; // accepted-ish
+  if (status === 401) return 3;                // canonical "auth required"
+  if (status === 403) return 2;                // permission denied
+  if (status >= 400 && status < 500) return 1; // other 4xx (404, 422, ...)
+  return -1;                                   // 5xx / 1xx — incomparable
+}
+
+function isAcceptableRejection(status: number, strict401: boolean): boolean {
+  if (strict401) return status === 401;
+  return status >= 400 && status < 500;
 }
 
 export const ignoredAuth: AuthStatefulCheck = {
@@ -57,15 +105,16 @@ export const ignoredAuth: AuthStatefulCheck = {
     if (Object.keys(h.authHeaders).length === 0) {
       return { kind: "skip", reason: "no auth headers provided to harness — pass --auth-header" };
     }
-    const url = `${h.baseUrl.replace(/\/+$/, "")}${fillPath(op.path, [])}`;
+    const strict401 = h.options?.strict401 === true;
+    const url = `${h.baseUrl.replace(/\/+$/, "")}${fillPath(op.path, op, h.pathVars)}`;
     const method = op.method.toUpperCase();
     const baseHeaders: Record<string, string> = { Accept: "application/json", ...h.authHeaders };
 
     // 1. baseline
     const baseReq: HttpRequest = { method, url, headers: baseHeaders };
     const baseline = await h.send(baseReq);
-    if (baseline.status < 200 || baseline.status >= 300) {
-      return { kind: "skip", reason: `baseline returned ${baseline.status} — broken-baseline guard` };
+    if (baseline.status >= 500) {
+      return { kind: "skip", reason: `baseline returned ${baseline.status} — server-side error, no trustworthy signal` };
     }
 
     // 2. no_auth — strip every auth-shaped header
@@ -74,13 +123,6 @@ export const ignoredAuth: AuthStatefulCheck = {
       if (isAuthHeaderName(k)) delete noAuthHeaders[k];
     }
     const noAuth = await h.send({ method, url, headers: noAuthHeaders });
-    if (noAuth.status >= 200 && noAuth.status < 300) {
-      return {
-        kind: "fail",
-        message: `Server accepted request without auth credentials (status ${noAuth.status}) — auth is being ignored`,
-        evidence: { variant: "no_auth", baseline_status: baseline.status, no_auth_status: noAuth.status },
-      };
-    }
 
     // 3. bogus_auth — keep header names, replace values
     const bogusHeaders: Record<string, string> = { ...baseHeaders };
@@ -88,14 +130,82 @@ export const ignoredAuth: AuthStatefulCheck = {
       if (isAuthHeaderName(k)) bogusHeaders[k] = buildBogus(k, bogusHeaders[k]!);
     }
     const bogus = await h.send({ method, url, headers: bogusHeaders });
-    if (bogus.status >= 200 && bogus.status < 300) {
-      return {
-        kind: "fail",
-        message: `Server accepted request with bogus auth (status ${bogus.status}) — credentials not validated`,
-        evidence: { variant: "bogus_auth", baseline_status: baseline.status, bogus_auth_status: bogus.status },
-      };
+
+    const baseBucket = statusBucket(baseline.status);
+    const baseIs2xx = baseline.status >= 200 && baseline.status < 300;
+
+    // ── strict-2xx-baseline branch (legacy path, unchanged semantically) ──
+    if (baseIs2xx) {
+      if (noAuth.status >= 200 && noAuth.status < 300) {
+        return {
+          kind: "fail",
+          message: `Server accepted request without auth credentials (status ${noAuth.status}) — auth is being ignored`,
+          evidence: { variant: "no_auth", baseline_status: baseline.status, no_auth_status: noAuth.status },
+        };
+      }
+      if (bogus.status >= 200 && bogus.status < 300) {
+        return {
+          kind: "fail",
+          message: `Server accepted request with bogus auth (status ${bogus.status}) — credentials not validated`,
+          evidence: { variant: "bogus_auth", baseline_status: baseline.status, bogus_auth_status: bogus.status },
+        };
+      }
+      if (strict401) {
+        if (noAuth.status !== 401) {
+          return {
+            kind: "fail",
+            message: `no_auth returned ${noAuth.status}, expected 401 (--strict-401)`,
+            evidence: { variant: "no_auth_strict", baseline_status: baseline.status, no_auth_status: noAuth.status, strict_401: true },
+          };
+        }
+        if (bogus.status !== 401) {
+          return {
+            kind: "fail",
+            message: `bogus_auth returned ${bogus.status}, expected 401 (--strict-401)`,
+            evidence: { variant: "bogus_auth_strict", baseline_status: baseline.status, bogus_auth_status: bogus.status, strict_401: true },
+          };
+        }
+      }
+      return { kind: "pass" };
     }
 
+    // ── differential 4xx-baseline branch (ARV-181) ─────────────────────
+    if (baseBucket < 0) {
+      return { kind: "skip", reason: `baseline returned ${baseline.status} — incomparable status, no trustworthy signal` };
+    }
+    const noAuthBucket = statusBucket(noAuth.status);
+    const bogusBucket = statusBucket(bogus.status);
+
+    if (noAuthBucket >= 0 && noAuthBucket < baseBucket) {
+      return {
+        kind: "fail",
+        message: `Server gave a more permissive status (${noAuth.status}) without auth than with valid auth (${baseline.status}) — possible bypass`,
+        evidence: { variant: "no_auth_differential", baseline_status: baseline.status, no_auth_status: noAuth.status },
+      };
+    }
+    if (bogusBucket >= 0 && bogusBucket < baseBucket) {
+      return {
+        kind: "fail",
+        message: `Server gave a more permissive status (${bogus.status}) with bogus auth than with valid auth (${baseline.status}) — possible bypass`,
+        evidence: { variant: "bogus_auth_differential", baseline_status: baseline.status, bogus_auth_status: bogus.status },
+      };
+    }
+    if (strict401) {
+      if (!isAcceptableRejection(noAuth.status, true) && noAuthBucket >= 0) {
+        return {
+          kind: "fail",
+          message: `no_auth returned ${noAuth.status}, expected 401 (--strict-401, baseline ${baseline.status})`,
+          evidence: { variant: "no_auth_strict", baseline_status: baseline.status, no_auth_status: noAuth.status, strict_401: true },
+        };
+      }
+      if (!isAcceptableRejection(bogus.status, true) && bogusBucket >= 0) {
+        return {
+          kind: "fail",
+          message: `bogus_auth returned ${bogus.status}, expected 401 (--strict-401, baseline ${baseline.status})`,
+          evidence: { variant: "bogus_auth_strict", baseline_status: baseline.status, bogus_auth_status: bogus.status, strict_401: true },
+        };
+      }
+    }
     return { kind: "pass" };
   },
 };

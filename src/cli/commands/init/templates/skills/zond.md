@@ -136,6 +136,7 @@ to run, not a mandate to always run all five.
 | "tests are failing", "diagnose run X", "fix failures" | 4 (Diagnose) | 1–3 |
 | "что упало в последнем run", "summary последнего прогона", "почему красное" | hand off to `zond-triage` | 1–7 |
 | "deep audit", "find edge cases", "boundary coverage", "broken auth", "SARIF for code scanning" | hand off to `zond-checks` | 1–7 |
+| "schemathesis-style strict mode" (405/401 enforcement) | hand off to `zond-checks` — `--strict-405` / `--strict-401` (m-18) | 1–7 |
 | "the run after my fix" | 3 (Run) → 4 (Diagnose) | 1–2 |
 | "what variables does this API need", "is auth_token set" | `zond doctor --api <name> --json` | direct file reads |
 | "workspace looks messy", "start clean", "remove auto-generated files" | `zond clean --api <name>` (dry-run) → `--force` | — |
