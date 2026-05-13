@@ -1,9 +1,10 @@
 ---
 id: ARV-184
 title: 'checks: missing_required_header — exhaustive enumeration (Stripe parity)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 08:35'
+updated_date: '2026-05-13 11:24'
 labels:
   - m-18
   - depth

@@ -1,9 +1,10 @@
 ---
 id: ARV-182
 title: 'm-18 decision: fuzz engine (m-19) — defer, not block m-18'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 06:56'
+updated_date: '2026-05-13 11:25'
 labels:
   - m-18
   - decision

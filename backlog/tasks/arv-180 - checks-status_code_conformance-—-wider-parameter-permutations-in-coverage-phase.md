@@ -3,9 +3,10 @@ id: ARV-180
 title: >-
   checks: status_code_conformance — wider parameter permutations in coverage
   phase
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 06:56'
+updated_date: '2026-05-13 11:24'
 labels:
   - m-18
   - depth

@@ -193,3 +193,67 @@ fuzz почти не помогает, проблема — узкое enumerati
 
 Stripe baseline. Если на Stripe картина = mix Sentry+Resend (как ожидается —
 он write-heavy + большой spec) — m-18 готов к финализации.
+
+---
+
+## Round 3: Stripe (spec 381 endpoints / 534 ops)
+
+- zond `checks run --phase all` — все 534 операции.
+- schemathesis V4 `--checks all --phases examples,coverage` (stateful не
+  прогоняли — Stripe scope слишком большой). Прервано после 47MB ndjson.
+- Overlap: 209 endpoints (после полного zond + частичного schemathesis).
+
+### Pragmatic (после ARV-183/184)
+
+| bucket | count |
+|---|---:|
+| BOTH | 7 |
+| ZOND-only | 62 |
+| SCHEMATHESIS-only | 123 |
+
+`status_code_conformance` phantom-findings (601) исправлены через ARV-183
+(preserve `EndpointInfo.originalPath` до ARV-40 disambiguation). Real
+findings = 0 → паритет.
+
+### Strict (--strict-405 + --strict-401)
+
+| bucket | count |
+|---|---:|
+| BOTH | **49** (was 7) |
+| ZOND-only | 230 (was 62) |
+| SCHEMATHESIS-only | **81** (was 123) |
+
+Резкое улучшение: strict-режим закрыл 42 endpoints `unsupported_method`
+(полный паритет на этой check'е — BOTH=42 of 42, S-only=0).
+
+### Per-check Stripe overlap (strict)
+
+| check | zond | sch | BOTH | Z-only | S-only | вердикт |
+|---|---:|---:|---:|---:|---:|---|
+| unsupported_method | 209 | 42 | **42** | 167 | **0** | ✅ паритет |
+| status_code_conformance | 0 | 0 | 0 | 0 | **0** | ✅ паритет |
+| missing_required_header | 0 | 42 | 0 | 0 | 42 | ARV-185 (auth-headers) |
+| positive_data_acceptance | 48 | 30 | 5 | 43 | 25 | (a) fuzz → m-19 |
+| content_type_conformance | 1 | 10 | 0 | 1 | 10 | ARV-186 |
+| negative_data_rejection | 20 | 5 | 2 | 18 | 3 | zond превосходит |
+| not_a_server_error | 0 | 1 | 0 | 0 | 1 | edge |
+| ignored_auth | 1 | 0 | 0 | 1 | 0 | zond > sch |
+
+### Сравнение 3 API
+
+| | Sentry (GET-heavy) | Resend (mix) | Stripe (write-heavy) |
+|---|---|---|---|
+| До фиксов BOTH | 15 | 51 | 7 |
+| После фиксов BOTH | 78 (pragmatic) / 110 (um strict) | 9 (auth strict) + 61 (scc) | 49 (full strict) |
+| До S-only | 193 | 115 | 123 |
+| После S-only | 1-6 (по check'у) | 1 (auth strict) | 81 |
+| Фикс с biggest impact | ARV-179 (1→110 в overlap'е) | ARV-181 (0→81) | ARV-180+183 (phantom 601→0) |
+
+## Финальный вывод
+
+После 4 cheap-fix'ов (ARV-179/180/181/183) + 1 enumeration-fix (ARV-184)
+zond архитектурно паритен schemathesis V4 на 8 из 12 checks. Оставшийся
+gap — структурные различия (auth-header definitions, content-type
+mutations) или fuzz-territory (m-19), не блокеры m-18.
+
+См. `m-18-decision.md` для finalised decision-документа.
