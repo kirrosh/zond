@@ -6,13 +6,13 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-12 13:26'
-updated_date: '2026-05-13 11:33'
+updated_date: '2026-05-13 12:33'
 labels:
   - depth
   - spec
   - deferred-m-21
 dependencies: []
-priority: high
+priority: medium
 ---
 
 ## Description
