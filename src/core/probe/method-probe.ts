@@ -112,15 +112,25 @@ export function generateMethodProbes(opts: MethodProbeOptions): MethodProbeResul
     const headers = getAuthHeaders(bucket.sample, securitySchemes);
 
     const steps: RawStep[] = missing.map((method) => {
+      // ARV-179: OPTIONS on an undeclared path is legitimately handled
+      // by most stacks (CORS preflight, 200/204 with Allow header). Let
+      // the probe accept 2xx for OPTIONS only; everything else keeps
+      // the strict "no 2xx, no 5xx" expectation.
+      const acceptable = method === "OPTIONS"
+        ? [200, 204, ...ACCEPTABLE_STATUSES]
+        : ACCEPTABLE_STATUSES;
+      const expectLabel = method === "OPTIONS"
+        ? `${method} ${bucket.path} — undeclared method must not 5xx (OPTIONS may legitimately succeed)`
+        : `${method} ${bucket.path} — undeclared method must reject (no 5xx, no 2xx)`;
       const step: RawStep = {
-        name: `${method} ${bucket.path} — undeclared method must reject (no 5xx, no 2xx)`,
+        name: expectLabel,
         source: {
           generator: "method-probe",
           endpoint: `${method} ${bucket.path}`,
-          response_branch: ACCEPTABLE_STATUSES.map(String).join("|"),
+          response_branch: acceptable.map(String).join("|"),
         },
         [method]: convertPath(concretePath),
-        expect: { status: ACCEPTABLE_STATUSES },
+        expect: { status: acceptable },
       };
       // Body-bearing methods on an undeclared route — send a minimal valid
       // JSON object to provoke any body-parsing path while the router is

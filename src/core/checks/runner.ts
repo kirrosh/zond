@@ -90,6 +90,9 @@ export interface RunChecksOptions {
    *  bursts of parallel workers respect a global RPS budget (also
    *  reacts to RateLimit-* headers via `note()`). */
   rateLimiter?: RateLimiter;
+  /** ARV-179: opt-in strict-405 semantics for `unsupported_method`.
+   *  Off by default — see `CheckRuntimeOptions.strict405` for rationale. */
+  strict405?: boolean;
   /** ARV-141: substitute real fixture values into path-param placeholders so
    *  the deterministic synthetic 404 (`/issues/x`) becomes a real-id 200/422
    *  whenever `.env.yaml` actually has a fixture. This makes `checks run`
@@ -261,35 +264,41 @@ function buildNegativeData(op: EndpointInfo, baseUrl: string, pathVars?: Record<
   return { req, case: c };
 }
 
-/** For `unsupported_method` we send a method that isn't declared on
- *  the *path bucket*. The check operates on the whole path, so we ask
- *  the runner to emit at most one probe per path (using one of the
- *  declared operations as the carrier of `op` metadata). */
+/** For `unsupported_method` we send every method that isn't declared on
+ *  the *path bucket*. ARV-179: pre-fix this emitted just `missing[0]`,
+ *  which produced ≈1 finding per path on real APIs (vs schemathesis's
+ *  per-method enumeration that finds 100+ on the same target). The
+ *  check itself coalesces results per-(path, undeclared-method) pair,
+ *  so a path with 4 missing methods yields up to 4 findings. The
+ *  per-path "one owner" rule still applies — only the owner-op emits
+ *  the bucket — so we don't double-count on multi-method paths. */
 function buildUnsupportedMethod(
   op: EndpointInfo,
   declaredOnPath: Set<string>,
   baseUrl: string,
-): BuiltCase | null {
-  const missing = ALL_METHODS.filter((m) => !declaredOnPath.has(m));
-  if (missing.length === 0) return null;
-  const method = missing[0]!;
+): BuiltCase[] {
+  const declaredUpper = new Set(Array.from(declaredOnPath, (m) => m.toUpperCase()));
+  const missing = ALL_METHODS.filter((m) => !declaredUpper.has(m));
+  if (missing.length === 0) return [];
   const concretePath = pathWithMethodPlaceholders(op.path, op.parameters);
   const url = `${baseUrl.replace(/\/+$/, "")}${concretePath}`;
-  const headers: Record<string, string> = { Accept: "application/json" };
-  let body: string | undefined;
-  if (method === "POST" || method === "PUT" || method === "PATCH") {
-    headers["Content-Type"] = "application/json";
-    body = "{}";
-  }
-  const req: HttpRequest = { method, url, headers, body };
-  const c: CheckCase = {
-    operation: op,
-    request: { method, url, headers, body },
-    mode: "negative",
-    kind: "unsupported_method",
-    meta: { undeclared_method: method },
-  };
-  return { req, case: c };
+  return missing.map((method) => {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    let body: string | undefined;
+    if (method === "POST" || method === "PUT" || method === "PATCH") {
+      headers["Content-Type"] = "application/json";
+      body = "{}";
+    }
+    const req: HttpRequest = { method, url, headers, body };
+    const c: CheckCase = {
+      operation: op,
+      request: { method, url, headers, body },
+      mode: "negative",
+      kind: "unsupported_method",
+      meta: { undeclared_method: method },
+    };
+    return { req, case: c };
+  });
 }
 
 function checkKinds(c: Check): CaseKind[] {
@@ -393,6 +402,8 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     }
   }
 
+  const checkRuntimeOptions = { strict405: opts.strict405 === true };
+
   const phase = opts.phase ?? "examples";
   const wantsExamples = phase === "examples" || phase === "all";
   const wantsCoverage = phase === "coverage" || phase === "all";
@@ -436,8 +447,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     }
     if (unsupportedMethodOwner.get(op.path) === op) {
       const declared = buckets.get(op.path)?.declared ?? new Set([op.method.toUpperCase()]);
-      const c = buildUnsupportedMethod(op, declared, opts.baseUrl);
-      if (c) cases.push(c);
+      cases.push(...buildUnsupportedMethod(op, declared, opts.baseUrl));
     }
 
     for (const built of cases) {
@@ -481,6 +491,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           response: checkResp,
           schemaValidator,
           doc,
+          options: checkRuntimeOptions,
         });
         if (outcome.kind === "fail") {
           recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent);
