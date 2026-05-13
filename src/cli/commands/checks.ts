@@ -114,6 +114,7 @@ interface ChecksRunOptions {
   workers?: string;
   rateLimit?: string;
   verbose?: boolean;
+  strict405?: boolean;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -408,6 +409,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed === true,
       phase: phaseRaw as "examples" | "coverage" | "all",
       allowX00: opts.allowX00 === true,
+      strict405: opts.strict405 === true,
       mode: modeRaw as "positive" | "negative" | "all",
       operationFilter,
       onEvent: ndjsonOnEvent,
@@ -598,6 +600,10 @@ function defineRun(parent: Command): void {
     .option(
       "--verbose",
       "ARV-18: emit one stdout row per finding instead of aggregating identical findings (same check + same response status). JSON / NDJSON / SARIF outputs always carry the unaggregated list; this flag only controls the human summary.",
+    )
+    .option(
+      "--strict-405",
+      "ARV-179: require exactly 405 for `unsupported_method` (mirrors schemathesis V4 default). Off by default — zond's pragmatic policy also accepts 401/403/404 as valid rejections of an undeclared method.",
     )
     .action(checksRunAction);
 }

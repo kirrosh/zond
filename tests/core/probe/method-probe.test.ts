@@ -2,11 +2,12 @@ import { describe, it, expect } from "bun:test";
 import { generateMethodProbes } from "../../../src/core/probe/method-probe.ts";
 import { ep } from "../../_helpers/endpoints";
 
-const KNOWN_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+const KNOWN_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"] as const;
 
 describe("generateMethodProbes", () => {
-  it("emits one suite per path with only the missing methods", () => {
-    // Path /audiences declares GET and POST → missing PUT, PATCH, DELETE.
+  it("emits one suite per path with every missing method (ARV-179)", () => {
+    // Path /audiences declares GET and POST → missing PUT, PATCH, DELETE,
+    // OPTIONS, TRACE (5 of 7).
     const result = generateMethodProbes({
       endpoints: [
         ep({ method: "GET", path: "/audiences" }),
@@ -19,7 +20,7 @@ describe("generateMethodProbes", () => {
     expect(result.suites).toHaveLength(1);
 
     const suite = result.suites[0]!;
-    expect(suite.tests).toHaveLength(3);
+    expect(suite.tests).toHaveLength(5);
 
     const methodsUsed = suite.tests.map((t) => {
       // RawStep has the HTTP method as a key whose value is the URL string.
@@ -27,14 +28,21 @@ describe("generateMethodProbes", () => {
       if (!found) throw new Error(`step has no recognised HTTP method key: ${JSON.stringify(t)}`);
       return found;
     });
-    expect(new Set(methodsUsed)).toEqual(new Set(["PUT", "PATCH", "DELETE"]));
+    expect(new Set(methodsUsed)).toEqual(new Set(["PUT", "PATCH", "DELETE", "OPTIONS", "TRACE"]));
 
-    // Acceptable statuses must include 405/404 but never 5xx or 2xx.
+    // For non-OPTIONS methods, acceptable statuses must include 405/404 but never 5xx or 2xx.
+    // OPTIONS is allowed to 2xx (CORS preflight).
     for (const t of suite.tests) {
       const statuses = t.expect.status as number[];
+      const isOptions = "OPTIONS" in t;
       expect(statuses).toContain(405);
       expect(statuses.some((s) => s >= 500)).toBe(false);
-      expect(statuses.some((s) => s >= 200 && s < 300)).toBe(false);
+      if (!isOptions) {
+        expect(statuses.some((s) => s >= 200 && s < 300)).toBe(false);
+      } else {
+        // ARV-179: OPTIONS is allowed to legitimately succeed.
+        expect(statuses).toContain(200);
+      }
     }
   });
 
@@ -46,6 +54,8 @@ describe("generateMethodProbes", () => {
         ep({ method: "PUT", path: "/full" }),
         ep({ method: "PATCH", path: "/full" }),
         ep({ method: "DELETE", path: "/full" }),
+        ep({ method: "OPTIONS", path: "/full" }),
+        ep({ method: "TRACE", path: "/full" }),
       ],
       securitySchemes: [],
     });
