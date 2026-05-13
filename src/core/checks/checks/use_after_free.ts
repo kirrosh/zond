@@ -6,7 +6,7 @@
  */
 import type { CrudStatefulCheck } from "../stateful.ts";
 import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId, fillPathParams } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody } from "./_crud-helpers.ts";
 
 export const useAfterFree: CrudStatefulCheck = {
   id: "use_after_free",
@@ -26,15 +26,20 @@ export const useAfterFree: CrudStatefulCheck = {
     const del = g.delete!;
     const baseHeaders = { Accept: "application/json", ...h.authHeaders };
 
-    // 1. create
-    const createBody = create.requestBodySchema
-      ? JSON.stringify(generateFromSchema(create.requestBodySchema))
-      : "{}";
+    // 1. create — ARV-191: respect form-urlencoded so Stripe-style APIs
+    // don't silently broken-baseline-skip every CRUD chain.
+    const generated = create.requestBodySchema ? generateFromSchema(create.requestBodySchema) : {};
+    const { body: createBody, contentType } = serializeCheckBody(
+      create,
+      (generated && typeof generated === "object" && !Array.isArray(generated))
+        ? (generated as Record<string, unknown>) : {},
+      h.pathVars,
+    );
     const createUrl = `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`;
     const createResp = await h.send({
       method: "POST",
       url: createUrl,
-      headers: { ...baseHeaders, "Content-Type": create.requestBodyContentType ?? "application/json" },
+      headers: { ...baseHeaders, "Content-Type": contentType },
       body: createBody,
     });
     if (createResp.status < 200 || createResp.status >= 300) {

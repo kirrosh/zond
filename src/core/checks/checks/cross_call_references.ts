@@ -28,7 +28,7 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { CrudStatefulCheck } from "../stateful.ts";
 import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId, fillPathParams } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody } from "./_crud-helpers.ts";
 import { computeDrift } from "./_readback-helpers.ts";
 
 function declaredReadFields(read: { responses: Array<{ statusCode: number; schema?: unknown }> }): Set<string> {
@@ -73,11 +73,13 @@ export const crossCallReferences: CrudStatefulCheck = {
     }
 
     const createUrl = `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`;
+    // ARV-191: form-urlencoded dispatch — see _crud-helpers.serializeCheckBody.
+    const { body: createBodyStr, contentType } = serializeCheckBody(create, writeBody as Record<string, unknown>, h.pathVars);
     const createResp = await h.send({
       method: "POST",
       url: createUrl,
-      headers: { ...baseHeaders, "Content-Type": create.requestBodyContentType ?? "application/json" },
-      body: JSON.stringify(writeBody),
+      headers: { ...baseHeaders, "Content-Type": contentType },
+      body: createBodyStr,
     });
     if (createResp.status < 200 || createResp.status >= 300) {
       return { kind: "skip", reason: `create returned ${createResp.status} — broken-baseline guard` };
