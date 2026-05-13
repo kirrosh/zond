@@ -15,11 +15,67 @@ Saved 2026-05-13. Источник: research-pass по конкурентам st
 | **RestTestGen** | ❌ | ❌ | ❌ | ❌ | ❌ | Operation Dependency Graph через name-matching |
 | **Akto** | ❌ | user-yaml | ❌ | ❌ | ❌ | YAML-templates модель — стоит скопировать |
 | **Optic** | partial (capture-vs-spec) | ❌ | ❌ | ❌ | ❌ | Archived Jan 2026 — niche открыта |
-| **Dochia** | ⚠ unclear | ✅ (idempotency playbook) | ⚠ | ⚠ | ❌ | **Closest competitor** — CLI + OpenAPI + playbooks. Нужен deep-dive. |
+| **Dochia** | ❌ | ❌ (blog only, no playbook) | ❌ | ⚠ (1 trivial playbook) | ❌ | См. §«Dochia deep-dive» ниже |
 | **StackHawk/APIsec/Bright** | ❌ | ❌ | ❌ | ❌ | ❌ | DAST/SaaS, не contract |
 | **Postman/Pact** | ❌ | ❌ | ❌ | ❌ | ❌ | Разные парадигмы |
 
 **Greenfield**: POST→GET shape diff — никто не делает целиком. Idempotency — только Dochia, но как user-authored playbook, не auto. Lifecycle state-machine — никто. Webhook delivery в API testing tool'ах — никто (Microcks умеет в mock-mode).
+
+## Dochia deep-dive (ARV-188, 2026-05-13)
+
+**Главное**: Dochia казался closest competitor, но **m-20 invariant'ов у них почти нет** — реальный stateful surface = 1 trivial playbook (DELETE→GET→404). Idempotency blog post — thought-leadership marketing, не product feature (нулевой реф на idempotency в code/playbooks). Greenfield подтверждён прямой проверкой.
+
+### Профиль
+- Java native binary, Apache-2.0, **145 GitHub stars** (`github.com/dochia-dev/dochia-cli`).
+- Основан Aug 2025, last release v2.1.1 (2026-04-01), monthly cadence.
+- Solo/small team, organization repo один.
+- Distribution: Homebrew, curl|sh, Docker.
+- Open-core: OSS + Premium tier "coming soon" с advanced playbooks, **Test Execution DSL** (potential m-20 overlap, watch list), non-OpenAPI support.
+
+### Архитектура
+- **126 per-call playbooks** (field/header/body fuzzers) + **1 stateful** (`DeletedResourcesNotAvailablePlaybook`).
+- Playbooks = Java classes с category-аннотациями, **не authorable пользователем** через yaml. Только через профили (yaml-bundle списков playbook'ов).
+- Два command'а: `dochia test` (structured playbooks) и `dochia fuzz` (continuous fuzz duration-based).
+- Config фрагментирован: `dochia.properties` + `headers.yml` + `query-params.yml` + `reference-data.yml` + `profiles.yml`.
+
+### Что у них есть, чего нет у нас
+- **`--skip-playbooks-for-extension "x-public-endpoint=true:BypassAuthentication"`** — skip rules через OpenAPI extensions в самом spec'е. Элегантно, без отдельного config file.
+- **Named profiles в CLI**: `ci`, `security`, `quick`, `full`, `compliance`, `type-coercion` + yaml-override.
+- **Dynamic value functions в yaml**: `#(uuid)`, `#(today)`, `#(todayPlus(30))`, `#(alphanumeric(16))`.
+- **Quality-gate DSL**: `--quality-gate "errors<5,warns<20"` + `--fail-on error,warn`.
+- **`init-skills` командa** для agentskills.io spec (Cursor/Windsurf/Claude Code/Codex). У нас своё через `zond init`, но их формат — open spec, стоит свериться на compatibility.
+
+### Чего нет у Dochia
+- **Никакого LLM** — code search по `openai|anthropic|claude|llm` нулевой. Agent у них **снаружи** (читает Dochia output), не **внутри** (помогает заполнить config). Это прямой контраст с нашим `zond api annotate`.
+- Нет POST→GET drift, idempotency probe, pagination invariants, lifecycle, webhooks (ни одного).
+- Нет resource-graph (только flat path→kv map в `reference-data.yml`).
+- Нет user-authored playbooks (только Java).
+- Нет multi-API workspace (один spec — один прогон).
+- Anti-FP — blackbox mode "5XX only filter", не fixture-regressions.
+
+### Что копировать в zond (2 новые ARV-задачи)
+1. **`x-zond-*` OpenAPI extensions** для skip/enable rules per endpoint. Низкий cost, complements `.api-resources.yaml`. Особенно полезно как fallback когда annotate ещё не прогоняли. → ARV-NEW3.
+2. **Dynamic value functions в yaml** (`#(uuid)`, `#(today)`, `#(todayPlus(N))`). Убирает stale hardcoded UUID/date traps. → ARV-NEW4.
+
+Опционально (не задачи, но добавить в roadmap):
+3. **Named profiles CLI ergonomic** — у zond уже есть `--phase`/`--check`, но explicit named profiles (`ci`, `security`, `quick`) + yaml-override стоят рассмотрения.
+4. **`--quality-gate "errors<5,warns<20"`** — лучше exit-code-only модели для CI.
+
+### От чего явно отойти
+- **Не дробить config на 4 файла** (`.properties` + 3 yaml). Наш `.api-resources.yaml` + `.env.yaml` уже single-purpose-files каждый, не размазывать.
+- **Не маркетить "stateful"** пока не shipped все 5 m-20 invariant'ов. Dochia переоценил один DELETE→404 как "stateful testing" — мы должны держать planку.
+- **Не закрывать LLM door** — Dochia сделал явную ставку на deterministic-only. Наш agent-augmented — категорическое преимущество, не отказываться.
+
+### Реальные advantages zond (после m-20)
+1. **Actual state-aware checks** — POST→GET shape diff, idempotency probe, pagination invariants. У Dochia нулёт.
+2. **Resource-graph config** — `.api-resources.yaml` с CRUD/lifecycle/idempotency semantic полями vs их flat path→kv map.
+3. **Agent-augmented authoring** (`zond api annotate` LLM-pass + git-diff review) — категория, в которую Dochia не входит и явно не собирается.
+4. **Anti-FP discipline** — differential baselines, strict flags, fixture regressions (ARV-183/184/186) vs их blackbox "5XX-only".
+
+### Open watch items
+- Premium "Test Execution DSL" — может быть stateful sequencing language. Re-check когда launch.
+- Парсят ли OpenAPI `links` (не документировано). Source-read `OpenAPIModelGenerator.java` если важно.
+- Расширится ли их `x-extension` pattern на enable (не только skip) — `x-idempotent=true` opt-in. Watch для нашего ARV-NEW3 дизайна.
 
 ## Agent-augmented testing — что уже есть
 
