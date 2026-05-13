@@ -71,6 +71,45 @@ export interface IdempotencyConfig {
   ignoreResponseFields?: string[];
 }
 
+/**
+ * ARV-171 (m-20 pagination-invariants): per-list-endpoint declaration
+ * of the pagination strategy. The `pagination_invariants` stateful
+ * check uses this to ask for two consecutive pages and assert
+ * disjointness + has_more consistency.
+ *
+ * Supported types in this milestone:
+ *   • `cursor` — Stripe/GitHub style: caller passes a cursor (e.g.
+ *     `starting_after=<id>`) derived from the last item of the
+ *     previous page. The check is built around this pattern.
+ *   • `page` and `offset` — declared for forward compatibility; the
+ *     check currently skips with a "pagination type not implemented"
+ *     reason so the yaml block stays a stable schema.
+ *
+ * Auto-detect fallback: if the list endpoint declares `starting_after`
+ * / `cursor` / `page_token` query parameters in the spec, the check
+ * uses sensible defaults (cursor_field=`id`, items_field=`data` →
+ * `items` → `results`, has_more_field=`has_more`). Explicit yaml is
+ * preferred — it documents intent and survives spec changes that
+ * rename query params.
+ */
+export interface PaginationConfig {
+  /** Pagination flavor. Default `cursor`. */
+  type?: "cursor" | "page" | "offset" | "token";
+  /** Query-param name that takes the cursor value. Default `starting_after`. */
+  cursorParam?: string;
+  /** Response field on each item that becomes the next cursor. Default `id`. */
+  cursorField?: string;
+  /** Response field that signals "more pages remain". Default `has_more`. */
+  hasMoreField?: string;
+  /** Query-param name for page size. Default `limit`. */
+  limitParam?: string;
+  /** Probe page-size. Default 2 (small enough to land two replies fast). */
+  defaultLimit?: number;
+  /** Response field carrying the array of items. Default `data` (Stripe);
+   *  falls back to `items` / `results` when missing. */
+  itemsField?: string;
+}
+
 export interface ApiResourceEntry {
   resource: string;
   basePath: string;
@@ -97,6 +136,8 @@ export interface ApiResourceEntry {
   readbackDiff?: ReadbackDiffConfig;
   /** ARV-170: opt-in idempotency-replay probe. */
   idempotency?: IdempotencyConfig;
+  /** ARV-171: pagination-invariants probe. */
+  pagination?: PaginationConfig;
 }
 
 export interface ApiResourceMap {
@@ -470,6 +511,16 @@ export function serializeApiResourceMap(m: ApiResourceMap): string {
         lines.push(`      ignore_response_fields:`);
         for (const f of ig) lines.push(`        - ${escape(f)}`);
       }
+    }
+    if (r.pagination) {
+      lines.push(`    pagination:`);
+      if (r.pagination.type) lines.push(`      type: ${r.pagination.type}`);
+      if (r.pagination.cursorParam) lines.push(`      cursor_param: ${escape(r.pagination.cursorParam)}`);
+      if (r.pagination.cursorField) lines.push(`      cursor_field: ${escape(r.pagination.cursorField)}`);
+      if (r.pagination.hasMoreField) lines.push(`      has_more_field: ${escape(r.pagination.hasMoreField)}`);
+      if (r.pagination.limitParam) lines.push(`      limit_param: ${escape(r.pagination.limitParam)}`);
+      if (r.pagination.defaultLimit != null) lines.push(`      default_limit: ${r.pagination.defaultLimit}`);
+      if (r.pagination.itemsField) lines.push(`      items_field: ${escape(r.pagination.itemsField)}`);
     }
   }
   if (m.orphanEndpoints.length === 0) {

@@ -306,6 +306,17 @@ export interface ResourceYaml {
     scope?: "endpoint" | "global";
     ignore_response_fields?: string[];
   };
+  /** ARV-171: pagination-invariants probe for this resource's list
+   *  endpoint. */
+  pagination?: {
+    type?: "cursor" | "page" | "offset" | "token";
+    cursor_param?: string;
+    cursor_field?: string;
+    has_more_field?: string;
+    limit_param?: string;
+    default_limit?: number;
+    items_field?: string;
+  };
 }
 
 export interface ApiResourceMapYaml {

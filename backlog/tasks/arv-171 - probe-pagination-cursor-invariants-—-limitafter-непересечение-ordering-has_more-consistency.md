@@ -3,10 +3,10 @@ id: ARV-171
 title: >-
   probe: pagination/cursor invariants — limit+after непересечение, ordering,
   has_more consistency
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 12:48'
-updated_date: '2026-05-13 11:54'
+updated_date: '2026-05-13 15:39'
 labels:
   - m-20
   - depth

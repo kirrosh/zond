@@ -35,6 +35,7 @@ zond checks list --json          # same, machine-readable
 | "find security bugs", "broken auth" | `... --check ignored_auth,use_after_free,ensure_resource_availability` |
 | "is GET returning what POST accepted?", "cross-call drift" | `... --check cross_call_references` (m-20) |
 | "does the API honor Idempotency-Key?", "two-POST replay" | `... --check idempotency_replay` (m-20) |
+| "are paginated lists consistent?", "duplicates across cursor pages" | `... --check pagination_invariants` (m-20) |
 | "schemathesis-style strict mode" | `... --strict-405 --strict-401` (m-18) |
 | "SARIF for GitHub Code Scanning" | `... --report sarif --output zond.sarif` |
 | "stream findings to a pipeline" | `... --report ndjson \| jq -c '.'` |
@@ -225,3 +226,43 @@ resources:
 
 Anti-FP: 429/409 on the 2nd POST → skip with cleanup. No DELETE on the
 group → finding still fires, evidence carries `cleanup_warning`.
+
+## Pagination invariants (m-20 ARV-171)
+
+`pagination_invariants` — fetch two consecutive cursor pages and assert
+the contract holds:
+
+- **duplicate_items** — an item id appears on both page A and page B
+  (off-by-one / cursor stops one short). HIGH-signal.
+- **has_more_inconsistent** — page A said `has_more=true`, but page B is
+  empty and doesn't flip to `has_more=false`. Surfaces broken end-of-list
+  signalling.
+- **partial_page_with_has_more** — page A returns fewer items than the
+  requested limit *yet* advertises `has_more=true`. Means the cursor is
+  prematurely truncating responses.
+
+Cursor-style only in this milestone (Stripe / GitHub / Resend / Linear
+pattern). `page` / `offset` / `token` declarations parse but the check
+short-circuits with a "type not implemented" reason so the yaml block
+stays a stable schema.
+
+Auto-detect: if the list endpoint declares `starting_after` / `cursor` /
+`after` / `page_token` as a query parameter, the check runs with
+defaults (`cursor_field=id`, `items_field=data|items|results`,
+`has_more_field=has_more`, `limit=2`).
+
+Per-resource yaml override:
+
+```yaml
+resources:
+  - resource: customer
+    # … existing fields …
+    pagination:
+      type: cursor                   # only cursor supported today
+      cursor_param: starting_after   # Stripe-style; "after" / "cursor" / "page_token" also work
+      cursor_field: id               # field on each item that feeds the next cursor
+      has_more_field: has_more       # response field that flips on end-of-list
+      limit_param: limit             # query param for page size
+      default_limit: 2               # probe page size — small on purpose
+      items_field: data              # array container (falls back to items / results / value)
+```

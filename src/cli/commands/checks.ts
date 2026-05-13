@@ -23,7 +23,7 @@ import { createAdaptiveRateLimiter, createRateLimiter, type RateLimiter } from "
 import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
 import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts";
 import { readResourceMap } from "./discover.ts";
-import type { ReadbackDiffConfig, IdempotencyConfig } from "../../core/generator/resources-builder.ts";
+import type { ReadbackDiffConfig, IdempotencyConfig, PaginationConfig } from "../../core/generator/resources-builder.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
@@ -148,17 +148,17 @@ function parseAuthHeaders(values: string[] | undefined): Record<string, string> 
 async function deriveResourceConfigsFromApi(
   apiName: string | undefined,
   dbPath: string | undefined,
-): Promise<Map<string, { readbackDiff?: ReadbackDiffConfig; idempotency?: IdempotencyConfig }> | undefined> {
+): Promise<Map<string, ResourceConfigEntry> | undefined> {
   if (!apiName) return undefined;
   const col = resolveApiCollection(apiName, dbPath);
   if ("error" in col) return undefined;
   if (!col.baseDir) return undefined;
   const map = await readResourceMap(col.baseDir);
   if (!map) return undefined;
-  const out = new Map<string, { readbackDiff?: ReadbackDiffConfig; idempotency?: IdempotencyConfig }>();
+  const out = new Map<string, ResourceConfigEntry>();
   for (const r of map.resources) {
-    if (!r.readback_diff && !r.idempotency) continue;
-    const entry: { readbackDiff?: ReadbackDiffConfig; idempotency?: IdempotencyConfig } = {};
+    if (!r.readback_diff && !r.idempotency && !r.pagination) continue;
+    const entry: ResourceConfigEntry = {};
     if (r.readback_diff) {
       entry.readbackDiff = {
         ignoreFields: r.readback_diff.ignore_fields,
@@ -172,10 +172,27 @@ async function deriveResourceConfigsFromApi(
         ignoreResponseFields: r.idempotency.ignore_response_fields,
       };
     }
+    if (r.pagination) {
+      entry.pagination = {
+        type: r.pagination.type,
+        cursorParam: r.pagination.cursor_param,
+        cursorField: r.pagination.cursor_field,
+        hasMoreField: r.pagination.has_more_field,
+        limitParam: r.pagination.limit_param,
+        defaultLimit: r.pagination.default_limit,
+        itemsField: r.pagination.items_field,
+      };
+    }
     out.set(r.resource, entry);
   }
   return out.size > 0 ? out : undefined;
 }
+
+type ResourceConfigEntry = {
+  readbackDiff?: ReadbackDiffConfig;
+  idempotency?: IdempotencyConfig;
+  pagination?: PaginationConfig;
+};
 
 async function derivePathVarsFromApi(apiName: string | undefined, dbPath: string | undefined): Promise<Record<string, string>> {
   if (!apiName) return {};

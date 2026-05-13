@@ -112,6 +112,8 @@ const TABLE: Row[] = [
     ctx: { finding_class: "check:cross_call_references" }, expected: "report_backend_bug" },
   { name: "check:idempotency_replay → report_backend_bug",
     ctx: { finding_class: "check:idempotency_replay" }, expected: "report_backend_bug" },
+  { name: "check:pagination_invariants → report_backend_bug",
+    ctx: { finding_class: "check:pagination_invariants" }, expected: "report_backend_bug" },
   { name: "check:negative_data_rejection → tighten_validation",
     ctx: { finding_class: "check:negative_data_rejection" }, expected: "tighten_validation" },
   { name: "check:missing_required_header → add_required_header",

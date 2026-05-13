@@ -23,6 +23,7 @@ import { negativeDataRejection } from "./negative_data_rejection.ts";
 import { positiveDataAcceptance } from "./positive_data_acceptance.ts";
 import { crossCallReferences } from "./cross_call_references.ts";
 import { idempotencyReplay } from "./idempotency_replay.ts";
+import { paginationInvariants } from "./pagination_invariants.ts";
 
 let registered = false;
 
@@ -48,6 +49,8 @@ export function registerBuiltinChecks(): void {
   registerStatefulCheck(crossCallReferences);
   // ARV-170 (m-20) — Idempotency-Key replay probe.
   registerStatefulCheck(idempotencyReplay);
+  // ARV-171 (m-20) — cursor pagination invariants.
+  registerStatefulCheck(paginationInvariants);
   registered = true;
 }
 
