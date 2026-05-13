@@ -216,6 +216,39 @@ describe("crossCallReferences — stateful check", () => {
     expect(out.kind).toBe("skip");
   });
 
+  test("substitutes parent-scope path vars on create + read URLs", async () => {
+    // Sentry-style nested resource: /api/0/organizations/{org_slug}/projects/
+    const create = makeEp({ path: "/api/0/organizations/{org_slug}/projects/" });
+    const read = makeReadEp();
+    read.path = "/api/0/projects/{org_slug}/{customer_id}/";
+    const g: CrudGroup = {
+      resource: "projects",
+      basePath: "/api/0/organizations/{org_slug}/projects/",
+      itemPath: "/api/0/projects/{org_slug}/{customer_id}/",
+      idParam: "customer_id",
+      create,
+      read,
+    };
+    const sentUrls: string[] = [];
+    const h: StatefulHarness = {
+      baseUrl: "http://test",
+      doc: { openapi: "3.0.0", info: { title: "t", version: "1" }, paths: {} } as OpenAPIV3.Document,
+      authHeaders: {},
+      bootstrapCleanupFailed: false,
+      pathVars: { org_slug: "acme-corp" },
+      async send(req) {
+        sentUrls.push(req.url);
+        const body = { id: "proj_1", name: "x", email: "y@z.q" };
+        return r2xx(body);
+      },
+    };
+    const out = await crossCallReferences.run(g, h);
+    expect(out.kind).toBe("pass");
+    // Both calls hit the substituted URLs, not literal `{org_slug}`.
+    expect(sentUrls[0]).toContain("/organizations/acme-corp/projects/");
+    expect(sentUrls[1]).toContain("/api/0/projects/acme-corp/proj_1/");
+  });
+
   test("applies() requires both create and read", () => {
     const g1: CrudGroup = { resource: "x", basePath: "/x", itemPath: "/x/{id}", idParam: "id", create: makeEp() };
     expect(crossCallReferences.applies(g1)).toBe(false);

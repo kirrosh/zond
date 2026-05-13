@@ -28,7 +28,7 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { CrudStatefulCheck } from "../stateful.ts";
 import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams } from "./_crud-helpers.ts";
 import { computeDrift } from "./_readback-helpers.ts";
 
 function declaredReadFields(read: { responses: Array<{ statusCode: number; schema?: unknown }> }): Set<string> {
@@ -72,7 +72,7 @@ export const crossCallReferences: CrudStatefulCheck = {
       return { kind: "skip", reason: "generated create body is not an object" };
     }
 
-    const createUrl = `${h.baseUrl.replace(/\/+$/, "")}${create.path}`;
+    const createUrl = `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`;
     const createResp = await h.send({
       method: "POST",
       url: createUrl,
@@ -86,7 +86,12 @@ export const crossCallReferences: CrudStatefulCheck = {
     const id = extractIdFromCreateResponse(echo, g.idParam);
     if (id == null) return { kind: "skip", reason: "could not extract id from create response" };
 
-    const readUrl = `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(read.path, g.idParam, id)}`;
+    // Substitute parent-scope vars first (e.g., {organization_id_or_slug}),
+    // then the captured id for {idParam}. Order matters: fillPathWithId's
+    // fallback regex replaces ANY remaining `{...}` with the id, so parent
+    // vars must already be resolved when it runs.
+    const readPath = fillPathWithId(fillPathParams(read.path, h.pathVars), g.idParam, id);
+    const readUrl = `${h.baseUrl.replace(/\/+$/, "")}${readPath}`;
     const readResp = await h.send({ method: "GET", url: readUrl, headers: baseHeaders });
     if (readResp.status < 200 || readResp.status >= 300) {
       return { kind: "skip", reason: `read returned ${readResp.status} — broken-baseline guard` };

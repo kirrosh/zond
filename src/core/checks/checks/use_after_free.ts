@@ -6,7 +6,7 @@
  */
 import type { CrudStatefulCheck } from "../stateful.ts";
 import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams } from "./_crud-helpers.ts";
 
 export const useAfterFree: CrudStatefulCheck = {
   id: "use_after_free",
@@ -30,7 +30,7 @@ export const useAfterFree: CrudStatefulCheck = {
     const createBody = create.requestBodySchema
       ? JSON.stringify(generateFromSchema(create.requestBodySchema))
       : "{}";
-    const createUrl = `${h.baseUrl.replace(/\/+$/, "")}${create.path}`;
+    const createUrl = `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`;
     const createResp = await h.send({
       method: "POST",
       url: createUrl,
@@ -46,7 +46,7 @@ export const useAfterFree: CrudStatefulCheck = {
     // 2. delete
     const delResp = await h.send({
       method: "DELETE",
-      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(del.path, g.idParam, id)}`,
+      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(fillPathParams(del.path, h.pathVars), g.idParam, id)}`,
       headers: baseHeaders,
     });
     if (delResp.status < 200 || delResp.status >= 300) {
@@ -56,7 +56,7 @@ export const useAfterFree: CrudStatefulCheck = {
     // 3. read after delete
     const readResp = await h.send({
       method: "GET",
-      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(read.path, g.idParam, id)}`,
+      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(fillPathParams(read.path, h.pathVars), g.idParam, id)}`,
       headers: baseHeaders,
     });
     if (readResp.status === 404 || readResp.status === 410) return { kind: "pass" };

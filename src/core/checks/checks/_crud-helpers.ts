@@ -11,6 +11,22 @@ export function fillPathWithId(path: string, idParam: string, id: string | numbe
     .replace(/\{[^}]+\}/g, v);
 }
 
+/** ARV-169: substitute parent-scope path-params on a create endpoint
+ *  using harness.pathVars. Resource-scoped APIs (Sentry's
+ *  `/api/0/organizations/{organization_id_or_slug}/projects/`) need
+ *  the parent id resolved before the create call lands — without it
+ *  the create 404s and the broken-baseline guard skips the whole
+ *  CRUD chain. Vars not present in `pathVars` are left as literal
+ *  placeholders so the caller can spot the gap in skip diagnostics.
+ *  Idempotent for paths with no placeholders (most flat-CRUD APIs). */
+export function fillPathParams(path: string, pathVars?: Record<string, string>): string {
+  if (!pathVars) return path;
+  return path.replace(/\{([^}]+)\}/g, (_, name) => {
+    const v = pathVars[name];
+    return v && v.length > 0 ? encodeURIComponent(v) : `{${name}}`;
+  });
+}
+
 /**
  * Pull a usable id out of a create-response body. Honours the spec's
  * declared `idParam` first (so `userId` matches `user_id` / `userId`),
