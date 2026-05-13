@@ -33,7 +33,7 @@ import type { OpenAPIV3 } from "openapi-types";
 import type { CrudStatefulCheck } from "../stateful.ts";
 import type { IdempotencyConfig } from "../../generator/resources-builder.ts";
 import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId, fillPathParams } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody } from "./_crud-helpers.ts";
 
 /** Default header name used when yaml omits it and we're running on
  *  spec-detected idempotency support. Matches the Stripe / Resend
@@ -148,14 +148,17 @@ export const idempotencyReplay: CrudStatefulCheck = {
     }
 
     const key = generateKey();
+    // ARV-191: form-urlencoded vs JSON dispatch — Stripe-style APIs
+    // honor Idempotency-Key but expect x-www-form-urlencoded payloads;
+    // JSON.stringify would yield broken-baseline 400s on every replay.
+    const { body: bodyStr, contentType } = serializeCheckBody(create, writeBody as Record<string, unknown>, h.pathVars);
     const baseHeaders = {
       Accept: "application/json",
-      "Content-Type": create.requestBodyContentType ?? "application/json",
+      "Content-Type": contentType,
       [resolved.header]: key,
       ...h.authHeaders,
     };
     const url = `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`;
-    const bodyStr = JSON.stringify(writeBody);
 
     // 1st POST
     const r1 = await h.send({ method: "POST", url, headers: baseHeaders, body: bodyStr });

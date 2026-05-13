@@ -6,7 +6,7 @@
  */
 import type { CrudStatefulCheck } from "../stateful.ts";
 import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId, fillPathParams } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody } from "./_crud-helpers.ts";
 
 export const ensureResourceAvailability: CrudStatefulCheck = {
   id: "ensure_resource_availability",
@@ -24,13 +24,22 @@ export const ensureResourceAvailability: CrudStatefulCheck = {
     const create = g.create!;
     const read = g.read!;
     const baseHeaders = { Accept: "application/json", ...h.authHeaders };
-    const body = create.requestBodySchema
-      ? JSON.stringify(generateFromSchema(create.requestBodySchema))
-      : "{}";
+    // ARV-191: form-urlencoded vs JSON dispatch — Stripe-style APIs
+    // declare x-www-form-urlencoded; JSON.stringify would yield "400
+    // missing param" the broken-baseline guard then silently swallows.
+    const generated = create.requestBodySchema
+      ? generateFromSchema(create.requestBodySchema)
+      : {};
+    const { body, contentType } = serializeCheckBody(
+      create,
+      (generated && typeof generated === "object" && !Array.isArray(generated))
+        ? (generated as Record<string, unknown>) : {},
+      h.pathVars,
+    );
     const createResp = await h.send({
       method: "POST",
       url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`,
-      headers: { ...baseHeaders, "Content-Type": create.requestBodyContentType ?? "application/json" },
+      headers: { ...baseHeaders, "Content-Type": contentType },
       body,
     });
     if (createResp.status < 200 || createResp.status >= 300) {

@@ -2,6 +2,45 @@
  * Shared id-extraction helpers for stateful CRUD checks (m-15 ARV-3).
  * Kept under `_` prefix so it doesn't get auto-registered.
  */
+import { encodeFormBody } from "../../runner/form-encode.ts";
+import { substituteDeep } from "../../parser/variables.ts";
+
+/**
+ * ARV-191: serialise a generated body using whichever wire format the
+ * create endpoint declares, and resolve the `{{$randomString}}` /
+ * `{{$randomInt}}` / `{{$randomEmail}}` markers that
+ * `generateFromSchema` embeds. Two failure modes this addresses:
+ *
+ *   1. Content-type — Stripe-style APIs declare only
+ *      `application/x-www-form-urlencoded`; JSON.stringify yields a
+ *      400 "missing required param" the broken-baseline guard swallows.
+ *      Mirrors `serializeProbeBody` (ARV-150) for probes.
+ *   2. Placeholder resolution — `data-factory` emits literal markers
+ *      that downstream callers (the YAML runner, the probe-harness)
+ *      resolve via `substituteDeep`. Stateful checks bypassed this and
+ *      sent `balance={{$randomInt}}` to Stripe → 400. Sending JSON
+ *      previously masked the bug because Stripe ignored the body
+ *      entirely on form-encoded endpoints.
+ *
+ * Pass `vars` when the caller has live env values (path-fixtures); the
+ * helper otherwise relies on the built-in `GENERATORS` table inside
+ * `substituteDeep` to fabricate values for the random markers.
+ */
+export function serializeCheckBody(
+  create: { requestBodyContentType?: string },
+  body: Record<string, unknown>,
+  vars: Record<string, unknown> = {},
+): { body: string; contentType: string } {
+  const resolved = substituteDeep(body, vars);
+  const obj = (resolved && typeof resolved === "object" && !Array.isArray(resolved))
+    ? (resolved as Record<string, unknown>)
+    : {};
+  if (create.requestBodyContentType === "application/x-www-form-urlencoded") {
+    return { body: encodeFormBody(obj), contentType: "application/x-www-form-urlencoded" };
+  }
+  const contentType = create.requestBodyContentType ?? "application/json";
+  return { body: JSON.stringify(obj), contentType };
+}
 
 export function fillPathWithId(path: string, idParam: string, id: string | number): string {
   const v = encodeURIComponent(String(id));
