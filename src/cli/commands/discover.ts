@@ -328,6 +328,17 @@ export interface ResourceYaml {
       body?: Record<string, unknown>;
     }>;
   };
+  /** ARV-187: LLM-authored example POST body for stateful checks that
+   *  need a valid create payload. When present, stateful CRUD checks
+   *  (cross_call_references, idempotency_replay, lifecycle_transitions,
+   *  ensure_resource_availability, use_after_free) prefer this over
+   *  `generateFromSchema(create.requestBodySchema)`. The fallback path
+   *  stays — yaml is purely additive. `content_type` defaults to the
+   *  create endpoint's `requestBodyContentType`. */
+  seed_body?: {
+    content_type?: string;
+    body: Record<string, unknown>;
+  };
 }
 
 export interface ApiResourceMapYaml {

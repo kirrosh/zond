@@ -32,8 +32,7 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { CrudStatefulCheck } from "../stateful.ts";
 import type { IdempotencyConfig } from "../../generator/resources-builder.ts";
-import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody, resolveCreateBody } from "./_crud-helpers.ts";
 
 /** Default header name used when yaml omits it and we're running on
  *  spec-detected idempotency support. Matches the Stripe / Resend
@@ -139,19 +138,20 @@ export const idempotencyReplay: CrudStatefulCheck = {
       return { kind: "skip", reason: "no idempotency config and no Idempotency-Key parameter in spec" };
     }
 
-    if (!create.requestBodySchema) {
-      return { kind: "skip", reason: "create has no requestBody schema — nothing to replay" };
+    const seedBody = h.resourceConfigs?.get(g.resource)?.seedBody;
+    if (!create.requestBodySchema && !seedBody) {
+      return { kind: "skip", reason: "create has no requestBody schema and no seed_body — nothing to replay" };
     }
-    const writeBody = generateFromSchema(create.requestBodySchema);
-    if (writeBody == null || typeof writeBody !== "object") {
-      return { kind: "skip", reason: "generated create body is not an object" };
+    const writeBody = resolveCreateBody(create, seedBody);
+    if (writeBody == null) {
+      return { kind: "skip", reason: "could not produce a create body (no seed_body, generator returned non-object)" };
     }
 
     const key = generateKey();
     // ARV-191: form-urlencoded vs JSON dispatch — Stripe-style APIs
     // honor Idempotency-Key but expect x-www-form-urlencoded payloads;
     // JSON.stringify would yield broken-baseline 400s on every replay.
-    const { body: bodyStr, contentType } = serializeCheckBody(create, writeBody as Record<string, unknown>, h.pathVars);
+    const { body: bodyStr, contentType } = serializeCheckBody(create, writeBody, h.pathVars, seedBody?.contentType);
     const baseHeaders = {
       Accept: "application/json",
       "Content-Type": contentType,

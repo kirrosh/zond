@@ -23,7 +23,7 @@ import { createAdaptiveRateLimiter, createRateLimiter, type RateLimiter } from "
 import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
 import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts";
 import { readResourceMap } from "./discover.ts";
-import type { ReadbackDiffConfig, IdempotencyConfig, PaginationConfig, LifecycleConfig } from "../../core/generator/resources-builder.ts";
+import type { ReadbackDiffConfig, IdempotencyConfig, PaginationConfig, LifecycleConfig, SeedBodyConfig } from "../../core/generator/resources-builder.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
@@ -157,8 +157,14 @@ async function deriveResourceConfigsFromApi(
   if (!map) return undefined;
   const out = new Map<string, ResourceConfigEntry>();
   for (const r of map.resources) {
-    if (!r.readback_diff && !r.idempotency && !r.pagination && !r.lifecycle) continue;
+    if (!r.readback_diff && !r.idempotency && !r.pagination && !r.lifecycle && !r.seed_body) continue;
     const entry: ResourceConfigEntry = {};
+    if (r.seed_body) {
+      entry.seedBody = {
+        contentType: r.seed_body.content_type,
+        body: r.seed_body.body,
+      };
+    }
     if (r.readback_diff) {
       entry.readbackDiff = {
         ignoreFields: r.readback_diff.ignore_fields,
@@ -207,6 +213,7 @@ type ResourceConfigEntry = {
   idempotency?: IdempotencyConfig;
   pagination?: PaginationConfig;
   lifecycle?: LifecycleConfig;
+  seedBody?: SeedBodyConfig;
 };
 
 async function derivePathVarsFromApi(apiName: string | undefined, dbPath: string | undefined): Promise<Record<string, string>> {

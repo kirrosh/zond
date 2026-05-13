@@ -27,6 +27,7 @@ import { registerAdd } from "./commands/add-api.ts";
 import { registerRemove } from "./commands/remove-api.ts";
 import { registerAudit } from "./commands/audit.ts";
 import { registerReference } from "./commands/reference.ts";
+import { registerApiAnnotate } from "./commands/api/annotate/index.ts";
 
 import { getSecretRegistry } from "../core/secrets/registry.ts";
 import { getRuntimeInfo } from "./runtime.ts";
@@ -114,6 +115,7 @@ export function buildProgram(): Command {
 
   registerCompletions(program);
   registerReference(program);
+  registerApiAnnotate(program);
 
   // TASK-267: group top-level commands by phase in `zond --help`. Without
   // grouping, the flat 20+ command list buries the workflow shape; with it,

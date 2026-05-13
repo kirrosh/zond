@@ -1,10 +1,10 @@
 ---
 id: ARV-187
 title: 'zond api annotate: LLM-pass для .api-resources.local.yaml'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 11:53'
-updated_date: '2026-05-13 15:48'
+updated_date: '2026-05-13 18:53'
 labels:
   - m-20
   - depth
@@ -123,14 +123,14 @@ Resend pagination_invariants дал 11 PASS из 12 cases чисто на auto-d
 - [ ] #8 #3 Повторный annotate не теряет user-edits (conflict markers)
 - [ ] #9 #4 ANTHROPIC_API_KEY и --local-model оба supported
 - [ ] #10 #5 На Stripe annotate выдаёт минимум 4/5 almetric пункта
-- [ ] #11 #6 --seed-bodies: yaml-схема seed_body.{content_type, body} разобрана + прочитана через harness.resourceConfigs в stateful checks
+- [x] #11 #6 --seed-bodies: yaml-схема seed_body.{content_type, body} разобрана + прочитана через harness.resourceConfigs в stateful checks
 - [ ] #12 #7 --seed-bodies regression: cross_call_references / idempotency_replay / ensure_resource_availability на Stripe customers/products/coupons превращают пост-ARV-191 broken-baseline 400 в реальный PASS или сигнальный finding
-- [ ] #13 #1 Каждая подкоманда (--lifecycle, --idempotency, --pagination, --readback, --resources, --seed-bodies) пишет в .api-resources.local.yaml через ARV-111 overlay
-- [ ] #14 #2 Diff показывается перед записью; --yes для bypass
-- [ ] #15 #3 Повторный annotate не теряет user-edits (conflict markers)
-- [ ] #16 #4 ANTHROPIC_API_KEY и --local-model оба supported
+- [x] #13 #1 Каждая подкоманда (--lifecycle, --idempotency, --pagination, --readback, --resources, --seed-bodies) пишет в .api-resources.local.yaml через ARV-111 overlay
+- [x] #14 #2 Diff показывается перед записью; --yes для bypass
+- [x] #15 #3 Повторный annotate не теряет user-edits (conflict markers)
+- [x] #16 #4 ANTHROPIC_API_KEY и --local-model оба supported
 - [ ] #17 #5 На Stripe annotate выдаёт минимум 4/5 almetric пункта (см. секцию Almetric)
-- [ ] #18 #6 --seed-bodies yaml-схема seed_body.{content_type, body} разобрана и прочитана через harness.resourceConfigs в stateful checks
-- [ ] #19 #7 --seed-bodies regression на Stripe customers/products/coupons: пост-ARV-191 broken-baseline 400 превращается в реальный PASS или сигнальный finding
+- [x] #18 #6 --seed-bodies yaml-схема seed_body.{content_type, body} разобрана и прочитана через harness.resourceConfigs в stateful checks
+- [x] #19 #7 --seed-bodies regression на Stripe customers/products/coupons: пост-ARV-191 broken-baseline 400 превращается в реальный PASS или сигнальный finding
 - [ ] #20 #8 --lifecycle regression на Stripe subscriptions (объявлена в zond-test после ARV-172): create + cancel chain доходит до GET state, тест либо PASS либо producent state-machine finding
 <!-- AC:END -->

@@ -38,12 +38,12 @@ import type { OpenAPIV3 } from "openapi-types";
 import type { CrudStatefulCheck } from "../stateful.ts";
 import type { LifecycleConfig, LifecycleAction } from "../../generator/resources-builder.ts";
 import { validateLifecycleManifest } from "../../generator/resources-builder.ts";
-import { generateFromSchema } from "../../generator/data-factory.ts";
 import {
   extractIdFromCreateResponse,
   fillPathWithId,
   fillPathParams,
   serializeCheckBody,
+  resolveCreateBody,
 } from "./_crud-helpers.ts";
 
 function safeParse(v: unknown): unknown {
@@ -107,15 +107,14 @@ export const lifecycleTransitions: CrudStatefulCheck = {
     const baseHeaders = { Accept: "application/json", ...h.authHeaders };
     const stateSet = new Set(cfg.states);
 
-    // 1. Create
-    const generated = create.requestBodySchema
-      ? generateFromSchema(create.requestBodySchema)
-      : {};
+    // 1. Create — prefer seed_body (ARV-187) over generator.
+    const seedBody = h.resourceConfigs?.get(g.resource)?.seedBody;
+    const generated = resolveCreateBody(create, seedBody) ?? {};
     const { body: createBody, contentType } = serializeCheckBody(
       create,
-      (generated && typeof generated === "object" && !Array.isArray(generated))
-        ? (generated as Record<string, unknown>) : {},
+      generated,
       h.pathVars,
+      seedBody?.contentType,
     );
     const createUrl = `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`;
     const createResp = await h.send({

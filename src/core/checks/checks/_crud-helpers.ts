@@ -4,6 +4,34 @@
  */
 import { encodeFormBody } from "../../runner/form-encode.ts";
 import { substituteDeep } from "../../parser/variables.ts";
+import { generateFromSchema } from "../../generator/data-factory.ts";
+import type { EndpointInfo } from "../../generator/types.ts";
+import type { SeedBodyConfig } from "../../generator/resources-builder.ts";
+
+/**
+ * ARV-187: pick the create body for a stateful CRUD step. Prefers an
+ * LLM-authored `seed_body` block (from `.api-resources.local.yaml`)
+ * because random scalars from `generateFromSchema` consistently get
+ * rejected by strict-validating APIs (Stripe's `expand[]`, Stripe
+ * required-field XORs, FK-bearing creates). When no seed_body is set,
+ * falls back to generation — preserves the pre-ARV-187 behaviour for
+ * APIs we haven't annotated yet.
+ *
+ * Returns `null` when neither path can produce an object (no schema +
+ * no seed). Caller should skip with a broken-baseline reason.
+ */
+export function resolveCreateBody(
+  create: EndpointInfo,
+  seedBody: SeedBodyConfig | undefined,
+): Record<string, unknown> | null {
+  if (seedBody && seedBody.body && typeof seedBody.body === "object") {
+    return seedBody.body;
+  }
+  if (!create.requestBodySchema) return null;
+  const generated = generateFromSchema(create.requestBodySchema);
+  if (generated == null || typeof generated !== "object") return null;
+  return generated as Record<string, unknown>;
+}
 
 /**
  * ARV-191: serialise a generated body using whichever wire format the
@@ -30,16 +58,17 @@ export function serializeCheckBody(
   create: { requestBodyContentType?: string },
   body: Record<string, unknown>,
   vars: Record<string, unknown> = {},
+  contentTypeOverride?: string,
 ): { body: string; contentType: string } {
   const resolved = substituteDeep(body, vars);
   const obj = (resolved && typeof resolved === "object" && !Array.isArray(resolved))
     ? (resolved as Record<string, unknown>)
     : {};
-  if (create.requestBodyContentType === "application/x-www-form-urlencoded") {
+  const ct = contentTypeOverride ?? create.requestBodyContentType ?? "application/json";
+  if (ct === "application/x-www-form-urlencoded") {
     return { body: encodeFormBody(obj), contentType: "application/x-www-form-urlencoded" };
   }
-  const contentType = create.requestBodyContentType ?? "application/json";
-  return { body: JSON.stringify(obj), contentType };
+  return { body: JSON.stringify(obj), contentType: ct };
 }
 
 export function fillPathWithId(path: string, idParam: string, id: string | number): string {
