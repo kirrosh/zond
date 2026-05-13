@@ -1,9 +1,10 @@
 ---
 id: ARV-181
 title: 'checks: ignored_auth — relax broken-baseline guard, systematic no-auth sweep'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 06:56'
+updated_date: '2026-05-13 11:24'
 labels:
   - m-18
   - security

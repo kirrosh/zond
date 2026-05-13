@@ -1,9 +1,10 @@
 ---
 id: ARV-179
 title: 'checks: unsupported_method — exhaustive HTTP method enumeration'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 06:56'
+updated_date: '2026-05-13 11:24'
 labels:
   - m-18
   - depth

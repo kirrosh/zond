@@ -149,23 +149,22 @@ mitmproxy2swagger и sentry-sdk-ingest из исходного драфта **в
 - **Никаких архитектурных рефакторов.** Если comparison-раунд вскроет
   новый класс долга — пишется отдельный milestone, не лезет в m-18.
 
-## Done-критерий
+## Done-критерий — статус
 
-1. **D — schemathesis diff** прогнан на Sentry / Stripe / Resend.
-   `backlog/notes/m-18-parity-baseline.md` содержит таблицу
-   `zond-only / schemathesis-only / both` по каждому API.
-   `schemathesis-only` классифицирован по (a)/(b)/(c).
-2. **A — quicktype patch** работает: на Sentry дельта
-   `response_schema_conformance` ≥ 5× (с 14 → ≥70 findings), anti-FP
-   regression-pack m-15 остаётся green.
-3. **C — `zond probe security --oob-server`** даёт явный вердикт
-   (confirmed HIGH или confirmed FP) для всех 4 LOW SSRF на Sentry.
-4. **E — Recipes** в `docs/recipes/quicktype.md` + `interactsh.md`,
-   запускается «вслепую» новым tester'ом за <15 минут.
-5. **Decision-документ** `backlog/notes/m-18-decision.md` фиксирует
-   priority m-19 (fuzz engine) на основе данных D.
-6. **Skill update** — zond-base/zond ссылаются на recipes; SD-pass
-   через `/zond-fb-tester` не находит drift'а на новых командах.
+1. ✅ **D — schemathesis diff** прогнан на Sentry/Stripe/Resend.
+   `backlog/notes/m-18-parity-baseline.md` + `m-18-decision.md`.
+2. ❌ **A — quicktype patch** — отложено (ARV-175/176 → m-21+).
+   Обоснование: parity-замер показал что это отдельный продуктовый
+   workflow, не parity-issue. См. decision-doc §«Решение по A-блоку».
+3. ❌ **C — `zond probe security --oob-server`** — отложено
+   (ARV-177 → m-19+).
+4. ❌ **E — Recipes** — отложено. Skill update частично — TODO.
+5. ✅ **Decision-документ** `backlog/notes/m-18-decision.md`.
+6. ⏳ **Skill update** — TODO в финальном коммите.
+
+Главная цель m-18 (измерить gap, решить нужно ли догонять fuzz) **достигнута**.
+4 cheap-fix'а в коде (ARV-179/180/181/183/184) дали архитектурный
+паритет на 8 из 12 checks с превосходством на param-axis coverage.
 
 ## Что закрывается из накопленного контекста
 

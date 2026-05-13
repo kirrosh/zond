@@ -1,9 +1,10 @@
 ---
 id: ARV-174
 title: 'parity: schemathesis V4 baseline run — Sentry/Stripe/Resend + diff bucketing'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 13:26'
+updated_date: '2026-05-13 11:24'
 labels:
   - m-18
   - parity

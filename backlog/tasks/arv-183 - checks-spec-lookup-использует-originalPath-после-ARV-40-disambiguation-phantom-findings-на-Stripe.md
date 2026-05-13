@@ -3,9 +3,10 @@ id: ARV-183
 title: >-
   checks: spec-lookup использует originalPath после ARV-40 disambiguation
   (phantom findings на Stripe)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 08:29'
+updated_date: '2026-05-13 11:24'
 labels:
   - m-18
   - bug
