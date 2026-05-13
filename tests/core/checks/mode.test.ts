@@ -122,11 +122,14 @@ describe("ARV-7 mode pipeline (AC#3)", () => {
 
     // Single op /widgets POST has:
     //   1 positive case  + 1 missing-header negative + 1 negative-body
-    //   + 1 unsupported-method (per path, not per op) = 4 cases on `all`
-    expect(all.data.summary.cases).toBe(4);
-    // mode=positive: drops the 3 negative cases.
+    //   + 6 unsupported-method (ARV-179: all missing methods from
+    //     [GET, POST, PUT, PATCH, DELETE, OPTIONS, TRACE] minus POST)
+    //   = 9 cases on `all`. Previously 4 — bumped after ARV-179 widened
+    //   the method-complement enumeration.
+    expect(all.data.summary.cases).toBe(9);
+    // mode=positive: drops the 8 negative cases (1 + 1 + 6).
     expect(pos.data.summary.cases).toBe(1);
     // mode=negative: drops the 1 positive case.
-    expect(neg.data.summary.cases).toBe(3);
+    expect(neg.data.summary.cases).toBe(8);
   });
 });

@@ -97,6 +97,9 @@ export interface RunChecksOptions {
   /** ARV-179: opt-in strict-405 semantics for `unsupported_method`.
    *  Off by default — see `CheckRuntimeOptions.strict405` for rationale. */
   strict405?: boolean;
+  /** ARV-181: opt-in strict-401 semantics for `ignored_auth`. Off by
+   *  default — see `CheckRuntimeOptions.strict401` for rationale. */
+  strict401?: boolean;
   /** ARV-141: substitute real fixture values into path-param placeholders so
    *  the deterministic synthetic 404 (`/issues/x`) becomes a real-id 200/422
    *  whenever `.env.yaml` actually has a fixture. This makes `checks run`
@@ -504,7 +507,10 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     }
   }
 
-  const checkRuntimeOptions = { strict405: opts.strict405 === true };
+  const checkRuntimeOptions = {
+    strict405: opts.strict405 === true,
+    strict401: opts.strict401 === true,
+  };
 
   const phase = opts.phase ?? "examples";
   const wantsExamples = phase === "examples" || phase === "all";
@@ -671,6 +677,13 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       authHeaders: opts.authHeaders,
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed,
       timeoutMs: opts.timeoutMs,
+      // ARV-181: stateful checks (ignored_auth) need the same
+      // fixture-driven path-var substitution that ARV-141 wired into
+      // the per-response runner — without this the synthetic baseline
+      // lands on literal `/{event_id}` and the broken-baseline guard
+      // skips the whole op.
+      pathVars: opts.pathVars,
+      options: checkRuntimeOptions,
     });
     const crudGroups = activeStateful.some((c) => c.phase === "crud") ? detectCrudGroups(allOps) : [];
     summary.checks_run += activeStateful.length;
