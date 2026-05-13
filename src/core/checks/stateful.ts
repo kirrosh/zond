@@ -11,7 +11,7 @@ import type { OpenAPIV3 } from "openapi-types";
 import type { CrudGroup, EndpointInfo } from "../generator/types.ts";
 import type { HttpRequest, HttpResponse } from "../runner/types.ts";
 import { executeRequest } from "../runner/http-client.ts";
-import type { CheckOutcome, CheckReference, Severity } from "./types.ts";
+import type { CheckOutcome, CheckReference, CheckRuntimeOptions, Severity } from "./types.ts";
 
 export interface StatefulHarness {
   baseUrl: string;
@@ -21,6 +21,17 @@ export interface StatefulHarness {
   authHeaders: Record<string, string>;
   /** When true, security checks should skip with a warning (ARV-3 AC #6). */
   bootstrapCleanupFailed: boolean;
+  /** ARV-181: real path-param fixtures from `.env.yaml`. Mirrors what
+   *  the per-response runner already does via ARV-141 — without this
+   *  the stateful harness rebuilds URLs with literal `{event_id}`
+   *  placeholders, gets routed to 403/404, and the broken-baseline
+   *  guard silently skips real auth checks. Optional so unit tests
+   *  can stub without it; production callers always pass them. */
+  pathVars?: Record<string, string>;
+  /** ARV-181: per-run knobs (e.g. strict401). Mirrors CheckContext.options
+   *  for stateful checks so they can read the same flags as per-response
+   *  ones. */
+  options?: CheckRuntimeOptions;
   send(req: HttpRequest, opts?: { timeoutMs?: number }): Promise<HttpResponse>;
 }
 
@@ -59,13 +70,21 @@ export function listStatefulChecks(): StatefulCheck[] {
 export function makeHarness(
   baseUrl: string,
   doc: OpenAPIV3.Document,
-  opts: { authHeaders?: Record<string, string>; bootstrapCleanupFailed?: boolean; timeoutMs?: number } = {},
+  opts: {
+    authHeaders?: Record<string, string>;
+    bootstrapCleanupFailed?: boolean;
+    timeoutMs?: number;
+    pathVars?: Record<string, string>;
+    options?: CheckRuntimeOptions;
+  } = {},
 ): StatefulHarness {
   return {
     baseUrl,
     doc,
     authHeaders: opts.authHeaders ?? {},
     bootstrapCleanupFailed: opts.bootstrapCleanupFailed ?? false,
+    pathVars: opts.pathVars,
+    options: opts.options,
     send: (req, sendOpts) => executeRequest(req, { timeout: sendOpts?.timeoutMs ?? opts.timeoutMs ?? 30000 }),
   };
 }

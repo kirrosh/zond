@@ -79,6 +79,12 @@ export interface CheckRuntimeOptions {
    *  accepts 401/403/404 as legitimate rejections of an undeclared
    *  method (common nginx/gateway behaviour). */
   strict405?: boolean;
+  /** ARV-181: require strict 401 for `ignored_auth` no-auth / bogus-auth
+   *  variants (matches schemathesis V4 default). Off by default — zond's
+   *  pragmatic policy accepts any 4xx as a legitimate auth-reject (403,
+   *  404, 422 are common). With this on, only 401 passes — a 403 on
+   *  no_auth becomes a finding "expected 401, got 403". */
+  strict401?: boolean;
 }
 
 export interface CheckContext {

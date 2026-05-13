@@ -115,6 +115,7 @@ interface ChecksRunOptions {
   rateLimit?: string;
   verbose?: boolean;
   strict405?: boolean;
+  strict401?: boolean;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -410,6 +411,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       phase: phaseRaw as "examples" | "coverage" | "all",
       allowX00: opts.allowX00 === true,
       strict405: opts.strict405 === true,
+      strict401: opts.strict401 === true,
       mode: modeRaw as "positive" | "negative" | "all",
       operationFilter,
       onEvent: ndjsonOnEvent,
@@ -604,6 +606,10 @@ function defineRun(parent: Command): void {
     .option(
       "--strict-405",
       "ARV-179: require exactly 405 for `unsupported_method` (mirrors schemathesis V4 default). Off by default — zond's pragmatic policy also accepts 401/403/404 as valid rejections of an undeclared method.",
+    )
+    .option(
+      "--strict-401",
+      "ARV-181: require exactly 401 for `ignored_auth` no-auth / bogus-auth probes (mirrors schemathesis V4). Off by default — zond's pragmatic policy accepts any 4xx as a valid auth-reject.",
     )
     .action(checksRunAction);
 }
