@@ -44,7 +44,11 @@ export const statusCodeConformance: Check = {
   applies: () => true,
   run({ case: c, response, doc }) {
     if (!doc) return { kind: "skip", reason: "spec doc not available" };
-    const { codes, hasDefault, hasWildcard } = declaredStatuses(doc, c.operation.path, c.operation.method);
+    // ARV-183: ARV-40 path-disambiguation renames {id} → {<resource>_id}
+    // in EndpointInfo.path. doc.paths keeps the original — use
+    // originalPath for spec lookup when present.
+    const specPath = c.operation.originalPath ?? c.operation.path;
+    const { codes, hasDefault, hasWildcard } = declaredStatuses(doc, specPath, c.operation.method);
     if (hasDefault) return { kind: "pass" };
     if (codes.has(response.status)) return { kind: "pass" };
     if (hasWildcard.get(Math.floor(response.status / 100))) return { kind: "pass" };

@@ -191,23 +191,33 @@ function buildPositive(op: EndpointInfo, baseUrl: string, pathVars?: Record<stri
   return { req, case: c };
 }
 
-function buildMissingHeader(op: EndpointInfo, baseUrl: string, pathVars?: Record<string, string>): BuiltCase | null {
+/** ARV-184: emit one BuiltCase per required header — drop that header
+ *  in isolation so `missing_required_header` can identify *which* one
+ *  the server fails to enforce. Pre-fix this emitted just the first
+ *  required header (`required[0]`), which on Stripe-style specs with
+ *  multiple per-op headers (Stripe-Version, Stripe-Account, ...) gave
+ *  ≤1 finding per op vs schemathesis V4 ~42 in the same overlap. */
+function buildMissingHeader(op: EndpointInfo, baseUrl: string, pathVars?: Record<string, string>): BuiltCase[] {
   const required = requiredHeaders(op);
-  if (required.length === 0) return null;
-  const dropped = required[0]!.name;
+  if (required.length === 0) return [];
   const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op, pathVars)}`;
-  const headers = buildBaseHeaders(op, { withRequired: true });
-  delete headers[dropped];
   const body = buildBody(op);
-  const req: HttpRequest = { method: op.method.toUpperCase(), url, headers, body };
-  const c: CheckCase = {
-    operation: op,
-    request: { method: req.method, url: req.url, headers: req.headers, body: req.body },
-    mode: "negative",
-    kind: "missing_required_header",
-    meta: { dropped_header: dropped },
-  };
-  return { req, case: c };
+  const method = op.method.toUpperCase();
+  return required.map((header) => {
+    const headers = buildBaseHeaders(op, { withRequired: true });
+    delete headers[header.name];
+    const req: HttpRequest = { method, url, headers, body };
+    return {
+      req,
+      case: {
+        operation: op,
+        request: { method: req.method, url: req.url, headers: req.headers, body: req.body },
+        mode: "negative" as const,
+        kind: "missing_required_header" as const,
+        meta: { dropped_header: header.name },
+      },
+    };
+  });
 }
 
 /** ARV-6: emit one BuiltCase per (field × boundary) over the body schema.
@@ -540,8 +550,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     const cases: BuiltCase[] = [];
     if (wantsExamples && neededKinds.has("positive")) cases.push(buildPositive(op, opts.baseUrl, opts.pathVars));
     if (neededKinds.has("missing_required_header")) {
-      const c = buildMissingHeader(op, opts.baseUrl, opts.pathVars);
-      if (c) cases.push(c);
+      cases.push(...buildMissingHeader(op, opts.baseUrl, opts.pathVars));
     }
     if (wantsExamples && neededKinds.has("negative_data")) {
       const c = buildNegativeData(op, opts.baseUrl, opts.pathVars);
