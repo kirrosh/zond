@@ -32,6 +32,13 @@ export interface StatefulHarness {
    *  for stateful checks so they can read the same flags as per-response
    *  ones. */
   options?: CheckRuntimeOptions;
+  /** ARV-169 (m-20): per-resource overrides for cross-call probes,
+   *  keyed by `resource` name from `.api-resources.yaml`. Today only
+   *  `cross_call_references` reads `readbackDiff`; future m-20 probes
+   *  (idempotency, pagination, lifecycle) will append their own keys
+   *  to the per-resource entry. Optional — when absent each probe
+   *  falls back to its built-in defaults. */
+  resourceConfigs?: Map<string, { readbackDiff?: import("../generator/resources-builder.ts").ReadbackDiffConfig }>;
   send(req: HttpRequest, opts?: { timeoutMs?: number }): Promise<HttpResponse>;
 }
 
@@ -76,6 +83,7 @@ export function makeHarness(
     timeoutMs?: number;
     pathVars?: Record<string, string>;
     options?: CheckRuntimeOptions;
+    resourceConfigs?: StatefulHarness["resourceConfigs"];
   } = {},
 ): StatefulHarness {
   return {
@@ -85,6 +93,7 @@ export function makeHarness(
     bootstrapCleanupFailed: opts.bootstrapCleanupFailed ?? false,
     pathVars: opts.pathVars,
     options: opts.options,
+    resourceConfigs: opts.resourceConfigs,
     send: (req, sendOpts) => executeRequest(req, { timeout: sendOpts?.timeoutMs ?? opts.timeoutMs ?? 30000 }),
   };
 }
