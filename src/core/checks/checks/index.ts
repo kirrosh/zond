@@ -24,6 +24,7 @@ import { positiveDataAcceptance } from "./positive_data_acceptance.ts";
 import { crossCallReferences } from "./cross_call_references.ts";
 import { idempotencyReplay } from "./idempotency_replay.ts";
 import { paginationInvariants } from "./pagination_invariants.ts";
+import { lifecycleTransitions } from "./lifecycle_transitions.ts";
 
 let registered = false;
 
@@ -51,6 +52,8 @@ export function registerBuiltinChecks(): void {
   registerStatefulCheck(idempotencyReplay);
   // ARV-171 (m-20) — cursor pagination invariants.
   registerStatefulCheck(paginationInvariants);
+  // ARV-172 (m-20) — declared state-machine + action transitions.
+  registerStatefulCheck(lifecycleTransitions);
   registered = true;
 }
 

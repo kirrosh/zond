@@ -32,6 +32,7 @@ const CHECK_ID_TO_CLASS: Record<string, FindingClass> = {
   cross_call_references: "check:cross_call_references",
   idempotency_replay: "check:idempotency_replay",
   pagination_invariants: "check:pagination_invariants",
+  lifecycle_transitions: "check:lifecycle_transitions",
   network_error: "check:network_error",
 };
 

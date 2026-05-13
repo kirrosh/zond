@@ -92,6 +92,89 @@ export interface IdempotencyConfig {
  * preferred — it documents intent and survives spec changes that
  * rename query params.
  */
+/**
+ * ARV-172 (m-20 lifecycle-transitions): declared state machine for a
+ * resource. Used by the `lifecycle_transitions` stateful check to
+ * verify that documented actions (cancel / archive / publish / ...)
+ * move a resource between declared states and that double-invoking an
+ * action either 4xx's or stays idempotent (no state regression).
+ *
+ * The yaml block has three parts:
+ *   • `field` + `states` — name of the response field carrying the
+ *     state, plus the closed enum of legal values.
+ *   • `transitions` — a from→to graph; the check uses it to flag
+ *     forbidden transitions (cancelled → active) when an action lands
+ *     a resource somewhere the graph doesn't allow.
+ *   • `actions` — POST endpoints that should drive a transition.
+ *     `expected_state` is the state the resource must be in after a
+ *     successful action call.
+ *
+ * Manifest validation runs at load time and surfaces obvious
+ * authoring bugs (unreachable states, missing terminal, action
+ * referencing an undeclared state) before any HTTP call goes out.
+ */
+export interface LifecycleAction {
+  /** Endpoint label, e.g. "POST /v1/subscriptions/{id}/cancel". The
+   *  `{id}` placeholder is substituted with the created resource id. */
+  endpoint: string;
+  /** State the resource must be in after this action lands. */
+  expectedState: string;
+  /** Optional request body sent with the action POST. Most lifecycle
+   *  actions are body-less (cancel, archive, publish); leave empty
+   *  when not needed. Serialised as JSON or form depending on the
+   *  endpoint's declared content type. */
+  body?: Record<string, unknown>;
+}
+
+export interface LifecycleConfig {
+  /** Response field name carrying the state (e.g. `status`). */
+  field: string;
+  /** Closed enum of legal state values. Any state observed on the
+   *  wire that isn't in this list is a finding. */
+  states: string[];
+  /** Allowed from→to graph. States not listed as `from` are assumed
+   *  terminal (no outgoing transition). States not listed as `to` of
+   *  any transition are starting-only (unreachable post-create). */
+  transitions: { from: string; to: string[] }[];
+  /** Named actions keyed by action name (cancel / archive / publish).
+   *  The check runs through them in object-key order. */
+  actions: Record<string, LifecycleAction>;
+}
+
+/**
+ * Static validation of a lifecycle manifest. Returns the list of
+ * authoring bugs without throwing — callers decide whether to fail
+ * the run or just warn. Empty array = clean manifest.
+ */
+export function validateLifecycleManifest(cfg: LifecycleConfig): string[] {
+  const errors: string[] = [];
+  if (!cfg.field || cfg.field.length === 0) errors.push("lifecycle.field is empty");
+  if (!cfg.states || cfg.states.length === 0) errors.push("lifecycle.states is empty");
+  const stateSet = new Set(cfg.states ?? []);
+  for (const t of cfg.transitions ?? []) {
+    if (!stateSet.has(t.from)) errors.push(`transitions: unknown "from" state "${t.from}"`);
+    for (const to of t.to) {
+      if (!stateSet.has(to)) errors.push(`transitions[${t.from}]: unknown "to" state "${to}"`);
+    }
+  }
+  // At least one terminal — a state with no outgoing transition (or
+  // an explicit `to: []`). A graph with every state having outgoing
+  // edges is suspicious (no end-of-life, infinite churn).
+  const hasOutgoing = new Set((cfg.transitions ?? []).filter((t) => t.to.length > 0).map((t) => t.from));
+  const terminals = (cfg.states ?? []).filter((s) => !hasOutgoing.has(s));
+  if (terminals.length === 0) errors.push("no terminal state — every declared state has outgoing transitions");
+  // Actions must reference declared states.
+  for (const [name, a] of Object.entries(cfg.actions ?? {})) {
+    if (!stateSet.has(a.expectedState)) {
+      errors.push(`actions.${name}.expected_state "${a.expectedState}" is not in states[]`);
+    }
+    if (!a.endpoint || a.endpoint.length === 0) {
+      errors.push(`actions.${name}.endpoint is empty`);
+    }
+  }
+  return errors;
+}
+
 export interface PaginationConfig {
   /** Pagination flavor. Default `cursor`. */
   type?: "cursor" | "page" | "offset" | "token";
@@ -138,6 +221,8 @@ export interface ApiResourceEntry {
   idempotency?: IdempotencyConfig;
   /** ARV-171: pagination-invariants probe. */
   pagination?: PaginationConfig;
+  /** ARV-172: state-machine for the resource. */
+  lifecycle?: LifecycleConfig;
 }
 
 export interface ApiResourceMap {
@@ -521,6 +606,28 @@ export function serializeApiResourceMap(m: ApiResourceMap): string {
       if (r.pagination.limitParam) lines.push(`      limit_param: ${escape(r.pagination.limitParam)}`);
       if (r.pagination.defaultLimit != null) lines.push(`      default_limit: ${r.pagination.defaultLimit}`);
       if (r.pagination.itemsField) lines.push(`      items_field: ${escape(r.pagination.itemsField)}`);
+    }
+    if (r.lifecycle) {
+      lines.push(`    lifecycle:`);
+      lines.push(`      field: ${escape(r.lifecycle.field)}`);
+      lines.push(`      states:`);
+      for (const s of r.lifecycle.states) lines.push(`        - ${escape(s)}`);
+      lines.push(`      transitions:`);
+      for (const t of r.lifecycle.transitions) {
+        lines.push(`        - from: ${escape(t.from)}`);
+        if (t.to.length === 0) {
+          lines.push(`          to: []`);
+        } else {
+          lines.push(`          to:`);
+          for (const to of t.to) lines.push(`            - ${escape(to)}`);
+        }
+      }
+      lines.push(`      actions:`);
+      for (const [name, a] of Object.entries(r.lifecycle.actions)) {
+        lines.push(`        ${escape(name)}:`);
+        lines.push(`          endpoint: ${escape(a.endpoint)}`);
+        lines.push(`          expected_state: ${escape(a.expectedState)}`);
+      }
     }
   }
   if (m.orphanEndpoints.length === 0) {
