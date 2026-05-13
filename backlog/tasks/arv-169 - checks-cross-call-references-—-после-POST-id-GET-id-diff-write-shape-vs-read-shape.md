@@ -3,10 +3,10 @@ id: ARV-169
 title: >-
   checks: cross-call-references — после POST id GET id, diff write-shape vs
   read-shape
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 12:48'
-updated_date: '2026-05-13 11:54'
+updated_date: '2026-05-13 14:28'
 labels:
   - m-20
   - depth
