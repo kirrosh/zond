@@ -23,7 +23,7 @@ import { createAdaptiveRateLimiter, createRateLimiter, type RateLimiter } from "
 import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
 import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts";
 import { readResourceMap } from "./discover.ts";
-import type { ReadbackDiffConfig } from "../../core/generator/resources-builder.ts";
+import type { ReadbackDiffConfig, IdempotencyConfig } from "../../core/generator/resources-builder.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
@@ -148,22 +148,31 @@ function parseAuthHeaders(values: string[] | undefined): Record<string, string> 
 async function deriveResourceConfigsFromApi(
   apiName: string | undefined,
   dbPath: string | undefined,
-): Promise<Map<string, { readbackDiff?: ReadbackDiffConfig }> | undefined> {
+): Promise<Map<string, { readbackDiff?: ReadbackDiffConfig; idempotency?: IdempotencyConfig }> | undefined> {
   if (!apiName) return undefined;
   const col = resolveApiCollection(apiName, dbPath);
   if ("error" in col) return undefined;
   if (!col.baseDir) return undefined;
   const map = await readResourceMap(col.baseDir);
   if (!map) return undefined;
-  const out = new Map<string, { readbackDiff?: ReadbackDiffConfig }>();
+  const out = new Map<string, { readbackDiff?: ReadbackDiffConfig; idempotency?: IdempotencyConfig }>();
   for (const r of map.resources) {
-    if (!r.readback_diff) continue;
-    out.set(r.resource, {
-      readbackDiff: {
+    if (!r.readback_diff && !r.idempotency) continue;
+    const entry: { readbackDiff?: ReadbackDiffConfig; idempotency?: IdempotencyConfig } = {};
+    if (r.readback_diff) {
+      entry.readbackDiff = {
         ignoreFields: r.readback_diff.ignore_fields,
         writeToReadMap: r.readback_diff.write_to_read_map,
-      },
-    });
+      };
+    }
+    if (r.idempotency) {
+      entry.idempotency = {
+        header: r.idempotency.header,
+        scope: r.idempotency.scope,
+        ignoreResponseFields: r.idempotency.ignore_response_fields,
+      };
+    }
+    out.set(r.resource, entry);
   }
   return out.size > 0 ? out : undefined;
 }

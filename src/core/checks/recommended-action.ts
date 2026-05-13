@@ -30,6 +30,7 @@ const CHECK_ID_TO_CLASS: Record<string, FindingClass> = {
   missing_required_header: "check:missing_required_header",
   ignored_auth: "check:ignored_auth",
   cross_call_references: "check:cross_call_references",
+  idempotency_replay: "check:idempotency_replay",
   network_error: "check:network_error",
 };
 

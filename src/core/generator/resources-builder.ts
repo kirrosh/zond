@@ -44,6 +44,33 @@ export interface ReadbackDiffConfig {
   writeToReadMap?: Record<string, string>;
 }
 
+/**
+ * ARV-170 (m-20 idempotency-replay): per-resource declaration that the
+ * create endpoint honors an Idempotency-Key header. When present, the
+ * `idempotency_replay` stateful check sends POST twice with the same
+ * key and asserts (a) no duplicate resource is created and (b) the two
+ * responses are bit-identical modulo `ignoreResponseFields`.
+ *
+ * Auto-detect fallback: if `idempotency:` is absent from yaml but the
+ * create endpoint declares an `Idempotency-Key` header parameter in
+ * the spec, the check still runs with `header="Idempotency-Key"` and
+ * the default ignore list. Explicit yaml is preferred — it documents
+ * intent and lets the user customise the ignore list per API quirks
+ * (Stripe `request_id`, Resend `retry_after`).
+ */
+export interface IdempotencyConfig {
+  /** Header that carries the key. Default `Idempotency-Key`. */
+  header?: string;
+  /** Informational. `endpoint` = key scoped per-endpoint (Stripe).
+   *  `global` = same key replays across endpoints. Today the check
+   *  uses the same flow either way; field is read for diagnostics. */
+  scope?: "endpoint" | "global";
+  /** Response-body field names stripped before the R1==R2 compare.
+   *  Defaults to a baseline list shared with readback-diff
+   *  (timestamps, request_id, etag) when omitted. */
+  ignoreResponseFields?: string[];
+}
+
 export interface ApiResourceEntry {
   resource: string;
   basePath: string;
@@ -68,6 +95,8 @@ export interface ApiResourceEntry {
   fkDependencies: ResourceFkRef[];
   /** ARV-169: optional cross-call-drift overrides. */
   readbackDiff?: ReadbackDiffConfig;
+  /** ARV-170: opt-in idempotency-replay probe. */
+  idempotency?: IdempotencyConfig;
 }
 
 export interface ApiResourceMap {
@@ -430,6 +459,16 @@ export function serializeApiResourceMap(m: ApiResourceMap): string {
       if (mapKeys.length > 0) {
         lines.push(`      write_to_read_map:`);
         for (const k of mapKeys) lines.push(`        ${escape(k)}: ${escape(map[k]!)}`);
+      }
+    }
+    if (r.idempotency) {
+      lines.push(`    idempotency:`);
+      if (r.idempotency.header) lines.push(`      header: ${escape(r.idempotency.header)}`);
+      if (r.idempotency.scope) lines.push(`      scope: ${r.idempotency.scope}`);
+      const ig = r.idempotency.ignoreResponseFields ?? [];
+      if (ig.length > 0) {
+        lines.push(`      ignore_response_fields:`);
+        for (const f of ig) lines.push(`        - ${escape(f)}`);
       }
     }
   }

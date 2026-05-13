@@ -299,6 +299,13 @@ export interface ResourceYaml {
     ignore_fields?: string[];
     write_to_read_map?: Record<string, string>;
   };
+  /** ARV-170: opt-in idempotency-replay probe for this resource's
+   *  create endpoint. */
+  idempotency?: {
+    header?: string;
+    scope?: "endpoint" | "global";
+    ignore_response_fields?: string[];
+  };
 }
 
 export interface ApiResourceMapYaml {
