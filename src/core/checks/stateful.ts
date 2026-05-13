@@ -38,7 +38,10 @@ export interface StatefulHarness {
    *  (idempotency, pagination, lifecycle) will append their own keys
    *  to the per-resource entry. Optional — when absent each probe
    *  falls back to its built-in defaults. */
-  resourceConfigs?: Map<string, { readbackDiff?: import("../generator/resources-builder.ts").ReadbackDiffConfig }>;
+  resourceConfigs?: Map<string, {
+    readbackDiff?: import("../generator/resources-builder.ts").ReadbackDiffConfig;
+    idempotency?: import("../generator/resources-builder.ts").IdempotencyConfig;
+  }>;
   send(req: HttpRequest, opts?: { timeoutMs?: number }): Promise<HttpResponse>;
 }
 

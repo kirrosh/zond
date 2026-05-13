@@ -28,6 +28,8 @@ describe("ARV-11 AC #1: recommended_action table", () => {
     ["positive_data_acceptance", 422, "report_backend_bug"],
     ["use_after_free", 200, "report_backend_bug"],
     ["ensure_resource_availability", 404, "report_backend_bug"],
+    ["cross_call_references", undefined, "report_backend_bug"],
+    ["idempotency_replay", undefined, "report_backend_bug"],
 
     // Validation gap.
     ["negative_data_rejection", 200, "tighten_validation"],

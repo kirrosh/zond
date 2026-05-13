@@ -38,6 +38,7 @@ describe("ARV-7 mode catalog", () => {
       "content_type_conformance",
       "cross_call_references",
       "ensure_resource_availability",
+      "idempotency_replay",
       "not_a_server_error",
       "positive_data_acceptance",
       "response_headers_conformance",

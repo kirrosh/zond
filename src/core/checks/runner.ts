@@ -105,7 +105,10 @@ export interface RunChecksOptions {
    *  CLI loads them from `.api-resources.yaml` + `.api-resources.local.yaml`
    *  and hands them in; tests pass a literal Map. Optional — undefined
    *  ⇒ each probe uses its built-in defaults. */
-  resourceConfigs?: Map<string, { readbackDiff?: import("../generator/resources-builder.ts").ReadbackDiffConfig }>;
+  resourceConfigs?: Map<string, {
+    readbackDiff?: import("../generator/resources-builder.ts").ReadbackDiffConfig;
+    idempotency?: import("../generator/resources-builder.ts").IdempotencyConfig;
+  }>;
   /** ARV-141: substitute real fixture values into path-param placeholders so
    *  the deterministic synthetic 404 (`/issues/x`) becomes a real-id 200/422
    *  whenever `.env.yaml` actually has a fixture. This makes `checks run`

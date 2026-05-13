@@ -34,6 +34,7 @@ zond checks list --json          # same, machine-readable
 | "boundary value coverage" | `... --phase coverage` |
 | "find security bugs", "broken auth" | `... --check ignored_auth,use_after_free,ensure_resource_availability` |
 | "is GET returning what POST accepted?", "cross-call drift" | `... --check cross_call_references` (m-20) |
+| "does the API honor Idempotency-Key?", "two-POST replay" | `... --check idempotency_replay` (m-20) |
 | "schemathesis-style strict mode" | `... --strict-405 --strict-401` (m-18) |
 | "SARIF for GitHub Code Scanning" | `... --report sarif --output zond.sarif` |
 | "stream findings to a pipeline" | `... --report ndjson \| jq -c '.'` |
@@ -192,3 +193,35 @@ Defaults already filter timestamps (`created_at`, `updated_at`), envelope
 fields (`object`, `_links`), and ETag. Per-API quirks need a yaml line.
 Authored either by hand or via `zond api annotate --readback` (ARV-187 —
 LLM-pass writing to `.api-resources.local.yaml`, reviewed via git diff).
+
+## Idempotency replay (m-20 ARV-170)
+
+`idempotency_replay` — two POSTs with the same `Idempotency-Key` header.
+Server must (a) return the same resource id and (b) bit-identical response
+bodies (modulo timestamps / request-id / etag).
+
+- **duplicate_resource** — ids differ → server ignored the key. HIGH.
+- **non_bit_identical** — same id but bodies drift on non-ignored fields
+  → replay isn't truly idempotent. Surfaced in the same HIGH finding via
+  `evidence.kind`.
+
+Two ways to opt-in per resource:
+
+1. Spec declares `Idempotency-Key` as a header parameter on the create
+   endpoint → auto-detected, runs with defaults.
+2. `.api-resources.yaml` block (preferred — documents intent + lets you
+   tune the ignore list):
+
+```yaml
+resources:
+  - resource: charge
+    # … existing fields …
+    idempotency:
+      header: Idempotency-Key            # default; override for non-standard names
+      scope: endpoint                    # informational; `endpoint` | `global`
+      ignore_response_fields:            # added on top of timestamp/request_id baseline
+        - retry_after
+```
+
+Anti-FP: 429/409 on the 2nd POST → skip with cleanup. No DELETE on the
+group → finding still fires, evidence carries `cleanup_warning`.

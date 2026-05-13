@@ -39,6 +39,9 @@ export const MODE_BY_CHECK: Record<string, Mode> = {
   // ARV-169 (m-20): cross-call drift is a contract-verification check
   // (does GET reflect POST?), not a malicious-input probe. Positive.
   cross_call_references: "positive",
+  // ARV-170 (m-20): idempotency replay verifies a *contract* the server
+  // advertises (Idempotency-Key honored). Positive.
+  idempotency_replay: "positive",
 };
 
 export function modeFor(checkId: string): Mode {

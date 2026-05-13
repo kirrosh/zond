@@ -22,6 +22,7 @@ import { ensureResourceAvailability } from "./ensure_resource_availability.ts";
 import { negativeDataRejection } from "./negative_data_rejection.ts";
 import { positiveDataAcceptance } from "./positive_data_acceptance.ts";
 import { crossCallReferences } from "./cross_call_references.ts";
+import { idempotencyReplay } from "./idempotency_replay.ts";
 
 let registered = false;
 
@@ -45,6 +46,8 @@ export function registerBuiltinChecks(): void {
   registerCheck(positiveDataAcceptance);
   // ARV-169 (m-20) — cross-call POST→GET shape-diff probe.
   registerStatefulCheck(crossCallReferences);
+  // ARV-170 (m-20) — Idempotency-Key replay probe.
+  registerStatefulCheck(idempotencyReplay);
   registered = true;
 }
 
