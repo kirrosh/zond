@@ -37,6 +37,7 @@ zond checks list --json          # same, machine-readable
 | "does the API honor Idempotency-Key?", "two-POST replay" | `... --check idempotency_replay` (m-20) |
 | "are paginated lists consistent?", "duplicates across cursor pages" | `... --check pagination_invariants` (m-20) |
 | "does cancel/archive land the resource in the declared state?", "state-machine" | `... --check lifecycle_transitions` (m-20) |
+| "do captured webhook events match spec.webhooks shape?" | `zond probe webhooks --event-log events.jsonl` (m-20) — recipe: docs/recipes/webhook-receiver.md |
 | "schemathesis-style strict mode" | `... --strict-405 --strict-401` (m-18) |
 | "SARIF for GitHub Code Scanning" | `... --report sarif --output zond.sarif` |
 | "stream findings to a pipeline" | `... --report ndjson \| jq -c '.'` |
