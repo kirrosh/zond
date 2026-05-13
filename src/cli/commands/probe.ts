@@ -19,6 +19,7 @@ import type { Command } from "commander";
 import { probeStaticCommand, resolveStaticClasses } from "./probe/static.ts";
 import { probeMassAssignmentCommand, emitMassAssignmentTemplateCommand } from "./probe/mass-assignment.ts";
 import { probeSecurityCommand } from "./probe/security.ts";
+import { probeWebhooksCommand } from "./probe/webhooks.ts";
 import { SECURITY_CLASSES } from "../../core/probe/security-probe.ts";
 import { globalJson, resolveSpecArg, resolveApiEnv, resolveApiCollection } from "../resolve.ts";
 import { getApi } from "../util/api-context.ts";
@@ -392,12 +393,50 @@ function defineProbeSecurity(parent: Command, name: string): void {
     });
 }
 
+/**
+ * ARV-173 (m-20): `zond probe webhooks` — offline shape-conformance for
+ * webhook events captured by `docs/recipes/webhook-receiver.md`.
+ *
+ * Live HTTP infrastructure (tunnels, listeners) lives in the recipe,
+ * not in core zond. The CLI takes a pre-captured ndjson log + the
+ * API's spec and validates each event's payload against
+ * `spec.webhooks.<event>.post.requestBody`. Same recipe/probe split as
+ * m-18's quicktype and interactsh.
+ */
+function defineProbeWebhooks(parent: Command, name: string): void {
+  const sub = parent
+    .command(`${name} [spec]`)
+    .description("Shape-conform captured webhook events (ndjson) against spec.webhooks. Recipe: docs/recipes/webhook-receiver.md")
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
+    .requiredOption("--event-log <file>", "ndjson event log captured by the recipe (one JSON event per line)")
+    .option("--only <types>", "Comma-separated event types to validate (default: all declared)");
+  addProbeReportOutputOptions(sub);
+  sub.action(async (specPos: string | undefined, opts, cmd: Command) => {
+    const apiName = resolveProbeApi(opts.api, cmd);
+    const resolved = resolveSpecArg(specPos, apiName, opts.db);
+    if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+    const json = globalJson(cmd);
+    const rep = resolveProbeOutputFlags("probe-webhooks", opts, json);
+    if (!rep) { process.exitCode = 2; return; }
+    process.exitCode = await probeWebhooksCommand({
+      specPath: resolved.spec,
+      eventLog: opts.eventLog,
+      only: opts.only,
+      report: rep.report,
+      output: rep.output,
+      json,
+    });
+  });
+}
+
 export function registerProbes(program: Command): void {
   const probeCmd = program
     .command("probe")
-    .description("Run a probe class — pick one of: static, mass-assignment, security");
+    .description("Run a probe class — pick one of: static, mass-assignment, security, webhooks");
 
   defineProbeStatic(probeCmd, "static");
   defineProbeMassAssignment(probeCmd, "mass-assignment");
   defineProbeSecurity(probeCmd, "security");
+  defineProbeWebhooks(probeCmd, "webhooks");
 }

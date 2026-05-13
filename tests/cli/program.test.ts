@@ -224,6 +224,7 @@ describe("TASK-182 / TASK-300: zond probe umbrella", () => {
       "mass-assignment",
       "security",
       "static",
+      "webhooks",
     ]);
   });
 

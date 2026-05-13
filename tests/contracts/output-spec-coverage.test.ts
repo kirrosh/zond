@@ -42,6 +42,7 @@ const SPEC_REGISTRY: Record<string, OutputSpec<any>> = {
   "checks run": CHECKS_OUTPUT_SPEC,
   "probe mass-assignment": PROBE_OUTPUT_SPEC,
   "probe security": PROBE_OUTPUT_SPEC,
+  "probe webhooks": PROBE_OUTPUT_SPEC,
 };
 
 /**
