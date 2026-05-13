@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-12 12:48'
+updated_date: '2026-05-13 11:54'
 labels:
   - m-20
   - depth
@@ -43,3 +44,28 @@ Acceptance:
 
 Source: feedback round 09 final evaluation §4 item 3.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Agent-augmented re-framing (2026-05-13)
+
+См. backlog/notes/m-20-validation.md.
+
+Расширить idempotency block в .api-resources.yaml:
+
+```
+resources:
+  payment_intent:
+    idempotency:
+      header: Idempotency-Key  # или body field
+      scope: endpoints  # 'endpoint' (default) | 'global'
+      body_hash_fields: [amount, currency, customer]  # которые идут в hash key
+      replay_timeout_sec: 5
+      ignore_response_fields: [created, request_id]  # для bit-identical comparison
+```
+
+Probe запускается per endpoint с idempotency блоком; auto-detect endpoint'ов с Idempotency-Key header'ом в spec'е остаётся как fallback (если в yaml нет explicit).
+
+Config заполняется через ARV-187 `zond api annotate --idempotency` или руками.
+<!-- SECTION:NOTES:END -->
