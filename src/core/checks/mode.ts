@@ -36,6 +36,9 @@ export const MODE_BY_CHECK: Record<string, Mode> = {
   // Availability is positive-flavored — it asserts the server *can*
   // serve the listed resource. Useful in `--mode positive` runs.
   ensure_resource_availability: "all",
+  // ARV-169 (m-20): cross-call drift is a contract-verification check
+  // (does GET reflect POST?), not a malicious-input probe. Positive.
+  cross_call_references: "positive",
 };
 
 export function modeFor(checkId: string): Mode {

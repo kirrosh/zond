@@ -21,6 +21,7 @@ import { useAfterFree } from "./use_after_free.ts";
 import { ensureResourceAvailability } from "./ensure_resource_availability.ts";
 import { negativeDataRejection } from "./negative_data_rejection.ts";
 import { positiveDataAcceptance } from "./positive_data_acceptance.ts";
+import { crossCallReferences } from "./cross_call_references.ts";
 
 let registered = false;
 
@@ -42,6 +43,8 @@ export function registerBuiltinChecks(): void {
   // ARV-4 — 2 data-rejection checks with anti-FP guards.
   registerCheck(negativeDataRejection);
   registerCheck(positiveDataAcceptance);
+  // ARV-169 (m-20) — cross-call POST→GET shape-diff probe.
+  registerStatefulCheck(crossCallReferences);
   registered = true;
 }
 

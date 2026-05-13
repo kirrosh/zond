@@ -33,6 +33,7 @@ zond checks list --json          # same, machine-readable
 | "deep audit", "find edge cases" | `zond checks run --api <name>` |
 | "boundary value coverage" | `... --phase coverage` |
 | "find security bugs", "broken auth" | `... --check ignored_auth,use_after_free,ensure_resource_availability` |
+| "is GET returning what POST accepted?", "cross-call drift" | `... --check cross_call_references` (m-20) |
 | "schemathesis-style strict mode" | `... --strict-405 --strict-401` (m-18) |
 | "SARIF for GitHub Code Scanning" | `... --report sarif --output zond.sarif` |
 | "stream findings to a pipeline" | `... --report ndjson \| jq -c '.'` |
@@ -159,4 +160,35 @@ zond checks run --api prod \
 # Coverage-phase boundary sweep, NDJSON pipe into a watcher
 zond checks run --api dev --phase coverage --report ndjson | \
   jq -c 'select(.type == "finding") | {check, op: .finding.operation, action: .finding.recommended_action}'
+
+# Cross-call POST→GET drift only (m-20, single CRUD-chain check per resource)
+zond checks run --api stripe --check cross_call_references
 ```
+
+## Cross-call drift (m-20 ARV-169)
+
+`cross_call_references` — POST resource → GET resource, diff write-shape
+vs read-shape. Surfaces fields the server silently dropped:
+
+- **state_not_persisted** — POST 2xx echoed the field, GET dropped it.
+  HIGH-signal: server lied about persisting state.
+- **write_only** — POST accepted, GET dropped. Spec-declared write-only
+  fields (passwords, etc.) are auto-filtered.
+
+Tunable per-resource in `apis/<name>/.api-resources.yaml` (или
+`.api-resources.local.yaml` overlay):
+
+```yaml
+resources:
+  - resource: customer
+    # … existing fields …
+    readback_diff:
+      ignore_fields: [metadata, livemode]      # API-quirks, suppress
+      write_to_read_map:
+        tax_id_data: tax_ids                   # write-shape → read-shape
+```
+
+Defaults already filter timestamps (`created_at`, `updated_at`), envelope
+fields (`object`, `_links`), and ETag. Per-API quirks need a yaml line.
+Authored either by hand or via `zond api annotate --readback` (ARV-187 —
+LLM-pass writing to `.api-resources.local.yaml`, reviewed via git diff).

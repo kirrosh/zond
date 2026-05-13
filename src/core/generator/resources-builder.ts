@@ -26,6 +26,24 @@ export interface ResourceFkRef {
   ownerResource: string | null;
 }
 
+/**
+ * ARV-169 (m-20 cross-call drift): per-resource overrides for the
+ * POST→GET shape-diff probe. All fields optional — when absent the
+ * check falls back to `DEFAULT_READBACK_IGNORE` (timestamp / etag /
+ * envelope quirks) so a probe works on a stock spec without yaml work.
+ * Authored by `zond api annotate --readback` (ARV-187) or by hand.
+ */
+export interface ReadbackDiffConfig {
+  /** Field names dropped before diff. Suppresses known API-quirks
+   *  (Stripe `metadata` stripping, livemode, object discriminators)
+   *  so they don't drown out real drift. */
+  ignoreFields?: string[];
+  /** Write-shape → read-shape rename. Stripe takes `tax_id_data` on
+   *  create but exposes it as `tax_ids` on read; without this the
+   *  field looks like state-not-persisted on every probe. */
+  writeToReadMap?: Record<string, string>;
+}
+
 export interface ApiResourceEntry {
   resource: string;
   basePath: string;
@@ -48,6 +66,8 @@ export interface ApiResourceEntry {
   softDelete?: boolean;
   /** Other resources whose ids this resource consumes (FK chain). */
   fkDependencies: ResourceFkRef[];
+  /** ARV-169: optional cross-call-drift overrides. */
+  readbackDiff?: ReadbackDiffConfig;
 }
 
 export interface ApiResourceMap {
@@ -396,6 +416,20 @@ export function serializeApiResourceMap(m: ApiResourceMap): string {
         lines.push(`        param: ${escape(d.param)}`);
         lines.push(`        in: ${d.in}`);
         lines.push(`        ownerResource: ${d.ownerResource ? escape(d.ownerResource) : "null"}`);
+      }
+    }
+    if (r.readbackDiff) {
+      lines.push(`    readback_diff:`);
+      const ig = r.readbackDiff.ignoreFields ?? [];
+      if (ig.length > 0) {
+        lines.push(`      ignore_fields:`);
+        for (const f of ig) lines.push(`        - ${escape(f)}`);
+      }
+      const map = r.readbackDiff.writeToReadMap ?? {};
+      const mapKeys = Object.keys(map);
+      if (mapKeys.length > 0) {
+        lines.push(`      write_to_read_map:`);
+        for (const k of mapKeys) lines.push(`        ${escape(k)}: ${escape(map[k]!)}`);
       }
     }
   }

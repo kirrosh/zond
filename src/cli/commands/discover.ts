@@ -293,6 +293,12 @@ export interface ResourceYaml {
   hasFullCrud?: boolean;
   endpoints: { list?: string; create?: string; read?: string; update?: string; delete?: string };
   fkDependencies: Array<{ var: string; param: string; in: "path" | "body"; ownerResource: string | null }>;
+  /** ARV-169: optional POST→GET drift overrides. snake_case to match
+   *  yaml on disk; loaders preserve as-is so the check can read it. */
+  readback_diff?: {
+    ignore_fields?: string[];
+    write_to_read_map?: Record<string, string>;
+  };
 }
 
 export interface ApiResourceMapYaml {
