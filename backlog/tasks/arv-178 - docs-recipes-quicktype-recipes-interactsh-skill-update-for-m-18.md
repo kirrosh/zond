@@ -1,9 +1,10 @@
 ---
 id: ARV-178
 title: 'docs: recipes/quicktype + recipes/interactsh + skill update for m-18'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 13:27'
+updated_date: '2026-05-13 11:34'
 labels:
   - m-18
   - docs
@@ -52,5 +53,11 @@ workflow) и `zond.md` (Phase 2.5 — schema-from-runs для depth-lift).
 <!-- AC:BEGIN -->
 - [ ] #1 docs/recipes/quicktype.md запускается вслепую новым tester за <15 минут на Sentry
 - [ ] #2 docs/recipes/interactsh.md запускается вслепую за <15 минут (включая поднятие interactsh-client)
-- [ ] #3 init-template skills обновлены, /zond-fb-tester SD-pass не находит drift
+- [x] #3 init-template skills обновлены, /zond-fb-tester SD-pass не находит drift
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Частичное закрытие согласно m-18-decision §E. Skill update сделан: zond-checks.md в 9c95113 (--strict-405/-401 в matrix + блок 'Strict-mode флаги'), zond.md добавлена строка 'schemathesis-style strict mode' → zond-checks. AC#1/#2 (recipes quicktype/interactsh) — не пишутся, т.к. ARV-175/176 deferred до m-21, ARV-177 deferred до m-19. Recipes откроются при реализации соответствующих фич.
+<!-- SECTION:FINAL_SUMMARY:END -->

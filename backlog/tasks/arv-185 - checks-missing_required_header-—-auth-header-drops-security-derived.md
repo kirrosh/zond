@@ -1,9 +1,10 @@
 ---
 id: ARV-185
 title: 'checks: missing_required_header — auth-header drops (security-derived)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 09:17'
+updated_date: '2026-05-13 11:34'
 labels:
   - m-18
   - parity-gap
@@ -78,5 +79,11 @@ schemathesis-style SARIF report'ы где категории должны сов
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 решение B (дублировать) или C (skip) принято с количественным обоснованием
+- [x] #1 решение B (дублировать) или C (skip) принято с количественным обоснованием
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Won't-do (вариант C). Текущее покрытие через ignored_auth (после ARV-181 с differential + strict-401) ловит тот же класс auth-bypass багов. Parity-gap по check-имени структурный (schemathesis считает security-derived Authorization за required header; у zond это домен ignored_auth). Дублирование запроса нежелательно. Решение задокументировано в backlog/notes/m-18-decision.md §c'2.
+<!-- SECTION:FINAL_SUMMARY:END -->
