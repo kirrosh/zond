@@ -27,8 +27,7 @@
  */
 import type { OpenAPIV3 } from "openapi-types";
 import type { CrudStatefulCheck } from "../stateful.ts";
-import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody, resolveCreateBody } from "./_crud-helpers.ts";
 import { computeDrift } from "./_readback-helpers.ts";
 
 function declaredReadFields(read: { responses: Array<{ statusCode: number; schema?: unknown }> }): Set<string> {
@@ -64,17 +63,19 @@ export const crossCallReferences: CrudStatefulCheck = {
     const read = g.read!;
     const baseHeaders = { Accept: "application/json", ...h.authHeaders };
 
-    if (!create.requestBodySchema) {
-      return { kind: "skip", reason: "create has no requestBody schema — nothing to diff" };
+    const seedBody = h.resourceConfigs?.get(g.resource)?.seedBody;
+    if (!create.requestBodySchema && !seedBody) {
+      return { kind: "skip", reason: "create has no requestBody schema and no seed_body — nothing to diff" };
     }
-    const writeBody = generateFromSchema(create.requestBodySchema);
-    if (writeBody == null || typeof writeBody !== "object") {
-      return { kind: "skip", reason: "generated create body is not an object" };
+    const writeBody = resolveCreateBody(create, seedBody);
+    if (writeBody == null) {
+      return { kind: "skip", reason: "could not produce a create body (no seed_body, generator returned non-object)" };
     }
 
     const createUrl = `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`;
     // ARV-191: form-urlencoded dispatch — see _crud-helpers.serializeCheckBody.
-    const { body: createBodyStr, contentType } = serializeCheckBody(create, writeBody as Record<string, unknown>, h.pathVars);
+    // ARV-187: seed_body.content_type overrides spec'd contentType when set.
+    const { body: createBodyStr, contentType } = serializeCheckBody(create, writeBody, h.pathVars, seedBody?.contentType);
     const createResp = await h.send({
       method: "POST",
       url: createUrl,

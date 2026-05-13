@@ -5,8 +5,7 @@
  * actually appears in storage.
  */
 import type { CrudStatefulCheck } from "../stateful.ts";
-import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody, resolveCreateBody } from "./_crud-helpers.ts";
 
 export const ensureResourceAvailability: CrudStatefulCheck = {
   id: "ensure_resource_availability",
@@ -27,14 +26,14 @@ export const ensureResourceAvailability: CrudStatefulCheck = {
     // ARV-191: form-urlencoded vs JSON dispatch — Stripe-style APIs
     // declare x-www-form-urlencoded; JSON.stringify would yield "400
     // missing param" the broken-baseline guard then silently swallows.
-    const generated = create.requestBodySchema
-      ? generateFromSchema(create.requestBodySchema)
-      : {};
+    // ARV-187: prefer LLM-authored seed_body over generator.
+    const seedBody = h.resourceConfigs?.get(g.resource)?.seedBody;
+    const generated = resolveCreateBody(create, seedBody) ?? {};
     const { body, contentType } = serializeCheckBody(
       create,
-      (generated && typeof generated === "object" && !Array.isArray(generated))
-        ? (generated as Record<string, unknown>) : {},
+      generated,
       h.pathVars,
+      seedBody?.contentType,
     );
     const createResp = await h.send({
       method: "POST",

@@ -1,0 +1,525 @@
+/**
+ * ARV-187: `zond api annotate` — agent-augmented overlay authoring.
+ *
+ * zond does NOT call an LLM and does NOT carry LLM prompt text.
+ * It exposes two phases that bracket the agent's own inference:
+ *
+ *   1. `zond api annotate dump --<kind>` — emit raw, per-resource
+ *      spec slices + the expected response shape (zod-derived contract).
+ *      The agent reads them, decides how to ask its model, generates
+ *      one YAML response per resource.
+ *
+ *   2. `zond api annotate apply --<kind> --input <file|->` — read the
+ *      agent's YAML response, validate via zod, render a diff against
+ *      the existing `.api-resources.local.yaml`, and (with --yes) write.
+ *
+ * The agent owns prompt formulation, model choice, and inference. zond
+ * owns spec-parsing, response validation, and overlay I/O. No network
+ * calls from zond, no API keys, deterministic binary behaviour.
+ */
+
+import { join } from "node:path";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import type { Command } from "commander";
+import type { OpenAPIV3 } from "openapi-types";
+import { resolveApiCollection } from "../../../resolve.ts";
+import { readOpenApiSpec } from "../../../../core/generator/openapi-reader.ts";
+import { readResourceMap, type ResourceYaml } from "../../discover.ts";
+import { buildResourceSlices, type ResourceSlice, type EndpointDump } from "./prompts.ts";
+import { readLocalOverlay, writeLocalOverlay, mergePatches, renderChangesDiff, type ResourcePatch } from "./overlay.ts";
+import * as seedBodies from "./seed-bodies.ts";
+import * as lifecycle from "./lifecycle.ts";
+import * as idempotency from "./idempotency.ts";
+import * as pagination from "./pagination.ts";
+import * as readback from "./readback.ts";
+import * as resourcesModule from "./resources.ts";
+import { printError, printSuccess, printWarning } from "../../../output.ts";
+import { jsonOk, jsonError, printJson } from "../../../json-envelope.ts";
+import { globalJson } from "../../../resolve.ts";
+
+type SubcommandKind = "seed-bodies" | "lifecycle" | "idempotency" | "pagination" | "readback" | "resources";
+
+// ─── Dump phase ──────────────────────────────────────────────────────
+
+export interface DumpBundle {
+  kind: SubcommandKind;
+  /** "*orphans*" for kind=resources; resource name otherwise. */
+  resource: string;
+  /** Output of buildResourceSlices for a single resource — endpoints,
+   *  schemas, descriptions, x-codeSamples. The raw material. */
+  data: unknown;
+  /** zod-derived shape of the YAML response zond will accept in `apply`.
+   *  Not an LLM prompt — a typed contract the agent can reference. */
+  expected_response_shape: unknown;
+}
+
+const EXPECTED_SHAPES: Record<SubcommandKind, unknown> = {
+  "seed-bodies": seedBodies.EXPECTED_OUTPUT_SHAPE,
+  "lifecycle":   lifecycle.EXPECTED_OUTPUT_SHAPE,
+  "idempotency": idempotency.EXPECTED_OUTPUT_SHAPE,
+  "pagination":  pagination.EXPECTED_OUTPUT_SHAPE,
+  "readback":    readback.EXPECTED_OUTPUT_SHAPE,
+  "resources":   resourcesModule.EXPECTED_OUTPUT_SHAPE,
+};
+
+export interface DumpOptions {
+  api: string;
+  kind: SubcommandKind;
+  only?: string[];
+  json?: boolean;
+  dbPath?: string;
+}
+
+export async function dumpCommand(opts: DumpOptions): Promise<number> {
+  const col = resolveApiCollection(opts.api, opts.dbPath);
+  if ("error" in col) { printError(col.error); return 2; }
+  if (!col.baseDir || !col.spec) {
+    printError(`API '${opts.api}' has no spec/base_dir registered.`);
+    return 2;
+  }
+
+  const doc = await readOpenApiSpec(col.spec);
+  const map = await readResourceMap(col.baseDir);
+  if (!map) {
+    printError(`API '${opts.api}' has no .api-resources.yaml. Run \`zond refresh-api ${opts.api}\` first.`);
+    return 2;
+  }
+
+  let resources = map.resources;
+  if (opts.only && opts.only.length > 0) {
+    const wanted = new Set(opts.only);
+    resources = resources.filter((r) => wanted.has(r.resource));
+  }
+  const slices = buildResourceSlices(doc, resources);
+  const bundles = buildDumpBundles(opts.kind, slices, doc, map.resources);
+
+  if (opts.json) {
+    printJson(jsonOk("api annotate dump", { kind: opts.kind, bundles }));
+  } else {
+    process.stdout.write(JSON.stringify(bundles, null, 2) + "\n");
+  }
+  return 0;
+}
+
+function buildDumpBundles(
+  kind: SubcommandKind,
+  slices: ResourceSlice[],
+  doc: OpenAPIV3.Document,
+  allResources: ResourceYaml[],
+): DumpBundle[] {
+  if (kind === "resources") {
+    const claimedPaths = new Set<string>();
+    for (const r of allResources) {
+      for (const role of ["list", "create", "read", "update", "delete"] as const) {
+        const ep = r.endpoints[role];
+        if (ep) claimedPaths.add(ep.split(/\s+/)[1] ?? "");
+      }
+    }
+    const orphans: string[] = [];
+    for (const [path, item] of Object.entries(doc.paths ?? {})) {
+      if (!item || typeof item !== "object") continue;
+      for (const method of ["get", "post", "put", "patch", "delete"]) {
+        if (!(item as Record<string, unknown>)[method]) continue;
+        if (claimedPaths.has(path)) continue;
+        orphans.push(`${method.toUpperCase()} ${path}`);
+      }
+    }
+    if (orphans.length === 0) return [];
+    return [{
+      kind,
+      resource: "*orphans*",
+      data: {
+        orphan_endpoints: orphans,
+        existing_resources: allResources.map((r) => ({ resource: r.resource, basePath: r.basePath })),
+      },
+      expected_response_shape: EXPECTED_SHAPES[kind],
+    }];
+  }
+
+  const out: DumpBundle[] = [];
+  for (const slice of slices) {
+    if (!isSliceApplicable(kind, slice)) continue;
+    let data: unknown;
+    switch (kind) {
+      case "seed-bodies":
+      case "idempotency":
+      case "pagination":
+      case "readback":
+        data = sliceData(slice);
+        break;
+      case "lifecycle":
+        data = {
+          ...(sliceData(slice) as Record<string, unknown>),
+          action_endpoint_candidates: collectActionEndpoints(doc, slice),
+        };
+        break;
+      default: throw new Error(`unhandled kind: ${kind}`);
+    }
+    out.push({
+      kind,
+      resource: slice.resource,
+      data,
+      expected_response_shape: EXPECTED_SHAPES[kind],
+    });
+  }
+  return out;
+}
+
+function sliceData(slice: ResourceSlice): unknown {
+  return {
+    resource: slice.resource,
+    basePath: slice.basePath,
+    itemPath: slice.itemPath,
+    endpoints: slice.endpoints,
+  };
+}
+
+function isSliceApplicable(kind: SubcommandKind, slice: ResourceSlice): boolean {
+  switch (kind) {
+    case "seed-bodies": return seedBodies.isApplicable(slice);
+    case "lifecycle":   return lifecycle.isApplicable(slice);
+    case "idempotency": return idempotency.isApplicable(slice);
+    case "pagination":  return pagination.isApplicable(slice);
+    case "readback":    return readback.isApplicable(slice);
+    case "resources":   return true;
+  }
+}
+
+function collectActionEndpoints(doc: OpenAPIV3.Document, slice: ResourceSlice): EndpointDump[] {
+  const out: EndpointDump[] = [];
+  const claimed = new Set<string>();
+  for (const role of ["list", "create", "read", "update", "delete"] as const) {
+    const ep = slice.endpoints[role];
+    if (ep) claimed.add(`${ep.method} ${ep.path}`);
+  }
+  const baseLen = slice.basePath.length;
+  for (const [path, item] of Object.entries(doc.paths ?? {})) {
+    if (!item || typeof item !== "object") continue;
+    if (!path.startsWith(slice.basePath)) continue;
+    const tail = path.slice(baseLen);
+    if (!/\/\{[^}]+\}\/[a-zA-Z]/.test(tail)) continue;
+    for (const method of ["get", "post", "put", "patch", "delete"]) {
+      const op = (item as Record<string, unknown>)[method];
+      if (!op) continue;
+      const key = `${method.toUpperCase()} ${path}`;
+      if (claimed.has(key)) continue;
+      out.push({
+        method: method.toUpperCase(),
+        path,
+        operationId: (op as { operationId?: string }).operationId,
+        summary: (op as { summary?: string }).summary,
+        description: ((op as { description?: string }).description ?? "").slice(0, 240),
+      });
+    }
+  }
+  return out;
+}
+
+// ─── Apply phase ─────────────────────────────────────────────────────
+
+export interface ApplyOptions {
+  api: string;
+  kind: SubcommandKind;
+  input: string;
+  yes?: boolean;
+  force?: boolean;
+  json?: boolean;
+  dbPath?: string;
+}
+
+export async function applyCommand(opts: ApplyOptions): Promise<number> {
+  const col = resolveApiCollection(opts.api, opts.dbPath);
+  if ("error" in col) { printError(col.error); return 2; }
+  if (!col.baseDir || !col.spec) {
+    printError(`API '${opts.api}' has no spec/base_dir registered.`);
+    return 2;
+  }
+
+  const doc = await readOpenApiSpec(col.spec);
+  const map = await readResourceMap(col.baseDir);
+  if (!map) {
+    printError(`API '${opts.api}' has no .api-resources.yaml.`);
+    return 2;
+  }
+  const slicesByName = new Map<string, ResourceSlice>();
+  for (const s of buildResourceSlices(doc, map.resources)) slicesByName.set(s.resource, s);
+
+  const inputText = await readInput(opts.input);
+  const documents = parseYamlDocuments(inputText);
+  if (documents.length === 0) {
+    printError(`No YAML documents found in input (${opts.input}).`);
+    return 2;
+  }
+
+  if (opts.kind === "resources") {
+    return applyResources(col.baseDir, documents, opts);
+  }
+
+  const drafts: Array<{ patch: ResourcePatch; audit: Record<string, unknown> }> = [];
+  const errors: Array<{ resource: string; error: string }> = [];
+
+  for (const document of documents) {
+    const resourceName = (document as { resource?: string } | null)?.resource;
+    if (typeof resourceName !== "string") {
+      errors.push({ resource: "<unknown>", error: "document missing 'resource:' field" });
+      continue;
+    }
+    const slice = slicesByName.get(resourceName);
+    if (!slice) {
+      errors.push({ resource: resourceName, error: "resource not present in .api-resources.yaml — refresh-api first?" });
+      continue;
+    }
+    try {
+      drafts.push(parseByKind(opts.kind, document, slice));
+    } catch (err) {
+      errors.push({ resource: resourceName, error: (err as Error).message });
+    }
+  }
+
+  const nonEmpty = drafts.filter((d) => Object.keys(d.patch).filter((k) => k !== "resource").length > 0);
+
+  const overlay = await readLocalOverlay(col.baseDir);
+  const existing = (overlay.patches ?? []) as ResourcePatch[];
+  const merge = mergePatches(existing, nonEmpty.map((d) => d.patch), { force: opts.force === true });
+
+  const summary = {
+    api: opts.api,
+    kind: opts.kind,
+    inputDocuments: documents.length,
+    accepted: nonEmpty.length,
+    dropped: drafts.length - nonEmpty.length,
+    failures: errors,
+    changes: merge.changes.length,
+    conflicts: merge.conflicts.length,
+  };
+
+  const diff = renderChangesDiff(merge);
+  if (!opts.json) {
+    if (errors.length > 0) {
+      printWarning(`Failed to parse ${errors.length} document(s):`);
+      for (const e of errors) process.stdout.write(`  ✗ ${e.resource}: ${e.error}\n`);
+    }
+    if (diff) {
+      process.stdout.write("\nProposed changes (and conflicts):\n");
+      process.stdout.write(diff + "\n\n");
+    } else {
+      process.stdout.write("No changes proposed.\n");
+    }
+  }
+
+  if (!opts.yes) {
+    if (!opts.json) process.stdout.write(`Dry-run. Re-run with --yes to write ${col.baseDir}/.api-resources.local.yaml.\n`);
+    if (opts.json) printJson(jsonOk("api annotate apply", { ...summary, written: false }));
+    return 0;
+  }
+
+  if (merge.changes.length === 0 && merge.conflicts.length === 0) {
+    if (opts.json) printJson(jsonOk("api annotate apply", { ...summary, written: false }));
+    return 0;
+  }
+
+  overlay.patches = merge.patches;
+  await writeLocalOverlay(col.baseDir, overlay);
+  await appendAuditLog(col.baseDir, {
+    timestamp: new Date().toISOString(),
+    kind: opts.kind,
+    drafts: drafts.map((d) => d.audit),
+    failures: errors,
+  });
+  if (!opts.json) printSuccess(`Wrote ${merge.changes.length} change(s) to ${col.baseDir}/.api-resources.local.yaml`);
+  if (merge.conflicts.length > 0 && !opts.force && !opts.json) {
+    printWarning(`${merge.conflicts.length} conflict(s) kept existing values. Re-run with --force to overwrite.`);
+  }
+  if (opts.json) printJson(jsonOk("api annotate apply", { ...summary, written: true }));
+  return 0;
+}
+
+function parseByKind(kind: SubcommandKind, parsed: unknown, slice: ResourceSlice): { patch: ResourcePatch; audit: Record<string, unknown> } {
+  switch (kind) {
+    case "seed-bodies": return seedBodies.parseSeedBodyResponse(parsed, slice);
+    case "lifecycle":   return lifecycle.parseLifecycleResponse(parsed, slice);
+    case "idempotency": return idempotency.parseIdempotencyResponse(parsed, slice);
+    case "pagination":  return pagination.parsePaginationResponse(parsed, slice);
+    case "readback":    return readback.parseReadbackResponse(parsed, slice);
+    case "resources":   throw new Error("resources kind handled separately");
+  }
+}
+
+async function applyResources(apiDir: string, documents: unknown[], opts: ApplyOptions): Promise<number> {
+  if (documents.length !== 1) {
+    printWarning(`Expected 1 YAML document with 'extensions:'; got ${documents.length}. Using the first.`);
+  }
+  let result;
+  try { result = resourcesModule.parseResourcesResponse(documents[0]); }
+  catch (err) { printError((err as Error).message); return 2; }
+
+  if (!opts.json) {
+    process.stdout.write(`Proposed: ${result.audit.proposed}; high-confidence accepted: ${result.extensions.length}; dropped: ${result.audit.droppedLowConfidence}\n`);
+  }
+  if (result.extensions.length === 0) {
+    if (opts.json) printJson(jsonOk("api annotate apply", { written: false, accepted: 0 }));
+    return 0;
+  }
+
+  const overlay = await readLocalOverlay(apiDir);
+  const existing = (overlay.extensions ?? []);
+  const existingNames = new Set(existing.map((e) => e.resource));
+  const newOnes = result.extensions.filter((e) => !existingNames.has(e.resource));
+
+  if (!opts.json) {
+    process.stdout.write(`\nNew resource extension(s):\n`);
+    for (const ext of newOnes) process.stdout.write(`  + ${ext.resource} (${ext.basePath})\n`);
+  }
+
+  if (!opts.yes) {
+    if (!opts.json) process.stdout.write(`\nDry-run. Re-run with --yes to write.\n`);
+    if (opts.json) printJson(jsonOk("api annotate apply", { written: false, accepted: newOnes.length }));
+    return 0;
+  }
+
+  overlay.extensions = [...existing, ...newOnes];
+  await writeLocalOverlay(apiDir, overlay);
+  await appendAuditLog(apiDir, {
+    timestamp: new Date().toISOString(),
+    kind: "resources",
+    accepted: newOnes.length,
+    dropped: result.audit.droppedLowConfidence,
+  });
+  if (!opts.json) printSuccess(`Wrote ${newOnes.length} extension(s) to ${apiDir}/.api-resources.local.yaml`);
+  if (opts.json) printJson(jsonOk("api annotate apply", { written: true, accepted: newOnes.length }));
+  return 0;
+}
+
+// ─── I/O helpers ─────────────────────────────────────────────────────
+
+async function readInput(source: string): Promise<string> {
+  if (source === "-") return await readStdin();
+  return await readFile(source, "utf-8");
+}
+
+async function readStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
+function parseYamlDocuments(text: string): unknown[] {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return [];
+  if (trimmed.startsWith("[") || trimmed.startsWith("- ")) {
+    const parsed = Bun.YAML.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed;
+    return [parsed];
+  }
+  const segments = trimmed.split(/^---\s*$/m).map((s) => s.trim()).filter(Boolean);
+  return segments.map((s) => Bun.YAML.parse(s));
+}
+
+async function appendAuditLog(apiDir: string, record: Record<string, unknown>): Promise<void> {
+  const path = join(apiDir, ".api-resources.annotate.log.ndjson");
+  if (!existsSync(apiDir)) await mkdir(apiDir, { recursive: true });
+  await appendFile(path, JSON.stringify(record) + "\n", "utf-8");
+}
+
+void jsonError;
+
+// ─── Commander registration ──────────────────────────────────────────
+
+export function registerApiAnnotate(program: Command): void {
+  const api = program
+    .command("api")
+    .description("Per-API tooling — annotate the .api-resources.local.yaml overlay (ARV-187)");
+
+  const annotate = api
+    .command("annotate")
+    .description("Agent-augmented overlay authoring. zond emits raw spec slices → agent generates YAML → zond validates+applies. Two subcommands: `dump` and `apply`.");
+
+  annotate
+    .command("dump")
+    .description("Emit per-resource spec slices + expected response shape on stdout (JSON). The agent decides how to prompt its LLM; zond carries no prompts.")
+    .option("--api <name>", "Target API (else falls back to global --api)")
+    .option("--seed-bodies", "Slices for seed_body{content_type, body}")
+    .option("--lifecycle", "Slices + action-endpoint candidates for lifecycle")
+    .option("--idempotency", "Slices for idempotency{header, scope, ...}")
+    .option("--pagination", "Slices for pagination{type, cursor_param, ...}")
+    .option("--readback", "Create+read pair for readback_diff")
+    .option("--resources", "Orphan-endpoint list for resource-graph extensions")
+    .option("--only <list>", "Comma-separated resource names — restrict scope", csv)
+    .option("--db <path>", "SQLite db path override")
+    .action(async (rawOpts, cmd: Command) => {
+      const kind = pickKind(rawOpts);
+      if (!kind) {
+        printError("Pick one of --seed-bodies | --lifecycle | --idempotency | --pagination | --readback | --resources");
+        process.exitCode = 2;
+        return;
+      }
+      const apiName = resolveApiArg(rawOpts, cmd);
+      if (!apiName) { printError("No API selected."); process.exitCode = 2; return; }
+      process.exitCode = await dumpCommand({
+        api: apiName, kind, only: rawOpts.only, dbPath: rawOpts.db, json: globalJson(cmd),
+      });
+    });
+
+  annotate
+    .command("apply")
+    .description("Validate the agent's YAML responses, render a diff, and (with --yes) write into .api-resources.local.yaml.")
+    .option("--api <name>", "Target API (else falls back to global --api)")
+    .option("--seed-bodies", "Apply seed_body block")
+    .option("--lifecycle", "Apply lifecycle block")
+    .option("--idempotency", "Apply idempotency block")
+    .option("--pagination", "Apply pagination block")
+    .option("--readback", "Apply readback_diff block")
+    .option("--resources", "Apply orphan-resource extension list")
+    .option("--input <file>", "Path to the YAML responses file, or `-` for stdin", "-")
+    .option("--yes", "Write the proposed patches to disk (default: dry-run + diff)")
+    .option("--force", "Overwrite the existing value on field-level conflict")
+    .option("--db <path>", "SQLite db path override")
+    .action(async (rawOpts, cmd: Command) => {
+      const kind = pickKind(rawOpts);
+      if (!kind) {
+        printError("Pick one of --seed-bodies | --lifecycle | --idempotency | --pagination | --readback | --resources");
+        process.exitCode = 2;
+        return;
+      }
+      const apiName = resolveApiArg(rawOpts, cmd);
+      if (!apiName) { printError("No API selected."); process.exitCode = 2; return; }
+      process.exitCode = await applyCommand({
+        api: apiName,
+        kind,
+        input: rawOpts.input ?? "-",
+        yes: rawOpts.yes === true,
+        force: rawOpts.force === true,
+        dbPath: rawOpts.db,
+        json: globalJson(cmd),
+      });
+    });
+}
+
+function pickKind(opts: Record<string, unknown>): SubcommandKind | null {
+  const flags: Array<[string, SubcommandKind]> = [
+    ["seedBodies", "seed-bodies"],
+    ["lifecycle", "lifecycle"],
+    ["idempotency", "idempotency"],
+    ["pagination", "pagination"],
+    ["readback", "readback"],
+    ["resources", "resources"],
+  ];
+  const set = flags.filter(([f]) => opts[f] === true);
+  if (set.length !== 1) return null;
+  return set[0]![1];
+}
+
+function csv(v: string): string[] {
+  return v.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+function resolveApiArg(rawOpts: Record<string, unknown>, cmd: Command): string | null {
+  const fromFlag = rawOpts.api;
+  if (typeof fromFlag === "string" && fromFlag.length > 0) return fromFlag;
+  const fromParent = cmd.parent?.parent?.parent?.opts().api;
+  if (typeof fromParent === "string" && fromParent.length > 0) return fromParent;
+  const fromEnv = process.env.ZOND_API_GLOBAL;
+  if (typeof fromEnv === "string" && fromEnv.length > 0) return fromEnv;
+  return null;
+}

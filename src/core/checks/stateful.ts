@@ -43,6 +43,9 @@ export interface StatefulHarness {
     idempotency?: import("../generator/resources-builder.ts").IdempotencyConfig;
     pagination?: import("../generator/resources-builder.ts").PaginationConfig;
     lifecycle?: import("../generator/resources-builder.ts").LifecycleConfig;
+    /** ARV-187: LLM-authored example POST body — preferred over
+     *  generateFromSchema(create) by stateful CRUD checks. */
+    seedBody?: import("../generator/resources-builder.ts").SeedBodyConfig;
   }>;
   send(req: HttpRequest, opts?: { timeoutMs?: number }): Promise<HttpResponse>;
 }

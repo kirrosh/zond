@@ -193,6 +193,14 @@ export interface PaginationConfig {
   itemsField?: string;
 }
 
+/** ARV-187: LLM-authored example POST body. Stateful checks prefer this
+ *  over generateFromSchema(create) when present. */
+export interface SeedBodyConfig {
+  /** Defaults to the create endpoint's requestBodyContentType. */
+  contentType?: string;
+  body: Record<string, unknown>;
+}
+
 export interface ApiResourceEntry {
   resource: string;
   basePath: string;

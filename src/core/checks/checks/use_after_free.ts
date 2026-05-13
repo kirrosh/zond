@@ -5,8 +5,7 @@
  * after a successful DELETE (a classic data-leak / soft-delete bug).
  */
 import type { CrudStatefulCheck } from "../stateful.ts";
-import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody, resolveCreateBody } from "./_crud-helpers.ts";
 
 export const useAfterFree: CrudStatefulCheck = {
   id: "use_after_free",
@@ -28,12 +27,14 @@ export const useAfterFree: CrudStatefulCheck = {
 
     // 1. create — ARV-191: respect form-urlencoded so Stripe-style APIs
     // don't silently broken-baseline-skip every CRUD chain.
-    const generated = create.requestBodySchema ? generateFromSchema(create.requestBodySchema) : {};
+    // ARV-187: prefer LLM-authored seed_body when available.
+    const seedBody = h.resourceConfigs?.get(g.resource)?.seedBody;
+    const generated = resolveCreateBody(create, seedBody) ?? {};
     const { body: createBody, contentType } = serializeCheckBody(
       create,
-      (generated && typeof generated === "object" && !Array.isArray(generated))
-        ? (generated as Record<string, unknown>) : {},
+      generated,
       h.pathVars,
+      seedBody?.contentType,
     );
     const createUrl = `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`;
     const createResp = await h.send({
