@@ -46,7 +46,9 @@ export const responseHeadersConformance: Check = {
   applies: () => true,
   run({ case: c, response, doc }) {
     if (!doc) return { kind: "skip", reason: "spec doc not available" };
-    const declared = getDeclaredHeaders(doc, c.operation.path, c.operation.method, response.status);
+    // ARV-183: use originalPath (pre-ARV-40 rename) for spec lookup.
+    const specPath = c.operation.originalPath ?? c.operation.path;
+    const declared = getDeclaredHeaders(doc, specPath, c.operation.method, response.status);
     const names = Object.keys(declared);
     if (names.length === 0) return { kind: "skip", reason: "no declared response headers" };
     const issues: string[] = [];
