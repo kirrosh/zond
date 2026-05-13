@@ -33,9 +33,22 @@ zond checks list --json          # same, machine-readable
 | "deep audit", "find edge cases" | `zond checks run --api <name>` |
 | "boundary value coverage" | `... --phase coverage` |
 | "find security bugs", "broken auth" | `... --check ignored_auth,use_after_free,ensure_resource_availability` |
+| "schemathesis-style strict mode" | `... --strict-405 --strict-401` (m-18) |
 | "SARIF for GitHub Code Scanning" | `... --report sarif --output zond.sarif` |
 | "stream findings to a pipeline" | `... --report ndjson \| jq -c '.'` |
 | "scan large API faster" | `... --workers auto` (or `--workers 8`) |
+
+### Strict-mode флаги (m-18)
+
+- **`--strict-405`** — `unsupported_method` принимает только 405 (вместо
+  pragmatic 401/403/404/405). Mirror schemathesis V4 default. Включай
+  когда target — backend, где политика «undeclared method → 405»
+  обязательна (RFC 9110 compliance).
+- **`--strict-401`** — `ignored_auth` no-auth/bogus_auth требует ровно 401
+  (вместо любого 4xx). Включай для проверки точности auth-rejection policy.
+
+Pragmatic режим (default) — реалистичный для production API'ев где gateway
+часто возвращает 404 на undeclared method или 403 на missing auth.
 
 ## Iron rules
 

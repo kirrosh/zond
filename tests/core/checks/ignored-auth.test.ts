@@ -37,7 +37,7 @@ interface StubResponses {
 function stubHarness(
   authHeaders: Record<string, string>,
   responses: StubResponses,
-  flags: { bootstrapCleanupFailed?: boolean } = {},
+  flags: { bootstrapCleanupFailed?: boolean; strict401?: boolean } = {},
 ): StatefulHarness {
   let call = 0;
   return {
@@ -45,6 +45,7 @@ function stubHarness(
     doc: { openapi: "3.0.0", info: { title: "t", version: "1" }, paths: {} } as OpenAPIV3.Document,
     authHeaders,
     bootstrapCleanupFailed: flags.bootstrapCleanupFailed ?? false,
+    options: flags.strict401 ? { strict401: true } : undefined,
     async send(_req: HttpRequest): Promise<HttpResponse> {
       const seq = ["baseline", "no_auth", "bogus"] as const;
       const which = seq[call++]!;
@@ -96,19 +97,45 @@ describe("ignored_auth — table-driven (ARV-3 AC #3)", () => {
       expected: "fail",
       failVariant: "bogus_auth",
     },
+    // ARV-181: broken-baseline guard now narrowed to 5xx. 4xx baseline
+    // is handled via differential semantics (see below).
     {
-      label: "broken-baseline guard — baseline 401 → skip",
-      scheme: "bearer",
-      headers: { Authorization: "Bearer real" },
-      responses: { baseline: 401, no_auth: 200, bogus: 200 },
-      expected: "skip",
-    },
-    {
-      label: "broken-baseline guard — baseline 503 → skip",
+      label: "ARV-181: baseline 503 → skip (server unhealthy)",
       scheme: "bearer",
       headers: { Authorization: "Bearer real" },
       responses: { baseline: 503, no_auth: 200, bogus: 200 },
       expected: "skip",
+    },
+    // ── ARV-181 differential: baseline 4xx but no_auth/bogus better ──
+    {
+      label: "ARV-181: baseline 403, no_auth 200 → FAIL (smoking gun bypass)",
+      scheme: "bearer",
+      headers: { Authorization: "Bearer real" },
+      responses: { baseline: 403, no_auth: 200, bogus: 401 },
+      expected: "fail",
+      failVariant: "no_auth_differential" as any,
+    },
+    {
+      label: "ARV-181: baseline 403, no_auth 403, bogus 403 → PASS (auth consistently enforced)",
+      scheme: "bearer",
+      headers: { Authorization: "Bearer real" },
+      responses: { baseline: 403, no_auth: 403, bogus: 403 },
+      expected: "pass",
+    },
+    {
+      label: "ARV-181: baseline 404, no_auth 401, bogus 401 → PASS (route-level auth, resource absent)",
+      scheme: "bearer",
+      headers: { Authorization: "Bearer real" },
+      responses: { baseline: 404, no_auth: 401, bogus: 401 },
+      expected: "pass",
+    },
+    {
+      label: "ARV-181: baseline 403, bogus 200 → FAIL (bogus token accepted)",
+      scheme: "bearer",
+      headers: { Authorization: "Bearer real" },
+      responses: { baseline: 403, no_auth: 403, bogus: 200 },
+      expected: "fail",
+      failVariant: "bogus_auth_differential" as any,
     },
     {
       label: "Basic scheme — proper enforcement passes",
@@ -154,5 +181,44 @@ describe("ignored_auth — table-driven (ARV-3 AC #3)", () => {
     const h = stubHarness({}, { baseline: 200, no_auth: 401, bogus: 401 });
     const outcome = await ignoredAuth.run(makeOp(), h);
     expect(outcome.kind).toBe("skip");
+  });
+});
+
+describe("ignored_auth — ARV-181 strict-401 mode", () => {
+  test("strict-401: baseline 200, no_auth 403 → FAIL (was pass under pragmatic)", async () => {
+    const h = stubHarness(
+      { Authorization: "Bearer real" },
+      { baseline: 200, no_auth: 403, bogus: 401 },
+      { strict401: true },
+    );
+    const outcome = await ignoredAuth.run({
+      path: "/secure", method: "GET", operationId: "secure",
+      summary: undefined, tags: [], parameters: [],
+      requestBodySchema: undefined, requestBodyContentType: undefined,
+      responseContentTypes: ["application/json"],
+      responses: [{ statusCode: 200, description: "ok" }],
+      security: ["bearer"],
+    }, h);
+    expect(outcome.kind).toBe("fail");
+    if (outcome.kind === "fail") {
+      expect(outcome.evidence?.variant).toBe("no_auth_strict");
+      expect(outcome.evidence?.strict_401).toBe(true);
+    }
+  });
+
+  test("strict-401 off: same scenario → PASS (any 4xx ok)", async () => {
+    const h = stubHarness(
+      { Authorization: "Bearer real" },
+      { baseline: 200, no_auth: 403, bogus: 401 },
+    );
+    const outcome = await ignoredAuth.run({
+      path: "/secure", method: "GET", operationId: "secure",
+      summary: undefined, tags: [], parameters: [],
+      requestBodySchema: undefined, requestBodyContentType: undefined,
+      responseContentTypes: ["application/json"],
+      responses: [{ statusCode: 200, description: "ok" }],
+      security: ["bearer"],
+    }, h);
+    expect(outcome.kind).toBe("pass");
   });
 });

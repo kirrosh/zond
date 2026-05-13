@@ -95,6 +95,12 @@ export function disambiguateGenericPathParams(endpoints: EndpointInfo[]): Endpoi
       // Skip rename if newName collides with an unrelated existing name
       // for the same endpoint (would corrupt parameters[]). Cheap guard.
       for (const occ of occs) {
+        // ARV-183: preserve the original spec path before mutating, so
+        // downstream checks (status_code_conformance, response_headers_conformance)
+        // can still look up `doc.paths[...]` by string equality. Set only
+        // on first rename — subsequent renames of the same endpoint keep
+        // the truly original path.
+        if (occ.ep.originalPath === undefined) occ.ep.originalPath = occ.ep.path;
         const segs = occ.ep.path.split("/");
         segs[occ.segIdx] = `{${newName}}`;
         occ.ep.path = segs.join("/");
