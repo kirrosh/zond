@@ -149,22 +149,27 @@ mitmproxy2swagger и sentry-sdk-ingest из исходного драфта **в
 - **Никаких архитектурных рефакторов.** Если comparison-раунд вскроет
   новый класс долга — пишется отдельный milestone, не лезет в m-18.
 
-## Done-критерий — статус
+## Done-критерий — статус (m-18 закрыт 2026-05-13)
 
 1. ✅ **D — schemathesis diff** прогнан на Sentry/Stripe/Resend.
    `backlog/notes/m-18-parity-baseline.md` + `m-18-decision.md`.
-2. ❌ **A — quicktype patch** — отложено (ARV-175/176 → m-21+).
+2. ⏭ **A — quicktype patch** — отложено (ARV-175/176 → m-21+).
    Обоснование: parity-замер показал что это отдельный продуктовый
    workflow, не parity-issue. См. decision-doc §«Решение по A-блоку».
-3. ❌ **C — `zond probe security --oob-server`** — отложено
+3. ⏭ **C — `zond probe security --oob-server`** — отложено
    (ARV-177 → m-19+).
-4. ❌ **E — Recipes** — отложено. Skill update частично — TODO.
+4. ⏭ **E — Recipes** — отложено (ARV-178 closed: skills обновлены,
+   recipes откроются с реализацией ARV-175/176/177).
 5. ✅ **Decision-документ** `backlog/notes/m-18-decision.md`.
-6. ⏳ **Skill update** — TODO в финальном коммите.
+6. ✅ **Skill update** — `zond-checks.md` (--strict-405/-401 matrix +
+   pragmatic-vs-strict block), `zond.md` (entry-points row для
+   schemathesis-style strict).
 
 Главная цель m-18 (измерить gap, решить нужно ли догонять fuzz) **достигнута**.
-4 cheap-fix'а в коде (ARV-179/180/181/183/184) дали архитектурный
+5 cheap-fix'ов в коде (ARV-179/180/181/183/184) дали архитектурный
 паритет на 8 из 12 checks с превосходством на param-axis coverage.
+Решение по fuzz-engine — отложить (ARV-182, m-19 medium priority).
+Следующий milestone — **m-20** (state-aware contract checks).
 
 ## Что закрывается из накопленного контекста
 
