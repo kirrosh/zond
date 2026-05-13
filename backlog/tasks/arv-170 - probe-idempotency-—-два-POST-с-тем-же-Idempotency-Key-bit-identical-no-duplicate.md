@@ -3,10 +3,10 @@ id: ARV-170
 title: >-
   probe: idempotency — два POST с тем же Idempotency-Key bit-identical, no
   duplicate
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-12 12:48'
-updated_date: '2026-05-13 14:35'
+updated_date: '2026-05-13 14:43'
 labels:
   - m-20
   - depth
