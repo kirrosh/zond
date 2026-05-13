@@ -108,6 +108,7 @@ export interface RunChecksOptions {
   resourceConfigs?: Map<string, {
     readbackDiff?: import("../generator/resources-builder.ts").ReadbackDiffConfig;
     idempotency?: import("../generator/resources-builder.ts").IdempotencyConfig;
+    pagination?: import("../generator/resources-builder.ts").PaginationConfig;
   }>;
   /** ARV-141: substitute real fixture values into path-param placeholders so
    *  the deterministic synthetic 404 (`/issues/x`) becomes a real-id 200/422
