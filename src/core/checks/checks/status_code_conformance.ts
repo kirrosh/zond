@@ -35,6 +35,12 @@ export const statusCodeConformance: Check = {
   severity: "medium",
   defaultExpected: "Response status must be declared in the OpenAPI `responses` (or `default`)",
   references: [{ id: "OAS3-responsesObject", url: "https://spec.openapis.org/oas/v3.0.3#responses-object" }],
+  // ARV-180: status-code conformance is a property of the response, not
+  // of the input. The check must fire on every case kind — including
+  // negative-data, dropped-header, and unsupported-method probes — so
+  // an undocumented 5xx/404/422 on bad input surfaces as a finding
+  // (matches schemathesis V4 default: the check has no input-kind filter).
+  caseKinds: ["positive", "negative_data", "missing_required_header", "unsupported_method"],
   applies: () => true,
   run({ case: c, response, doc }) {
     if (!doc) return { kind: "skip", reason: "spec doc not available" };
