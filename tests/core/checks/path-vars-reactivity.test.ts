@@ -90,7 +90,7 @@ describe("checks run reacts to fixture growth (ARV-141)", () => {
         "response_headers_conformance",
         "status_code_conformance",
       ],
-    } as const;
+    };
 
     const empty = await runChecks({ ...baseOpts });
     const filled = await runChecks({ ...baseOpts, pathVars: { issue_id: "real-issue-42" } });
