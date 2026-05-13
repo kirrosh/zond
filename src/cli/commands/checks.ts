@@ -23,7 +23,7 @@ import { createAdaptiveRateLimiter, createRateLimiter, type RateLimiter } from "
 import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
 import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts";
 import { readResourceMap } from "./discover.ts";
-import type { ReadbackDiffConfig, IdempotencyConfig, PaginationConfig } from "../../core/generator/resources-builder.ts";
+import type { ReadbackDiffConfig, IdempotencyConfig, PaginationConfig, LifecycleConfig } from "../../core/generator/resources-builder.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
@@ -157,7 +157,7 @@ async function deriveResourceConfigsFromApi(
   if (!map) return undefined;
   const out = new Map<string, ResourceConfigEntry>();
   for (const r of map.resources) {
-    if (!r.readback_diff && !r.idempotency && !r.pagination) continue;
+    if (!r.readback_diff && !r.idempotency && !r.pagination && !r.lifecycle) continue;
     const entry: ResourceConfigEntry = {};
     if (r.readback_diff) {
       entry.readbackDiff = {
@@ -183,6 +183,20 @@ async function deriveResourceConfigsFromApi(
         itemsField: r.pagination.items_field,
       };
     }
+    if (r.lifecycle) {
+      entry.lifecycle = {
+        field: r.lifecycle.field,
+        states: r.lifecycle.states,
+        transitions: r.lifecycle.transitions,
+        actions: Object.fromEntries(
+          Object.entries(r.lifecycle.actions).map(([name, a]) => [name, {
+            endpoint: a.endpoint,
+            expectedState: a.expected_state,
+            body: a.body,
+          }]),
+        ),
+      };
+    }
     out.set(r.resource, entry);
   }
   return out.size > 0 ? out : undefined;
@@ -192,6 +206,7 @@ type ResourceConfigEntry = {
   readbackDiff?: ReadbackDiffConfig;
   idempotency?: IdempotencyConfig;
   pagination?: PaginationConfig;
+  lifecycle?: LifecycleConfig;
 };
 
 async function derivePathVarsFromApi(apiName: string | undefined, dbPath: string | undefined): Promise<Record<string, string>> {

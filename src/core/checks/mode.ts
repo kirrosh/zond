@@ -44,6 +44,8 @@ export const MODE_BY_CHECK: Record<string, Mode> = {
   idempotency_replay: "positive",
   // ARV-171 (m-20): pagination invariants verify the cursor contract.
   pagination_invariants: "positive",
+  // ARV-172 (m-20): lifecycle verifies the declared state machine.
+  lifecycle_transitions: "positive",
 };
 
 export function modeFor(checkId: string): Mode {

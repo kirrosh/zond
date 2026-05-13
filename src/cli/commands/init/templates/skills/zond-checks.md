@@ -36,6 +36,7 @@ zond checks list --json          # same, machine-readable
 | "is GET returning what POST accepted?", "cross-call drift" | `... --check cross_call_references` (m-20) |
 | "does the API honor Idempotency-Key?", "two-POST replay" | `... --check idempotency_replay` (m-20) |
 | "are paginated lists consistent?", "duplicates across cursor pages" | `... --check pagination_invariants` (m-20) |
+| "does cancel/archive land the resource in the declared state?", "state-machine" | `... --check lifecycle_transitions` (m-20) |
 | "schemathesis-style strict mode" | `... --strict-405 --strict-401` (m-18) |
 | "SARIF for GitHub Code Scanning" | `... --report sarif --output zond.sarif` |
 | "stream findings to a pipeline" | `... --report ndjson \| jq -c '.'` |
@@ -266,3 +267,49 @@ resources:
       default_limit: 2               # probe page size — small on purpose
       items_field: data              # array container (falls back to items / results / value)
 ```
+
+## Lifecycle transitions (m-20 ARV-172)
+
+`lifecycle_transitions` — declare a state machine in
+`.api-resources.yaml`, the check creates a resource and walks the
+named actions, asserting:
+
+- **undeclared_state** — observed state isn't in declared `states[]`.
+- **wrong_expected_state** — action landed the resource in a state other
+  than its declared `expected_state`.
+- **forbidden_transition** — observed (from, to) isn't in declared
+  transitions graph.
+- **state_regression_on_replay** — invoking the action a second time
+  drifted state instead of staying idempotent.
+- **double_action_5xx** — replay 5xx'd. Idempotent actions should 4xx
+  or 2xx, never crash.
+- **action_rejected** — first-call non-2xx (server-side gating). Not a
+  contract bug per se, surfaced as INCONCLUSIVE-class info.
+
+Manifest validation runs at yaml load (catches cycles, unreachable
+states, missing terminal, actions referencing undeclared states)
+before any HTTP call goes out.
+
+```yaml
+resources:
+  - resource: subscription
+    # … existing fields …
+    lifecycle:
+      field: status
+      states: [pending, active, cancelled]
+      transitions:
+        - from: pending
+          to: [active, cancelled]
+        - from: active
+          to: [cancelled]
+        - from: cancelled
+          to: []                     # terminal
+      actions:
+        cancel:
+          endpoint: POST /v1/subscriptions/{id}/cancel
+          expected_state: cancelled
+```
+
+Action endpoints accept the `{id}` placeholder (replaced with the
+captured create-id) or `{<idParam>}`. Body-less actions are the common
+case; provide `body:` only for actions that demand a request payload.

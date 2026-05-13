@@ -317,6 +317,17 @@ export interface ResourceYaml {
     default_limit?: number;
     items_field?: string;
   };
+  /** ARV-172: per-resource state machine + action endpoints. */
+  lifecycle?: {
+    field: string;
+    states: string[];
+    transitions: Array<{ from: string; to: string[] }>;
+    actions: Record<string, {
+      endpoint: string;
+      expected_state: string;
+      body?: Record<string, unknown>;
+    }>;
+  };
 }
 
 export interface ApiResourceMapYaml {

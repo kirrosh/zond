@@ -55,6 +55,7 @@ export type FindingClass =
   | "check:cross_call_references"
   | "check:idempotency_replay"
   | "check:pagination_invariants"
+  | "check:lifecycle_transitions"
   | "check:network_error"
 
   // probe verdicts (severity already classified upstream) ───────────
@@ -156,6 +157,7 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
     case "check:cross_call_references":
     case "check:idempotency_replay":
     case "check:pagination_invariants":
+    case "check:lifecycle_transitions":
       return "report_backend_bug";
 
     case "check:negative_data_rejection":

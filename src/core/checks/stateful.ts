@@ -42,6 +42,7 @@ export interface StatefulHarness {
     readbackDiff?: import("../generator/resources-builder.ts").ReadbackDiffConfig;
     idempotency?: import("../generator/resources-builder.ts").IdempotencyConfig;
     pagination?: import("../generator/resources-builder.ts").PaginationConfig;
+    lifecycle?: import("../generator/resources-builder.ts").LifecycleConfig;
   }>;
   send(req: HttpRequest, opts?: { timeoutMs?: number }): Promise<HttpResponse>;
 }
