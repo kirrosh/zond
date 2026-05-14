@@ -2,10 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import zondSkill from "./templates/skills/zond.md" with { type: "text" };
-import scenariosSkill from "./templates/skills/scenarios.md" with { type: "text" };
 import checksSkill from "./templates/skills/zond-checks.md" with { type: "text" };
 import triageSkill from "./templates/skills/zond-triage.md" with { type: "text" };
-import baseSkill from "./templates/skills/zond-base.md" with { type: "text" };
 
 export interface SkillResult {
   name: string;
@@ -19,13 +17,15 @@ interface SkillTemplate {
 }
 
 const SKILLS: SkillTemplate[] = [
-  // Foundation: workspace contract + manifest-vs-values rule + cross-cutting
-  // iron rules + sub-skill router. Auto-loads when the user mentions any
-  // workspace artefact; siblings extend it without duplicating its rules.
-  { name: "zond-base", body: baseSkill },
+  // Primary skill: artifact model + iron rules + full workflow
+  // (init → fixtures → annotate → generate → run → stateful checks →
+  // probes → coverage → share) + single-flow scenario authoring.
   { name: "zond", body: zondSkill },
-  { name: "zond-scenarios", body: scenariosSkill },
+  // Depth-check reference: conformance + security + m-20 stateful
+  // (cross_call_references, idempotency_replay, pagination_invariants,
+  // lifecycle_transitions) with per-aspect annotate flow.
   { name: "zond-checks", body: checksSkill },
+  // Read-only triage of a finished run / probe artifact.
   { name: "zond-triage", body: triageSkill },
 ];
 

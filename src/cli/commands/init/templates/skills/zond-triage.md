@@ -14,8 +14,8 @@ allowed-tools: [Read, Bash(zond *), Bash(bunx zond *), Bash(jq *)]
 
 Narrow skill: the user already has a finished run (or a recent
 `probe <class>` / `check spec` artifact) and wants to know **what failed and
-what to do next**. Sibling `zond` does the full audit; sibling
-`zond-scenarios` writes new flows. This one only reads.
+what to do next**. Sibling `zond` does the full audit + writes
+scenarios; this one only reads.
 
 ## Iron rules
 

@@ -313,13 +313,13 @@ describe("TASK-297: rich --help with related-skill footer", () => {
     }
   });
 
-  test("probe leaves point at skills/scenarios.md", () => {
+  test("probe leaves point at skills/zond-checks.md", () => {
     const program = buildProgram();
     const probe = program.commands.find((c) => c.name() === "probe")!;
     const security = probe.commands.find((c) => c.name() === "security")!;
-    expect(capture(security)).toContain("Related skill: skills/scenarios.md");
+    expect(capture(security)).toContain("Related skill: skills/zond-checks.md");
     const ma = probe.commands.find((c) => c.name() === "mass-assignment")!;
-    expect(capture(ma)).toContain("Related skill: skills/scenarios.md");
+    expect(capture(ma)).toContain("Related skill: skills/zond-checks.md");
   });
 
   test("default leaf falls back to skills/zond.md", () => {
