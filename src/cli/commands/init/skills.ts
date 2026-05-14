@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import zondSkill from "./templates/skills/zond.md" with { type: "text" };
@@ -28,6 +28,50 @@ const SKILLS: SkillTemplate[] = [
   // Read-only triage of a finished run / probe artifact.
   { name: "zond-triage", body: triageSkill },
 ];
+
+/**
+ * Names previously emitted by `upsertSkills` but no longer in `SKILLS`.
+ * Detected as stale by `detectStaleSkills` and removed by
+ * `pruneStaleSkills` (only when the user opts in via `--prune-stale-skills`).
+ *
+ * Append a name here whenever a skill template is retired. User-authored
+ * skills (any name NOT in this list) are never touched.
+ */
+const LEGACY_SKILL_NAMES: readonly string[] = [
+  "zond-base",       // retired by skills-consolidation refactor (folded into zond)
+  "zond-scenarios",  // retired by skills-consolidation refactor (folded into zond)
+] as const;
+
+export interface StaleSkill {
+  name: string;
+  path: string;
+}
+
+/**
+ * Returns directories under `<cwd>/.claude/skills/` whose name is in
+ * `LEGACY_SKILL_NAMES`. User-authored skill directories (any other
+ * name) are intentionally ignored.
+ */
+export function detectStaleSkills(cwd: string): StaleSkill[] {
+  const out: StaleSkill[] = [];
+  for (const name of LEGACY_SKILL_NAMES) {
+    const path = join(cwd, ".claude", "skills", name);
+    if (existsSync(path)) out.push({ name, path });
+  }
+  return out;
+}
+
+/**
+ * Recursively removes the directories returned by `detectStaleSkills`.
+ * Returns the list of names that were actually removed.
+ */
+export function pruneStaleSkills(cwd: string, opts: { dryRun?: boolean } = {}): StaleSkill[] {
+  const stale = detectStaleSkills(cwd);
+  if (!opts.dryRun) {
+    for (const { path } of stale) rmSync(path, { recursive: true, force: true });
+  }
+  return stale;
+}
 
 /**
  * Idempotently writes Claude Code skills into `<cwd>/.claude/skills/<name>/SKILL.md`.

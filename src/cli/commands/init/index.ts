@@ -22,6 +22,8 @@ export interface InitOptions {
   noAgents?: boolean;
   /** Skip writing Claude Code skills under .claude/skills/. */
   noSkills?: boolean;
+  /** Remove legacy skill dirs (zond-base, zond-scenarios, …) — by default a warning is printed. */
+  pruneStaleSkills?: boolean;
   /** Override cwd for bootstrap (used by tests; CLI always uses process.cwd()). */
   cwd?: string;
   /** Override $HOME for MCP install (used by tests). */
@@ -56,7 +58,13 @@ export async function initCommand(options: InitOptions): Promise<number> {
       return 0;
     }
 
-    const bootstrap = bootstrapWorkspace({ writeAgents, writeSkills, cwd: options.cwd, home: options.home });
+    const bootstrap = bootstrapWorkspace({
+      writeAgents,
+      writeSkills,
+      pruneStaleSkills: options.pruneStaleSkills,
+      cwd: options.cwd,
+      home: options.home,
+    });
     let register: SetupApiResult | null = null;
 
     if (mode === "bootstrap+register") {
@@ -73,6 +81,8 @@ export async function initCommand(options: InitOptions): Promise<number> {
         agentsPath: bootstrap.agents?.path ?? null,
         agentsAction: bootstrap.agents?.action ?? null,
         skills: bootstrap.skills.map((s) => ({ name: s.name, path: s.path, action: s.action })),
+        staleSkills: bootstrap.staleSkills.map((s) => ({ name: s.name, path: s.path })),
+        prunedSkills: bootstrap.prunedSkills.map((s) => ({ name: s.name, path: s.path })),
       };
       if (register) {
         data.collectionId = register.collectionId;
@@ -134,6 +144,9 @@ function printBootstrapResult(b: BootstrapResult, writeAgents: boolean): void {
   if (b.agents) lines.push(`  ${verb(b.agents.action)} AGENTS.md`);
   for (const s of b.skills) {
     lines.push(`  ${verb(s.action)} .claude/skills/${s.name}/SKILL.md`);
+  }
+  for (const s of b.prunedSkills) {
+    lines.push(`  Removed .claude/skills/${s.name}/ (stale)`);
   }
   for (const w of b.warnings) {
     process.stderr.write(`Warning: ${w}\n`);
@@ -200,6 +213,10 @@ export function registerInit(program: Command): void {
     .option("--with-spec <path>", "Bootstrap workspace AND register first API from spec")
     .option("--no-agents-md", "Skip writing AGENTS.md when bootstrapping")
     .option("--no-skills", "Skip writing Claude Code skills under .claude/skills/")
+    .option(
+      "--prune-stale-skills",
+      "Remove .claude/skills/ dirs for retired template names (zond-base, zond-scenarios)",
+    )
     .action(async (specPos: string | undefined, opts, cmd: Command) => {
       const spec = opts.spec ?? specPos;
       const json = globalJson(cmd);
@@ -220,6 +237,7 @@ export function registerInit(program: Command): void {
         withSpec: opts.withSpec,
         noAgents: opts.agentsMd === false,
         noSkills: opts.skills === false,
+        pruneStaleSkills: opts.pruneStaleSkills === true,
         json,
       });
     });
