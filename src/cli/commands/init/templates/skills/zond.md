@@ -264,7 +264,7 @@ trailing-slash mismatch, …).
 
 ```bash
 zond check spec --api <name>                     # 0 network requests
-zond check spec --api <name> --json | jq '.data.summary.by_severity'
+zond check spec --api <name> --json | jq '.data.stats'
 ```
 
 Fast lint of OpenAPI doc. Catches missing `format` on path params,
