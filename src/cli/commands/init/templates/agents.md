@@ -5,12 +5,17 @@ only, no MCP server in this workspace.
 
 ### Skills
 
-- **`.claude/skills/zond-scenarios/SKILL.md` (default)** — when the user asks
-  to verify a specific flow / business scenario. Hand-written multi-step
-  YAML, runs and analyses one focused journey.
-- **`.claude/skills/zond/SKILL.md`** — full audit: autogenerate from spec,
-  run sanity → smoke → CRUD → probes → coverage → report. Use when asked
-  for breadth (`audit my API`, `find bugs`, `coverage`, `5xx hunt`).
+- **`.claude/skills/zond/SKILL.md` (primary)** — artifact model + iron
+  rules + full workflow: fixtures → annotate → generate → smoke → CRUD
+  → stateful checks → probes → coverage → report, plus single-flow
+  scenario authoring. Loads on workspace touch and on intent ("audit
+  this API", "find bugs", "write a test for X flow").
+- **`.claude/skills/zond-checks/SKILL.md`** — depth-check reference:
+  conformance + security + m-20 stateful invariants
+  (cross_call_references, idempotency_replay, pagination_invariants,
+  lifecycle_transitions) and the `zond api annotate dump+apply` flow.
+- **`.claude/skills/zond-triage/SKILL.md`** — read-only triage of a
+  finished run / probe artifact. Routes by `recommended_action` enum.
 
 Both skills work off the per-API artifacts written by `zond add api`:
 

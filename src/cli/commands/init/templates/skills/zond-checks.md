@@ -5,10 +5,11 @@ description: |
   probes that go beyond YAML smoke tests. Use when the user asks for:
   "deep audit", "find spec drift", "test edge cases", "boundary value
   coverage", "find security bugs", "broken auth check", "use-after-free",
-  "SARIF for code scanning", "GitHub Code Scanning report", or after a
-  YAML run passes but they still want depth coverage. For a full
-  generated test pipeline, hand off to `zond`. For a single user flow,
-  use `zond-scenarios`.
+  "SARIF for code scanning", "GitHub Code Scanning report", "stateful
+  invariants", "cross-call drift", "idempotency replay", "pagination
+  consistency", "lifecycle state machine". For a full generated test
+  pipeline + scenarios + audit chain, hand off to `zond`. For triage
+  of a failing run, use `zond-triage`.
 allowed-tools: [Read, Bash(zond *), Bash(bunx zond *), Bash(jq *), Bash(sqlite3 *)]
 ---
 
@@ -60,6 +61,12 @@ Pragmatic режим (default) — реалистичный для production AP
 - **NEVER hand-roll these checks in YAML.** The catalog encodes
   schemathesis V4 semantics 1-to-1 — replicating them in YAML drifts
   silently. `zond checks run` is the single source of truth.
+- **NEVER run `--phase stateful` without prior `api annotate` review.**
+  m-20 stateful checks (cross_call_references, idempotency_replay,
+  pagination_invariants, lifecycle_transitions) read `.api-resources.local.yaml`
+  for per-API quirks (custom pagination param, non-standard lifecycle
+  field, write-only ignore_fields). Defaults catch the obvious; running
+  on defaults alone misses API-specific drift. See **Phase pre-0** below.
 - **NEVER ignore `--bootstrap-cleanup-failed`.** Stateful security
   checks (`ignored_auth`, `use_after_free`, `ensure_resource_availability`)
   produce false positives on stale data. If the previous run's
@@ -67,6 +74,63 @@ Pragmatic режим (default) — реалистичный для production AP
 - **Auth headers are auto-derived from `--api <name>` `.env.yaml`**
   (`auth_token` → `Authorization: Bearer …`, `api_key` → `X-API-Key`).
   Add explicit ones with `--auth-header 'Name: value'` (repeatable).
+
+## Phase pre-0 — Annotation (mandatory for `--phase stateful`)
+
+m-20 stateful checks rely on per-resource config in
+`.api-resources.local.yaml` (overlay that survives `refresh-api`).
+`zond api annotate` is the canonical authoring path: zond emits raw
+spec slices, **agent (you) writes the YAML**, zond validates and
+applies. **zond itself does NOT call any LLM** — agent is the LLM, zond
+is the dumb-tool.
+
+Six dump aspects (one per check class):
+
+```bash
+zond api annotate dump --api <name> --seed-bodies   > /tmp/seed.json
+zond api annotate dump --api <name> --readback      > /tmp/readback.json
+zond api annotate dump --api <name> --idempotency   > /tmp/idem.json
+zond api annotate dump --api <name> --pagination    > /tmp/pag.json
+zond api annotate dump --api <name> --lifecycle     > /tmp/life.json
+zond api annotate dump --api <name> --resources     > /tmp/orphans.json  # optional: new CRUD resources from orphans
+```
+
+Restrict scope with `--only r1,r2,r3` on any dump.
+
+Agent reads each dump and writes a YAML response file (top-level list
+of entries — see per-check schemas below for the block shape).
+Optional `rationale` and `confidence: high|medium|low` per entry help
+future review.
+
+Apply — dry-run first (renders diff + conflicts), then `--yes` to write:
+
+```bash
+zond api annotate apply --api <name> --readback --input /tmp/readback.yaml         # dry-run
+zond api annotate apply --api <name> --readback --input /tmp/readback.yaml --yes   # write
+zond api annotate apply --api <name> --readback --input /tmp/readback.yaml --yes --force  # overwrite conflicts
+```
+
+Conflicts: when an existing field already has a value, apply keeps
+existing by default (renders `! field: (conflict — kept existing; pass
+--yes to overwrite)`). Pass `--force` to overwrite.
+
+**Recommended pre-stateful sweep on a new API:**
+
+```bash
+zond api annotate dump --api <name> --seed-bodies > /tmp/seed.json    # for prepare-fixtures --seed
+zond api annotate dump --api <name> --readback    > /tmp/readback.json # for cross_call_references
+zond api annotate dump --api <name> --pagination  > /tmp/pag.json     # for pagination_invariants
+zond api annotate dump --api <name> --lifecycle   > /tmp/life.json    # for lifecycle_transitions
+zond api annotate dump --api <name> --idempotency > /tmp/idem.json    # for idempotency_replay
+# … agent generates YAML files for each …
+zond api annotate apply --api <name> --seed-bodies --input /tmp/seed.yaml --yes
+zond api annotate apply --api <name> --readback   --input /tmp/readback.yaml --yes
+zond api annotate apply --api <name> --pagination --input /tmp/pag.yaml --yes
+zond api annotate apply --api <name> --lifecycle  --input /tmp/life.yaml --yes
+zond api annotate apply --api <name> --idempotency --input /tmp/idem.yaml --yes
+```
+
+Each block's YAML format is documented under the per-check section below.
 
 ## Reading findings
 
@@ -194,8 +258,11 @@ resources:
 
 Defaults already filter timestamps (`created_at`, `updated_at`), envelope
 fields (`object`, `_links`), and ETag. Per-API quirks need a yaml line.
-Authored either by hand or via `zond api annotate --readback` (ARV-187 —
-LLM-pass writing to `.api-resources.local.yaml`, reviewed via git diff).
+Authored either by hand or via the `zond api annotate dump --readback` →
+agent → `apply` flow (see **Phase pre-0** above). zond emits the
+write+read endpoint slice; agent decides `ignore_fields` /
+`write_to_read_map` and writes the YAML; zond validates + writes to
+`.api-resources.local.yaml`.
 
 ## Idempotency replay (m-20 ARV-170)
 
@@ -212,8 +279,9 @@ Two ways to opt-in per resource:
 
 1. Spec declares `Idempotency-Key` as a header parameter on the create
    endpoint → auto-detected, runs with defaults.
-2. `.api-resources.yaml` block (preferred — documents intent + lets you
-   tune the ignore list):
+2. `.api-resources.local.yaml` block (preferred — documents intent +
+   lets you tune the ignore list). Author via Phase pre-0
+   `annotate dump --idempotency` → agent → `apply`:
 
 ```yaml
 resources:
@@ -253,7 +321,8 @@ Auto-detect: if the list endpoint declares `starting_after` / `cursor` /
 defaults (`cursor_field=id`, `items_field=data|items|results`,
 `has_more_field=has_more`, `limit=2`).
 
-Per-resource yaml override:
+Per-resource yaml override (author via Phase pre-0
+`annotate dump --pagination` → agent → `apply`):
 
 ```yaml
 resources:
@@ -290,6 +359,11 @@ named actions, asserting:
 Manifest validation runs at yaml load (catches cycles, unreachable
 states, missing terminal, actions referencing undeclared states)
 before any HTTP call goes out.
+
+Author via Phase pre-0 `annotate dump --lifecycle` → agent → `apply`.
+The dump emits action-endpoint candidates (POST `/{resource}/{id}/cancel`,
+PATCH `/{resource}/{id}/status` etc.); agent decides the state machine
+graph.
 
 ```yaml
 resources:
