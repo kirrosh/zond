@@ -648,6 +648,24 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
             }
           }
           console.log(`Seed loop stopped: ${seedStop}.`);
+          // ARV-242 (R-02/SD5): when seeds produce zero new vars and a
+          // majority of attempts failed with auth/scope status codes (401 /
+          // 403), the token clearly cannot create resources — keep retrying
+          // burns rate-limit budget without ever succeeding. Hint at
+          // `--no-seed` so the next prepare-fixtures pass skips the futile
+          // POSTs and focuses on cascade discovery.
+          const seedsCreated = seeds.filter(s => s.status === "seeded").length;
+          const seedsAuthFail = seeds.filter(s => {
+            if (s.status !== "miss-status") return false;
+            const reason = s.reason ?? "";
+            return /(\s|→)40[13]\b/.test(reason);
+          }).length;
+          if (seedsCreated === 0 && seedsAuthFail > 0 && seedsAuthFail >= Math.ceil(seeds.length / 2)) {
+            console.log(
+              `Hint: ${seedsAuthFail}/${seeds.length} seed attempts hit 401/403 (likely token scope). ` +
+              `Re-run without \`--seed\` (cascade-only) to skip futile POSTs and save rate-limit budget.`,
+            );
+          }
         }
         console.log("");
         console.log(`Filled ${filledFkVars}/${totalFkVars} path-FK vars (${Math.round(fillRate * 100)}%).`);
