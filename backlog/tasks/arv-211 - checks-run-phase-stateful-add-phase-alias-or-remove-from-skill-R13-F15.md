@@ -4,7 +4,7 @@ title: 'checks run --phase stateful: add phase alias or remove from skill (R13/F
 status: Done
 assignee: []
 created_date: '2026-05-14 09:25'
-updated_date: '2026-05-14 09:27'
+updated_date: '2026-05-14 11:15'
 labels:
   - feedback-loop
   - api-github
@@ -36,5 +36,5 @@ Log: see feedback-13.md F15.
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Fixed via two-pronged change: (1) src/cli/commands/checks.ts splitList → expandStatefulAlias() so --check stateful expands to all StatefulCheck registry ids; (2) skill templates (zond.md + zond-checks.md) rewritten --phase stateful → --check stateful. Phase remains case-generation (examples|coverage|all); stateful is now the canonical group keyword in --check.
+round-02/03 (R-02/F5+SD4): подтверждено повторно. CLI hint работает корректно (ARV-211 fix), но prompt-инструкция в ~/.claude/commands/zond-fb-tester.md всё ещё содержит --phase stateful → новый агент-tester видит exit 2 → переключается на --check stateful по hint'у. Prompt поправлен в этой же сессии (user-side, вне зонда).
 <!-- SECTION:NOTES:END -->

@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-11 07:34'
-updated_date: '2026-05-14 10:40'
+updated_date: '2026-05-14 11:15'
 labels:
   - feedback-loop
   - api-resend
@@ -24,5 +24,5 @@ Source: feedback round 03, finding F21, class ux-papercut. 20/32 mass-assignment
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-round-01 (R-01/F4): подтверждено на github mass-assignment — 286 endpoints с Copilot 403 свалены в INCONCLUSIVE-BASELINE
+round-02 (R-02/F6): подтверждено повторно после расширения fixtures — owner/repo заполнены, baseline теперь 403 с Copilot reason, но categorization не учитывает body reason.
 <!-- SECTION:NOTES:END -->
