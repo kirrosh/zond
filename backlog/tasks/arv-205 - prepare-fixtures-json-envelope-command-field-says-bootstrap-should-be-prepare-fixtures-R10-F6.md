@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-05-14 08:12'
-updated_date: '2026-05-14 09:34'
+updated_date: '2026-05-14 10:05'
 labels:
   - feedback-loop
   - api-github
@@ -32,5 +32,5 @@ Log: see feedback-10.md F6.
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-round-13 F19: closed. bootstrap.ts now reads commandName from options (defaults to 'bootstrap' for direct invocations), and prepare-fixtures.ts passes commandName='prepare-fixtures' when delegating via --cascade/--seed. The JSON envelope now correctly reads command='prepare-fixtures' instead of 'bootstrap'.
+round-14 F19-REOPEN: fixed. R13 patch covered only the bootstrap (cascade) delegation path; prepare-fixtures --apply alone (no --cascade) routes through discoverCommand which still hardcoded jsonOk/jsonError('discover'). Added commandName option to DiscoverOptions and pass 'prepare-fixtures' from prepare-fixtures.ts in both branches. Verified: zond prepare-fixtures --api gh-verify --apply --json now emits command:'prepare-fixtures'.
 <!-- SECTION:NOTES:END -->
