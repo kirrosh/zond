@@ -4,7 +4,7 @@ title: 'db: retry/backoff on SQLite locks for concurrent zond runs (F14)'
 status: Done
 assignee: []
 created_date: '2026-05-12 12:45'
-updated_date: '2026-05-12 13:11'
+updated_date: '2026-05-14 08:08'
 labels:
   - feedback-loop
   - api-stripe
@@ -31,3 +31,9 @@ Fix: WAL + busy_timeout (5–10s) на open() + retry/backoff wrapper над wri
 
 Log: ~/Projects/zond-test/.fb-loop/rounds/raw-09.log
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+round-06 reconfirmed: feedback-06 again surfaced F14 (concurrent zond → SQLite database is locked). Already Done.
+<!-- SECTION:NOTES:END -->
