@@ -1,9 +1,10 @@
 ---
 id: ARV-233
 title: 'skill drift: .api-resources.local.yaml не создаётся zond add api'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 10:41'
+updated_date: '2026-05-14 10:43'
 labels:
   - feedback-loop
   - m-16
@@ -22,3 +23,8 @@ Actual: появляется только после annotate apply --yes; до 
 Fix options: (a) обновить skill: 'появляется после первого annotate apply'; (b) zond add api создаёт пустой шаблон с комментариями.
 Log: ~/Projects/zond-test/.fb-loop/rounds/raw-01.log
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Skill template clarifies that .api-resources.local.yaml appears after first annotate apply (or hand-created)
+<!-- AC:END -->

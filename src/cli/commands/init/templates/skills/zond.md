@@ -70,7 +70,7 @@ After `zond add api <name> --spec <path|url>`, `apis/<name>/` contains:
 spec.json                    ← dereferenced OpenAPI (machine source)
 .api-catalog.yaml            ← endpoint index (method, path, params)
 .api-resources.yaml          ← CRUD chains + FK deps (auto)
-.api-resources.local.yaml    ← overlay: extensions + annotate output (hand-edit OK)
+.api-resources.local.yaml    ← overlay: extensions + annotate output (hand-edit OK; appears after first `zond api annotate apply` — or create by hand to use as overlay)
 .api-fixtures.yaml           ← MANIFEST: required vars + descriptions (read-only)
 .env.yaml                    ← VALUES: variable values (user / prepare-fixtures writes)
 .secrets.yaml                ← raw secret values (auto-gitignored)
