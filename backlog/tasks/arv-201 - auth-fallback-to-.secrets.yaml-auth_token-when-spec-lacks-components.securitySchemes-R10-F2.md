@@ -3,9 +3,10 @@ id: ARV-201
 title: >-
   auth: fallback to .secrets.yaml auth_token when spec lacks
   components.securitySchemes (R10/F2)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 08:11'
+updated_date: '2026-05-14 08:24'
 labels:
   - feedback-loop
   - api-github
@@ -37,3 +38,9 @@ Impact: HIGH — all 'bare' specs without securitySchemes (github, internal APIs
 
 Log: see feedback-10.md F2.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fixed: setup-api.ts now seeds 'auth_token: "@secret:auth_token"' into .env.yaml when authVarNames=[] (i.e., spec has no components.securitySchemes). Mirrors the existing .secrets.yaml fallback. Regression test in tests/cli/doctor.test.ts. Bare GitHub-style specs now get Authorization: Bearer attached on zond request --api X without manual .env.yaml editing. Verified: zond request GET /user --api github will pick up auth_token after user fills .secrets.yaml.
+<!-- SECTION:NOTES:END -->

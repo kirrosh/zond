@@ -400,6 +400,17 @@ async function finalizeSetup(p: FinalizeSetupParams): Promise<SetupApiResult> {
   for (const v of authVarNames) {
     if (!(v in envVars)) envVars[v] = `@secret:${v}`;
   }
+  // ARV-201 (R10/F2): when the spec declares no `components.securitySchemes`
+  // (GitHub publishes its OpenAPI this way), `deriveAuthVarNames` returns []
+  // and the loop above is a no-op — yet `zond request --api <name>` knows
+  // to attach `Authorization: Bearer <auth_token>` if the env carries an
+  // `auth_token`. Mirror the `.secrets.yaml` fallback (which already seeds
+  // `auth_token: ""` when authVarNames is empty) into `.env.yaml` so users
+  // do not need to hand-add `auth_token: "@secret:auth_token"` just to
+  // surface the Bearer header on bare specs.
+  if (authVarNames.length === 0 && !("auth_token" in envVars)) {
+    envVars.auth_token = "@secret:auth_token";
+  }
   if (envVarsOverride) {
     Object.assign(envVars, envVarsOverride);
   }

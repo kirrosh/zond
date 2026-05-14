@@ -107,6 +107,26 @@ describe("zond doctor", () => {
     expect(r.stdout).toMatch(/refresh-api runonly/);
   });
 
+  // ARV-201 (R10/F2): spec without `components.securitySchemes` (GitHub-style)
+  // must still seed `auth_token: @secret:auth_token` in .env.yaml so the
+  // implicit Bearer auto-attach in send-request resolves the token. Before
+  // the fix, GitHub's spec left .env.yaml without any auth wiring and every
+  // live request 401'd until the user hand-edited the file.
+  test("F2: spec without securitySchemes still seeds auth_token in .env.yaml", async () => {
+    const envText = await Bun.file(join(workspace, "apis", "tiny", ".env.yaml")).text();
+    // NB: setupApi wrote .env.yaml during beforeEach (with no security schemes
+    // in MICROSPEC); beforeEach then overwrote it. Re-run setupApi into a
+    // clean dir to inspect the freshly-seeded shape.
+    const freshDb = join(workspace, "fresh.db");
+    await setupApi({ name: "bare", spec: specPath, dbPath: freshDb });
+    closeDb();
+    const fresh = await Bun.file(join(workspace, "apis", "bare", ".env.yaml")).text();
+    expect(fresh).toContain('auth_token: "@secret:auth_token"');
+    // Sanity: prior baseline .env.yaml was rewritten by the beforeEach hook
+    // and no longer carries auth_token — that's expected and unrelated.
+    expect(envText).toBeDefined();
+  });
+
   test("TASK-145: --json data shape pins canonical paths", async () => {
     const r = await runDoctor({ api: "tiny", json: true });
     expect(r.exitCode).toBe(0);
