@@ -52,6 +52,10 @@ export type FindingClass =
   | "check:negative_data_rejection"
   | "check:missing_required_header"
   | "check:ignored_auth"
+  | "check:cross_call_references"
+  | "check:idempotency_replay"
+  | "check:pagination_invariants"
+  | "check:lifecycle_transitions"
   | "check:network_error"
 
   // probe verdicts (severity already classified upstream) ───────────
@@ -150,6 +154,10 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
     case "check:positive_data_acceptance":
     case "check:use_after_free":
     case "check:ensure_resource_availability":
+    case "check:cross_call_references":
+    case "check:idempotency_replay":
+    case "check:pagination_invariants":
+    case "check:lifecycle_transitions":
       return "report_backend_bug";
 
     case "check:negative_data_rejection":

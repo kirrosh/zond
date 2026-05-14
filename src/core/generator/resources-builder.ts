@@ -26,6 +26,181 @@ export interface ResourceFkRef {
   ownerResource: string | null;
 }
 
+/**
+ * ARV-169 (m-20 cross-call drift): per-resource overrides for the
+ * POST→GET shape-diff probe. All fields optional — when absent the
+ * check falls back to `DEFAULT_READBACK_IGNORE` (timestamp / etag /
+ * envelope quirks) so a probe works on a stock spec without yaml work.
+ * Authored by `zond api annotate --readback` (ARV-187) or by hand.
+ */
+export interface ReadbackDiffConfig {
+  /** Field names dropped before diff. Suppresses known API-quirks
+   *  (Stripe `metadata` stripping, livemode, object discriminators)
+   *  so they don't drown out real drift. */
+  ignoreFields?: string[];
+  /** Write-shape → read-shape rename. Stripe takes `tax_id_data` on
+   *  create but exposes it as `tax_ids` on read; without this the
+   *  field looks like state-not-persisted on every probe. */
+  writeToReadMap?: Record<string, string>;
+}
+
+/**
+ * ARV-170 (m-20 idempotency-replay): per-resource declaration that the
+ * create endpoint honors an Idempotency-Key header. When present, the
+ * `idempotency_replay` stateful check sends POST twice with the same
+ * key and asserts (a) no duplicate resource is created and (b) the two
+ * responses are bit-identical modulo `ignoreResponseFields`.
+ *
+ * Auto-detect fallback: if `idempotency:` is absent from yaml but the
+ * create endpoint declares an `Idempotency-Key` header parameter in
+ * the spec, the check still runs with `header="Idempotency-Key"` and
+ * the default ignore list. Explicit yaml is preferred — it documents
+ * intent and lets the user customise the ignore list per API quirks
+ * (Stripe `request_id`, Resend `retry_after`).
+ */
+export interface IdempotencyConfig {
+  /** Header that carries the key. Default `Idempotency-Key`. */
+  header?: string;
+  /** Informational. `endpoint` = key scoped per-endpoint (Stripe).
+   *  `global` = same key replays across endpoints. Today the check
+   *  uses the same flow either way; field is read for diagnostics. */
+  scope?: "endpoint" | "global";
+  /** Response-body field names stripped before the R1==R2 compare.
+   *  Defaults to a baseline list shared with readback-diff
+   *  (timestamps, request_id, etag) when omitted. */
+  ignoreResponseFields?: string[];
+}
+
+/**
+ * ARV-171 (m-20 pagination-invariants): per-list-endpoint declaration
+ * of the pagination strategy. The `pagination_invariants` stateful
+ * check uses this to ask for two consecutive pages and assert
+ * disjointness + has_more consistency.
+ *
+ * Supported types in this milestone:
+ *   • `cursor` — Stripe/GitHub style: caller passes a cursor (e.g.
+ *     `starting_after=<id>`) derived from the last item of the
+ *     previous page. The check is built around this pattern.
+ *   • `page` and `offset` — declared for forward compatibility; the
+ *     check currently skips with a "pagination type not implemented"
+ *     reason so the yaml block stays a stable schema.
+ *
+ * Auto-detect fallback: if the list endpoint declares `starting_after`
+ * / `cursor` / `page_token` query parameters in the spec, the check
+ * uses sensible defaults (cursor_field=`id`, items_field=`data` →
+ * `items` → `results`, has_more_field=`has_more`). Explicit yaml is
+ * preferred — it documents intent and survives spec changes that
+ * rename query params.
+ */
+/**
+ * ARV-172 (m-20 lifecycle-transitions): declared state machine for a
+ * resource. Used by the `lifecycle_transitions` stateful check to
+ * verify that documented actions (cancel / archive / publish / ...)
+ * move a resource between declared states and that double-invoking an
+ * action either 4xx's or stays idempotent (no state regression).
+ *
+ * The yaml block has three parts:
+ *   • `field` + `states` — name of the response field carrying the
+ *     state, plus the closed enum of legal values.
+ *   • `transitions` — a from→to graph; the check uses it to flag
+ *     forbidden transitions (cancelled → active) when an action lands
+ *     a resource somewhere the graph doesn't allow.
+ *   • `actions` — POST endpoints that should drive a transition.
+ *     `expected_state` is the state the resource must be in after a
+ *     successful action call.
+ *
+ * Manifest validation runs at load time and surfaces obvious
+ * authoring bugs (unreachable states, missing terminal, action
+ * referencing an undeclared state) before any HTTP call goes out.
+ */
+export interface LifecycleAction {
+  /** Endpoint label, e.g. "POST /v1/subscriptions/{id}/cancel". The
+   *  `{id}` placeholder is substituted with the created resource id. */
+  endpoint: string;
+  /** State the resource must be in after this action lands. */
+  expectedState: string;
+  /** Optional request body sent with the action POST. Most lifecycle
+   *  actions are body-less (cancel, archive, publish); leave empty
+   *  when not needed. Serialised as JSON or form depending on the
+   *  endpoint's declared content type. */
+  body?: Record<string, unknown>;
+}
+
+export interface LifecycleConfig {
+  /** Response field name carrying the state (e.g. `status`). */
+  field: string;
+  /** Closed enum of legal state values. Any state observed on the
+   *  wire that isn't in this list is a finding. */
+  states: string[];
+  /** Allowed from→to graph. States not listed as `from` are assumed
+   *  terminal (no outgoing transition). States not listed as `to` of
+   *  any transition are starting-only (unreachable post-create). */
+  transitions: { from: string; to: string[] }[];
+  /** Named actions keyed by action name (cancel / archive / publish).
+   *  The check runs through them in object-key order. */
+  actions: Record<string, LifecycleAction>;
+}
+
+/**
+ * Static validation of a lifecycle manifest. Returns the list of
+ * authoring bugs without throwing — callers decide whether to fail
+ * the run or just warn. Empty array = clean manifest.
+ */
+export function validateLifecycleManifest(cfg: LifecycleConfig): string[] {
+  const errors: string[] = [];
+  if (!cfg.field || cfg.field.length === 0) errors.push("lifecycle.field is empty");
+  if (!cfg.states || cfg.states.length === 0) errors.push("lifecycle.states is empty");
+  const stateSet = new Set(cfg.states ?? []);
+  for (const t of cfg.transitions ?? []) {
+    if (!stateSet.has(t.from)) errors.push(`transitions: unknown "from" state "${t.from}"`);
+    for (const to of t.to) {
+      if (!stateSet.has(to)) errors.push(`transitions[${t.from}]: unknown "to" state "${to}"`);
+    }
+  }
+  // At least one terminal — a state with no outgoing transition (or
+  // an explicit `to: []`). A graph with every state having outgoing
+  // edges is suspicious (no end-of-life, infinite churn).
+  const hasOutgoing = new Set((cfg.transitions ?? []).filter((t) => t.to.length > 0).map((t) => t.from));
+  const terminals = (cfg.states ?? []).filter((s) => !hasOutgoing.has(s));
+  if (terminals.length === 0) errors.push("no terminal state — every declared state has outgoing transitions");
+  // Actions must reference declared states.
+  for (const [name, a] of Object.entries(cfg.actions ?? {})) {
+    if (!stateSet.has(a.expectedState)) {
+      errors.push(`actions.${name}.expected_state "${a.expectedState}" is not in states[]`);
+    }
+    if (!a.endpoint || a.endpoint.length === 0) {
+      errors.push(`actions.${name}.endpoint is empty`);
+    }
+  }
+  return errors;
+}
+
+export interface PaginationConfig {
+  /** Pagination flavor. Default `cursor`. */
+  type?: "cursor" | "page" | "offset" | "token";
+  /** Query-param name that takes the cursor value. Default `starting_after`. */
+  cursorParam?: string;
+  /** Response field on each item that becomes the next cursor. Default `id`. */
+  cursorField?: string;
+  /** Response field that signals "more pages remain". Default `has_more`. */
+  hasMoreField?: string;
+  /** Query-param name for page size. Default `limit`. */
+  limitParam?: string;
+  /** Probe page-size. Default 2 (small enough to land two replies fast). */
+  defaultLimit?: number;
+  /** Response field carrying the array of items. Default `data` (Stripe);
+   *  falls back to `items` / `results` when missing. */
+  itemsField?: string;
+}
+
+/** ARV-187: LLM-authored example POST body. Stateful checks prefer this
+ *  over generateFromSchema(create) when present. */
+export interface SeedBodyConfig {
+  /** Defaults to the create endpoint's requestBodyContentType. */
+  contentType?: string;
+  body: Record<string, unknown>;
+}
+
 export interface ApiResourceEntry {
   resource: string;
   basePath: string;
@@ -48,6 +223,14 @@ export interface ApiResourceEntry {
   softDelete?: boolean;
   /** Other resources whose ids this resource consumes (FK chain). */
   fkDependencies: ResourceFkRef[];
+  /** ARV-169: optional cross-call-drift overrides. */
+  readbackDiff?: ReadbackDiffConfig;
+  /** ARV-170: opt-in idempotency-replay probe. */
+  idempotency?: IdempotencyConfig;
+  /** ARV-171: pagination-invariants probe. */
+  pagination?: PaginationConfig;
+  /** ARV-172: state-machine for the resource. */
+  lifecycle?: LifecycleConfig;
 }
 
 export interface ApiResourceMap {
@@ -396,6 +579,62 @@ export function serializeApiResourceMap(m: ApiResourceMap): string {
         lines.push(`        param: ${escape(d.param)}`);
         lines.push(`        in: ${d.in}`);
         lines.push(`        ownerResource: ${d.ownerResource ? escape(d.ownerResource) : "null"}`);
+      }
+    }
+    if (r.readbackDiff) {
+      lines.push(`    readback_diff:`);
+      const ig = r.readbackDiff.ignoreFields ?? [];
+      if (ig.length > 0) {
+        lines.push(`      ignore_fields:`);
+        for (const f of ig) lines.push(`        - ${escape(f)}`);
+      }
+      const map = r.readbackDiff.writeToReadMap ?? {};
+      const mapKeys = Object.keys(map);
+      if (mapKeys.length > 0) {
+        lines.push(`      write_to_read_map:`);
+        for (const k of mapKeys) lines.push(`        ${escape(k)}: ${escape(map[k]!)}`);
+      }
+    }
+    if (r.idempotency) {
+      lines.push(`    idempotency:`);
+      if (r.idempotency.header) lines.push(`      header: ${escape(r.idempotency.header)}`);
+      if (r.idempotency.scope) lines.push(`      scope: ${r.idempotency.scope}`);
+      const ig = r.idempotency.ignoreResponseFields ?? [];
+      if (ig.length > 0) {
+        lines.push(`      ignore_response_fields:`);
+        for (const f of ig) lines.push(`        - ${escape(f)}`);
+      }
+    }
+    if (r.pagination) {
+      lines.push(`    pagination:`);
+      if (r.pagination.type) lines.push(`      type: ${r.pagination.type}`);
+      if (r.pagination.cursorParam) lines.push(`      cursor_param: ${escape(r.pagination.cursorParam)}`);
+      if (r.pagination.cursorField) lines.push(`      cursor_field: ${escape(r.pagination.cursorField)}`);
+      if (r.pagination.hasMoreField) lines.push(`      has_more_field: ${escape(r.pagination.hasMoreField)}`);
+      if (r.pagination.limitParam) lines.push(`      limit_param: ${escape(r.pagination.limitParam)}`);
+      if (r.pagination.defaultLimit != null) lines.push(`      default_limit: ${r.pagination.defaultLimit}`);
+      if (r.pagination.itemsField) lines.push(`      items_field: ${escape(r.pagination.itemsField)}`);
+    }
+    if (r.lifecycle) {
+      lines.push(`    lifecycle:`);
+      lines.push(`      field: ${escape(r.lifecycle.field)}`);
+      lines.push(`      states:`);
+      for (const s of r.lifecycle.states) lines.push(`        - ${escape(s)}`);
+      lines.push(`      transitions:`);
+      for (const t of r.lifecycle.transitions) {
+        lines.push(`        - from: ${escape(t.from)}`);
+        if (t.to.length === 0) {
+          lines.push(`          to: []`);
+        } else {
+          lines.push(`          to:`);
+          for (const to of t.to) lines.push(`            - ${escape(to)}`);
+        }
+      }
+      lines.push(`      actions:`);
+      for (const [name, a] of Object.entries(r.lifecycle.actions)) {
+        lines.push(`        ${escape(name)}:`);
+        lines.push(`          endpoint: ${escape(a.endpoint)}`);
+        lines.push(`          expected_state: ${escape(a.expectedState)}`);
       }
     }
   }

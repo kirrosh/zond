@@ -1,9 +1,10 @@
 ---
 id: ARV-173
 title: recipe + probe webhooks — delivery + shape conformance + retry policy
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 12:49'
+updated_date: '2026-05-13 15:58'
 labels:
   - m-20
   - depth
@@ -43,3 +44,17 @@ Acceptance:
 
 Source: feedback round 09 final evaluation §4 item 5.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+## Implementation notes (2026-05-13)
+
+Offline shape-conformance, not async delivery. Recipe captures via Stripe CLI / smee.io / ngrok; probe consumes ndjson and validates each event against `spec.webhooks.<type>.post.requestBody`. Same recipe/probe split as ARV-178 (quicktype, interactsh).
+
+End-to-end verified on synthetic spec: 4 events → 2 OK (Stripe envelope + body envelope) + 1 HIGH shape_drift + 1 LOW unknown_event_type. JSON envelope, markdown digest, exit code 1 on HIGH.
+
+**Live verify on Stripe/Resend/Sentry not possible** — все three specs на OpenAPI 3.0 без `webhooks:` block или `x-webhooks` extension. Probe честно skip'ит с reason 'spec declares no webhooks'. Это limitation specs, не probe.
+
+Out-of-scope retry-policy / ordering / HMAC verification — covered как future work в recipe.
+<!-- SECTION:NOTES:END -->

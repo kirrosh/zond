@@ -29,6 +29,10 @@ const CHECK_ID_TO_CLASS: Record<string, FindingClass> = {
   negative_data_rejection: "check:negative_data_rejection",
   missing_required_header: "check:missing_required_header",
   ignored_auth: "check:ignored_auth",
+  cross_call_references: "check:cross_call_references",
+  idempotency_replay: "check:idempotency_replay",
+  pagination_invariants: "check:pagination_invariants",
+  lifecycle_transitions: "check:lifecycle_transitions",
   network_error: "check:network_error",
 };
 

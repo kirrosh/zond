@@ -21,6 +21,10 @@ import { useAfterFree } from "./use_after_free.ts";
 import { ensureResourceAvailability } from "./ensure_resource_availability.ts";
 import { negativeDataRejection } from "./negative_data_rejection.ts";
 import { positiveDataAcceptance } from "./positive_data_acceptance.ts";
+import { crossCallReferences } from "./cross_call_references.ts";
+import { idempotencyReplay } from "./idempotency_replay.ts";
+import { paginationInvariants } from "./pagination_invariants.ts";
+import { lifecycleTransitions } from "./lifecycle_transitions.ts";
 
 let registered = false;
 
@@ -42,6 +46,14 @@ export function registerBuiltinChecks(): void {
   // ARV-4 — 2 data-rejection checks with anti-FP guards.
   registerCheck(negativeDataRejection);
   registerCheck(positiveDataAcceptance);
+  // ARV-169 (m-20) — cross-call POST→GET shape-diff probe.
+  registerStatefulCheck(crossCallReferences);
+  // ARV-170 (m-20) — Idempotency-Key replay probe.
+  registerStatefulCheck(idempotencyReplay);
+  // ARV-171 (m-20) — cursor pagination invariants.
+  registerStatefulCheck(paginationInvariants);
+  // ARV-172 (m-20) — declared state-machine + action transitions.
+  registerStatefulCheck(lifecycleTransitions);
   registered = true;
 }
 
