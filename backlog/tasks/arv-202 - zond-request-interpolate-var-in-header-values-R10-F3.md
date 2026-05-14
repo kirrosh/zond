@@ -4,12 +4,13 @@ title: 'zond request: interpolate {{var}} in --header values (R10/F3)'
 status: To Do
 assignee: []
 created_date: '2026-05-14 08:11'
+updated_date: '2026-05-14 08:25'
 labels:
   - feedback-loop
   - api-github
   - m-21
 dependencies: []
-priority: medium
+priority: low
 ---
 
 ## Description
@@ -28,3 +29,9 @@ Actual: header passed verbatim. This removes the only safe workaround for F2 (ra
 
 Log: see feedback-10.md F3.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+round-11: F2 fix (ARV-201) practically resolves F3 — after .env.yaml auto-seeds auth_token: @secret:auth_token, vars carries auth_token and substituteDeep already-implemented at send-request.ts:134 interpolates the --header correctly. The 'header passes literally' symptom only happens when auth_token is not in vars at all. The deeper question (should --header substitution fall back to .secrets.yaml even without .env.yaml wiring?) remains, but is no longer a github-user blocker. Reclassify: keep open as low-priority polish.
+<!-- SECTION:NOTES:END -->
