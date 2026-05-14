@@ -4,12 +4,13 @@ title: 'probe security: skip-with-reason on GET-only routes (R14/F21)'
 status: To Do
 assignee: []
 created_date: '2026-05-14 10:05'
+updated_date: '2026-05-14 10:11'
 labels:
   - feedback-loop
   - api-github
   - m-21
 dependencies: []
-priority: medium
+priority: low
 ---
 
 ## Description
@@ -30,3 +31,9 @@ Skill .claude/skills/zond/SKILL.md Phase 7 doesn't mention this targeting constr
 
 Log: see feedback-14.md F21.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+round-16 F21 withdrawn by tester — was artifact of narrow --include (GET-only routes); with broader scope (no --include) probe security shows clear skip reasons 'no-body', 'no-matched-field'. Skill drift SD16 still valid (Phase 7 docs don't mention vulnerable-field+body criterion). Reclassify to LOW skill-update.
+<!-- SECTION:NOTES:END -->
