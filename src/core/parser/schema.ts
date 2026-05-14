@@ -1,7 +1,11 @@
 import { z } from "zod";
 import type { TestSuite, TestStep, AssertionRule, TestStepExpect, SuiteConfig, RetryUntil, ForEach, MultipartField, SourceMetadata } from "./types.ts";
 
-const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+// ARV-223 (R16/F28): include OPTIONS / HEAD / TRACE so probe-method generated
+// suites (which emit one step per missing-method per path) parse and run.
+// Without this, `zond probe static --emit-tests → zond run` breaks end-to-end
+// on every API where these methods aren't already declared (= almost always).
+const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"] as const;
 
 function extractMethodAndPath(raw: unknown): unknown {
   if (typeof raw !== "object" || raw === null) return raw;
