@@ -431,8 +431,8 @@ not API bug), `unhit`.
 
 ```bash
 zond report export <run-id>                                # default: triage/<api>/run-<id>/
-zond report bundle 135..142 -o triage/sweep/               # case-study + html + diagnose + index.md
-zond report bundle <run-id> --include case-study
+zond report bundle 135..142 -o triage/sweep/               # all artefacts (default): case-study + html + diagnose + index.md
+zond report bundle <run-id> --include case-study,diagnose  # subset only (drop html)
 zond report bundle --session <id> -o triage/session/       # group by session
 ```
 
