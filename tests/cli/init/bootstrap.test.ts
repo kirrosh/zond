@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -68,5 +68,46 @@ describe("bootstrapWorkspace", () => {
     expect(existsSync(join(cwd, "zond.config.yml"))).toBe(false);
     expect(existsSync(join(cwd, "apis"))).toBe(false);
     expect(existsSync(join(cwd, ".claude"))).toBe(false);
+  });
+
+  test("stale legacy skill dirs are detected and warned-about by default", () => {
+    // seed legacy skill from a prior init
+    mkdirSync(join(cwd, ".claude", "skills", "zond-base"), { recursive: true });
+    writeFileSync(join(cwd, ".claude", "skills", "zond-base", "SKILL.md"), "---\nname: zond-base\n---\n");
+
+    const r = bootstrapWorkspace({ cwd, home });
+    expect(r.staleSkills.map((s) => s.name)).toEqual(["zond-base"]);
+    expect(r.prunedSkills).toEqual([]);
+    expect(r.warnings).toContain(
+      "stale skill detected: .claude/skills/zond-base/ — re-run with --prune-stale-skills to remove",
+    );
+    // Warn-only: dir is still on disk.
+    expect(existsSync(join(cwd, ".claude", "skills", "zond-base"))).toBe(true);
+  });
+
+  test("--prune-stale-skills removes legacy skill dirs", () => {
+    mkdirSync(join(cwd, ".claude", "skills", "zond-base"), { recursive: true });
+    mkdirSync(join(cwd, ".claude", "skills", "zond-scenarios"), { recursive: true });
+    writeFileSync(join(cwd, ".claude", "skills", "zond-base", "SKILL.md"), "x");
+    writeFileSync(join(cwd, ".claude", "skills", "zond-scenarios", "SKILL.md"), "y");
+
+    const r = bootstrapWorkspace({ cwd, home, pruneStaleSkills: true });
+    expect(r.prunedSkills.map((s) => s.name).sort()).toEqual(["zond-base", "zond-scenarios"]);
+    expect(r.warnings).not.toContain(expect.stringContaining("stale skill detected"));
+    expect(existsSync(join(cwd, ".claude", "skills", "zond-base"))).toBe(false);
+    expect(existsSync(join(cwd, ".claude", "skills", "zond-scenarios"))).toBe(false);
+  });
+
+  test("user-authored skill dirs are NOT pruned even with --prune-stale-skills", () => {
+    // user skill — not in LEGACY_SKILL_NAMES
+    mkdirSync(join(cwd, ".claude", "skills", "zond-max-coverage"), { recursive: true });
+    writeFileSync(join(cwd, ".claude", "skills", "zond-max-coverage", "SKILL.md"), "user-content");
+
+    const r = bootstrapWorkspace({ cwd, home, pruneStaleSkills: true });
+    expect(r.staleSkills).toEqual([]);
+    expect(r.prunedSkills).toEqual([]);
+    expect(existsSync(join(cwd, ".claude", "skills", "zond-max-coverage"))).toBe(true);
+    expect(readFileSync(join(cwd, ".claude", "skills", "zond-max-coverage", "SKILL.md"), "utf-8"))
+      .toBe("user-content");
   });
 });

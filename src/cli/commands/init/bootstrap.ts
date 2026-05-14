@@ -2,7 +2,13 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { upsertAgentsBlock, type AgentsBlockResult } from "./agents-md.ts";
-import { upsertSkills, type SkillResult } from "./skills.ts";
+import {
+  detectStaleSkills,
+  pruneStaleSkills,
+  upsertSkills,
+  type SkillResult,
+  type StaleSkill,
+} from "./skills.ts";
 import zondConfigTemplate from "./templates/zond-config.yml" with { type: "text" };
 
 export interface BootstrapOptions {
@@ -11,6 +17,8 @@ export interface BootstrapOptions {
   writeAgents?: boolean;
   /** Whether to write Claude Code skills under .claude/skills/. Defaults to true. */
   writeSkills?: boolean;
+  /** Remove legacy skill dirs (zond-base, zond-scenarios, …) instead of just warning. */
+  pruneStaleSkills?: boolean;
   /** Override $HOME — used by tests and intentional overrides. */
   home?: string;
   dryRun?: boolean;
@@ -24,6 +32,10 @@ export interface BootstrapResult {
   apisAction: "created" | "noop";
   agents: AgentsBlockResult | null;
   skills: SkillResult[];
+  /** Legacy skill dirs that exist on disk but are no longer in `SKILLS`. */
+  staleSkills: StaleSkill[];
+  /** Subset of `staleSkills` that were actually removed (empty unless `pruneStaleSkills`). */
+  prunedSkills: StaleSkill[];
   warnings: string[];
 }
 
@@ -66,6 +78,21 @@ export function bootstrapWorkspace(opts: BootstrapOptions = {}): BootstrapResult
   // 4. .claude/skills/zond-*/SKILL.md
   const skills: SkillResult[] = writeSkills ? upsertSkills(cwd, { dryRun: opts.dryRun }) : [];
 
+  // 5. Detect (and optionally prune) legacy skill dirs left over from
+  // retired templates. User-authored skill dirs are NOT touched —
+  // only names in `LEGACY_SKILL_NAMES` are considered.
+  const staleSkills = writeSkills ? detectStaleSkills(cwd) : [];
+  let prunedSkills: StaleSkill[] = [];
+  if (writeSkills && opts.pruneStaleSkills && staleSkills.length > 0) {
+    prunedSkills = pruneStaleSkills(cwd, { dryRun: opts.dryRun });
+  } else if (staleSkills.length > 0) {
+    for (const { name } of staleSkills) {
+      warnings.push(
+        `stale skill detected: .claude/skills/${name}/ — re-run with --prune-stale-skills to remove`,
+      );
+    }
+  }
+
   return {
     cwd,
     configPath,
@@ -74,6 +101,8 @@ export function bootstrapWorkspace(opts: BootstrapOptions = {}): BootstrapResult
     apisAction,
     agents,
     skills,
+    staleSkills,
+    prunedSkills,
     warnings,
   };
 }
