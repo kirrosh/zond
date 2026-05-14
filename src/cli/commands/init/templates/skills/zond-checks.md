@@ -77,6 +77,13 @@ Pragmatic режим (default) — реалистичный для production AP
 
 ## Phase pre-0 — Annotation (mandatory for `--check stateful`)
 
+> **Heads-up for `pagination_invariants`:** only cursor-style pagination
+> is implemented in this milestone (`cursor`/`next`-token responses).
+> APIs with `type: page` / `type: offset` (GitHub, Linear, Resend, …)
+> are accepted by `annotate apply` but the check short-circuits with
+> "type not implemented" — annotating page-based pagination has **no
+> runtime effect**, skip the dump+apply step for those resources.
+
 m-20 stateful checks rely on per-resource config in
 `.api-resources.local.yaml` (overlay that survives `refresh-api`).
 `zond api annotate` is the canonical authoring path: zond emits raw
