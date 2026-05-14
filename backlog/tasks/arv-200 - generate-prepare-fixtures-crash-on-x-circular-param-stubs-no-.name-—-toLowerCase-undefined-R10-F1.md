@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-05-14 08:11'
-updated_date: '2026-05-14 08:15'
+updated_date: '2026-05-14 08:21'
 labels:
   - feedback-loop
   - api-github
@@ -43,5 +43,5 @@ Log: $HANDOFF/rounds/raw-10.log (empty — zond writes to stdout); see feedback-
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Fixed in openapi-reader.ts: filter out parameter stubs without .name/.in (decycleSchema x-circular sentinels). Regression test added in tests/generator/openapi-reader.test.ts. Verified: zond prepare-fixtures --api github and zond generate --api github both succeed now (no toLowerCase crash).
+round-11 F7 verified: zond coverage and zond checks run on github API both work now (no more p.name.toLowerCase crash). Same fix point in extractEndpoints covers all consumers.
 <!-- SECTION:NOTES:END -->
