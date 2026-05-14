@@ -36,6 +36,16 @@ export const MODE_BY_CHECK: Record<string, Mode> = {
   // Availability is positive-flavored — it asserts the server *can*
   // serve the listed resource. Useful in `--mode positive` runs.
   ensure_resource_availability: "all",
+  // ARV-169 (m-20): cross-call drift is a contract-verification check
+  // (does GET reflect POST?), not a malicious-input probe. Positive.
+  cross_call_references: "positive",
+  // ARV-170 (m-20): idempotency replay verifies a *contract* the server
+  // advertises (Idempotency-Key honored). Positive.
+  idempotency_replay: "positive",
+  // ARV-171 (m-20): pagination invariants verify the cursor contract.
+  pagination_invariants: "positive",
+  // ARV-172 (m-20): lifecycle verifies the declared state machine.
+  lifecycle_transitions: "positive",
 };
 
 export function modeFor(checkId: string): Mode {

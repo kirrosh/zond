@@ -42,6 +42,7 @@ const SPEC_REGISTRY: Record<string, OutputSpec<any>> = {
   "checks run": CHECKS_OUTPUT_SPEC,
   "probe mass-assignment": PROBE_OUTPUT_SPEC,
   "probe security": PROBE_OUTPUT_SPEC,
+  "probe webhooks": PROBE_OUTPUT_SPEC,
 };
 
 /**
@@ -85,6 +86,8 @@ const LEGACY_ALLOW_LIST: Record<string, string> = {
   "session start": "pre-m-19: --json envelope via printJson.",
   "session status": "pre-m-19: --json envelope via printJson.",
   "use": "pre-m-19: --json envelope via printJson.",
+  "api annotate dump": "ARV-187: emits per-resource spec slices for the agent (no prompts inside zond); --json wraps in envelope. OutputSpec migration not scheduled.",
+  "api annotate apply": "ARV-187: applies the agent's YAML responses to .api-resources.local.yaml; --json wraps the merge summary. OutputSpec migration not scheduled.",
 };
 
 interface LeafEntry {

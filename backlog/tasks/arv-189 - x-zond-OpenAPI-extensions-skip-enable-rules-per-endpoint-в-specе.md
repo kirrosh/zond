@@ -4,10 +4,12 @@ title: 'x-zond-* OpenAPI extensions: skip/enable rules per endpoint в spec''е'
 status: To Do
 assignee: []
 created_date: '2026-05-13 12:06'
+updated_date: '2026-05-13 19:20'
 labels:
   - m-20
   - depth
   - dx
+  - m-21
 dependencies: []
 priority: medium
 ---

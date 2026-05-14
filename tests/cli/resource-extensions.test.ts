@@ -248,3 +248,132 @@ describe("readResourceMap with .api-resources.local.yaml extensions (ARV-111)", 
     expect(users?.endpoints.create).toBe("POST /users");
   });
 });
+
+/**
+ * ARV-169 (m-20): `patches:` is a field-level overlay alongside
+ * `extensions:`. Designed for adding readback_diff (and future m-20
+ * yaml-blocks: idempotency, pagination, lifecycle) without re-
+ * declaring the resource's CRUD wiring.
+ */
+describe("readResourceMap with patches: (ARV-169)", () => {
+  let tmpDir: string;
+  let apiDir: string;
+
+  beforeAll(async () => {
+    tmpDir = join(tmpdir(), `zond-res-patches-${Date.now()}`);
+    apiDir = join(tmpDir, "apis", "demo");
+    await mkdir(apiDir, { recursive: true });
+  });
+
+  afterAll(async () => {
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  beforeEach(async () => {
+    await rm(join(apiDir, ".api-resources.yaml"), { force: true });
+    await rm(join(apiDir, ".api-resources.local.yaml"), { force: true });
+  });
+
+  const writeBase = (yaml: string) =>
+    writeFile(join(apiDir, ".api-resources.yaml"), yaml);
+  const writeLocal = (yaml: string) =>
+    writeFile(join(apiDir, ".api-resources.local.yaml"), yaml);
+
+  test("patch adds readback_diff onto existing resource without re-declaring CRUD", async () => {
+    await writeBase([
+      "resources:",
+      "  - resource: customers",
+      "    basePath: /customers",
+      "    itemPath: /customers/{id}",
+      "    idParam: id",
+      "    captureField: id",
+      "    hasFullCrud: true",
+      "    endpoints:",
+      "      list: GET /customers",
+      "      create: POST /customers",
+      "      read: GET /customers/{id}",
+      "    fkDependencies: []",
+    ].join("\n"));
+    await writeLocal([
+      "patches:",
+      "  - resource: customers",
+      "    readback_diff:",
+      "      ignore_fields: [expand, metadata]",
+      "      write_to_read_map:",
+      "        tax_id_data: tax_ids",
+    ].join("\n"));
+
+    const map = await readResourceMap(apiDir);
+    expect(map?.resources).toHaveLength(1);
+    const r = map!.resources[0]!;
+    // CRUD wiring preserved from upstream.
+    expect(r.basePath).toBe("/customers");
+    expect(r.endpoints.create).toBe("POST /customers");
+    expect(r.endpoints.read).toBe("GET /customers/{id}");
+    // readback_diff layered on.
+    expect(r.readback_diff?.ignore_fields).toEqual(["expand", "metadata"]);
+    expect(r.readback_diff?.write_to_read_map).toEqual({ tax_id_data: "tax_ids" });
+  });
+
+  test("patch for non-existent resource is silently dropped", async () => {
+    await writeBase([
+      "resources:",
+      "  - resource: customers",
+      "    basePath: /customers",
+      "    itemPath: /customers/{id}",
+      "    idParam: id",
+      "    captureField: id",
+      "    hasFullCrud: false",
+      "    endpoints:",
+      "      list: GET /customers",
+      "    fkDependencies: []",
+    ].join("\n"));
+    await writeLocal([
+      "patches:",
+      "  - resource: ghosts",
+      "    readback_diff:",
+      "      ignore_fields: [x]",
+    ].join("\n"));
+
+    const map = await readResourceMap(apiDir);
+    expect(map?.resources.map((r) => r.resource)).toEqual(["customers"]);
+    // No readback_diff added — patch silently dropped.
+    expect(map!.resources[0]!.readback_diff).toBeUndefined();
+  });
+
+  test("patches: and extensions: coexist", async () => {
+    await writeBase([
+      "resources:",
+      "  - resource: customers",
+      "    basePath: /customers",
+      "    itemPath: /customers/{id}",
+      "    idParam: id",
+      "    captureField: id",
+      "    hasFullCrud: false",
+      "    endpoints:",
+      "      list: GET /customers",
+      "    fkDependencies: []",
+    ].join("\n"));
+    await writeLocal([
+      "extensions:",
+      "  - resource: ingest",
+      "    basePath: /ingest",
+      "    itemPath: /ingest/{id}",
+      "    idParam: id",
+      "    captureField: id",
+      "    hasFullCrud: false",
+      "    endpoints:",
+      "      create: POST /ingest",
+      "    fkDependencies: []",
+      "patches:",
+      "  - resource: customers",
+      "    readback_diff:",
+      "      ignore_fields: [livemode]",
+    ].join("\n"));
+
+    const map = await readResourceMap(apiDir);
+    expect(map?.resources.map((r) => r.resource).sort()).toEqual(["customers", "ingest"]);
+    const customers = map!.resources.find((r) => r.resource === "customers")!;
+    expect(customers.readback_diff?.ignore_fields).toEqual(["livemode"]);
+  });
+});

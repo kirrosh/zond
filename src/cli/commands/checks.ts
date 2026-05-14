@@ -22,6 +22,8 @@ import { parseWorkers } from "../../core/runner/async-pool.ts";
 import { createAdaptiveRateLimiter, createRateLimiter, type RateLimiter } from "../../core/runner/rate-limiter.ts";
 import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
 import { resolveSpecArg, globalJson, resolveApiCollection } from "../resolve.ts";
+import { readResourceMap } from "./discover.ts";
+import type { ReadbackDiffConfig, IdempotencyConfig, PaginationConfig, LifecycleConfig, SeedBodyConfig } from "../../core/generator/resources-builder.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
@@ -135,6 +137,85 @@ function parseAuthHeaders(values: string[] | undefined): Record<string, string> 
  *  numeric/object values silently — they can't be URL-encoded path segments
  *  anyway) and skips obvious placeholders so a TODO-string doesn't masquerade
  *  as a real id and produce phantom-200s. */
+/**
+ * ARV-169: load per-resource overrides for stateful checks. Reads
+ * `apis/<name>/.api-resources.yaml` (+ `.local.yaml` overlay through
+ * `readResourceMap`) and surfaces each resource's `readback_diff`
+ * block keyed by resource name. Returns undefined when no API context
+ * is in scope (raw `--spec` invocation without a registered API) so
+ * the runner falls back to default ignore patterns.
+ */
+async function deriveResourceConfigsFromApi(
+  apiName: string | undefined,
+  dbPath: string | undefined,
+): Promise<Map<string, ResourceConfigEntry> | undefined> {
+  if (!apiName) return undefined;
+  const col = resolveApiCollection(apiName, dbPath);
+  if ("error" in col) return undefined;
+  if (!col.baseDir) return undefined;
+  const map = await readResourceMap(col.baseDir);
+  if (!map) return undefined;
+  const out = new Map<string, ResourceConfigEntry>();
+  for (const r of map.resources) {
+    if (!r.readback_diff && !r.idempotency && !r.pagination && !r.lifecycle && !r.seed_body) continue;
+    const entry: ResourceConfigEntry = {};
+    if (r.seed_body) {
+      entry.seedBody = {
+        contentType: r.seed_body.content_type,
+        body: r.seed_body.body,
+      };
+    }
+    if (r.readback_diff) {
+      entry.readbackDiff = {
+        ignoreFields: r.readback_diff.ignore_fields,
+        writeToReadMap: r.readback_diff.write_to_read_map,
+      };
+    }
+    if (r.idempotency) {
+      entry.idempotency = {
+        header: r.idempotency.header,
+        scope: r.idempotency.scope,
+        ignoreResponseFields: r.idempotency.ignore_response_fields,
+      };
+    }
+    if (r.pagination) {
+      entry.pagination = {
+        type: r.pagination.type,
+        cursorParam: r.pagination.cursor_param,
+        cursorField: r.pagination.cursor_field,
+        hasMoreField: r.pagination.has_more_field,
+        limitParam: r.pagination.limit_param,
+        defaultLimit: r.pagination.default_limit,
+        itemsField: r.pagination.items_field,
+      };
+    }
+    if (r.lifecycle) {
+      entry.lifecycle = {
+        field: r.lifecycle.field,
+        states: r.lifecycle.states,
+        transitions: r.lifecycle.transitions,
+        actions: Object.fromEntries(
+          Object.entries(r.lifecycle.actions).map(([name, a]) => [name, {
+            endpoint: a.endpoint,
+            expectedState: a.expected_state,
+            body: a.body,
+          }]),
+        ),
+      };
+    }
+    out.set(r.resource, entry);
+  }
+  return out.size > 0 ? out : undefined;
+}
+
+type ResourceConfigEntry = {
+  readbackDiff?: ReadbackDiffConfig;
+  idempotency?: IdempotencyConfig;
+  pagination?: PaginationConfig;
+  lifecycle?: LifecycleConfig;
+  seedBody?: SeedBodyConfig;
+};
+
 async function derivePathVarsFromApi(apiName: string | undefined, dbPath: string | undefined): Promise<Record<string, string>> {
   if (!apiName) return {};
   const col = resolveApiCollection(apiName, dbPath);
@@ -320,6 +401,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   // fixture-pack growth (otherwise findings/skips are pixel-identical across
   // rounds and CI can't distinguish "spec stable" from "checks ignored deltas").
   const pathVars = await derivePathVarsFromApi(apiName, opts.db);
+  const resourceConfigs = await deriveResourceConfigsFromApi(apiName, opts.db);
 
   const phaseRaw = typeof opts.phase === "string" ? opts.phase : "examples";
   if (phaseRaw !== "examples" && phaseRaw !== "coverage" && phaseRaw !== "all") {
@@ -407,6 +489,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       timeoutMs: typeof opts.timeout === "number" ? opts.timeout : undefined,
       authHeaders: Object.keys(authHeaders).length > 0 ? authHeaders : undefined,
       pathVars: Object.keys(pathVars).length > 0 ? pathVars : undefined,
+      resourceConfigs,
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed === true,
       phase: phaseRaw as "examples" | "coverage" | "all",
       allowX00: opts.allowX00 === true,

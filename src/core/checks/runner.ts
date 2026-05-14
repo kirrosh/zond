@@ -100,6 +100,17 @@ export interface RunChecksOptions {
   /** ARV-181: opt-in strict-401 semantics for `ignored_auth`. Off by
    *  default — see `CheckRuntimeOptions.strict401` for rationale. */
   strict401?: boolean;
+  /** ARV-169 (m-20): per-resource overrides for stateful checks
+   *  (cross-call drift today; idempotency/pagination/lifecycle next).
+   *  CLI loads them from `.api-resources.yaml` + `.api-resources.local.yaml`
+   *  and hands them in; tests pass a literal Map. Optional — undefined
+   *  ⇒ each probe uses its built-in defaults. */
+  resourceConfigs?: Map<string, {
+    readbackDiff?: import("../generator/resources-builder.ts").ReadbackDiffConfig;
+    idempotency?: import("../generator/resources-builder.ts").IdempotencyConfig;
+    pagination?: import("../generator/resources-builder.ts").PaginationConfig;
+    lifecycle?: import("../generator/resources-builder.ts").LifecycleConfig;
+  }>;
   /** ARV-141: substitute real fixture values into path-param placeholders so
    *  the deterministic synthetic 404 (`/issues/x`) becomes a real-id 200/422
    *  whenever `.env.yaml` actually has a fixture. This makes `checks run`
@@ -693,6 +704,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       // skips the whole op.
       pathVars: opts.pathVars,
       options: checkRuntimeOptions,
+      resourceConfigs: opts.resourceConfigs,
     });
     const crudGroups = activeStateful.some((c) => c.phase === "crud") ? detectCrudGroups(allOps) : [];
     summary.checks_run += activeStateful.length;

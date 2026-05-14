@@ -36,8 +36,12 @@ describe("ARV-7 mode catalog", () => {
 
     expect(idsForMode("positive")).toEqual([
       "content_type_conformance",
+      "cross_call_references",
       "ensure_resource_availability",
+      "idempotency_replay",
+      "lifecycle_transitions",
       "not_a_server_error",
+      "pagination_invariants",
       "positive_data_acceptance",
       "response_headers_conformance",
       "response_schema_conformance",

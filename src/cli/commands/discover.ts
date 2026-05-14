@@ -293,6 +293,52 @@ export interface ResourceYaml {
   hasFullCrud?: boolean;
   endpoints: { list?: string; create?: string; read?: string; update?: string; delete?: string };
   fkDependencies: Array<{ var: string; param: string; in: "path" | "body"; ownerResource: string | null }>;
+  /** ARV-169: optional POST→GET drift overrides. snake_case to match
+   *  yaml on disk; loaders preserve as-is so the check can read it. */
+  readback_diff?: {
+    ignore_fields?: string[];
+    write_to_read_map?: Record<string, string>;
+  };
+  /** ARV-170: opt-in idempotency-replay probe for this resource's
+   *  create endpoint. */
+  idempotency?: {
+    header?: string;
+    scope?: "endpoint" | "global";
+    ignore_response_fields?: string[];
+  };
+  /** ARV-171: pagination-invariants probe for this resource's list
+   *  endpoint. */
+  pagination?: {
+    type?: "cursor" | "page" | "offset" | "token";
+    cursor_param?: string;
+    cursor_field?: string;
+    has_more_field?: string;
+    limit_param?: string;
+    default_limit?: number;
+    items_field?: string;
+  };
+  /** ARV-172: per-resource state machine + action endpoints. */
+  lifecycle?: {
+    field: string;
+    states: string[];
+    transitions: Array<{ from: string; to: string[] }>;
+    actions: Record<string, {
+      endpoint: string;
+      expected_state: string;
+      body?: Record<string, unknown>;
+    }>;
+  };
+  /** ARV-187: LLM-authored example POST body for stateful checks that
+   *  need a valid create payload. When present, stateful CRUD checks
+   *  (cross_call_references, idempotency_replay, lifecycle_transitions,
+   *  ensure_resource_availability, use_after_free) prefer this over
+   *  `generateFromSchema(create.requestBodySchema)`. The fallback path
+   *  stays — yaml is purely additive. `content_type` defaults to the
+   *  create endpoint's `requestBodyContentType`. */
+  seed_body?: {
+    content_type?: string;
+    body: Record<string, unknown>;
+  };
 }
 
 export interface ApiResourceMapYaml {
@@ -359,7 +405,10 @@ export async function readResourceMap(apiDir: string): Promise<ApiResourceMapYam
   // name collision (precedence 20 > 10, mergePolicy: "override") —
   // and the same path also feeds provenance into composeResourceMap.
   const composed = await composeResourceMap(apiDir);
-  return { resources: composed.entries };
+  // ARV-169: field-level overlay for adding readback_diff / idempotency
+  // / pagination / lifecycle without re-declaring the whole entry.
+  const patches = await readResourcePatches(apiDir);
+  return { resources: applyResourcePatches(composed.entries, patches) };
 }
 
 /** ARV-111: read `apis/<name>/.api-resources.local.yaml`. Same `resources:`
@@ -375,6 +424,49 @@ export async function readResourceExtensions(apiDir: string): Promise<ResourceYa
   if (!parsed || typeof parsed !== "object") return [];
   const obj = parsed as { extensions?: ResourceYaml[] };
   return obj.extensions ?? [];
+}
+
+/** ARV-169 (m-20): partial overlay for adding fields (readback_diff,
+ *  future idempotency / pagination / lifecycle) to an existing
+ *  resource entry without re-declaring its CRUD wiring. Lives in the
+ *  same `.api-resources.local.yaml` under top-level `patches:`. Each
+ *  entry MUST carry `resource:` (the merge key); any other declared
+ *  field overlays the upstream value, leaving omitted fields intact.
+ *
+ *  Unlike `extensions:` (full replacement, ARV-111) this is field-
+ *  level merge. Both can coexist in the same file. Returns [] when
+ *  the file is missing or carries no `patches:` key. */
+export async function readResourcePatches(apiDir: string): Promise<Array<Partial<ResourceYaml> & { resource: string }>> {
+  const path = join(apiDir, ".api-resources.local.yaml");
+  const file = Bun.file(path);
+  if (!(await file.exists())) return [];
+  const text = await file.text();
+  const parsed = Bun.YAML.parse(text);
+  if (!parsed || typeof parsed !== "object") return [];
+  const obj = parsed as { patches?: Array<Partial<ResourceYaml> & { resource?: string }> };
+  const raw = obj.patches ?? [];
+  return raw.filter((p): p is Partial<ResourceYaml> & { resource: string } =>
+    typeof p?.resource === "string" && p.resource.length > 0,
+  );
+}
+
+/** ARV-169: apply partial patches over a composed resource list.
+ *  Patch fields overwrite matching upstream fields; absent fields
+ *  are preserved. Patches whose `resource` doesn't match anything
+ *  upstream are dropped silently — callers wanting to ADD a whole
+ *  resource use `extensions:` instead. */
+function applyResourcePatches(
+  resources: ResourceYaml[],
+  patches: Array<Partial<ResourceYaml> & { resource: string }>,
+): ResourceYaml[] {
+  if (patches.length === 0) return resources;
+  const byName = new Map(resources.map((r) => [r.resource, r] as const));
+  for (const p of patches) {
+    const upstream = byName.get(p.resource);
+    if (!upstream) continue;
+    byName.set(p.resource, { ...upstream, ...p });
+  }
+  return resources.map((r) => byName.get(r.resource) ?? r);
 }
 
 export interface FixtureManifestEntry {

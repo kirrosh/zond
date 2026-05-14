@@ -5,8 +5,7 @@
  * after a successful DELETE (a classic data-leak / soft-delete bug).
  */
 import type { CrudStatefulCheck } from "../stateful.ts";
-import { generateFromSchema } from "../../generator/data-factory.ts";
-import { extractIdFromCreateResponse, fillPathWithId } from "./_crud-helpers.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody, resolveCreateBody } from "./_crud-helpers.ts";
 
 export const useAfterFree: CrudStatefulCheck = {
   id: "use_after_free",
@@ -26,15 +25,22 @@ export const useAfterFree: CrudStatefulCheck = {
     const del = g.delete!;
     const baseHeaders = { Accept: "application/json", ...h.authHeaders };
 
-    // 1. create
-    const createBody = create.requestBodySchema
-      ? JSON.stringify(generateFromSchema(create.requestBodySchema))
-      : "{}";
-    const createUrl = `${h.baseUrl.replace(/\/+$/, "")}${create.path}`;
+    // 1. create — ARV-191: respect form-urlencoded so Stripe-style APIs
+    // don't silently broken-baseline-skip every CRUD chain.
+    // ARV-187: prefer LLM-authored seed_body when available.
+    const seedBody = h.resourceConfigs?.get(g.resource)?.seedBody;
+    const generated = resolveCreateBody(create, seedBody) ?? {};
+    const { body: createBody, contentType } = serializeCheckBody(
+      create,
+      generated,
+      h.pathVars,
+      seedBody?.contentType,
+    );
+    const createUrl = `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`;
     const createResp = await h.send({
       method: "POST",
       url: createUrl,
-      headers: { ...baseHeaders, "Content-Type": create.requestBodyContentType ?? "application/json" },
+      headers: { ...baseHeaders, "Content-Type": contentType },
       body: createBody,
     });
     if (createResp.status < 200 || createResp.status >= 300) {
@@ -46,7 +52,7 @@ export const useAfterFree: CrudStatefulCheck = {
     // 2. delete
     const delResp = await h.send({
       method: "DELETE",
-      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(del.path, g.idParam, id)}`,
+      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(fillPathParams(del.path, h.pathVars), g.idParam, id)}`,
       headers: baseHeaders,
     });
     if (delResp.status < 200 || delResp.status >= 300) {
@@ -56,7 +62,7 @@ export const useAfterFree: CrudStatefulCheck = {
     // 3. read after delete
     const readResp = await h.send({
       method: "GET",
-      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(read.path, g.idParam, id)}`,
+      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(fillPathParams(read.path, h.pathVars), g.idParam, id)}`,
       headers: baseHeaders,
     });
     if (readResp.status === 404 || readResp.status === 410) return { kind: "pass" };

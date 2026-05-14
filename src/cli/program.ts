@@ -27,6 +27,7 @@ import { registerAdd } from "./commands/add-api.ts";
 import { registerRemove } from "./commands/remove-api.ts";
 import { registerAudit } from "./commands/audit.ts";
 import { registerReference } from "./commands/reference.ts";
+import { registerApiAnnotate } from "./commands/api/annotate/index.ts";
 
 import { getSecretRegistry } from "../core/secrets/registry.ts";
 import { getRuntimeInfo } from "./runtime.ts";
@@ -114,6 +115,7 @@ export function buildProgram(): Command {
 
   registerCompletions(program);
   registerReference(program);
+  registerApiAnnotate(program);
 
   // TASK-267: group top-level commands by phase in `zond --help`. Without
   // grouping, the flat 20+ command list buries the workflow shape; with it,
@@ -188,12 +190,15 @@ export function buildProgram(): Command {
   // Mapped by fully-qualified path; `*` matches any unnamed leaf and is
   // tried last.
   const skillFor: Record<string, string> = {
-    // probes → audit playbook (skills/scenarios.md drills auth/RBAC chains).
-    "probe security": "skills/scenarios.md",
-    "probe mass-assignment": "skills/scenarios.md",
-    "audit": "skills/scenarios.md",
-    // db family — failure triage workflow. Will point at skills/zond-triage.md
-    // once TASK-302 lands; for now Phase 4 of skills/zond.md covers it.
+    // Depth-check & probe commands → checks skill (annotate flow + m-20).
+    "checks run": "skills/zond-checks.md",
+    "checks list": "skills/zond-checks.md",
+    "api annotate": "skills/zond-checks.md",
+    "probe security": "skills/zond-checks.md",
+    "probe mass-assignment": "skills/zond-checks.md",
+    // Triage-class commands.
+    "db diagnose": "skills/zond-triage.md",
+    "db compare": "skills/zond-triage.md",
   };
   const attachHelp = (cmd: Command, parentPath: string): void => {
     const path = parentPath ? `${parentPath} ${cmd.name()}` : cmd.name();
