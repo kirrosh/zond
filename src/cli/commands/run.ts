@@ -369,6 +369,28 @@ export async function runCommand(options: RunOptions): Promise<number> {
         } catch { /* workspace not initialised — give up silently */ }
       }
     }
+    // ARV-209 (R12/F11): when --validate-schema is requested but no --api was
+    // passed (explicit suite path suppresses current-api fallback at the
+    // argv-parse level), still try to derive the spec from the test path
+    // pattern `apis/<name>/tests/...`. SKILL.md DEPTH-PASS examples use that
+    // exact shape and expect the spec to resolve automatically.
+    if (!specPath && primaryPath) {
+      const m = primaryPath.replace(/\\/g, "/").match(/(?:^|\/)apis\/([^\/]+)\/tests(?:\/|$)/);
+      if (m) {
+        const apiName = m[1]!;
+        try {
+          const byName = resolveApiCollection(apiName, options.dbPath);
+          if (!("error" in byName) && byName.spec) specPath = byName.spec;
+        } catch { /* fall through to disk probe */ }
+        if (!specPath) {
+          try {
+            const ws = findWorkspaceRoot();
+            const onDisk = pathResolve(ws.root, "apis", apiName, "spec.json");
+            if (existsSync(onDisk)) specPath = onDisk;
+          } catch { /* give up silently */ }
+        }
+      }
+    }
     if (specPath) {
       try {
         openApiDoc = await readOpenApiSpec(specPath);
@@ -388,7 +410,10 @@ export async function runCommand(options: RunOptions): Promise<number> {
     if (needsSchema) {
       if (!openApiDoc) {
         const flag = options.learn ? "--learn" : "--validate-schema";
-        printError(`${flag} requires --spec <path|url> or a collection with openapi_spec set`);
+        printError(
+          `${flag} requires --spec <path|url> or a collection with openapi_spec set. ` +
+          `Pass \`--api <name>\` (resolves apis/<name>/spec.json) or add \`--spec apis/<name>/spec.json\` explicitly.`,
+        );
         return 2;
       }
       schemaValidator = createSchemaValidator(openApiDoc as Parameters<typeof createSchemaValidator>[0]);
