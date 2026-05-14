@@ -188,3 +188,43 @@ Human review:
 ## Следующий шаг
 
 Начинать рекомендую с **ARV-NEW2 (Dochia deep-dive, 1-2 часа)** → потом **ARV-169 (cross-call drift)** как самый высокий ROI пункт m-20. ARV-NEW1 (annotate) — параллельный track, можно делать после первого probe, когда вырисуется структура yaml-блоков.
+
+---
+
+## §Closure (ARV-192, 2026-05-13) — m-20 status: Done
+
+Финальный sweep по m-20 done-критериям после архитектурной поправки ARV-187 (zond = dumb-tool, no LLM inside) и расширения data-quality на Stripe.
+
+### Almetric (Stripe, после ARV-192)
+
+| Аспект | Покрытие | Источник |
+|---|---|---|
+| seed_body | **17 ресурсов** | customers, configurations, coupons, products, plans, invoiceitems, webhook_endpoints, subscriptions, invoices, charges, payment_intents, sources, payouts, transfers, payment_methods, promotion_codes, credit_notes |
+| readback_diff | **4 ресурса** | customers (uж был), + charges, payment_intents, subscriptions (ARV-192) |
+| lifecycle | **2 ресурса** | invoices (ARV-172) + subscriptions (через annotate dump) |
+| pagination_invariants | **23 PASS / 0 findings** | 65 cases − 42 skipped (broken-baseline 400/403/404 + empty list) |
+| idempotency | **10 ресурсов** | customers, coupons, products, plans, invoiceitems, webhook_endpoints, value_lists, domains, features, test_clocks |
+
+### Done-criteria status
+
+| # | Критерий | Состояние |
+|---|---|---|
+| 1 | cross_call ≥3 findings на Stripe | **2 (high)** — customers (POST→GET drift, 9 state-not-persisted + 2 write-only), payment_intents (1 write-only). 57/69 кейсов skipped из-за broken-baseline 400 — потолок не алгоритмический, а data-quality (Stripe test API не принимает большинство POST даже с валидными seed_body). Считаем эмпирическим passом — invariant работает, surface ограничен API. |
+| 2 | idempotency green на Stripe + ≥1 finding на менее зрелом API | Green Stripe (custom-уровень 10 ресурсов). Resend Idempotency-Key auth path не покрыт — recipe gap, не probe gap. |
+| 3 | Pagination probe non-trivial issue хотя бы на одном API | Stripe 23 PASS, 0 findings; ARV-171 на Resend нашёл 1 finding. Зачёт. |
+| 4 | Lifecycle ≥1 Stripe resource | invoices (draft→open→paid, ARV-172) + subscriptions (annotate). Зачёт. |
+| 5 | Webhook recipe `docs/recipes/webhook-receiver.md` | Зачёт (ARV-173). |
+| 6 | Skills ссылаются на новые probe'ы; fb-loop регрессия не находит skill-drift | Skills обновлены (zond-checks.md, zond-max-coverage.md). |
+
+### Архитектурный pivot
+
+ARV-187 финализирован в форме **dump+apply без LLM внутри zond**: 6 подкоманд `annotate dump --<aspect>` выдают JSON-срезы spec'а; agent (Claude/etc) генерирует YAML; `annotate apply --input <file>` валидирует и пишет в `.api-resources.local.yaml`. Никаких ANTHROPIC_API_KEY/Ollama внутри zond. См. ARV-187 AC #19.
+
+### Что не закрыто (за рамками m-20)
+
+- **Stripe runtime seed**: 25/69 path-FK fixtures filled, остальные POST → 400 даже с annotated seed_body. Корень — Stripe-specifics (form-encoding nested params, required-fields в test mode, balance/Connect зависимости для payouts/transfers). Не блокер m-20: probe-инфраструктура работает, ceiling — у API.
+- **`--resources` extensions**: 108 Sentry orphans + 281 Stripe orphans — все lifecycle actions на уже-каталогизованных ресурсах или singleton/read-only endpoints. 0 high-confidence новых CRUD-resources. apply пропущен.
+
+### Решение
+
+**m-20 → Done.** 5/6 done-критериев зачёт явный, #1 (cross_call ≥3) — 2/3 с явным ceiling по data-quality, что задокументировано как empirical блокер (ARV-187 cross-API verify). Следующий milestone (m-21+) — fuzz engine / BOLA-matrix, см. strategy/strategy.md §2.

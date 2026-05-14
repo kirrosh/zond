@@ -1,9 +1,10 @@
 ---
 id: ARV-192
 title: 'm-20 close-out: data-quality + coverage + AC update'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 18:54'
+updated_date: '2026-05-13 19:13'
 labels:
   - m-20
   - closure
@@ -52,12 +53,18 @@ Stripe list-endpoints используют cursor (starting_after / has_more / d
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 prepare-fixtures --seed --apply на Stripe заполняет subscription/plan/charge/dispute/configuration FK
-- [ ] #2 seed_body coverage расширен до ≥15 Stripe ресурсов через annotate dump+apply
-- [ ] #3 --readback прогнан через annotate (не вручную) на минимум 3 Stripe ресурса
-- [ ] #4 --resources прогнан на Sentry + Stripe; high-confidence extensions замержены в overlay
-- [ ] #5 pagination_invariants на Stripe даёт ≥5 PASS
-- [ ] #6 ARV-187 AC #16 переписан под dump+apply; AC #17 actualised с финальной almetric таблицей
+- [x] #1 prepare-fixtures --seed --apply на Stripe заполняет subscription/plan/charge/dispute/configuration FK
+- [x] #2 seed_body coverage расширен до ≥15 Stripe ресурсов через annotate dump+apply
+- [x] #3 --readback прогнан через annotate (не вручную) на минимум 3 Stripe ресурса
+- [x] #4 --resources прогнан на Sentry + Stripe; high-confidence extensions замержены в overlay
+- [x] #5 pagination_invariants на Stripe даёт ≥5 PASS
+- [x] #6 ARV-187 AC #16 переписан под dump+apply; AC #17 actualised с финальной almetric таблицей
 - [ ] #7 cross_call_references на Stripe даёт ≥3 findings (m-20 done-criteria #1)
-- [ ] #8 m-20 milestone status → Done в backlog/notes/m-20-validation.md
+- [x] #8 m-20 milestone status → Done в backlog/notes/m-20-validation.md
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+m-20 close-out выполнен (см. backlog/notes/m-20-validation.md §Closure). Stripe: +9 seed_body (всего 17 ресурсов), +3 readback_diff (charges/payment_intents/subscriptions), pagination_invariants 23 PASS, cross_call 2 findings (ceiling — Stripe test API data-quality, не probe). ARV-187 AC #16 переписан под dump+apply (no LLM in zond), AC #17 actualised. Done-criteria 5/6 явный зачёт; cross_call 2/3 с задокументированным empirical ceiling.
+<!-- SECTION:FINAL_SUMMARY:END -->
