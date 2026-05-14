@@ -61,7 +61,7 @@ Pragmatic режим (default) — реалистичный для production AP
 - **NEVER hand-roll these checks in YAML.** The catalog encodes
   schemathesis V4 semantics 1-to-1 — replicating them in YAML drifts
   silently. `zond checks run` is the single source of truth.
-- **NEVER run `--phase stateful` without prior `api annotate` review.**
+- **NEVER run `--check stateful` without prior `api annotate` review.**
   m-20 stateful checks (cross_call_references, idempotency_replay,
   pagination_invariants, lifecycle_transitions) read `.api-resources.local.yaml`
   for per-API quirks (custom pagination param, non-standard lifecycle
@@ -75,7 +75,7 @@ Pragmatic режим (default) — реалистичный для production AP
   (`auth_token` → `Authorization: Bearer …`, `api_key` → `X-API-Key`).
   Add explicit ones with `--auth-header 'Name: value'` (repeatable).
 
-## Phase pre-0 — Annotation (mandatory for `--phase stateful`)
+## Phase pre-0 — Annotation (mandatory for `--check stateful`)
 
 m-20 stateful checks rely on per-resource config in
 `.api-resources.local.yaml` (overlay that survives `refresh-api`).

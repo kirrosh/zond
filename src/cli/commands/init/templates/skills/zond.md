@@ -320,7 +320,7 @@ After Phase 2 annotation is applied, run the cross-call invariants.
 See `zond-checks` for per-check semantics.
 
 ```bash
-zond checks run --api <name> --phase stateful --report ndjson
+zond checks run --api <name> --check stateful --report ndjson
 ```
 
 5 m-20 stateful checks:
@@ -330,7 +330,7 @@ zond checks run --api <name> --phase stateful --report ndjson
 - `lifecycle_transitions` — declared state-machine validity
 - `webhooks` (recipe-based, see `docs/recipes/webhook-receiver.md`)
 
-**Iron rule**: don't run `--phase stateful` without prior `api annotate`
+**Iron rule**: don't run `--check stateful` without prior `api annotate`
 review. Defaults catch the obvious; quirks need declared config.
 
 ## Phase 7 — Proactive bug hunting (probes)
@@ -421,7 +421,7 @@ not API bug), `unhit`.
 | Signal | Command |
 |---|---|
 | Contract drift | `checks run --phase coverage` HIGH count == 0 |
-| Stateful invariants | `checks run --phase stateful` HIGH count == 0 |
+| Stateful invariants | `checks run --check stateful` HIGH count == 0 |
 | Auth / Authz / injection | `probe security` HIGH count == 0 |
 | Mass-assignment | `probe mass-assignment` HIGH count == 0 |
 | Response conformance | `run --validate-schema` `schema_violation` == 0 |

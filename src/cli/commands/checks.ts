@@ -319,6 +319,24 @@ function splitList(values: string[] | undefined): string[] | undefined {
   return values.flatMap((v) => v.split(",")).map((s) => s.trim()).filter(Boolean);
 }
 
+// ARV-211 (R13/F15): expand the `stateful` keyword in --check / --exclude-check
+// into the full set of stateful check ids registered in core/checks/stateful.ts.
+// This lets users (and the zond-checks SKILL.md DEPTH-PASS step) write
+//   zond checks run --check stateful
+// instead of hand-listing cross_call_references, idempotency_replay, … —
+// matching the prior `--phase stateful` UX promise without overloading the
+// case-generation `--phase` flag.
+function expandStatefulAlias(ids: string[] | undefined): string[] | undefined {
+  if (!ids) return ids;
+  const statefulIds = listStatefulChecks().map((c) => c.id);
+  const out: string[] = [];
+  for (const id of ids) {
+    if (id === "stateful") out.push(...statefulIds);
+    else out.push(id);
+  }
+  return out;
+}
+
 async function resolveBaseUrl(
   apiName: string | undefined,
   baseUrlFlag: string | undefined,
@@ -405,7 +423,12 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
 
   const phaseRaw = typeof opts.phase === "string" ? opts.phase : "examples";
   if (phaseRaw !== "examples" && phaseRaw !== "coverage" && phaseRaw !== "all") {
-    const msg = `Unknown --phase: "${phaseRaw}". Available: examples, coverage, all`;
+    // ARV-211: redirect users typing --phase stateful (a common skill drift)
+    // to the canonical alias `--check stateful`.
+    const hint = phaseRaw === "stateful"
+      ? " — stateful checks are a separate family; run them with `--check stateful` (or list individual ids)"
+      : "";
+    const msg = `Unknown --phase: "${phaseRaw}". Available: examples, coverage, all${hint}`;
     if (json) printJson(jsonError("checks run", [msg]));
     else printError(msg);
     process.exit(2);
@@ -484,8 +507,8 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     const result = await runChecks({
       specPath: specRes.spec,
       baseUrl: baseRes.baseUrl,
-      include: splitList(opts.check),
-      exclude: splitList(opts.excludeCheck),
+      include: expandStatefulAlias(splitList(opts.check)),
+      exclude: expandStatefulAlias(splitList(opts.excludeCheck)),
       timeoutMs: typeof opts.timeout === "number" ? opts.timeout : undefined,
       authHeaders: Object.keys(authHeaders).length > 0 ? authHeaders : undefined,
       pathVars: Object.keys(pathVars).length > 0 ? pathVars : undefined,
