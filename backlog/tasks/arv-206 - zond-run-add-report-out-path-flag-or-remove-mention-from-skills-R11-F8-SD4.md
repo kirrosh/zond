@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-14 08:22'
+updated_date: '2026-05-14 10:40'
 labels:
   - feedback-loop
   - api-github
@@ -29,3 +30,9 @@ Actual: flag absent; only shell redirect (> run-NN.json) works. Skill instructio
 
 Log: see feedback-11.md F8.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+round-01 (R-01/F1+SD1): подтверждено повторно на github API — --report-out → exit 1 без alias/hint
+<!-- SECTION:NOTES:END -->
