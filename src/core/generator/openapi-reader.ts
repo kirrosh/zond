@@ -58,9 +58,16 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
 
       const parameters: OpenAPIV3.ParameterObject[] = [];
 
+      // Skip circular-ref sentinel stubs emitted by decycleSchema —
+      // they look like `{ "x-circular": true }` (no .name, no .in) and
+      // crash downstream code that expects p.name/p.in. ARV-200 (R10/F1).
+      const isUsableParam = (p: any): p is OpenAPIV3.ParameterObject =>
+        p != null && typeof p === "object" && typeof p.name === "string" && typeof p.in === "string";
+
       // Path-level parameters
       if (pathItem.parameters) {
         for (const p of pathItem.parameters) {
+          if (!isUsableParam(p)) continue;
           parameters.push(p as OpenAPIV3.ParameterObject);
         }
       }
@@ -68,6 +75,7 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
       // Operation-level parameters (override path-level)
       if (operation.parameters) {
         for (const p of operation.parameters) {
+          if (!isUsableParam(p)) continue;
           const param = p as OpenAPIV3.ParameterObject;
           const existingIdx = parameters.findIndex(
             (existing) => existing.name === param.name && existing.in === param.in,
