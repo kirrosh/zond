@@ -243,29 +243,34 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       ? []
       : endpoints.filter(ep => ep.deprecated).map(ep => `${ep.method} ${ep.path}`);
 
+    // ARV-212 (R13/F16): peek at .env.yaml *before* generating suites so we
+    // can pass `defaultAuthVar` into generateSuites when the spec has no
+    // securitySchemes but the workspace is wired for Bearer auth (the
+    // ARV-201 seed in setup-api.ts). Without this, GitHub-style suites go
+    // unauth and brick on the first rate-limited 60 requests.
+    const envForWarnings: Record<string, unknown> = {};
+    try {
+      const envDir = resolveApiRoot(options.output, baseUrl) ?? options.output;
+      Object.assign(envForWarnings, await loadEnvironment(undefined, envDir));
+    } catch { /* env load failures stay silent — original behaviour for missing files */ }
+
+    let defaultAuthVar: string | undefined;
+    if (securitySchemes.length === 0 && "auth_token" in envForWarnings) {
+      // Presence-not-value: an empty .secrets.yaml.auth_token resolves to ""
+      // here, but the .env.yaml wiring is what matters. Once the user fills
+      // .secrets.yaml the generated suite picks up the Bearer header without
+      // a regenerate.
+      defaultAuthVar = "auth_token";
+    }
+
     // Generate suites
     const suites = generateSuites({
       endpoints,
       securitySchemes,
       specPath: options.specPath,
       includeDeprecated: options.includeDeprecated,
+      defaultAuthVar,
     });
-
-    // TASK-218: surface a one-line summary of path params without examples
-    // so users running `zond generate` (not `zond coverage`) know they need
-    // to fill `.env.yaml` for positive smoke / CRUD reads to actually run.
-    // Without this hint, the path-param `*-smoke-positive` suites silently
-    // skip via skip_if and look like phantom passes.
-    // ARV-76 (feedback round-03 / F17): also consult the API's .env.yaml so
-    // a param that's already filled there (e.g. `id: <uuid>`) doesn't keep
-    // firing the "no examples" warning. zond run resolves placeholders from
-    // .env.yaml at runtime — generate's job is to tell the user which gaps
-    // *remain*, not to ignore filled values.
-    const envForWarnings: Record<string, unknown> = {};
-    try {
-      const envDir = resolveApiRoot(options.output, baseUrl) ?? options.output;
-      Object.assign(envForWarnings, await loadEnvironment(undefined, envDir));
-    } catch { /* env load failures stay silent — original behaviour for missing files */ }
 
     const missingPathParams = new Set<string>();
     let endpointsMissingPathExamples = 0;

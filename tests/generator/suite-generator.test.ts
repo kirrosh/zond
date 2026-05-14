@@ -566,6 +566,38 @@ describe("generateCrudSuite", () => {
 // ── generateSuites ──
 
 describe("generateSuites", () => {
+  // ARV-212 (R13/F16): when the spec ships no securitySchemes but the
+  // workspace is wired for Bearer auth (`auth_token` present in .env.yaml),
+  // generated suites must carry a suite-level
+  //   headers:
+  //     Authorization: 'Bearer {{auth_token}}'
+  // Otherwise every generated GitHub-style suite goes unauth and bricks
+  // on the first rate-limited 60 requests.
+  test("F16: emits Authorization header at suite level via defaultAuthVar when spec has no securitySchemes", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/zen", method: "GET", tags: ["meta"] }),
+      makeEndpoint({ path: "/octocat", method: "GET", tags: ["meta"] }),
+    ];
+    const suites = generateSuites({
+      endpoints,
+      securitySchemes: noSecurity,
+      defaultAuthVar: "auth_token",
+    });
+    const positive = suites.find((s) => s.name === "meta-smoke-positive");
+    expect(positive).toBeDefined();
+    expect(positive!.headers).toEqual({ Authorization: "Bearer {{auth_token}}" });
+  });
+
+  test("F16: without defaultAuthVar, suites for bare specs stay header-less (back-compat)", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/zen", method: "GET", tags: ["meta"] }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
+    const positive = suites.find((s) => s.name === "meta-smoke-positive");
+    expect(positive).toBeDefined();
+    expect(positive!.headers).toBeUndefined();
+  });
+
   test("separates GET and non-GET into smoke and smoke-unsafe", () => {
     const endpoints = [
       makeEndpoint({ path: "/pets", method: "GET", tags: ["pets"] }),

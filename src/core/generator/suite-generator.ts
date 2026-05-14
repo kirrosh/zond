@@ -211,12 +211,36 @@ function getSuiteHeaders(
 
   const headerSets = endpoints.map(ep => getAuthHeaders(ep, schemes));
   const first = headerSets[0];
-  if (!first) return undefined;
+  if (!first) {
+    // ARV-212 (R13/F16): spec has no securitySchemes (GitHub publishes its
+    // OpenAPI this way) so per-endpoint auth-header derivation returns
+    // undefined for every step. When the API workspace nonetheless wires
+    // `auth_token` end-to-end (ARV-201 seeds it in .env.yaml on bare specs,
+    // and zond request / runner auto-attach Authorization: Bearer when
+    // auth_token is present), generated suites should not silently go
+    // unauth — that bricks them on the first rate-limited 60 requests.
+    // Fall back to a generic Bearer header at the suite level. The header
+    // is harmless when .secrets.yaml.auth_token is empty (zond runner
+    // still substitutes `{{auth_token}}` to an empty string, just like
+    // before; the server then 401s — same outcome as today).
+    if (schemes.length === 0 && _suiteDefaultAuthVar !== null) {
+      return { Authorization: `Bearer {{${_suiteDefaultAuthVar}}}` };
+    }
+    return undefined;
+  }
 
   const firstJson = JSON.stringify(first);
   const allSame = headerSets.every(h => JSON.stringify(h) === firstJson);
   return allSame ? first : undefined;
 }
+
+// ARV-212 (R13/F16): generator-level "the caller wired auth_token in
+// .env.yaml even though the spec has no securitySchemes" hint. Set at the
+// top of generateSuites and consulted by getSuiteHeaders / generateCrudSuite
+// / generateSanitySuite. Module-scoped to avoid threading through ~7 call
+// sites. Always reset to null at the end of generateSuites so the helper
+// stays stateless from the caller's perspective.
+let _suiteDefaultAuthVar: string | null = null;
 
 /** Common id-like field names looked up after `id` itself.
  *  TASK-139: many real-world APIs return `slug`, `uuid`, `version`, `key`,
@@ -906,8 +930,14 @@ export function generateSuites(opts: {
   specPath?: string;
   /** When true, deprecated endpoints are included instead of filtered out. */
   includeDeprecated?: boolean;
+  /** ARV-212 (R13/F16): inject `Authorization: Bearer {{<varName>}}` at the
+   *  suite level when the spec declares no securitySchemes but the workspace
+   *  .env.yaml carries this auth-token variable. Lets generated suites talk
+   *  to bare-spec APIs (GitHub) without going unauth. */
+  defaultAuthVar?: string;
 }): RawSuite[] {
-  const { endpoints, securitySchemes, specPath, includeDeprecated } = opts;
+  const { endpoints, securitySchemes, specPath, includeDeprecated, defaultAuthVar } = opts;
+  _suiteDefaultAuthVar = defaultAuthVar ?? null;
 
   // Filter deprecated unless caller opted in. The list of skipped paths is
   // exposed separately via `getSkippedDeprecated` for stdout reporting.
@@ -1113,5 +1143,6 @@ export function generateSuites(opts: {
     }
   }
 
+  _suiteDefaultAuthVar = null;                                                                  // ARV-212
   return allSuites;
 }
