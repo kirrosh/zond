@@ -59,6 +59,12 @@ export interface BootstrapOptions {
   /** Hard cap on cascade passes — defends against pathological loops. */
   maxPasses?: number;
   json?: boolean;
+  /** ARV-205/F19 (R10/R13): command name surfaced in the JSON envelope.
+   *  prepare-fixtures delegates here for `--cascade`, but a generic
+   *  "bootstrap" label in the envelope misleads anyone filtering by
+   *  command. Caller passes the human-facing name; defaults to "bootstrap"
+   *  for back-compat with direct invocations. */
+  commandName?: string;
 }
 
 interface SeedAttempt {
@@ -362,6 +368,7 @@ async function runCascade(
 }
 
 export async function bootstrapCommand(options: BootstrapOptions): Promise<number> {
+  const commandName = options.commandName ?? "bootstrap";
   try {
     const doc = await readOpenApiSpec(options.specPath);
     const endpoints = extractEndpoints(doc);
@@ -370,7 +377,7 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     const resourceMap = await readResourceMap(options.apiDir);
     if (!resourceMap || resourceMap.resources.length === 0) {
       const msg = `No .api-resources.yaml in ${options.apiDir}. Run 'zond refresh-api ${options.apiDir.split("/").pop()}' first.`;
-      if (options.json) printJson(jsonError("bootstrap", [msg]));
+      if (options.json) printJson(jsonError(commandName, [msg]));
       else printError(msg);
       return 2;
     }
@@ -380,7 +387,7 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     const baseUrl = env["base_url"];
     if (!baseUrl) {
       const msg = `base_url is required in ${envPath} (live API calls need it).`;
-      if (options.json) printJson(jsonError("bootstrap", [msg]));
+      if (options.json) printJson(jsonError(commandName, [msg]));
       else printError(msg);
       return 2;
     }
@@ -397,7 +404,7 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     if (targets.length === 0 && !options.seed) {
       const msg = "No path-FK dependencies — nothing to bootstrap.";
       if (options.json) {
-        printJson(jsonOk("bootstrap", { envPath, applied: false, passes: [], seeds: [], summary: { writes: 0, seeds: 0 } }));
+        printJson(jsonOk(commandName, { envPath, applied: false, passes: [], seeds: [], summary: { writes: 0, seeds: 0 } }));
       } else {
         console.log(msg);
       }
@@ -576,7 +583,7 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     const mode: "exec" | "plan" = options.apply ? "exec" : "plan";
 
     if (options.json) {
-      printJson(jsonOk("bootstrap", {
+      printJson(jsonOk(commandName, {
         envPath,
         applied,
         mode,
@@ -657,7 +664,7 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     return 0;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (options.json) printJson(jsonError("bootstrap", [message]));
+    if (options.json) printJson(jsonError(commandName, [message]));
     else printError(message);
     return 2;
   }
