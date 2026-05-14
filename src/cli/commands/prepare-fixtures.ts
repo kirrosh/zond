@@ -127,6 +127,9 @@ export function registerPrepareFixtures(program: Command): void {
         verify,
         timeoutMs,
         json: globalJson(cmd),
+        // ARV-205 (R10/F6, R13/F19, R14): single-pass branch also delegates,
+        // so surface the user-facing command name in the JSON envelope.
+        commandName: "prepare-fixtures",
       });
     });
 }

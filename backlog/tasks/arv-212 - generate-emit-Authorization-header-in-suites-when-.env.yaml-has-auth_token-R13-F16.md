@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-05-14 09:25'
-updated_date: '2026-05-14 09:31'
+updated_date: '2026-05-14 10:05'
 labels:
   - feedback-loop
   - api-github
@@ -42,5 +42,5 @@ Log: see feedback-13.md F16.
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Fixed: suite-generator's getSuiteHeaders now falls back to {Authorization: 'Bearer {{<defaultAuthVar>}}'} when securitySchemes is empty AND generate.ts passed defaultAuthVar (set when .env.yaml carries auth_token). generate.ts probes envForWarnings for auth_token presence (not value — empty placeholder is OK; once .secrets.yaml is filled the suite picks up the value at runtime). Verified end-to-end: generated GitHub Meta suite now has top-level 'headers: { Authorization: "Bearer {{auth_token}}" }'. Regression tests added in tests/generator/suite-generator.test.ts.
+round-14 F16-REOPEN: fixed. Root cause: generate.ts read .env.yaml from resolveApiRoot(options.output) which returns undefined when --output points outside apis/<name>/ (tester used /tmp/scratch). Now uses options.apiName (plumbed via getApi(cmd, opts) from --api or current-api) to construct apis/<name>/ directly. Verified end-to-end with tester's repro: zond add api gh-verify --spec ... && zond generate --api gh-verify --output /tmp/x → suite carries Authorization header.
 <!-- SECTION:NOTES:END -->

@@ -79,6 +79,15 @@ export interface GenerateOptions {
    *  always removes. Stacks with --tag for back-compat. */
   include?: string[];
   exclude?: string[];
+  /** ARV-212 (R13/F16, R14): the explicit --api name. Lets generate read
+   *  apis/<name>/.env.yaml directly even when --output points outside the
+   *  apis/<name>/ tree (e.g. /tmp/<scratch>), where resolveApiRoot /
+   *  inferApiName cannot recover the name from the path. */
+  apiName?: string;
+  /** ARV-212: explicit override for apis/<name>/ root. Caller pre-resolved
+   *  it through the DB (base_dir column) for the case where the API was
+   *  registered in a non-standard layout. */
+  apiDir?: string;
 }
 
 export async function generateCommand(options: GenerateOptions): Promise<number> {
@@ -243,14 +252,25 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       ? []
       : endpoints.filter(ep => ep.deprecated).map(ep => `${ep.method} ${ep.path}`);
 
-    // ARV-212 (R13/F16): peek at .env.yaml *before* generating suites so we
-    // can pass `defaultAuthVar` into generateSuites when the spec has no
+    // ARV-212 (R13/F16, R14): peek at .env.yaml *before* generating suites so
+    // we can pass `defaultAuthVar` into generateSuites when the spec has no
     // securitySchemes but the workspace is wired for Bearer auth (the
     // ARV-201 seed in setup-api.ts). Without this, GitHub-style suites go
     // unauth and brick on the first rate-limited 60 requests.
+    //
+    // R14 fix: do NOT rely on resolveApiRoot(options.output) — when the
+    // user passes --output to a scratch directory outside apis/<name>/
+    // (e.g. /tmp/foo), the resolver returns undefined and we fall back to
+    // the output dir, which has no .env.yaml. Prefer the explicit --api
+    // name to construct apis/<name>/ inside the workspace.
     const envForWarnings: Record<string, unknown> = {};
     try {
-      const envDir = resolveApiRoot(options.output, baseUrl) ?? options.output;
+      let envDir: string | undefined = options.apiDir;
+      if (!envDir && options.apiName) {
+        const ws = findWorkspaceRoot();
+        envDir = resolvePath(ws.root, "apis", options.apiName);
+      }
+      if (!envDir) envDir = resolveApiRoot(options.output, baseUrl) ?? options.output;
       Object.assign(envForWarnings, await loadEnvironment(undefined, envDir));
     } catch { /* env load failures stay silent — original behaviour for missing files */ }
 
@@ -493,6 +513,7 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
 
 import type { Command } from "commander";
 import { globalJson, resolveSpecArg } from "../resolve.ts";
+import { getApi } from "../util/api-context.ts";
 
 export function registerGenerate(program: Command): void {
   program
@@ -533,6 +554,7 @@ export function registerGenerate(program: Command): void {
         json: globalJson(cmd),
         include: Array.isArray(opts.include) ? opts.include : undefined,
         exclude: Array.isArray(opts.exclude) ? opts.exclude : undefined,
+        apiName: getApi(cmd, opts),
       });
     });
 }
