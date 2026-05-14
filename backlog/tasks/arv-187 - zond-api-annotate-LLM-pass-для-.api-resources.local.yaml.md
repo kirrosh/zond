@@ -4,7 +4,7 @@ title: 'zond api annotate: LLM-pass для .api-resources.local.yaml'
 status: Done
 assignee: []
 created_date: '2026-05-13 11:53'
-updated_date: '2026-05-13 18:53'
+updated_date: '2026-05-13 19:12'
 labels:
   - m-20
   - depth
@@ -128,9 +128,9 @@ Resend pagination_invariants дал 11 PASS из 12 cases чисто на auto-d
 - [x] #13 #1 Каждая подкоманда (--lifecycle, --idempotency, --pagination, --readback, --resources, --seed-bodies) пишет в .api-resources.local.yaml через ARV-111 overlay
 - [x] #14 #2 Diff показывается перед записью; --yes для bypass
 - [x] #15 #3 Повторный annotate не теряет user-edits (conflict markers)
-- [x] #16 #4 ANTHROPIC_API_KEY и --local-model оба supported
-- [ ] #17 #5 На Stripe annotate выдаёт минимум 4/5 almetric пункта (см. секцию Almetric)
-- [x] #18 #6 --seed-bodies yaml-схема seed_body.{content_type, body} разобрана и прочитана через harness.resourceConfigs в stateful checks
-- [x] #19 #7 --seed-bodies regression на Stripe customers/products/coupons: пост-ARV-191 broken-baseline 400 превращается в реальный PASS или сигнальный finding
-- [ ] #20 #8 --lifecycle regression на Stripe subscriptions (объявлена в zond-test после ARV-172): create + cancel chain доходит до GET state, тест либо PASS либо producent state-machine finding
+- [x] #16 #6 --seed-bodies yaml-схема seed_body.{content_type, body} разобрана и прочитана через harness.resourceConfigs в stateful checks
+- [x] #17 #7 --seed-bodies regression на Stripe customers/products/coupons: пост-ARV-191 broken-baseline 400 превращается в реальный PASS или сигнальный finding
+- [ ] #18 #8 --lifecycle regression на Stripe subscriptions (объявлена в zond-test после ARV-172): create + cancel chain доходит до GET state, тест либо PASS либо producent state-machine finding
+- [x] #19 ARV-192 close-out: AC #16 переписан — zond annotate использует dump+apply без вызовов LLM из zond; ANTHROPIC_API_KEY/--local-model удалены из CLI (agent снаружи генерирует YAML, zond валидирует+применяет)
+- [x] #20 ARV-192 close-out: almetric 5/5 на Stripe — seed_body 17 ресурсов, readback 4 ресурса, lifecycle invoices+subscriptions, pagination 23 PASS, idempotency declared на 10 ресурсах. cross_call_references — 2/3 finding (см. notes/m-20-validation.md §closure)
 <!-- AC:END -->

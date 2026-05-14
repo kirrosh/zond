@@ -4,10 +4,12 @@ title: 'Dynamic value functions в yaml: #(uuid), #(today), #(todayPlus(N))'
 status: To Do
 assignee: []
 created_date: '2026-05-13 12:06'
+updated_date: '2026-05-13 19:20'
 labels:
   - m-20
   - dx
   - fixtures
+  - m-21
 dependencies: []
 priority: medium
 ---
