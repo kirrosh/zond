@@ -59,6 +59,10 @@ export const CATEGORY_BY_ID: Record<string, Category> = {
   idempotency_replay: "contract",
   pagination_invariants: "contract",
   lifecycle_transitions: "contract",
+  // ARV-256 (m-21) — small-team value-add. Rate-limit absence is a
+  // production reliability concern, not a security exploit.
+  rate_limit_headers_absent: "reliability",
+  open_cors_on_sensitive: "security",
 
   // ── security ─────────────────────────────────────────────────
   ignored_auth: "security",

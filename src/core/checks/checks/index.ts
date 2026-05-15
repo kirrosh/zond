@@ -25,6 +25,8 @@ import { crossCallReferences } from "./cross_call_references.ts";
 import { idempotencyReplay } from "./idempotency_replay.ts";
 import { paginationInvariants } from "./pagination_invariants.ts";
 import { lifecycleTransitions } from "./lifecycle_transitions.ts";
+import { openCorsOnSensitive } from "./open_cors_on_sensitive.ts";
+import { rateLimitHeadersAbsent } from "./rate_limit_headers_absent.ts";
 
 let registered = false;
 
@@ -54,6 +56,9 @@ export function registerBuiltinChecks(): void {
   registerStatefulCheck(paginationInvariants);
   // ARV-172 (m-20) — declared state-machine + action transitions.
   registerStatefulCheck(lifecycleTransitions);
+  // ARV-256 (m-21) — small-team value-add checks.
+  registerStatefulCheck(openCorsOnSensitive);
+  registerCheck(rateLimitHeadersAbsent);
   registered = true;
 }
 
