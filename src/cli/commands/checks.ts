@@ -292,6 +292,16 @@ function renderMarkdownReport(
   lines.push(
     `**${s.findings} finding(s)** across ${s.cases} case(s) on ${s.operations} operation(s) — ${s.checks_run} check(s) active`,
   );
+  // ARV-251: per-category roll-up. Small teams use this to triage —
+  // "0 security, 12 reliability" is a clear starting point compared to
+  // a flat severity pile.
+  if (s.findings > 0) {
+    const c = s.by_category;
+    lines.push("");
+    lines.push(
+      `🛡 security: ${c.security} · ⚙ reliability: ${c.reliability} · 📜 contract: ${c.contract} · · hygiene: ${c.hygiene}`,
+    );
+  }
   const skipLine = formatSkippedOutcomes(s.skipped_outcomes);
   if (skipLine) {
     lines.push("");
@@ -306,8 +316,9 @@ function renderMarkdownReport(
     lines.push("");
     lines.push(`## Findings`);
     for (const f of data.findings) {
+      const cat = f.category ? ` _${f.category}_` : "";
       lines.push(
-        `- **[${f.severity}]** \`${f.check}\` ${f.operation.method} ${f.operation.path} — ${f.message}`,
+        `- **[${f.severity}]**${cat} \`${f.check}\` ${f.operation.method} ${f.operation.path} — ${f.message}`,
       );
     }
   }
@@ -588,6 +599,15 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       printSuccess(
         `${s.findings} finding(s) across ${s.cases} case(s) on ${s.operations} operation(s) — ${s.checks_run} check(s) active`,
       );
+      // ARV-251: per-category roll-up. Surfaces "0 security, 12
+      // reliability" so a triager sees where the volume sits before
+      // scrolling the finding list.
+      if (s.findings > 0) {
+        const c = s.by_category;
+        console.log(
+          `  🛡 security: ${c.security}  ⚙ reliability: ${c.reliability}  📜 contract: ${c.contract}  · hygiene: ${c.hygiene}`,
+        );
+      }
       const skipLine = formatSkippedOutcomes(s.skipped_outcomes);
       if (skipLine) console.log(`  ${skipLine}`);
       // ARV-18: aggregate identical findings (same check + same response

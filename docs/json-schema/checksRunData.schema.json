@@ -20,6 +20,15 @@
               "info"
             ]
           },
+          "category": {
+            "type": "string",
+            "enum": [
+              "security",
+              "reliability",
+              "contract",
+              "hygiene"
+            ]
+          },
           "operation": {
             "type": "object",
             "properties": {
@@ -158,6 +167,38 @@
           ],
           "additionalProperties": false
         },
+        "by_category": {
+          "type": "object",
+          "properties": {
+            "security": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "reliability": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "contract": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "hygiene": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "security",
+            "reliability",
+            "contract",
+            "hygiene"
+          ],
+          "additionalProperties": false
+        },
         "skipped_outcomes": {
           "type": "object",
           "propertyNames": {
@@ -176,6 +217,7 @@
         "checks_run",
         "findings",
         "by_severity",
+        "by_category",
         "skipped_outcomes"
       ],
       "additionalProperties": false
