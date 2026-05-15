@@ -99,6 +99,7 @@ const ALLOW_LIST: Array<{ source: string; reason: string }> = [
   { source: "refresh-api.ts", reason: "Same withApiContext early-exit; envelope path covered by tests/cli/refresh-api.test.ts." },
   { source: "probe.ts", reason: "ARV-119: registration umbrella for `probe static|mass-assignment|security`. The envelope helpers in this file fire only on input-flag errors (resolveOutput rejecting an unknown --report). The live command-level envelopes are emitted by probe-mass-assignment.ts / probe-security.ts, both already in SMOKE." },
   { source: "api/annotate/index.ts", reason: "ARV-187: agent-augmented workflow (zond emits prompts; agent answers; zond applies). Smoke entry would need a multi-step subcommand orchestration with a fixture YAML response. Per-parser correctness covered by tests/cli/annotate.test.ts." },
+  { source: "fixtures.ts", reason: "ARV-195: needs a registered API + spec.json on disk to exercise the envelope path (resolveApiContext rejects missing collections before the action runs). Pure helpers (extractUrlFromCurl, extractFixturesFromPath) covered by tests/cli/fixtures.test.ts." },
 ];
 
 /** Use the pre-compiled binary when it exists (much faster — 10× over
