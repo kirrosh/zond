@@ -4,12 +4,12 @@ title: 'probe security --oob-server: interactsh OOB-oracle SSRF verdict'
 status: To Do
 assignee: []
 created_date: '2026-05-12 13:27'
-updated_date: '2026-05-13 19:20'
+updated_date: '2026-05-15 07:03'
 labels:
   - security
   - probe
   - deferred-m-19
-  - m-21
+  - deferred-post-pivot
 dependencies: []
 priority: medium
 ---
