@@ -23,6 +23,7 @@ import { compileOperationFilter } from "../../../core/selectors/operation-filter
 
 interface Buckets {
   high: number;
+  medium: number;
   low: number;
   info: number;
   inconclusive: number;
@@ -33,6 +34,7 @@ interface Buckets {
 
 const SEC_BUCKETS: ReadonlyArray<readonly [string, keyof Buckets & string]> = [
   ["high", "high"],
+  ["medium", "medium"],
   ["low", "low"],
   ["info", "info"],
   ["inconclusive", "inconclusive"],
@@ -45,6 +47,7 @@ const SEC_SUMMARY: ReadonlyArray<readonly [string, keyof Buckets & string]> = [
   ["HIGH", "high"],
   ["INCONCLUSIVE", "inconclusive"],
   ["INCONCLUSIVE-BASE", "inconclusiveBaseline"],
+  ["MED", "medium"],
   ["LOW", "low"],
   ["INFO", "info"],
   ["OK", "ok"],
@@ -52,7 +55,7 @@ const SEC_SUMMARY: ReadonlyArray<readonly [string, keyof Buckets & string]> = [
 ];
 
 const SEC_ZERO: Buckets = {
-  high: 0, low: 0, info: 0, inconclusive: 0, inconclusiveBaseline: 0, ok: 0, skipped: 0,
+  high: 0, medium: 0, low: 0, info: 0, inconclusive: 0, inconclusiveBaseline: 0, ok: 0, skipped: 0,
 };
 
 export interface ProbeSecurityOptions {
