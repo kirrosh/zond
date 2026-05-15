@@ -130,6 +130,12 @@ function toProbeResult(sec: SecurityProbeResult): ProbeResult {
           // info → low for the public probe-result envelope; the digest
           // / structured per-endpoint shape preserves the distinction.
           ? "low"
+          : f.severity === "medium"
+          // ARV-254: ProbeFindingSeverity has no "medium" tier — collapse
+          // to "low" for the wire shape. MEDIUM is a digest-only severity
+          // marker (SSRF accept on endpoint declaring delivery, no OOB);
+          // by design it must NOT gate CI as a HIGH would.
+          ? "low"
           : f.severity,
       evidence: evidenceFromFinding(f),
     })),

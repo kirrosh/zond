@@ -48,13 +48,16 @@ export type SecurityClass = "ssrf" | "crlf" | "open-redirect";
 export const SECURITY_CLASSES: SecurityClass[] = ["ssrf", "crlf", "open-redirect"];
 
 /**
- * Security-probe severity ladder. Includes 'info' (ARV-253) for the
- * accept-without-reflection case where the server stored a CRLF payload
- * but no dangerous-context reflection was observed — single_signal proof
- * per the m-21 severity matrix.
+ * Security-probe severity ladder. Includes 'info' (ARV-253) for
+ * sanitization-only signals (CRLF accept-without-reflection) and
+ * 'medium' (ARV-254) for SSRF accept on endpoints declaring delivery
+ * semantics. The full m-21 matrix governs the cap: HIGH requires
+ * evidence_chain proof, OOB-backed SSRF lands here only when ARV-177
+ * lifts.
  */
 export type SecuritySeverity =
   | "high"
+  | "medium"
   | "low"
   | "info"
   | "inconclusive"
@@ -537,7 +540,7 @@ async function probeOneEndpoint(
         });
         continue;
       }
-      const finding = classify(hit, payload, resp);
+      const finding = classify(hit, payload, resp, { endpoint: ep });
       // ARV-126: route the 2xx-no-echo low-severity classification
       // through the anti-FP registry. When the response body deeply
       // equals the baseline body, the server ignored the attack
@@ -590,12 +593,12 @@ async function probeOneEndpoint(
   }
 
   // Roll up to the worst severity. ARV-253: "info" sits below "low"
-  // (single_signal proof — server accepted attack payload but reflected
-  // nothing in dangerous contexts). It can be the verdict-level severity
-  // when nothing stronger fired.
+  // (single_signal sanitization-only). ARV-254: "medium" sits between
+  // "high" and "low" (SSRF accept on endpoint declaring delivery).
   const severities: SecuritySeverity[] = verdict.findings.map(f => f.severity);
   if (severities.includes("high")) verdict.severity = "high";
   else if (severities.includes("inconclusive")) verdict.severity = "inconclusive";
+  else if (severities.includes("medium")) verdict.severity = "medium";
   else if (severities.includes("low")) verdict.severity = "low";
   else if (severities.includes("info")) verdict.severity = "info";
   else verdict.severity = "ok";
@@ -787,8 +790,34 @@ function classify(
   hit: SecurityFieldHit,
   payload: string,
   resp: ClassifyResp,
+  ctx: { endpoint?: EndpointInfo } = {},
 ): SecurityFinding {
-  return stampAction(classifyInner(hit, payload, resp));
+  return stampAction(classifyInner(hit, payload, resp, ctx));
+}
+
+/**
+ * ARV-254: detect whether an endpoint declares delivery semantics for
+ * a URL field — i.e. the server is documented to actually hit the URL
+ * (webhook receiver, push subscription, callback).
+ *
+ * Without OOB infrastructure (interactsh / Burp Collaborator —
+ * deferred to ARV-177 post-pivot), zond can't prove the server fetched
+ * the URL. So SSRF "accept" lands as LOW by default. But if the spec
+ * declares delivery, we know the URL gets fetched on some schedule,
+ * which raises the stakes — surface as MEDIUM with an explicit
+ * disclaimer that OOB verification is still required for HIGH.
+ *
+ * Heuristic: path or tag contains "webhook" / "callback" / "subscription"
+ * (case-insensitive). When ARV-189 lands, this also reads
+ * `x-zond-delivery: true` from the spec.
+ */
+function endpointDeclaresDelivery(ep: EndpointInfo | undefined): boolean {
+  if (!ep) return false;
+  const haystacks: string[] = [ep.path.toLowerCase()];
+  if (Array.isArray(ep.tags)) {
+    for (const t of ep.tags) haystacks.push(String(t).toLowerCase());
+  }
+  return haystacks.some((h) => /webhook|callback|subscription/.test(h));
 }
 
 /**
@@ -821,6 +850,7 @@ function classifyInner(
   hit: SecurityFieldHit,
   payload: string,
   resp: ClassifyResp,
+  ctx: { endpoint?: EndpointInfo } = {},
 ): SecurityFinding {
   const status = resp.status;
   const echo = classifyEcho(resp.body_parsed ?? resp.body, payload, hit.class);
@@ -894,19 +924,53 @@ function classifyInner(
         reason: `${status} accepted ${hit.class} payload but no reflection observed — sanitization may be missing but no exploit pathway proven`,
       };
     }
-    // SSRF / open-redirect (ARV-254 owns the dedicated rebalance).
+    // ARV-254: SSRF / open-redirect severity rebalance.
+    //
+    // Without an out-of-band (OOB) channel zond can't prove the server
+    // actually fetched the injected URL. "API accepted 169.254" is
+    // single_signal proof — caps at LOW per the m-21 matrix.
+    //
+    // Stake-raising signal: when the spec declares delivery semantics
+    // (path/tag mentions webhook / callback / subscription), the server
+    // is documented to fetch the URL — surface MEDIUM. Full HIGH is
+    // gated on OOB confirmation which lands with ARV-177 (deferred-
+    // post-pivot, out of scope for now).
+    const declaresDelivery = endpointDeclaresDelivery(ctx.endpoint);
+    const oobDisclaimer = "no OOB channel — accept ≠ proven fetch. Verify with Burp Collaborator / interactsh manually for HIGH severity.";
     if (echoed) {
       const label = echo.kind === "verbatim"
         ? "payload echoed verbatim"
         : `payload echoed (${echo.kind})`;
+      if (declaresDelivery) {
+        return {
+          field: hit.field,
+          class: hit.class,
+          payload,
+          status,
+          echoed,
+          severity: "low",
+          reason: `${label}; ${hit.class}: endpoint declares delivery (webhook/callback) but ${oobDisclaimer}`,
+        };
+      }
       return {
         field: hit.field,
         class: hit.class,
         payload,
         status,
         echoed,
-        severity: "high",
-        reason: `${label} — stored ${hit.class} candidate`,
+        severity: "low",
+        reason: `${label} — stored ${hit.class} candidate; ${oobDisclaimer}`,
+      };
+    }
+    if (declaresDelivery) {
+      return {
+        field: hit.field,
+        class: hit.class,
+        payload,
+        status,
+        echoed,
+        severity: "medium",
+        reason: `2xx accepted ${hit.class} payload on endpoint declaring delivery semantics (webhook/callback). ${oobDisclaimer}`,
       };
     }
     return {
@@ -916,7 +980,7 @@ function classifyInner(
       status,
       echoed,
       severity: "low",
-      reason: `2xx accepted ${hit.class} payload but no echo observed — verify side-effects manually`,
+      reason: `2xx accepted ${hit.class} payload but no echo observed. ${oobDisclaimer}`,
     };
   }
   if (status >= 400) {
@@ -1041,11 +1105,11 @@ export function classifyEcho(body: unknown, payload: string, cls: SecurityClass)
 
 function summaryLine(v: SecurityVerdict): string {
   const counts: Record<SecuritySeverity, number> = {
-    high: 0, low: 0, info: 0, inconclusive: 0, "inconclusive-baseline": 0, ok: 0, skipped: 0,
+    high: 0, medium: 0, low: 0, info: 0, inconclusive: 0, "inconclusive-baseline": 0, ok: 0, skipped: 0,
   };
   for (const f of v.findings) counts[f.severity]++;
   const fields = Array.from(new Set(v.detectedFields.map(d => d.field))).join(", ");
-  return `fields=[${fields}] · HIGH=${counts.high} LOW=${counts.low} INFO=${counts.info} INCONCLUSIVE=${counts.inconclusive} OK=${counts.ok}`;
+  return `fields=[${fields}] · HIGH=${counts.high} MED=${counts.medium} LOW=${counts.low} INFO=${counts.info} INCONCLUSIVE=${counts.inconclusive} OK=${counts.ok}`;
 }
 
 // ──────────────────────────────────────────────
@@ -1264,13 +1328,14 @@ export function formatSecurityDigest(
   }
 
   const buckets: Record<SecuritySeverity, SecurityVerdict[]> = {
-    high: [], low: [], info: [], inconclusive: [], "inconclusive-baseline": [], ok: [], skipped: [],
+    high: [], medium: [], low: [], info: [], inconclusive: [], "inconclusive-baseline": [], ok: [], skipped: [],
   };
   for (const v of result.verdicts) buckets[v.severity].push(v);
 
-  const ordered: SecuritySeverity[] = ["high", "inconclusive", "inconclusive-baseline", "low", "info", "ok", "skipped"];
+  const ordered: SecuritySeverity[] = ["high", "inconclusive", "inconclusive-baseline", "medium", "low", "info", "ok", "skipped"];
   const titles: Record<SecuritySeverity, string> = {
     high: "🚨 HIGH — header-reflection / HTML reflection / 5xx",
+    medium: "⚠️ MEDIUM — SSRF accept on endpoint declaring delivery (no OOB confirmation)",
     low: "🟡 LOW — storage observed, no dangerous-context reflection (verify manually)",
     info: "·  INFO — accepted, no reflection observed (sanitization signal only)",
     inconclusive: "❓ INCONCLUSIVE — could not classify",

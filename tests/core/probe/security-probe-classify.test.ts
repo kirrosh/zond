@@ -151,24 +151,26 @@ describe("runSecurityProbes — happy path", () => {
     expect(v.summary).toContain("dry-run");
   });
 
-  it("open-redirect: end-to-end run classifies HIGH when redirect payload is echoed", async () => {
+  it("open-redirect: ARV-254 — echoed redirect classifies LOW (no OOB confirmation)", async () => {
     harness.setResponder((req) => {
       if (req.method === "DELETE") return { status: 204 };
       const body = req.body as Record<string, unknown> | undefined;
       const redirect = body?.redirect;
-      // Echo back — typical stored open-redirect surface.
+      // Echo back — without OOB-confirmed delivery, this is single_signal
+      // proof. Severity caps at LOW with explicit disclaimer.
       return { status: 201, body: { id: "r_1", redirect } };
     });
     const result = await runSecurityProbes({
-      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
+      allowLeaks: true,
       endpoints: [ep({ method: "POST", path: "/r", requestBodySchema: redirectSchema })],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
       classes: ["open-redirect"],
     });
     const v = result.verdicts[0]!;
-    expect(v.severity).toBe("high");
+    expect(v.severity).toBe("low");
     expect(v.detectedFields[0]!.class).toBe("open-redirect");
+    expect(v.findings[0]!.reason).toMatch(/OOB/i);
   });
 
   it("open-redirect: rejected payload (4xx) classifies as OK", async () => {
