@@ -118,6 +118,7 @@ interface ChecksRunOptions {
   verbose?: boolean;
   strict405?: boolean;
   strict401?: boolean;
+  maxRequests?: number;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -537,6 +538,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       // path inside runPool — same observable behaviour.
       workers,
       rateLimiter,
+      maxRequests: typeof opts.maxRequests === "number" && opts.maxRequests > 0 ? opts.maxRequests : undefined,
     });
     const warnings: string[] = [];
     for (const id of result.selection.unknown) {
@@ -736,6 +738,11 @@ function defineRun(parent: Command): void {
     .option(
       "--strict-401",
       "ARV-181: require exactly 401 for `ignored_auth` no-auth / bogus-auth probes (mirrors schemathesis V4). Off by default — zond's pragmatic policy accepts any 4xx as a valid auth-reject.",
+    )
+    .option(
+      "--max-requests <n>",
+      "ARV-227: hard cap on outbound HTTP requests for the whole run (per-response + stateful share the same budget). Once reached, remaining cases short-circuit with `max-requests-cap-reached` in summary.skipped_outcomes. Use to keep coverage runs against large specs (github, kubernetes) bounded.",
+      (v) => Number.parseInt(v, 10),
     )
     .action(checksRunAction);
 }
