@@ -294,6 +294,21 @@ Rate limit: `zond run` defaults to an adaptive limiter (no-op until
 `RateLimit-*` headers appear). Pass `--rate-limit <N>` for a hard cap;
 `--sequential` for old binaries.
 
+**Long runs**: `zond run` shows a periodic progress line on stderr when
+stdout/stderr is a TTY (`zond: [42s] 234/10927 steps (2%), 230 req, ~30
+req/s, ETA ~5m`) — overwrites itself in place. Suppressed by `--quiet`
+and on non-interactive output. For huge probe-suites (e.g. GitHub spec
+→ ~10k probes under `--rate-limit 30` = 6+ min), this signals "alive,
+not hung". `zond probe static` itself prints a scale-warning block with
+ETA-at-rate-limit estimates and a `--max-per-endpoint K` sampling hint
+when `totalProbes ≥ 2000`.
+
+**Hard cap on requests**: pass `--max-requests N` to cap outgoing HTTP
+calls across the whole run. Remaining steps short-circuit to `skip` with
+`error: "max-requests-cap-reached"`. Each `retry_until` attempt counts as
+one request. Useful for sampling huge probe runs (`--max-requests 500`)
+and for CI time-boxing.
+
 `--all`: fold every `apis/<name>/tests/` dir into one `runs.id` per
 invocation (CI shape). CI context (commit_sha, branch, trigger=ci)
 auto-stamped from env vars.

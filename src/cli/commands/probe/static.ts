@@ -13,9 +13,36 @@ import { generateMethodProbes } from "../../../core/probe/method-probe.ts";
 import { loadSpecForProbe, writeProbeSuites } from "../../../core/probe/runner.ts";
 import { printError, printSuccess, printWarning } from "../../output.ts";
 import { jsonOk, jsonError, printJson } from "../../json-envelope.ts";
+import { formatEta } from "../../../core/util/format-eta.ts";
 
 export type ProbeStaticClass = "validation" | "methods";
 const ALL_CLASSES: ProbeStaticClass[] = ["validation", "methods"];
+
+/** ARV-249: print a scale block when probe generation lands a huge suite.
+ *  A 10k-probe set under `--rate-limit 30` is >6 min of silent work in
+ *  `zond run` — users assume it's hung and SIGKILL. Surfacing the math
+ *  here is cheaper than wiring a progress reporter (which we do anyway in
+ *  slice B), and points at `--max-per-endpoint` for sampling. */
+export const LARGE_PROBE_THRESHOLD = 2000;
+const ETA_RATE_LIMITS = [10, 30, 60] as const;
+
+export function buildLargeProbeNotice(
+  totalProbes: number,
+  probedEndpoints: number,
+): string[] {
+  if (totalProbes < LARGE_PROBE_THRESHOLD || probedEndpoints <= 0) return [];
+  const etaLine = ETA_RATE_LIMITS
+    .map((rl) => `--rate-limit ${rl} → ~${formatEta(totalProbes / rl)}`)
+    .join("   ");
+  const sampleK = 3;
+  const sampleTotal = Math.min(totalProbes, sampleK * probedEndpoints);
+  return [
+    `Large probe set: ${totalProbes} probe(s) across ${probedEndpoints} endpoint(s).`,
+    `   Estimated zond run time at common rate-limits:`,
+    `     ${etaLine}`,
+    `   To sample, re-run with --max-per-endpoint ${sampleK} (~${sampleTotal} probe(s)).`,
+  ];
+}
 
 export interface ProbeStaticOptions {
   specPath: string;
@@ -203,6 +230,14 @@ export async function probeStaticCommand(
             `  methods: ${data.methods.probedPaths} path(s) probed, ${data.methods.skippedPaths} skipped (full method coverage)`,
           );
         }
+      }
+      const probedEndpoints =
+        (data.validation?.probedEndpoints ?? 0) + (data.methods?.probedPaths ?? 0);
+      const notice = buildLargeProbeNotice(totalProbes, probedEndpoints);
+      if (notice.length > 0) {
+        console.log("");
+        printWarning(notice[0]!);
+        for (const line of notice.slice(1)) console.log(line);
       }
       console.log("");
       console.log("Next steps:");

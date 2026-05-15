@@ -4,7 +4,13 @@ import { parseSafe } from "../../core/parser/yaml-parser.ts";
 import { loadEnvironment, loadEnvMeta, loadEnvFile } from "../../core/parser/variables.ts";
 import { filterSuitesByTags, excludeSuitesByTags, filterSuitesByMethod, filterSuitesByOperationFilter } from "../../core/parser/filter.ts";
 import { preflightCheckVars, formatMissingVarLine, summarizeMissingVars } from "../../core/runner/preflight-vars.ts";
-import { runSuite } from "../../core/runner/executor.ts";
+import { runSuite, expandParameterize } from "../../core/runner/executor.ts";
+import {
+  ProgressTracker,
+  formatProgressLine,
+  PROGRESS_INTERVAL_MS,
+  PROGRESS_QUIET_MS,
+} from "../../core/runner/progress-tracker.ts";
 import { createSchemaValidator } from "../../core/runner/schema-validator.ts";
 import { readOpenApiSpec } from "../../core/generator/openapi-reader.ts";
 import { createRateLimiter, createAdaptiveRateLimiter } from "../../core/runner/rate-limiter.ts";
@@ -117,6 +123,26 @@ export interface RunOptions {
    *  useful for advisory runs (audit pre-pass, surface discovery) where
    *  CI shouldn't break on a single test red. */
   failOnFailures?: boolean;
+  /** ARV-249: hard cap on outgoing HTTP requests across the whole run.
+   *  Once reached, remaining steps short-circuit to `skip` with reason
+   *  `max-requests-cap-reached`. Useful for sampling huge probe-suite
+   *  runs and for CI time-boxing. Each `retry_until` attempt counts as
+   *  one request. */
+  maxRequests?: number;
+}
+
+/** ARV-249: rough up-front estimate of the total step count for the
+ *  progress reporter. Walks the parameterize cross-product so a 3×4 grid
+ *  on a 50-step suite reports as 600. for_each is dynamic (depends on
+ *  upstream captures) and not counted — the percentage will overshoot a
+ *  little on for_each-heavy suites; acceptable for an ETA. */
+function estimateTotalSteps(suites: TestSuite[]): number {
+  let total = 0;
+  for (const suite of suites) {
+    const iters = expandParameterize(suite.parameterize).length || 1;
+    total += suite.tests.length * iters;
+  }
+  return total;
 }
 
 export async function runCommand(options: RunOptions): Promise<number> {
@@ -430,10 +456,51 @@ export async function runCommand(options: RunOptions): Promise<number> {
     return 2;
   }
 
+  // ARV-249: shared HTTP-request budget. `Infinity` means uncapped.
+  const requestBudget = options.maxRequests !== undefined && options.maxRequests > 0
+    ? { limit: options.maxRequests, used: 0 }
+    : undefined;
+
+  // ARV-249: progress reporter. Enabled when stderr is a TTY and the user
+  // hasn't opted out via --quiet. Suppressed for non-interactive output
+  // (CI logs already track timestamps; an extra line every 5s is noise).
+  const progressEnabled = !options.quiet
+    && !options.dryRun
+    && Boolean((process.stderr as { isTTY?: boolean }).isTTY);
+  const totalStepsForProgress = progressEnabled
+    ? estimateTotalSteps(suites)
+    : 0;
+  const tracker = progressEnabled
+    ? new ProgressTracker(totalStepsForProgress)
+    : undefined;
+  let lastProgressLineLen = 0;
+  const writeProgressLine = (final: boolean): void => {
+    if (!tracker) return;
+    const snap = tracker.snapshot();
+    // Hold off on the first emit until the run has actually been running
+    // a while — short test suites should stay silent.
+    if (!final && snap.elapsedMs < PROGRESS_QUIET_MS) return;
+    const line = formatProgressLine(snap);
+    // Overwrite previous line in place (single TTY row, no scroll).
+    const pad = " ".repeat(Math.max(0, lastProgressLineLen - line.length));
+    process.stderr.write(`\r${line}${pad}${final ? "\n" : ""}`);
+    lastProgressLineLen = line.length;
+  };
+  let progressInterval: ReturnType<typeof setInterval> | undefined;
+  if (tracker) {
+    progressInterval = setInterval(() => writeProgressLine(false), PROGRESS_INTERVAL_MS);
+    // Don't let the timer pin the event loop alive past run completion.
+    (progressInterval as { unref?: () => void }).unref?.();
+  }
+
   const runOpts = {
     rateLimiter,
     schemaValidator,
     networkRetries: options.retryOnNetwork,
+    requestBudget,
+    onStepDone: tracker
+      ? (step: import("../../core/runner/types.ts").StepResult) => tracker.recordStep(step)
+      : undefined,
   };
 
   // 4. Run suites — setup suites run first (sequentially), their captures flow into regular suites
@@ -499,12 +566,31 @@ export async function runCommand(options: RunOptions): Promise<number> {
     results.push(...all);
   }
 
+  // ARV-249: stop the progress tracker before any reporter output starts
+  // — overlapping carriage returns and report lines garble the terminal.
+  if (progressInterval !== undefined) {
+    clearInterval(progressInterval);
+    // Clear the in-place progress line so it doesn't linger above the report.
+    if (lastProgressLineLen > 0) {
+      process.stderr.write(`\r${" ".repeat(lastProgressLineLen)}\r`);
+      lastProgressLineLen = 0;
+    }
+  }
+
   // 5. Collect warnings
   const warnings: string[] = [];
   const rateLimited = results.flatMap(r => r.steps)
     .filter(s => s.response?.status === 429);
   if (rateLimited.length > 0) {
     warnings.push(`${rateLimited.length} request(s) hit rate limit (429). Consider: consolidating login steps, adding --bail, or using retry_until with delay.`);
+  }
+  // ARV-249: surface --max-requests cap when it actually fired.
+  if (requestBudget && requestBudget.used >= requestBudget.limit) {
+    const cappedSteps = results.flatMap(r => r.steps)
+      .filter(s => s.status === "skip" && s.error === "max-requests-cap-reached").length;
+    if (cappedSteps > 0) {
+      warnings.push(`--max-requests ${requestBudget.limit} cap reached; ${cappedSteps} subsequent step(s) skipped. Raise the cap or narrow the suite to cover them.`);
+    }
   }
 
   // 5b. Report — ARV-117: route through core/output's OutputSpec so
@@ -929,6 +1015,11 @@ export function registerRun(program: Command): void {
       "--no-fail-on-failures",
       "ARV-72: keep exit code 0 even when steps failed (advisory runs). Default: exit 1 on any failure. The stderr tail still names the count for visibility.",
     )
+    .option(
+      "--max-requests <N>",
+      "ARV-249: hard cap on outgoing HTTP requests across the whole run. Once reached, remaining steps short-circuit to `skip` with reason `max-requests-cap-reached`. Each retry_until attempt counts as one request. Useful for sampling huge probe-suite runs and for CI time-boxing.",
+      parsePositiveInt("--max-requests"),
+    )
     .action(async (pathArgs: string[] | undefined, opts, cmd: Command) => {
       let paths = pathArgs ?? [];
       // ARV-53: explicit paths or --all suppress the current-API fallback —
@@ -1017,6 +1108,7 @@ export function registerRun(program: Command): void {
         learn: opts.learn === true,
         learnApply: opts.learnApply === true,
         learnTarget: opts.learnTarget as "test" | "drifts" | undefined,
+        maxRequests: typeof opts.maxRequests === "number" ? opts.maxRequests : undefined,
       });
     });
 }
