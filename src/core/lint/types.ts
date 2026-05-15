@@ -18,10 +18,24 @@ export const ALL_RULES: RuleId[] = [
   "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9",
 ];
 
+/**
+ * ARV-255 (m-21 pivot): all lint findings cap at LOW/INFO. Static spec
+ * analysis is hygiene — no runtime evidence, no exploit pathway, no
+ * security or contract drift. The old "HIGH on missing additionalProperties"
+ * inflation made the audit report unreadable; now lint lives in the
+ * hygiene category and surfaces via `zond lint` separately.
+ *
+ * Tier assignment:
+ * - `low`: real spec violations (format mismatch in example, missing
+ *   path-param format, response without schema). Worth fixing, but not
+ *   security.
+ * - `info`: style and documentation gaps (additionalProperties, naming,
+ *   missing examples, optional descriptions). Could be intentional.
+ */
 export const DEFAULT_SEVERITY: Record<RuleId, Severity> = {
-  A1: "high",   A2: "high",   A3: "medium", A4: "medium", A5: "medium", A6: "low",
-  B1: "high",   B2: "low",    B3: "medium", B4: "low",    B5: "medium",
-  B6: "low",    B7: "high",   B8: "low",    B9: "low",
+  A1: "low",    A2: "low",    A3: "info",   A4: "info",   A5: "info",   A6: "info",
+  B1: "low",    B2: "info",   B3: "info",   B4: "info",   B5: "info",
+  B6: "info",   B7: "low",    B8: "info",   B9: "info",
 };
 
 export interface Issue {

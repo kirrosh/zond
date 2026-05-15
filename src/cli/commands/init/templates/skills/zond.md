@@ -260,18 +260,28 @@ If a CRUD chain you expected is missing, run
 endpoint with verdict (no GET-by-id, non-`{id}` item param,
 trailing-slash mismatch, …).
 
-## Phase 4 — Static spec audit
+## Phase 4 — Spec-lint (hygiene, separate workflow)
 
 ```bash
-zond check spec --api <name>                     # 0 network requests
-zond check spec --api <name> --json | jq '.data.stats'
+zond lint --api <name>                           # 0 network requests
+zond lint --api <name> --json | jq '.data.stats'
+# Equivalent: `zond check spec --api <name>`
 ```
 
-Fast lint of OpenAPI doc. Catches missing `format` on path params,
-timestamps without `date-time`, request bodies without
-`additionalProperties: false`, integer queries without `min/max`.
-HIGH severity classes (B1/B5/B8) amplify response-conformance findings
-downstream — fix spec issues before depth-checks.
+ARV-255 (m-21 pivot): **spec-lint is hygiene, not security or
+contract.** It runs separately from `zond audit` / `zond probe` /
+`zond checks run` — those produce the security/reliability/contract
+report, lint stays out of that pile.
+
+Severity capped at **LOW / INFO** by design:
+- LOW: real spec violations (format mismatch in example, missing
+  path-param format, response without schema).
+- INFO: style and documentation gaps (additionalProperties missing,
+  naming, missing examples).
+
+No HIGH/MEDIUM ever — static analysis has no runtime evidence, so the
+severity matrix forbids escalation. `--strict` opts back into a
+non-zero exit when any LOW lands.
 
 ## Phase 5 — Run (sanity → smoke → CRUD)
 

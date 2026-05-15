@@ -28,7 +28,8 @@ describe("lint-spec acceptance — bugs-sample (synthetic spec with deliberate b
     const doc = await readOpenApiSpec(samplePath);
     const a1 = ofRule(lintSpec(doc, defaultConfig()).issues, "A1");
     expect(a1.length).toBeGreaterThanOrEqual(1);
-    expect(a1[0]!.severity).toBe("high");
+    // ARV-255: lint capped at LOW/INFO. A1 demoted high → low.
+    expect(a1[0]!.severity).toBe("low");
     expect(a1[0]!.message).toContain("2023-10-06:23:47:56.678Z");
     expect(a1[0]!.affects).toContain("run:--validate-schema");
   });

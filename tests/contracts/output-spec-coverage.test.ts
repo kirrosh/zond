@@ -59,6 +59,7 @@ const LEGACY_ALLOW_LIST: Record<string, string> = {
   "catalog": "pre-m-19: --json envelope via printJson.",
   "check spec": "pre-m-19: --json envelope via printJson.",
   "check tests": "pre-m-19: --json envelope via printJson.",
+  "lint": "ARV-255 alias of `check spec` (m-21 spec-lint separation). Inherits its envelope; OutputSpec migration not separately scheduled.",
   "checks list": "pre-m-19: --json envelope via printJson (checks run is migrated).",
   "ci init": "pre-m-19: --json envelope via printJson.",
   "clean": "pre-m-19: --json envelope via printJson.",

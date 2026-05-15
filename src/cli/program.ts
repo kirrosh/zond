@@ -1,7 +1,7 @@
 import { Command } from "commander";
 
 import { registerRun } from "./commands/run.ts";
-import { registerCheck } from "./commands/check.ts";
+import { registerCheck, registerLint } from "./commands/check.ts";
 import { registerChecks } from "./commands/checks.ts";
 import { registerCoverage } from "./commands/coverage.ts";
 import { registerCi } from "./commands/ci-init.ts";
@@ -76,6 +76,7 @@ export function buildProgram(): Command {
 
   registerCheck(program);
   registerChecks(program);
+  registerLint(program);
 
   registerCi(program);
 
