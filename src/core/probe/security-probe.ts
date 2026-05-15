@@ -1080,6 +1080,31 @@ function skipped(ep: EndpointInfo, reason: string): SecurityVerdict {
 /** TASK-154 §N: clip noisy payloads (some SSRF/CRLF/redirect strings are URL-
  *  encoded blobs > 60 chars). Keep the leading prefix users recognise plus an
  *  ellipsis, so the digest line stays readable. */
+/** ARV-245 (R-04/F16): percent-encode unsafe characters per path segment
+ *  for paste-ready manual repro lines in the digest. Mirrors the encoding
+ *  rules used by `cleanup --orphans` so the printed command works against
+ *  the same APIs the probe targeted. */
+function encodeDeletePathForRepro(deletePath: string): string {
+  const SAFE = /[A-Za-z0-9._~!$&'()*+,;=:@-]/;
+  return deletePath
+    .split("/")
+    .map((segment) => {
+      if (segment.length === 0) return segment;
+      let out = "";
+      for (let i = 0; i < segment.length; i++) {
+        const ch = segment.charAt(i);
+        if (ch === "%" && /^[0-9A-Fa-f]{2}$/.test(segment.slice(i + 1, i + 3))) {
+          out += segment.slice(i, i + 3);
+          i += 2;
+          continue;
+        }
+        out += SAFE.test(ch) ? ch : encodeURIComponent(ch);
+      }
+      return out;
+    })
+    .join("/");
+}
+
 function truncatePayload(payload: string, max: number): string {
   if (payload.length <= max) return payload;
   return payload.slice(0, max - 1) + "…";
@@ -1123,6 +1148,16 @@ export function formatSecurityDigest(
     lines.push("");
     for (const v of cleanupFailures) {
       lines.push(`- **${v.method} ${v.path}** — ${v.cleanup!.error}`);
+      // ARV-245 (R-04/F16): paste-ready manual repro when we have a
+      // deletePath. Auto-encode the path so operators dealing with
+      // CRLF-poisoned ids (round-4 GitHub labels) don't have to remember
+      // to percent-encode `\r`/`\n`/spaces themselves.
+      const dp = v.cleanup?.deletePath;
+      if (dp) {
+        const encoded = encodeDeletePathForRepro(dp);
+        const note = /[\r\n\t ]/.test(dp) ? " (note: id contains whitespace/CRLF — percent-encoded)" : "";
+        lines.push(`  - Manual repro: \`zond request DELETE ${encoded} --api <name>\`${note}`);
+      }
     }
     lines.push("");
   }
@@ -1176,7 +1211,12 @@ export function emitSecurityRegressionSuites(
 ): RawSuite[] {
   const suites: RawSuite[] = [];
   for (const v of result.verdicts) {
-    if (v.severity !== "ok" && v.severity !== "low") continue;
+    // ARV-247 (R-04/F18): `high` findings are 2xx-with-echoed-payload — the
+    // strongest regression signal we have. Skipping them meant CI had nothing
+    // to gate on for confirmed stored injections. Treat them like `ok` here:
+    // the suite locks in the *expected* state (attack rejected) once the API
+    // owner ships a fix, and fails loud while it's still broken.
+    if (v.severity !== "ok" && v.severity !== "low" && v.severity !== "high") continue;
     const ep = endpoints.find(
       e => e.path === v.path && e.method.toUpperCase() === v.method,
     );
@@ -1184,7 +1224,10 @@ export function emitSecurityRegressionSuites(
     const suiteHeaders = getAuthHeaders(ep, schemes);
     const tests: RawStep[] = [];
     for (const f of v.findings) {
-      const expected = f.severity === "ok" ? ATTACK_EXPECTED_STATUS : [200, 201, 202, 204];
+      // `ok` = attack already rejected; `high` = attack accepted+echoed (the
+      // regression target is rejection, same expected set as `ok`). `low` =
+      // attack accepted but no echo — lock in the 2xx-without-echo shape.
+      const expected = (f.severity === "ok" || f.severity === "high") ? ATTACK_EXPECTED_STATUS : [200, 201, 202, 204];
       const body = ep.requestBodySchema ? generateFromSchema(ep.requestBodySchema) : {};
       if (typeof body === "object" && body !== null && !Array.isArray(body)) {
         (body as Record<string, unknown>)[f.field] = f.payload;
