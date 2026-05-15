@@ -16,7 +16,13 @@ import type { EndpointInfo } from "../generator/types.ts";
 import type { SchemaValidator } from "../runner/schema-validator.ts";
 import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
 
-export type Severity = "low" | "medium" | "high" | "critical";
+// Severity unified in src/core/severity (ARV-250). Re-exported here for
+// backwards-compatible imports across the checks subsystem; the canonical
+// definition is in core/severity. Adds 'info' tier (previously absent in
+// checks, now needed for hygiene-class findings per m-21 pivot).
+import type { Severity } from "../severity/index.ts";
+import { emptySeverityBuckets } from "../severity/index.ts";
+export type { Severity };
 
 export type Phase = "examples" | "coverage" | "all";
 
@@ -165,7 +171,7 @@ export function emptySummary(): CheckRunSummary {
     cases: 0,
     checks_run: 0,
     findings: 0,
-    by_severity: { low: 0, medium: 0, high: 0, critical: 0 },
+    by_severity: emptySeverityBuckets(),
     skipped_outcomes: {},
   };
 }

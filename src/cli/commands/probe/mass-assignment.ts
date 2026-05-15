@@ -374,6 +374,7 @@ function maStatusFromSeverity(s: EndpointVerdict["severity"]): ProbeEndpointStat
     case "high": return "high";
     case "low":
     case "medium":
+    case "info":
       return "low";
     case "ok": return "ok";
     case "skipped": return "skipped";

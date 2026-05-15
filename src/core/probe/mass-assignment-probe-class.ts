@@ -66,6 +66,7 @@ function statusFromSeverity(s: Severity): ProbeEndpointStatus {
     case "high": return "high";
     case "low": return "low";
     case "medium": return "low";
+    case "info": return "low";
     case "ok": return "ok";
     case "skipped": return "skipped";
     case "inconclusive-baseline":

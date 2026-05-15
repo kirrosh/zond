@@ -78,7 +78,7 @@ export const JsonEnvelopeSchema = z.object({
  *  pins the per-command payload so agents can validate findings without
  *  parsing them by-hand. ARV-11 adds `recommended_action` as a closed
  *  enum on each finding. */
-export const SeveritySchema = z.enum(["low", "medium", "high", "critical"]);
+export const SeveritySchema = z.enum(["critical", "high", "medium", "low", "info"]);
 
 export const CheckFindingSchema = z.object({
   check: z.string(),
@@ -107,10 +107,11 @@ export const CheckRunSummarySchema = z.object({
   checks_run: z.number().int().nonnegative(),
   findings: z.number().int().nonnegative(),
   by_severity: z.object({
-    low: z.number().int().nonnegative(),
-    medium: z.number().int().nonnegative(),
-    high: z.number().int().nonnegative(),
     critical: z.number().int().nonnegative(),
+    high: z.number().int().nonnegative(),
+    medium: z.number().int().nonnegative(),
+    low: z.number().int().nonnegative(),
+    info: z.number().int().nonnegative(),
   }),
   // ARV-26: per-(check, reason) skip tally — surfaces probe outcomes that
   // never produced a checkable response (e.g. probe got 4xx, schema only on
