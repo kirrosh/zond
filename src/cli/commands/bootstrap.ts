@@ -29,6 +29,7 @@ import {
 } from "../../core/generator/index.ts";
 import { buildCreateRequestBody } from "../../core/generator/create-body.ts";
 import { loadEnvFile, substituteDeep } from "../../core/parser/variables.ts";
+import { encodeFormBody } from "../../core/runner/form-encode.ts";
 import { liveAuthHeaders } from "../../core/probe/shared.ts";
 import { executeRequest } from "../../core/runner/http-client.ts";
 import {
@@ -165,6 +166,7 @@ function buildCurlRepro(
   url: string,
   headers: Record<string, string>,
   body: unknown,
+  serializedBody?: string,
 ): string {
   const parts: string[] = [`curl -X ${method} ${JSON.stringify(url)}`];
   for (const [k, v] of Object.entries(headers)) {
@@ -172,7 +174,11 @@ function buildCurlRepro(
     const redacted = lk === "authorization" || lk === "x-api-key" || lk === "api-key";
     parts.push(`-H ${JSON.stringify(`${k}: ${redacted ? "<REDACTED>" : v}`)}`);
   }
-  parts.push(`-d ${JSON.stringify(JSON.stringify(body))}`);
+  // ARV-196: when the on-the-wire body is form-urlencoded (Stripe-style),
+  // the curl repro must mirror that exactly — JSON.stringify(body) would
+  // confuse the user (and not actually reproduce the request).
+  const wireBody = serializedBody ?? JSON.stringify(body);
+  parts.push(`-d ${JSON.stringify(wireBody)}`);
   return parts.join(" ");
 }
 
@@ -259,11 +265,19 @@ async function trySeed(
   const concreteBody = substituteDeep(generated, vars);
 
   const url = `${baseUrl.replace(/\/+$/, "")}${pathResolved}`;
+  const contentType = ep.requestBodyContentType ?? "application/json";
   const headers: Record<string, string> = {
     accept: "application/json",
-    "content-type": ep.requestBodyContentType ?? "application/json",
+    "content-type": contentType,
     ...liveAuthHeaders(ep, schemes, vars),
   };
+  // ARV-196: Stripe-style endpoints declare application/x-www-form-urlencoded
+  // and reject JSON bodies with 400 / 415. Use the shared bracket-notation
+  // serializer (`card[number]=...`, `items[0][price]=...`) so seed POSTs
+  // actually create resources instead of being stuck on broken-baseline.
+  const wireBody = contentType.startsWith("application/x-www-form-urlencoded")
+    ? encodeFormBody(concreteBody as Record<string, unknown>)
+    : JSON.stringify(concreteBody);
 
   let resp;
   try {
@@ -271,7 +285,7 @@ async function trySeed(
     // hiccups during seed POSTs. Application-level errors (4xx/5xx) keep
     // their existing branches and surface to the user.
     resp = await executeRequest(
-      { method: parsed.method, url, headers, body: JSON.stringify(concreteBody) },
+      { method: parsed.method, url, headers, body: wireBody },
       { timeout: timeoutMs, retries: 0, network_retries: 1 },
     );
   } catch (err) {
@@ -289,7 +303,7 @@ async function trySeed(
     // can route on the manifest-grade status, and emit a curl-style repro
     // so the user can reproduce the request manually.
     const isSeed422 = resp.status === 422;
-    const repro = buildCurlRepro(parsed.method, url, headers, concreteBody);
+    const repro = buildCurlRepro(parsed.method, url, headers, concreteBody, wireBody);
     const respBody = resp.body_parsed ?? resp.body;
     const detailHint = extractFirst422Detail(respBody);
     return {
