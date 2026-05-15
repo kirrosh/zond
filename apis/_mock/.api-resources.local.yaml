@@ -1,0 +1,54 @@
+# ARV-193 — probe-specific overrides for the mock testbed.
+#
+# Survives `zond add-api _mock` / `zond refresh-api _mock` (those
+# regenerate `.api-resources.yaml` only). Each block under `patches:`
+# matches an upstream resource by name and overlays one or more
+# stateful-probe configs.
+patches:
+  - resource: widgets
+
+    # cross_call_references — auto-fires on any CRUD group with
+    # create+read; no override needed. Listed here so the manifest
+    # documents that the probe has been considered for this resource.
+
+    # idempotency_replay — auto-detect would also pick this up via the
+    # Idempotency-Key header on POST /widgets, but pinning it makes
+    # the contract explicit.
+    idempotency:
+      header: Idempotency-Key
+      scope: endpoint
+
+    # pagination_invariants — auto-detected via `starting_after` on
+    # the list endpoint. Limit pinned to 2 so the off-by-one is
+    # observable with a small seed.
+    pagination:
+      type: cursor
+      cursor_param: starting_after
+      cursor_field: id
+      has_more_field: has_more
+      limit_param: limit
+      default_limit: 2
+      items_field: data
+
+    # lifecycle_transitions — must be declared (no autodetect). Server
+    # accepts POST /widgets/{id}/publish but never advances `status`,
+    # which the probe surfaces as `wrong_expected_state`.
+    lifecycle:
+      field: status
+      states: [draft, published, archived]
+      transitions:
+        - { from: draft,     to: [published, archived] }
+        - { from: published, to: [archived] }
+      actions:
+        publish:
+          endpoint: POST /widgets/{id}/publish
+          expected_state: published
+
+    # seed_body keeps the create deterministic — without it the
+    # generator would invent a random `name`/`color` that the recipe
+    # and the regression test couldn't share verbatim.
+    seed_body:
+      content_type: application/json
+      body:
+        name: probe-widget
+        color: blue

@@ -1,0 +1,23 @@
+# ARV-193 — manifest for the mock testbed.
+#
+# This file follows the auto-generated shape `zond add-api` produces
+# from spec.json (running add-api against this dir will re-stamp it
+# byte-for-byte modulo the `generatedAt` / `specHash` envelope).
+# Probe-specific overrides (idempotency / pagination / lifecycle /
+# seed_body) live in the sibling `.api-resources.local.yaml` so they
+# survive `zond refresh-api`.
+resources:
+  - resource: widgets
+    basePath: /widgets
+    itemPath: /widgets/{id}
+    idParam: id
+    captureField: id
+    hasFullCrud: true
+    endpoints:
+      list:   GET /widgets
+      create: POST /widgets
+      read:   GET /widgets/{id}
+      delete: DELETE /widgets/{id}
+    fkDependencies: []
+orphanEndpoints:
+  - POST /widgets/{id}/publish
