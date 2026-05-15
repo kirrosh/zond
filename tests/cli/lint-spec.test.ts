@@ -73,7 +73,8 @@ describe("lint-spec — Group A (consistency)", () => {
     });
     const a1 = ofRule(lint(doc), "A1");
     expect(a1).toHaveLength(1);
-    expect(a1[0]!.severity).toBe("high");
+    // ARV-255: lint capped at LOW/INFO. A1 demoted high → low.
+    expect(a1[0]!.severity).toBe("low");
     expect(a1[0]!.jsonpointer).toContain("/properties/created_at");
     expect(a1[0]!.affects).toContain("run:--validate-schema");
   });
@@ -193,7 +194,8 @@ describe("lint-spec — Group B (strictness)", () => {
     });
     const b1 = ofRule(lint(doc), "B1");
     expect(b1).toHaveLength(1);
-    expect(b1[0]!.severity).toBe("high");
+    // ARV-255: lint capped at LOW/INFO. B1 demoted high → low.
+    expect(b1[0]!.severity).toBe("low");
     expect(b1[0]!.affects).toContain("probe-validation:invalid-path-uuid");
   });
 
@@ -209,7 +211,7 @@ describe("lint-spec — Group B (strictness)", () => {
     expect(ofRule(lint(doc), "B1")).toHaveLength(0);
   });
 
-  test("B3: integer pagination param without min/max → medium", () => {
+  test("B3: integer pagination param without min/max → info (ARV-255 demote)", () => {
     const doc = makeDoc({
       "/widgets": {
         get: {
@@ -220,7 +222,8 @@ describe("lint-spec — Group B (strictness)", () => {
     });
     const b3 = ofRule(lint(doc), "B3");
     expect(b3).toHaveLength(1);
-    expect(b3[0]!.severity).toBe("medium");
+    // ARV-255: lint capped at LOW/INFO. B3 demoted medium → info.
+    expect(b3[0]!.severity).toBe("info");
   });
 
   test("B4: cursor param without minLength: 1", () => {
@@ -358,7 +361,7 @@ describe("lint-spec — config & filters", () => {
     expect(ofRule(lintSpec(doc, cfg).issues, "B3")).toHaveLength(0);
   });
 
-  test("--rule R=high overrides severity", () => {
+  test("--rule R=high override silently caps to LOW (ARV-255: lint can never escape LOW/INFO)", () => {
     const doc = makeDoc({
       "/x": {
         post: {
@@ -370,7 +373,8 @@ describe("lint-spec — config & filters", () => {
     const cfg = loadConfig({ cliRule: "B8=high" });
     const b8 = ofRule(lintSpec(doc, cfg).issues, "B8");
     expect(b8).toHaveLength(1);
-    expect(b8[0]!.severity).toBe("high");
+    // ARV-255: user's HIGH override is downgraded to LOW per the cap.
+    expect(b8[0]!.severity).toBe("low");
   });
 
   test("ignore_paths skips matching endpoints", () => {
