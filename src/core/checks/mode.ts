@@ -46,6 +46,12 @@ export const MODE_BY_CHECK: Record<string, Mode> = {
   pagination_invariants: "positive",
   // ARV-172 (m-20): lifecycle verifies the declared state machine.
   lifecycle_transitions: "positive",
+  // ARV-256 (m-21): open-CORS check sends an attacker Origin and
+  // inspects response — categorically negative-mode probe.
+  open_cors_on_sensitive: "negative",
+  // ARV-256 (m-21): rate-limit headers check inspects 2xx responses
+  // for advertised rate-limit metadata — runs on the positive path.
+  rate_limit_headers_absent: "positive",
 };
 
 export function modeFor(checkId: string): Mode {
