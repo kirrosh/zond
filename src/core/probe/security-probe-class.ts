@@ -125,6 +125,11 @@ function toProbeResult(sec: SecurityProbeResult): ProbeResult {
           ? "inconclusive"
           : f.severity === "skipped"
           ? "ok"
+          : f.severity === "info"
+          // ARV-253: ProbeFindingSeverity has no "info" tier. Collapse
+          // info → low for the public probe-result envelope; the digest
+          // / structured per-endpoint shape preserves the distinction.
+          ? "low"
           : f.severity,
       evidence: evidenceFromFinding(f),
     })),

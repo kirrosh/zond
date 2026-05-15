@@ -356,7 +356,11 @@ function defineProbeSecurity(parent: Command, name: string): void {
       [] as string[],
     )
     .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests")
-    .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"));
+    .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
+    .option(
+      "--verbose",
+      "ARV-253: surface INFO-severity findings (sanitization-signal-only, e.g. CRLF accepted but no reflection observed). Default hides them — they're single-signal proof with no exploit pathway.",
+    );
   addProbeReportOutputOptions(sub);
   sub.action(async (classes: string | undefined, specPos: string | undefined, opts, cmd: Command) => {
       // ARV-36: missing-arg path should list the available classes (parity
@@ -401,6 +405,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
         report: rep.report,
         include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
         exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
+        verbose: opts.verbose === true,
       });
     });
 }

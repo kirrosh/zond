@@ -24,6 +24,7 @@ import { compileOperationFilter } from "../../../core/selectors/operation-filter
 interface Buckets {
   high: number;
   low: number;
+  info: number;
   inconclusive: number;
   inconclusiveBaseline: number;
   ok: number;
@@ -33,6 +34,7 @@ interface Buckets {
 const SEC_BUCKETS: ReadonlyArray<readonly [string, keyof Buckets & string]> = [
   ["high", "high"],
   ["low", "low"],
+  ["info", "info"],
   ["inconclusive", "inconclusive"],
   ["inconclusive-baseline", "inconclusiveBaseline"],
   ["ok", "ok"],
@@ -44,12 +46,13 @@ const SEC_SUMMARY: ReadonlyArray<readonly [string, keyof Buckets & string]> = [
   ["INCONCLUSIVE", "inconclusive"],
   ["INCONCLUSIVE-BASE", "inconclusiveBaseline"],
   ["LOW", "low"],
+  ["INFO", "info"],
   ["OK", "ok"],
   ["SKIPPED", "skipped"],
 ];
 
 const SEC_ZERO: Buckets = {
-  high: 0, low: 0, inconclusive: 0, inconclusiveBaseline: 0, ok: 0, skipped: 0,
+  high: 0, low: 0, info: 0, inconclusive: 0, inconclusiveBaseline: 0, ok: 0, skipped: 0,
 };
 
 export interface ProbeSecurityOptions {
@@ -85,6 +88,10 @@ export interface ProbeSecurityOptions {
   /** m-15 ARV-9 / m-17 ARV-J: unified operation selectors. */
   include?: string[];
   exclude?: string[];
+  /** ARV-253: surface INFO-severity findings (CRLF accepted, no
+   *  reflection — sanitization signal only). Hidden by default since
+   *  they carry single_signal proof with no exploit pathway. */
+  verbose?: boolean;
 }
 
 function parseClasses(input: string): SecurityClass[] | string {
@@ -212,10 +219,22 @@ export async function probeSecurityCommand(
       allowLeaks: options.allowLeaks === true,
     });
 
+    // ARV-253: filter verdicts for display under the evidence-chain
+    // principle. INFO-severity findings (CRLF accepted, no reflection
+    // — sanitization signal only) are hidden by default; surfaced under
+    // --verbose for hygiene auditors. JSON envelope keeps the unfiltered
+    // list so agents can opt in explicitly.
+    const displayResult = options.verbose === true
+      ? result
+      : { ...result, verdicts: result.verdicts.map((v) => ({
+          ...v,
+          findings: v.findings.filter((f) => f.severity !== "info"),
+        })) };
+
     // TASK-168 (m-10): register env vars + redact the digest before
     // either writing to disk or echoing to stdout.
     getSecretRegistry().registerAll(vars);
-    const md = applySanitizer(formatSecurityDigest(result, options.specPath));
+    const md = applySanitizer(formatSecurityDigest(displayResult, options.specPath));
 
     // m-17 / ARV-51: --output writes whichever format `--report` selected
     // (default markdown). `--json` envelope is always structured —

@@ -47,9 +47,16 @@ export type SecurityClass = "ssrf" | "crlf" | "open-redirect";
 
 export const SECURITY_CLASSES: SecurityClass[] = ["ssrf", "crlf", "open-redirect"];
 
+/**
+ * Security-probe severity ladder. Includes 'info' (ARV-253) for the
+ * accept-without-reflection case where the server stored a CRLF payload
+ * but no dangerous-context reflection was observed — single_signal proof
+ * per the m-21 severity matrix.
+ */
 export type SecuritySeverity =
   | "high"
   | "low"
+  | "info"
   | "inconclusive"
   | "inconclusive-baseline"
   | "ok"
@@ -582,11 +589,15 @@ async function probeOneEndpoint(
     }
   }
 
-  // Roll up to the worst severity.
+  // Roll up to the worst severity. ARV-253: "info" sits below "low"
+  // (single_signal proof — server accepted attack payload but reflected
+  // nothing in dangerous contexts). It can be the verdict-level severity
+  // when nothing stronger fired.
   const severities: SecuritySeverity[] = verdict.findings.map(f => f.severity);
   if (severities.includes("high")) verdict.severity = "high";
   else if (severities.includes("inconclusive")) verdict.severity = "inconclusive";
   else if (severities.includes("low")) verdict.severity = "low";
+  else if (severities.includes("info")) verdict.severity = "info";
   else verdict.severity = "ok";
 
   verdict.summary = summaryLine(verdict);
@@ -765,18 +776,51 @@ function stampAction(f: SecurityFinding): SecurityFinding {
   return f;
 }
 
+interface ClassifyResp {
+  status: number;
+  body?: unknown;
+  body_parsed?: unknown;
+  headers?: Record<string, string>;
+}
+
 function classify(
   hit: SecurityFieldHit,
   payload: string,
-  resp: { status: number; body?: unknown; body_parsed?: unknown },
+  resp: ClassifyResp,
 ): SecurityFinding {
   return stampAction(classifyInner(hit, payload, resp));
+}
+
+/**
+ * Check whether the CRLF payload reflects into any response header
+ * value. ARV-253: header reflection is the smoking gun for CRLF —
+ * response splitting / header injection becomes exploitable as soon as
+ * the server emits attacker-controlled bytes in headers.
+ *
+ * We check raw payload AND its URL-decoded form so encodings like
+ * `%0d%0a` survive the comparison.
+ */
+function reflectsInHeaders(payload: string, headers: Record<string, string> | undefined): string | null {
+  if (!headers || !payload) return null;
+  const decoded = safeDecodeURI(payload);
+  const variants = [payload, decoded].filter((v) => v && v.length >= 3);
+  for (const [name, value] of Object.entries(headers)) {
+    for (const v of variants) {
+      if (value.includes(v)) return name;
+    }
+  }
+  return null;
+}
+
+function isHtmlContentType(headers: Record<string, string> | undefined): boolean {
+  const ct = headers?.["content-type"] ?? headers?.["Content-Type"] ?? "";
+  return /text\/html|application\/xhtml/i.test(ct);
 }
 
 function classifyInner(
   hit: SecurityFieldHit,
   payload: string,
-  resp: { status: number; body?: unknown; body_parsed?: unknown },
+  resp: ClassifyResp,
 ): SecurityFinding {
   const status = resp.status;
   const echo = classifyEcho(resp.body_parsed ?? resp.body, payload, hit.class);
@@ -785,10 +829,10 @@ function classifyInner(
   if (status >= 500) {
     // ARV-250: 5xx on attack payload is a reliability signal, not a
     // proven security issue. Single-signal proof (one crashed response)
-    // caps severity at LOW per the m-21 severity matrix. ARV-251 will
-    // relocate this finding to the reliability category entirely; the
-    // existing `not_a_server_error` check already tracks 5xx on positive
-    // input, so the security probe here is a secondary signal at best.
+    // caps severity at LOW per the m-21 severity matrix. ARV-251
+    // relocates this signal to the reliability category; the existing
+    // `not_a_server_error` check already tracks 5xx on positive input,
+    // so the security probe here is a secondary signal at best.
     return {
       field: hit.field,
       class: hit.class,
@@ -800,6 +844,57 @@ function classifyInner(
     };
   }
   if (status >= 200 && status < 300) {
+    // ARV-253: CRLF severity now keyed on reflection context, not on
+    // raw echo. The pivot principle: HIGH requires evidence the stored
+    // payload reaches a dangerous rendering context (header value /
+    // unescaped HTML). Echo in a JSON body alone is single_signal —
+    // storage is real, exploit pathway is not. Caps at LOW.
+    if (hit.class === "crlf") {
+      const headerName = reflectsInHeaders(payload, resp.headers);
+      if (headerName) {
+        return {
+          field: hit.field,
+          class: hit.class,
+          payload,
+          status,
+          echoed: true,
+          severity: "high",
+          reason: `payload reflected in response header \`${headerName}\` — response-splitting / header-injection candidate (evidence_chain)`,
+        };
+      }
+      if (echoed && isHtmlContentType(resp.headers)) {
+        return {
+          field: hit.field,
+          class: hit.class,
+          payload,
+          status,
+          echoed,
+          severity: "high",
+          reason: `payload echoed (${echo.kind}) in text/html response — unescaped reflection candidate (evidence_chain)`,
+        };
+      }
+      if (echoed) {
+        return {
+          field: hit.field,
+          class: hit.class,
+          payload,
+          status,
+          echoed,
+          severity: "low",
+          reason: `payload echoed (${echo.kind}) in JSON body — storage observed, no dangerous-context reflection. Manual follow-up: check whether the stored value reaches a downstream renderer (HTML page, RSS, custom header).`,
+        };
+      }
+      return {
+        field: hit.field,
+        class: hit.class,
+        payload,
+        status,
+        echoed: false,
+        severity: "info",
+        reason: `${status} accepted ${hit.class} payload but no reflection observed — sanitization may be missing but no exploit pathway proven`,
+      };
+    }
+    // SSRF / open-redirect (ARV-254 owns the dedicated rebalance).
     if (echoed) {
       const label = echo.kind === "verbatim"
         ? "payload echoed verbatim"
@@ -946,11 +1041,11 @@ export function classifyEcho(body: unknown, payload: string, cls: SecurityClass)
 
 function summaryLine(v: SecurityVerdict): string {
   const counts: Record<SecuritySeverity, number> = {
-    high: 0, low: 0, inconclusive: 0, "inconclusive-baseline": 0, ok: 0, skipped: 0,
+    high: 0, low: 0, info: 0, inconclusive: 0, "inconclusive-baseline": 0, ok: 0, skipped: 0,
   };
   for (const f of v.findings) counts[f.severity]++;
   const fields = Array.from(new Set(v.detectedFields.map(d => d.field))).join(", ");
-  return `fields=[${fields}] · HIGH=${counts.high} LOW=${counts.low} INCONCLUSIVE=${counts.inconclusive} OK=${counts.ok}`;
+  return `fields=[${fields}] · HIGH=${counts.high} LOW=${counts.low} INFO=${counts.info} INCONCLUSIVE=${counts.inconclusive} OK=${counts.ok}`;
 }
 
 // ──────────────────────────────────────────────
@@ -1169,14 +1264,15 @@ export function formatSecurityDigest(
   }
 
   const buckets: Record<SecuritySeverity, SecurityVerdict[]> = {
-    high: [], low: [], inconclusive: [], "inconclusive-baseline": [], ok: [], skipped: [],
+    high: [], low: [], info: [], inconclusive: [], "inconclusive-baseline": [], ok: [], skipped: [],
   };
   for (const v of result.verdicts) buckets[v.severity].push(v);
 
-  const ordered: SecuritySeverity[] = ["high", "inconclusive", "inconclusive-baseline", "low", "ok", "skipped"];
+  const ordered: SecuritySeverity[] = ["high", "inconclusive", "inconclusive-baseline", "low", "info", "ok", "skipped"];
   const titles: Record<SecuritySeverity, string> = {
-    high: "🚨 HIGH — server crashed or echoed payload",
-    low: "🟡 LOW — 2xx accepted but no echo (verify manually)",
+    high: "🚨 HIGH — header-reflection / HTML reflection / 5xx",
+    low: "🟡 LOW — storage observed, no dangerous-context reflection (verify manually)",
+    info: "·  INFO — accepted, no reflection observed (sanitization signal only)",
     inconclusive: "❓ INCONCLUSIVE — could not classify",
     "inconclusive-baseline": "⚠️ INCONCLUSIVE-BASELINE — baseline 4xx, attacks not run",
     ok: "✅ OK — payloads rejected with 4xx",
