@@ -29,7 +29,7 @@ describe("buildRuleSummary (TASK-279)", () => {
   });
 
   test("formatGrouped renders one row per (rule, severity) and respects --top", () => {
-    const stats: LintStats = { total: 5, high: 4, medium: 0, low: 1, endpoints: 4 };
+    const stats: LintStats = { total: 5, critical: 0, high: 4, medium: 0, low: 1, info: 0, endpoints: 4 };
     const issues = [
       issue("B1", "high", "/a", "msg-b1"),
       issue("B1", "high", "/b", "msg-b1"),
@@ -54,7 +54,7 @@ describe("buildRuleSummary (TASK-279)", () => {
   });
 
   test("empty issues — clean banner", () => {
-    const stats: LintStats = { total: 0, high: 0, medium: 0, low: 0, endpoints: 0 };
+    const stats: LintStats = { total: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0, endpoints: 0 };
     expect(formatGrouped([], stats)).toContain("no issues");
   });
 });

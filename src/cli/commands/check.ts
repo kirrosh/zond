@@ -177,16 +177,18 @@ function recomputeStats(issues: Issue[]) {
   }
   return {
     total: issues.length,
+    critical: issues.filter(i => i.severity === "critical").length,
     high: issues.filter(i => i.severity === "high").length,
     medium: issues.filter(i => i.severity === "medium").length,
     low: issues.filter(i => i.severity === "low").length,
+    info: issues.filter(i => i.severity === "info").length,
     endpoints: endpoints.size,
   };
 }
 
 function parseSeverityList(raw: unknown): Severity[] | undefined {
   if (typeof raw !== "string" || raw.trim() === "") return undefined;
-  const allowed: Severity[] = ["high", "medium", "low"];
+  const allowed: Severity[] = ["critical", "high", "medium", "low", "info"];
   const items = raw.split(",").map(s => s.trim().toLowerCase()).filter(Boolean) as Severity[];
   return items.filter(s => allowed.includes(s));
 }

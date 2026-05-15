@@ -783,14 +783,20 @@ function classifyInner(
   const echoed = echo.matched;
 
   if (status >= 500) {
+    // ARV-250: 5xx on attack payload is a reliability signal, not a
+    // proven security issue. Single-signal proof (one crashed response)
+    // caps severity at LOW per the m-21 severity matrix. ARV-251 will
+    // relocate this finding to the reliability category entirely; the
+    // existing `not_a_server_error` check already tracks 5xx on positive
+    // input, so the security probe here is a secondary signal at best.
     return {
       field: hit.field,
       class: hit.class,
       payload,
       status,
       echoed,
-      severity: "high",
-      reason: `5xx unhandled — server crashed on ${hit.class} payload`,
+      severity: "low",
+      reason: `5xx unhandled — server crashed on ${hit.class} payload (reliability signal; see also not_a_server_error check)`,
     };
   }
   if (status >= 200 && status < 300) {

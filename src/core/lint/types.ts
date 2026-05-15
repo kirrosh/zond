@@ -1,6 +1,11 @@
 import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
 
-export type Severity = "high" | "medium" | "low";
+// Severity unified in src/core/severity (ARV-250). Lint historically used a
+// 3-tier ladder (high/medium/low) without 'critical' or 'info'. ARV-255
+// will downgrade most lint findings to info/low; this re-export aligns the
+// type but does not yet change DEFAULT_SEVERITY values per rule.
+import type { Severity } from "../severity/index.ts";
+export type { Severity };
 
 export type { RecommendedAction };
 
@@ -54,9 +59,11 @@ export interface LintConfig {
 
 export interface LintStats {
   total: number;
+  critical: number;
   high: number;
   medium: number;
   low: number;
+  info: number;
   endpoints: number;
 }
 

@@ -89,6 +89,16 @@ const SERVER_FIELD_SENTINEL = {
 // Types
 // ──────────────────────────────────────────────
 
+/**
+ * Mass-assignment local severity. Includes the unified severity ladder
+ * (critical/high/medium/low/info — see core/severity) plus two
+ * outcome-style states specific to this probe (inconclusive-baseline,
+ * inconclusive-5xx) and probe-lifecycle markers (ok, skipped).
+ *
+ * 'medium' is retained in the type for backwards compat but ARV-250
+ * stopped emitting it — single-signal proof on absent-fields now caps
+ * to 'low' per the m-21 severity matrix.
+ */
 export type Severity =
   | "high"
   | "medium"
@@ -101,6 +111,7 @@ export type Severity =
    *  finding for the same endpoint (TASK-276). */
   | "inconclusive-5xx"
   | "low"
+  | "info"
   | "ok"
   | "skipped";
 
@@ -830,13 +841,20 @@ function finaliseSeverity(v: EndpointVerdict, strict: boolean) {
     return;
   }
   if (absent.length > 0) {
-    // Some fields couldn't be confirmed via response or follow-up GET — we
-    // can't rule out silent persistence.
-    v.severity = "medium";
+    // ARV-250: absent-but-unverifiable is single_signal proof (we sent
+    // the field, server returned 2xx, but the follow-up GET can't tell
+    // us whether the field persisted). Per the m-21 severity matrix,
+    // single-signal claims cap at LOW. ARV-252 rewrites the probe to
+    // either escalate proof (try harder follow-up) or stay silent.
+    v.severity = "low";
     v.summary = `inconclusive — could not verify via follow-up GET (${absent.map(f => f.field).join(", ")})`;
     return;
   }
-  v.severity = "low";
+  // ARV-250: silent-drop = correct framework behaviour (Rails strong
+  // params / FastAPI extra=ignore). Demoted from LOW to INFO so it no
+  // longer noise-floors the report. ARV-252 will silence this case
+  // entirely once evidence-chain rewrite lands.
+  v.severity = "info";
   const status = v.response?.status ?? 0;
   v.summary = `accepted ${status} but extras silently ignored${strict ? " (despite additionalProperties:false — server should reject)" : ""}`;
 }
@@ -851,6 +869,7 @@ const SEVERITY_ORDER: Severity[] = [
   "inconclusive-5xx",
   "medium",
   "low",
+  "info",
   "ok",
   "skipped",
 ];
@@ -860,7 +879,8 @@ const SEVERITY_HEADER: Record<Severity, string> = {
   "inconclusive-baseline": "⚠️  INCONCLUSIVE — baseline body invalid (fix fixture / FK / scope and re-probe)",
   "inconclusive-5xx": "⚠️  INCONCLUSIVE — baseline 5xx (endpoint crashes — likely duplicate of validation-probe)",
   medium: "⚠️  MEDIUM — inconclusive (no follow-up GET available)",
-  low: "ℹ️  LOW — accepted-and-ignored (silent acceptance)",
+  low: "ℹ️  LOW — inconclusive (single-signal, follow-up GET unavailable)",
+  info: "·  INFO — accepted-and-ignored (correct framework behaviour, often ineligible to report)",
   ok: "✅ OK — rejected 4xx (best behaviour)",
   skipped: "⏭️  SKIPPED",
 };
@@ -949,7 +969,7 @@ export function formatDigestMarkdown(
 
 function groupBySeverity(verdicts: EndpointVerdict[]): Record<Severity, EndpointVerdict[]> {
   const out: Record<Severity, EndpointVerdict[]> = {
-    high: [], "inconclusive-baseline": [], "inconclusive-5xx": [], medium: [], low: [], ok: [], skipped: [],
+    high: [], "inconclusive-baseline": [], "inconclusive-5xx": [], medium: [], low: [], info: [], ok: [], skipped: [],
   };
   for (const v of verdicts) out[v.severity].push(v);
   return out;
@@ -979,7 +999,12 @@ export function emitRegressionSuites(
 ): RawSuite[] {
   const suites: RawSuite[] = [];
   for (const v of result.verdicts) {
-    if (v.severity !== "ok" && v.severity !== "low") continue;
+    // ARV-250: "info" carries the post-pivot semantics of the old "low"
+    // (extras silently ignored — useful regression even when severity is
+    // demoted). Both "low" (inconclusive) and "info" (ignored) qualify
+    // for the ignored-baseline suite.
+    const isIgnoredCase = v.severity === "low" || v.severity === "info";
+    if (v.severity !== "ok" && !isIgnoredCase) continue;
     const ep = endpoints.find(e => e.path === v.path && e.method.toUpperCase() === v.method);
     if (!ep) continue;
     const suiteHeaders = getAuthHeaders(ep, schemes);
@@ -1007,7 +1032,7 @@ export function emitRegressionSuites(
     const tests: RawStep[] = [probeStep];
     // For ignored case + we have a follow-up GET → emit a verifying GET
     // that asserts injected fields are absent / overridden.
-    if (v.severity === "low" && v.followUpGet) {
+    if (isIgnoredCase && v.followUpGet) {
       const idField = captureFieldFor(ep);
       probeStep.expect.body = {
         ...(probeStep.expect.body ?? {}),
