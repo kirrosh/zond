@@ -59,6 +59,7 @@ const LEGACY_ALLOW_LIST: Record<string, string> = {
   "catalog": "pre-m-19: --json envelope via printJson.",
   "check spec": "pre-m-19: --json envelope via printJson.",
   "check tests": "pre-m-19: --json envelope via printJson.",
+  "lint": "ARV-255 alias of `check spec` (m-21 spec-lint separation). Inherits its envelope; OutputSpec migration not separately scheduled.",
   "checks list": "pre-m-19: --json envelope via printJson (checks run is migrated).",
   "ci init": "pre-m-19: --json envelope via printJson.",
   "clean": "pre-m-19: --json envelope via printJson.",
@@ -88,6 +89,8 @@ const LEGACY_ALLOW_LIST: Record<string, string> = {
   "use": "pre-m-19: --json envelope via printJson.",
   "api annotate dump": "ARV-187: emits per-resource spec slices for the agent (no prompts inside zond); --json wraps in envelope. OutputSpec migration not scheduled.",
   "api annotate apply": "ARV-187: applies the agent's YAML responses to .api-resources.local.yaml; --json wraps the merge summary. OutputSpec migration not scheduled.",
+  "fixtures add": "ARV-195: --json envelope via printJson. OutputSpec migration not scheduled — single-shape command (writes + validations).",
+  "fixtures import": "ARV-195: --json envelope via printJson. OutputSpec migration not scheduled — single-shape command (writes + source).",
 };
 
 interface LeafEntry {

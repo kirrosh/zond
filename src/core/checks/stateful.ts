@@ -92,6 +92,12 @@ export function makeHarness(
     pathVars?: Record<string, string>;
     options?: CheckRuntimeOptions;
     resourceConfigs?: StatefulHarness["resourceConfigs"];
+    /** ARV-227: shared with the per-response phase so a single
+     *  `--max-requests` cap bounds the whole run. Throws (caught by
+     *  the runner's per-check try/catch and converted to skip) once
+     *  the budget is exhausted, so a stateful probe mid-chain doesn't
+     *  silently spin past the cap. */
+    requestBudget?: import("../runner/executor.ts").RequestBudget;
   } = {},
 ): StatefulHarness {
   return {
@@ -102,6 +108,14 @@ export function makeHarness(
     pathVars: opts.pathVars,
     options: opts.options,
     resourceConfigs: opts.resourceConfigs,
-    send: (req, sendOpts) => executeRequest(req, { timeout: sendOpts?.timeoutMs ?? opts.timeoutMs ?? 30000 }),
+    send: async (req, sendOpts) => {
+      if (opts.requestBudget) {
+        const { reserveRequest, MAX_REQUESTS_SKIP_REASON } = await import("../runner/executor.ts");
+        if (!reserveRequest(opts.requestBudget)) {
+          throw new Error(MAX_REQUESTS_SKIP_REASON);
+        }
+      }
+      return executeRequest(req, { timeout: sendOpts?.timeoutMs ?? opts.timeoutMs ?? 30000 });
+    },
   };
 }

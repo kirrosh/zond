@@ -118,6 +118,7 @@ interface ChecksRunOptions {
   verbose?: boolean;
   strict405?: boolean;
   strict401?: boolean;
+  maxRequests?: number;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -292,6 +293,16 @@ function renderMarkdownReport(
   lines.push(
     `**${s.findings} finding(s)** across ${s.cases} case(s) on ${s.operations} operation(s) — ${s.checks_run} check(s) active`,
   );
+  // ARV-251: per-category roll-up. Small teams use this to triage —
+  // "0 security, 12 reliability" is a clear starting point compared to
+  // a flat severity pile.
+  if (s.findings > 0) {
+    const c = s.by_category;
+    lines.push("");
+    lines.push(
+      `🛡 security: ${c.security} · ⚙ reliability: ${c.reliability} · 📜 contract: ${c.contract} · · hygiene: ${c.hygiene}`,
+    );
+  }
   const skipLine = formatSkippedOutcomes(s.skipped_outcomes);
   if (skipLine) {
     lines.push("");
@@ -306,8 +317,9 @@ function renderMarkdownReport(
     lines.push("");
     lines.push(`## Findings`);
     for (const f of data.findings) {
+      const cat = f.category ? ` _${f.category}_` : "";
       lines.push(
-        `- **[${f.severity}]** \`${f.check}\` ${f.operation.method} ${f.operation.path} — ${f.message}`,
+        `- **[${f.severity}]**${cat} \`${f.check}\` ${f.operation.method} ${f.operation.path} — ${f.message}`,
       );
     }
   }
@@ -317,6 +329,24 @@ function renderMarkdownReport(
 function splitList(values: string[] | undefined): string[] | undefined {
   if (!values || values.length === 0) return undefined;
   return values.flatMap((v) => v.split(",")).map((s) => s.trim()).filter(Boolean);
+}
+
+// ARV-211 (R13/F15): expand the `stateful` keyword in --check / --exclude-check
+// into the full set of stateful check ids registered in core/checks/stateful.ts.
+// This lets users (and the zond-checks SKILL.md DEPTH-PASS step) write
+//   zond checks run --check stateful
+// instead of hand-listing cross_call_references, idempotency_replay, … —
+// matching the prior `--phase stateful` UX promise without overloading the
+// case-generation `--phase` flag.
+function expandStatefulAlias(ids: string[] | undefined): string[] | undefined {
+  if (!ids) return ids;
+  const statefulIds = listStatefulChecks().map((c) => c.id);
+  const out: string[] = [];
+  for (const id of ids) {
+    if (id === "stateful") out.push(...statefulIds);
+    else out.push(id);
+  }
+  return out;
 }
 
 async function resolveBaseUrl(
@@ -405,7 +435,12 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
 
   const phaseRaw = typeof opts.phase === "string" ? opts.phase : "examples";
   if (phaseRaw !== "examples" && phaseRaw !== "coverage" && phaseRaw !== "all") {
-    const msg = `Unknown --phase: "${phaseRaw}". Available: examples, coverage, all`;
+    // ARV-211: redirect users typing --phase stateful (a common skill drift)
+    // to the canonical alias `--check stateful`.
+    const hint = phaseRaw === "stateful"
+      ? " — stateful checks are a separate family; run them with `--check stateful` (or list individual ids)"
+      : "";
+    const msg = `Unknown --phase: "${phaseRaw}". Available: examples, coverage, all${hint}`;
     if (json) printJson(jsonError("checks run", [msg]));
     else printError(msg);
     process.exit(2);
@@ -484,8 +519,8 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     const result = await runChecks({
       specPath: specRes.spec,
       baseUrl: baseRes.baseUrl,
-      include: splitList(opts.check),
-      exclude: splitList(opts.excludeCheck),
+      include: expandStatefulAlias(splitList(opts.check)),
+      exclude: expandStatefulAlias(splitList(opts.excludeCheck)),
       timeoutMs: typeof opts.timeout === "number" ? opts.timeout : undefined,
       authHeaders: Object.keys(authHeaders).length > 0 ? authHeaders : undefined,
       pathVars: Object.keys(pathVars).length > 0 ? pathVars : undefined,
@@ -503,6 +538,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       // path inside runPool — same observable behaviour.
       workers,
       rateLimiter,
+      maxRequests: typeof opts.maxRequests === "number" && opts.maxRequests > 0 ? opts.maxRequests : undefined,
     });
     const warnings: string[] = [];
     for (const id of result.selection.unknown) {
@@ -565,6 +601,15 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       printSuccess(
         `${s.findings} finding(s) across ${s.cases} case(s) on ${s.operations} operation(s) — ${s.checks_run} check(s) active`,
       );
+      // ARV-251: per-category roll-up. Surfaces "0 security, 12
+      // reliability" so a triager sees where the volume sits before
+      // scrolling the finding list.
+      if (s.findings > 0) {
+        const c = s.by_category;
+        console.log(
+          `  🛡 security: ${c.security}  ⚙ reliability: ${c.reliability}  📜 contract: ${c.contract}  · hygiene: ${c.hygiene}`,
+        );
+      }
       const skipLine = formatSkippedOutcomes(s.skipped_outcomes);
       if (skipLine) console.log(`  ${skipLine}`);
       // ARV-18: aggregate identical findings (same check + same response
@@ -693,6 +738,11 @@ function defineRun(parent: Command): void {
     .option(
       "--strict-401",
       "ARV-181: require exactly 401 for `ignored_auth` no-auth / bogus-auth probes (mirrors schemathesis V4). Off by default — zond's pragmatic policy accepts any 4xx as a valid auth-reject.",
+    )
+    .option(
+      "--max-requests <n>",
+      "ARV-227: hard cap on outbound HTTP requests for the whole run (per-response + stateful share the same budget). Once reached, remaining cases short-circuit with `max-requests-cap-reached` in summary.skipped_outcomes. Use to keep coverage runs against large specs (github, kubernetes) bounded.",
+      (v) => Number.parseInt(v, 10),
     )
     .action(checksRunAction);
 }

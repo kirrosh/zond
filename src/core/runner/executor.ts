@@ -171,7 +171,36 @@ export interface RunSuiteOptions {
    *  Set by `zond run --retry-on-network <N>`. HTTP statuses are not retried
    *  by this path. */
   networkRetries?: number;
+  /** ARV-249: shared HTTP-request budget across all parallel suites. When
+   *  `used >= limit`, remaining steps short-circuit to `skip` with reason
+   *  `max-requests-cap-reached`. Each `retry_until` attempt counts as one
+   *  request; dry-run and set-only steps do not consume the budget. */
+  requestBudget?: RequestBudget;
+  /** ARV-249: invoked after every step completes (pass/fail/skip/error) so
+   *  the CLI can render a periodic progress line without each suite
+   *  knowing how many siblings are running in parallel. */
+  onStepDone?: (step: StepResult) => void;
 }
+
+/** ARV-249: shared `--max-requests` budget. Mutated in-place by every
+ *  parallel `runSuite` call — single-threaded JS makes the
+ *  check-then-increment race-free. `limit === Infinity` means "uncapped"
+ *  (the default). */
+export interface RequestBudget {
+  limit: number;
+  used: number;
+}
+
+/** Try to reserve one HTTP slot from the shared budget. Returns true if
+ *  the caller may proceed, false if the cap has been reached. */
+export function reserveRequest(budget: RequestBudget | undefined): boolean {
+  if (!budget) return true;
+  if (budget.used >= budget.limit) return false;
+  budget.used += 1;
+  return true;
+}
+
+export const MAX_REQUESTS_SKIP_REASON = "max-requests-cap-reached";
 
 export async function runSuite(
   suite: TestSuite,
@@ -192,6 +221,7 @@ export async function runSuite(
       result.failure_class_reason = classification.failure_class_reason;
     }
     steps.push(result);
+    if (options.onStepDone) options.onStepDone(result);
   };
 
   const fetchOptions: Partial<FetchOptions> = {
@@ -450,6 +480,13 @@ export async function runSuite(
       const rt = step.retry_until;
       let lastStepResult: StepResult | undefined;
       for (let attempt = 0; attempt < rt.max_attempts; attempt++) {
+        if (!reserveRequest(options.requestBudget)) {
+          lastStepResult = makeSkippedResult(
+            interpolateName(step.name, variables),
+            MAX_REQUESTS_SKIP_REASON,
+          );
+          break;
+        }
         try {
           const response = await executeRequest(request, fetchOptions);
           const captures = extractCaptures(resolved.expect.body, response.body_parsed, resolved.expect.headers, response.headers);
@@ -513,6 +550,14 @@ export async function runSuite(
         }
       }
       if (lastStepResult) pushStep(lastStepResult, step);
+      continue;
+    }
+
+    if (!reserveRequest(options.requestBudget)) {
+      pushStep(makeSkippedResult(
+        interpolateName(step.name, variables),
+        MAX_REQUESTS_SKIP_REASON,
+      ), step);
       continue;
     }
 

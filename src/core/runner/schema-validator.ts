@@ -55,12 +55,65 @@ export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator 
     endpoints.sort((a, b) => paramCount(a.path) - paramCount(b.path));
   }
 
-  const compiled = new Map<unknown, ValidateFunction>();
-  function compile(schema: AnySchema): ValidateFunction {
-    const cached = compiled.get(schema);
-    if (cached) return cached;
+  // ARV-214: per-schema compile is the dominant cost of --validate-schema
+  // on big dereferenced specs (github 14 MiB → minutes per response).
+  // The cache below is keyed by schema *object reference*, so endpoints
+  // that share a $ref source after dereference hit it on the second
+  // access. The slow_compile budget warns the user the first time a
+  // schema crosses 1s — the same compile only happens once per schema
+  // anyway thanks to the cache, so the warning is per-source, not
+  // per-call.
+  const SLOW_COMPILE_MS = Number(process.env.ZOND_VALIDATE_SCHEMA_SLOW_COMPILE_MS ?? "1000");
+  // Hard byte cap stops the run from hanging minutes on a pathological
+  // single response schema (post-deref github Repository / kubernetes
+  // pod-spec). Returning a no-op validator + a single warning is much
+  // friendlier than blocking on `ajv.compile` for an unbounded time.
+  // Default chosen from the bench in /tmp/bench-convert.ts: a 572 KiB
+  // schema compiles in ~800 ms; 1 MiB ≈ 1.4 s; beyond that we'd rather
+  // skip and tell the user.
+  const MAX_SCHEMA_BYTES = Number(process.env.ZOND_VALIDATE_SCHEMA_MAX_BYTES ?? String(1_048_576));
+  const compiled = new Map<unknown, ValidateFunction | null>();
+  const warnedSlow = new WeakSet<object>();
+  const warnedTooLarge = new WeakSet<object>();
+
+  function tooLargeSentinel(): null {
+    return null;
+  }
+
+  function compile(schema: AnySchema): ValidateFunction | null {
+    if (compiled.has(schema)) return compiled.get(schema) ?? null;
+    // Cheap pre-check: a schema whose JSON serialisation exceeds
+    // MAX_SCHEMA_BYTES is almost certainly going to take seconds-to-
+    // minutes to compile and produce noisy mid-body errors that aren't
+    // worth the wait. Skip it with a warning. JSON.stringify itself is
+    // O(n) but at MiB-scale completes in tens of ms — orders of
+    // magnitude cheaper than ajv.compile on the same payload.
+    if (MAX_SCHEMA_BYTES > 0) {
+      try {
+        const sz = JSON.stringify(schema)?.length ?? 0;
+        if (sz > MAX_SCHEMA_BYTES) {
+          if (typeof schema === "object" && schema && !warnedTooLarge.has(schema as object)) {
+            warnedTooLarge.add(schema as object);
+            const kib = Math.round(sz / 1024);
+            process.stderr.write(
+              `[zond] schema too large for --validate-schema (${kib} KiB > ${Math.round(MAX_SCHEMA_BYTES / 1024)} KiB) — skipping; raise via ZOND_VALIDATE_SCHEMA_MAX_BYTES.\n`,
+            );
+          }
+          compiled.set(schema, tooLargeSentinel());
+          return null;
+        }
+      } catch { /* circular or non-serialisable — let ajv try */ }
+    }
     const prepared = isV31 ? schema : convertOpenApi30(schema);
+    const t0 = performance.now();
     const fn = ajv.compile(prepared as AnySchema);
+    const elapsed = performance.now() - t0;
+    if (elapsed >= SLOW_COMPILE_MS && typeof schema === "object" && schema && !warnedSlow.has(schema as object)) {
+      warnedSlow.add(schema as object);
+      process.stderr.write(
+        `[zond] schema validator compile took ${elapsed.toFixed(0)} ms (warn ≥ ${SLOW_COMPILE_MS} ms) — see ZOND_VALIDATE_SCHEMA_MAX_BYTES if --validate-schema runs feel slow.\n`,
+      );
+    }
     compiled.set(schema, fn);
     return fn;
   }
@@ -104,7 +157,7 @@ export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator 
     validate(method, path, status, body) {
       const schema = findResponseSchema(method, path, status);
       if (!schema) return [];
-      let validator: ValidateFunction;
+      let validator: ValidateFunction | null;
       try {
         validator = compile(schema);
       } catch (err) {
@@ -114,6 +167,19 @@ export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator 
           passed: false,
           actual: undefined,
           expected: err instanceof Error ? err.message : String(err),
+        }];
+      }
+      // ARV-214: schema crossed ZOND_VALIDATE_SCHEMA_MAX_BYTES — surface
+      // the skip as a passing assertion so the run stays green and the
+      // user knows validation was bypassed for this body.
+      if (validator === null) {
+        return [{
+          field: "body",
+          rule: "schema.skipped_too_large",
+          passed: true,
+          actual: undefined,
+          expected: "schema exceeded ZOND_VALIDATE_SCHEMA_MAX_BYTES — see stderr warning",
+          kind: "schema",
         }];
       }
       const ok = validator(body);

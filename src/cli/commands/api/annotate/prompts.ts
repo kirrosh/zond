@@ -181,7 +181,3 @@ function truncate(s: string | undefined, n: number): string | undefined {
   return s.length > n ? s.slice(0, n) + "…" : s;
 }
 
-/** Render a slice as compact JSON suitable for prompt embedding. */
-export function sliceToPromptJson(slice: ResourceSlice): string {
-  return JSON.stringify(slice, null, 2);
-}

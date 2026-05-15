@@ -70,7 +70,7 @@ After `zond add api <name> --spec <path|url>`, `apis/<name>/` contains:
 spec.json                    ← dereferenced OpenAPI (machine source)
 .api-catalog.yaml            ← endpoint index (method, path, params)
 .api-resources.yaml          ← CRUD chains + FK deps (auto)
-.api-resources.local.yaml    ← overlay: extensions + annotate output (hand-edit OK)
+.api-resources.local.yaml    ← overlay: extensions + annotate output (hand-edit OK; appears after first `zond api annotate apply` — or create by hand to use as overlay)
 .api-fixtures.yaml           ← MANIFEST: required vars + descriptions (read-only)
 .env.yaml                    ← VALUES: variable values (user / prepare-fixtures writes)
 .secrets.yaml                ← raw secret values (auto-gitignored)
@@ -90,6 +90,7 @@ probes/                      ← probe-emitted suites
 | `zond add api` / `refresh-api` | rebuilds | seeds skeleton |
 | `zond generate` | extends (adds new `{{vars}}` discovered) | does **not** modify |
 | `zond prepare-fixtures` | reads | writes values |
+| `zond fixtures add` / `import` | reads | writes values (manual) |
 | user editing | never | always |
 
 - `{{var}}` in a generated test but NOT in `.api-fixtures.yaml` is a
@@ -99,6 +100,23 @@ probes/                      ← probe-emitted suites
   `prepare-fixtures` warns `not in manifest, ignored`.
 - "Generate should sync `.env.yaml`" is a rejected design (decision-7,
   m-17).
+
+### Manual fixture-bootstrap (when `prepare-fixtures --seed` can't help)
+
+`prepare-fixtures --seed` requires a discoverable list endpoint or a
+postable create. Path-id ids that live only in a vendor dashboard
+(Stripe `cus_*`, GitHub PR numbers, Sentry issue ids) need a manual
+hand-off:
+
+| Input you have | Command |
+|---|---|
+| Concrete id values | `zond fixtures add <var>=<id> [--validate] --apply` |
+| Curl from devtools / dashboard | `pbpaste \| zond fixtures import --from-curl --apply` (URL is matched against spec paths to extract `{var}` bindings) |
+
+`--validate` GETs the spec's read-by-id endpoint and classifies the
+fixture as `live` / `stale` / `unknown` so dead ids don't silently
+break later runs (ARV-32). Both commands write to `apis/<name>/.env.yaml`
+with a `.env.yaml.bak` backup, mirroring `prepare-fixtures --apply`.
 
 ### When to read which file
 
@@ -260,18 +278,28 @@ If a CRUD chain you expected is missing, run
 endpoint with verdict (no GET-by-id, non-`{id}` item param,
 trailing-slash mismatch, …).
 
-## Phase 4 — Static spec audit
+## Phase 4 — Spec-lint (hygiene, separate workflow)
 
 ```bash
-zond check spec --api <name>                     # 0 network requests
-zond check spec --api <name> --json | jq '.data.summary.by_severity'
+zond lint --api <name>                           # 0 network requests
+zond lint --api <name> --json | jq '.data.stats'
+# Equivalent: `zond check spec --api <name>`
 ```
 
-Fast lint of OpenAPI doc. Catches missing `format` on path params,
-timestamps without `date-time`, request bodies without
-`additionalProperties: false`, integer queries without `min/max`.
-HIGH severity classes (B1/B5/B8) amplify response-conformance findings
-downstream — fix spec issues before depth-checks.
+ARV-255 (m-21 pivot): **spec-lint is hygiene, not security or
+contract.** It runs separately from `zond audit` / `zond probe` /
+`zond checks run` — those produce the security/reliability/contract
+report, lint stays out of that pile.
+
+Severity capped at **LOW / INFO** by design:
+- LOW: real spec violations (format mismatch in example, missing
+  path-param format, response without schema).
+- INFO: style and documentation gaps (additionalProperties missing,
+  naming, missing examples).
+
+No HIGH/MEDIUM ever — static analysis has no runtime evidence, so the
+severity matrix forbids escalation. `--strict` opts back into a
+non-zero exit when any LOW lands.
 
 ## Phase 5 — Run (sanity → smoke → CRUD)
 
@@ -293,6 +321,21 @@ treat them like 5xx.
 Rate limit: `zond run` defaults to an adaptive limiter (no-op until
 `RateLimit-*` headers appear). Pass `--rate-limit <N>` for a hard cap;
 `--sequential` for old binaries.
+
+**Long runs**: `zond run` shows a periodic progress line on stderr when
+stdout/stderr is a TTY (`zond: [42s] 234/10927 steps (2%), 230 req, ~30
+req/s, ETA ~5m`) — overwrites itself in place. Suppressed by `--quiet`
+and on non-interactive output. For huge probe-suites (e.g. GitHub spec
+→ ~10k probes under `--rate-limit 30` = 6+ min), this signals "alive,
+not hung". `zond probe static` itself prints a scale-warning block with
+ETA-at-rate-limit estimates and a `--max-per-endpoint K` sampling hint
+when `totalProbes ≥ 2000`.
+
+**Hard cap on requests**: pass `--max-requests N` to cap outgoing HTTP
+calls across the whole run. Remaining steps short-circuit to `skip` with
+`error: "max-requests-cap-reached"`. Each `retry_until` attempt counts as
+one request. Useful for sampling huge probe runs (`--max-requests 500`)
+and for CI time-boxing.
 
 `--all`: fold every `apis/<name>/tests/` dir into one `runs.id` per
 invocation (CI shape). CI context (commit_sha, branch, trigger=ci)
@@ -320,7 +363,7 @@ After Phase 2 annotation is applied, run the cross-call invariants.
 See `zond-checks` for per-check semantics.
 
 ```bash
-zond checks run --api <name> --phase stateful --report ndjson
+zond checks run --api <name> --check stateful --report ndjson
 ```
 
 5 m-20 stateful checks:
@@ -330,7 +373,7 @@ zond checks run --api <name> --phase stateful --report ndjson
 - `lifecycle_transitions` — declared state-machine validity
 - `webhooks` (recipe-based, see `docs/recipes/webhook-receiver.md`)
 
-**Iron rule**: don't run `--phase stateful` without prior `api annotate`
+**Iron rule**: don't run `--check stateful` without prior `api annotate`
 review. Defaults catch the obvious; quirks need declared config.
 
 ## Phase 7 — Proactive bug hunting (probes)
@@ -421,7 +464,7 @@ not API bug), `unhit`.
 | Signal | Command |
 |---|---|
 | Contract drift | `checks run --phase coverage` HIGH count == 0 |
-| Stateful invariants | `checks run --phase stateful` HIGH count == 0 |
+| Stateful invariants | `checks run --check stateful` HIGH count == 0 |
 | Auth / Authz / injection | `probe security` HIGH count == 0 |
 | Mass-assignment | `probe mass-assignment` HIGH count == 0 |
 | Response conformance | `run --validate-schema` `schema_violation` == 0 |
@@ -431,8 +474,8 @@ not API bug), `unhit`.
 
 ```bash
 zond report export <run-id>                                # default: triage/<api>/run-<id>/
-zond report bundle 135..142 -o triage/sweep/               # case-study + html + diagnose + index.md
-zond report bundle <run-id> --include case-study
+zond report bundle 135..142 -o triage/sweep/               # all artefacts (default): case-study + html + diagnose + index.md
+zond report bundle <run-id> --include case-study,diagnose  # subset only (drop html)
 zond report bundle --session <id> -o triage/session/       # group by session
 ```
 

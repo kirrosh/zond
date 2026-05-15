@@ -165,6 +165,10 @@ export interface DiscoverOptions {
    *  the `--refresh` shortcut) stale fixtures are unset and re-resolved
    *  through the normal discover flow. */
   verify?: boolean;
+  /** ARV-205/F19 (R10/R13/R14): command name surfaced in the JSON envelope.
+   *  prepare-fixtures delegates here for the single-pass path; the envelope
+   *  should reflect the user-facing command, not the internal "discover". */
+  commandName?: string;
 }
 
 export interface FkTarget {
@@ -782,6 +786,7 @@ export function upsertEnvLine(yamlText: string, key: string, value: string): str
 }
 
 export async function discoverCommand(options: DiscoverOptions): Promise<number> {
+  const commandName = options.commandName ?? "discover";
   try {
     const doc = await readOpenApiSpec(options.specPath);
     const endpoints = extractEndpoints(doc);
@@ -790,7 +795,7 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     const resourceMap = await readResourceMap(options.apiDir);
     if (!resourceMap || resourceMap.resources.length === 0) {
       const msg = `No .api-resources.yaml in ${options.apiDir}. Run 'zond refresh-api <name>' to (re)build it.`;
-      if (options.json) printJson(jsonError("discover", [msg]));
+      if (options.json) printJson(jsonError(commandName, [msg]));
       else printError(msg);
       return 2;
     }
@@ -812,7 +817,7 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     const baseUrl = env["base_url"];
     if (!baseUrl) {
       const msg = `base_url is required in ${envPath} (live API calls need it).`;
-      if (options.json) printJson(jsonError("discover", [msg]));
+      if (options.json) printJson(jsonError(commandName, [msg]));
       else printError(msg);
       return 2;
     }
@@ -828,7 +833,7 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     const targets = collectTargets(resourceMap);
     if (targets.length === 0 && !manifest) {
       if (options.json) {
-        printJson(jsonOk("discover", { items: [], message: "No path-FK dependencies with known owner resources." }));
+        printJson(jsonOk(commandName, { items: [], message: "No path-FK dependencies with known owner resources." }));
       } else {
         console.log("No path-FK dependencies with known owner resources — nothing to discover.");
       }
@@ -1096,7 +1101,7 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
       // SecretRegistry registered every non-base_url env var above, so
       // redactObject swaps any registered value for `<redacted:<name>>`.
       const safeItems = getSecretRegistry().redactObject(items);
-      printJson(jsonOk("discover", {
+      printJson(jsonOk(commandName, {
         envPath,
         applied,
         backup: backupPath,
@@ -1216,7 +1221,7 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     return 0;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (options.json) printJson(jsonError("discover", [message]));
+    if (options.json) printJson(jsonError(commandName, [message]));
     else printError(message);
     return 2;
   }

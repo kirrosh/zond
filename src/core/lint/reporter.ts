@@ -1,4 +1,5 @@
 import type { Issue, LintStats, Severity } from "./types.ts";
+import { severityGlyph, rankSeverity } from "../severity/index.ts";
 
 const RED = "\x1b[31m";
 const YELLOW = "\x1b[33m";
@@ -8,18 +9,24 @@ const RESET = "\x1b[0m";
 
 const useColor = (): boolean => process.stdout.isTTY === true;
 
-const ICON: Record<Severity, string> = { high: "🚨", medium: "⚠️ ", low: "ℹ️ " };
-const COLOR: Record<Severity, string> = { high: RED, medium: YELLOW, low: DIM };
+const ICON: Record<Severity, string> = {
+  critical: "🚨", high: "🔴", medium: "⚠️ ", low: "ℹ️ ", info: "· ",
+};
+const COLOR: Record<Severity, string> = {
+  critical: RED, high: RED, medium: YELLOW, low: DIM, info: DIM,
+};
 
 export function formatHuman(issues: Issue[], stats: LintStats): string {
   if (issues.length === 0) {
     return useColor() ? `${BOLD}✓ no issues${RESET}\n` : "✓ no issues\n";
   }
-  const groups: Record<Severity, Issue[]> = { high: [], medium: [], low: [] };
+  const groups: Record<Severity, Issue[]> = {
+    critical: [], high: [], medium: [], low: [], info: [],
+  };
   for (const i of issues) groups[i.severity].push(i);
 
   const lines: string[] = [];
-  for (const sev of ["high", "medium", "low"] as Severity[]) {
+  for (const sev of ["critical", "high", "medium", "low", "info"] as Severity[]) {
     const g = groups[sev];
     if (g.length === 0) continue;
     const header = `${ICON[sev]} ${sev.toUpperCase()} (${g.length})`;
@@ -81,9 +88,8 @@ export function buildRuleSummary(issues: Issue[]): RuleSummaryEntry[] {
     if (i.path) b.endpointSet.add(`${i.method ?? "*"} ${i.path}`);
     else if (i.jsonpointer) b.endpointSet.add(i.jsonpointer);
   }
-  const rank: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
   return [...map.values()]
-    .sort((a, b) => rank[a.severity] - rank[b.severity] || b.count - a.count)
+    .sort((a, b) => rankSeverity(a.severity) - rankSeverity(b.severity) || b.count - a.count)
     .map(b => ({
       rule: b.rule,
       severity: b.severity,

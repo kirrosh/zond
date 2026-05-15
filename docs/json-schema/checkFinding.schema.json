@@ -8,10 +8,20 @@
     "severity": {
       "type": "string",
       "enum": [
-        "low",
-        "medium",
+        "critical",
         "high",
-        "critical"
+        "medium",
+        "low",
+        "info"
+      ]
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "security",
+        "reliability",
+        "contract",
+        "hygiene"
       ]
     },
     "operation": {

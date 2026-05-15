@@ -231,3 +231,32 @@ describe("extractEndpoints — non-numeric response keys (TASK-96)", () => {
     expect(ep.responses.every((r) => Number.isFinite(r.statusCode))).toBe(true);
   });
 });
+
+describe("extractEndpoints — x-circular param stubs (ARV-200/F1)", () => {
+  test("filters out parameter stubs without .name/.in (decycleSchema sentinels)", () => {
+    const doc = {
+      openapi: "3.0.0",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/widgets": {
+          parameters: [{ "x-circular": true } as any],
+          get: {
+            operationId: "listWidgets",
+            parameters: [
+              { name: "limit", in: "query", schema: { type: "integer" } },
+              { "x-circular": true } as any,
+              null as any,
+            ],
+            responses: { 200: { description: "ok" } },
+          },
+        },
+      },
+    } as Awaited<ReturnType<typeof readOpenApiSpec>>;
+    const endpoints = extractEndpoints(doc);
+    expect(endpoints.length).toBe(1);
+    const ep = endpoints[0]!;
+    expect(ep.parameters.length).toBe(1);
+    expect(ep.parameters[0]!.name).toBe("limit");
+    expect(ep.parameters.every((p) => typeof p.name === "string" && typeof p.in === "string")).toBe(true);
+  });
+});

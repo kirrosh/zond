@@ -151,9 +151,11 @@ export async function checkSpecCommand(opts: CheckSpecOptions): Promise<number> 
     process.stdout.write(formatGrouped(filtered, filteredStats, { top: opts.top }));
   }
 
-  if (result.stats.high > 0) return 1;
-  if (result.stats.medium > 0) return 2;
-  if (opts.strict && result.stats.low > 0) return 2;
+  // ARV-255: lint is hygiene — never gates CI by default. `--strict`
+  // opts back into a non-zero exit when any issue lands. The old "high
+  // → 1, medium → 2" gating is gone because no rule emits HIGH/MEDIUM
+  // anymore (severity matrix forbids it for static analysis).
+  if (opts.strict && result.stats.total > 0) return 2;
   return 0;
 }
 
@@ -177,16 +179,18 @@ function recomputeStats(issues: Issue[]) {
   }
   return {
     total: issues.length,
+    critical: issues.filter(i => i.severity === "critical").length,
     high: issues.filter(i => i.severity === "high").length,
     medium: issues.filter(i => i.severity === "medium").length,
     low: issues.filter(i => i.severity === "low").length,
+    info: issues.filter(i => i.severity === "info").length,
     endpoints: endpoints.size,
   };
 }
 
 function parseSeverityList(raw: unknown): Severity[] | undefined {
   if (typeof raw !== "string" || raw.trim() === "") return undefined;
-  const allowed: Severity[] = ["high", "medium", "low"];
+  const allowed: Severity[] = ["critical", "high", "medium", "low", "info"];
   const items = raw.split(",").map(s => s.trim().toLowerCase()).filter(Boolean) as Severity[];
   return items.filter(s => allowed.includes(s));
 }
@@ -274,18 +278,37 @@ export function registerCheck(program: Command): void {
       });
     });
 
-  check
-    .command("spec [spec]")
-    .description("Static-analyse an OpenAPI spec for internal-consistency and strictness gaps (catches bugs before any HTTP)")
+  defineCheckSpec(check, "spec");
+}
+
+/**
+ * ARV-255 (m-21 pivot): register `zond lint` as a top-level command,
+ * aliasing the existing `check spec` workflow. Spec-lint is hygiene —
+ * not part of the security/contract audit — so it gets a dedicated
+ * verb that makes the workflow explicit and keeps the audit report
+ * uncluttered. Same flag wiring, same code path, just a clearer name.
+ */
+export function registerLint(program: Command): void {
+  defineCheckSpec(program, "lint");
+}
+
+function defineCheckSpec(parent: Command, name: string): void {
+  parent
+    .command(`${name} [spec]`)
+    .description(
+      name === "lint"
+        ? "ARV-255: spec-lint (hygiene category). Static-analyse an OpenAPI spec for style and structural gaps. Severity capped at LOW/INFO — never gates CI unless --strict. Equivalent to `zond check spec`."
+        : "Static-analyse an OpenAPI spec for internal-consistency and strictness gaps (catches bugs before any HTTP). ARV-255: severity capped at LOW/INFO — no HIGH/MEDIUM from static analysis.",
+    )
     .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
     .option("--strict", "Exit non-zero even on LOW-severity issues")
     .option("--ndjson", "Stream issues as one JSON per line (NDJSON), instead of the wrapped envelope")
     .option(
       "--rule <list>",
       "Unified rule selector (TASK-291). Comma-separated items: 'B1' (whitelist), " +
-      "'!B2' (disable), 'B3=high|medium|low' (severity override; also implicitly whitelists). " +
+      "'!B2' (disable), 'B3=low|info' (severity override; also implicitly whitelists). " +
       "All-plain or all-override → whitelist mode (only these rules render). All-'!' → blacklist mode " +
-      "(exclude these). Mixed → whitelist + overrides + disables together.",
+      "(exclude these). Mixed → whitelist + overrides + disables together. ARV-255: high/medium overrides ignored (cap is LOW).",
     )
     .option(
       "--filter-rule <list>",
@@ -295,7 +318,7 @@ export function registerCheck(program: Command): void {
     .option("--include-path <glob...>", "Only lint endpoints whose path matches glob (repeatable)")
     .option("--max-issues <N>", "Stop after N issues", parsePositiveInt("--max-issues"))
     .option("--verbose, --flat", "Render the legacy flat one-line-per-issue list (default is now a rule × severity rollup, TASK-279)")
-    .option("--severity <list>", "Filter rendered/JSON output to severities (comma-separated: high,medium,low)")
+    .option("--severity <list>", "Filter rendered/JSON output to severities (comma-separated: low,info)")
     .option("--top <N>", "In the grouped summary, show only the top-N rules by count", parsePositiveInt("--top"))
     .option("--no-db", "Don't write to lint_runs SQLite history")
     .action(async (specPos: string | undefined, opts, cmd: Command) => {

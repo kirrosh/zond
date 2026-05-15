@@ -259,6 +259,16 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
       [] as string[],
     )
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
+    .option(
+      "--verbose",
+      "ARV-252: surface INFO-severity inconclusive verdicts (absent-but-unverifiable). Silently-ignored verdicts (correct framework behaviour) stay hidden even with this flag — they're never finding-worthy.",
+    )
+    .option(
+      "--suspect-field <name=value>",
+      "ARV-252: extend the curated suspect-fields list (is_admin, role, owner_id, …) with a custom field. Repeatable. Full per-api spec-extension support tracked in ARV-189.",
+      (v: string, prev: string[] = []) => prev.concat(v),
+      [] as string[],
+    )
     .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.");
   addProbeReportOutputOptions(sub);
   sub.action(async (specPos: string | undefined, opts, cmd: Command) => {
@@ -308,6 +318,8 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
         exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
         report: rep.report,
+        verbose: opts.verbose === true,
+        suspectField: Array.isArray(opts.suspectField) && opts.suspectField.length > 0 ? opts.suspectField : undefined,
       });
     });
 }
@@ -344,7 +356,11 @@ function defineProbeSecurity(parent: Command, name: string): void {
       [] as string[],
     )
     .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests")
-    .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"));
+    .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
+    .option(
+      "--verbose",
+      "ARV-253: surface INFO-severity findings (sanitization-signal-only, e.g. CRLF accepted but no reflection observed). Default hides them — they're single-signal proof with no exploit pathway.",
+    );
   addProbeReportOutputOptions(sub);
   sub.action(async (classes: string | undefined, specPos: string | undefined, opts, cmd: Command) => {
       // ARV-36: missing-arg path should list the available classes (parity
@@ -389,6 +405,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
         report: rep.report,
         include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
         exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
+        verbose: opts.verbose === true,
       });
     });
 }

@@ -13,10 +13,20 @@
           "severity": {
             "type": "string",
             "enum": [
-              "low",
-              "medium",
+              "critical",
               "high",
-              "critical"
+              "medium",
+              "low",
+              "info"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "security",
+              "reliability",
+              "contract",
+              "hygiene"
             ]
           },
           "operation": {
@@ -122,12 +132,7 @@
         "by_severity": {
           "type": "object",
           "properties": {
-            "low": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "medium": {
+            "critical": {
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
@@ -137,17 +142,60 @@
               "minimum": 0,
               "maximum": 9007199254740991
             },
-            "critical": {
+            "medium": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "low": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "info": {
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
             }
           },
           "required": [
-            "low",
-            "medium",
+            "critical",
             "high",
-            "critical"
+            "medium",
+            "low",
+            "info"
+          ],
+          "additionalProperties": false
+        },
+        "by_category": {
+          "type": "object",
+          "properties": {
+            "security": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "reliability": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "contract": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "hygiene": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "security",
+            "reliability",
+            "contract",
+            "hygiene"
           ],
           "additionalProperties": false
         },
@@ -169,6 +217,7 @@
         "checks_run",
         "findings",
         "by_severity",
+        "by_category",
         "skipped_outcomes"
       ],
       "additionalProperties": false

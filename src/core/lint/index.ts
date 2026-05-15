@@ -83,9 +83,11 @@ export function lintSpec(doc: OpenAPIV3.Document, config: LintConfig): LintResul
 
   const stats = {
     total: trimmed.length,
+    critical: trimmed.filter(i => i.severity === "critical").length,
     high: trimmed.filter(i => i.severity === "high").length,
     medium: trimmed.filter(i => i.severity === "medium").length,
     low: trimmed.filter(i => i.severity === "low").length,
+    info: trimmed.filter(i => i.severity === "info").length,
     endpoints: endpoints.size,
   };
   return { issues: trimmed, stats };

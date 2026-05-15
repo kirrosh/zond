@@ -138,6 +138,7 @@ describe("zond checks pipeline (ARV-1)", () => {
     const result = await runChecks({ specPath, baseUrl, include: ["not_a_server_error"] });
     const f = result.data.findings[0]!;
     expect(Object.keys(f).sort()).toEqual([
+      "category",
       "check",
       "evidence",
       "message",

@@ -56,6 +56,8 @@ export type FindingClass =
   | "check:idempotency_replay"
   | "check:pagination_invariants"
   | "check:lifecycle_transitions"
+  | "check:open_cors_on_sensitive"
+  | "check:rate_limit_headers_absent"
   | "check:network_error"
 
   // probe verdicts (severity already classified upstream) ───────────
@@ -167,6 +169,14 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
       return "add_required_header";
 
     case "check:ignored_auth":
+    case "check:open_cors_on_sensitive":
+      return "fix_auth_config";
+
+    case "check:rate_limit_headers_absent":
+      // ARV-256: missing rate-limit on write endpoints is an
+      // infrastructure-config gap — closest existing action is
+      // "fix_auth_config" (server-side hardening) rather than report-
+      // backend-bug (the spec doesn't say rate-limit must exist).
       return "fix_auth_config";
 
     case "check:network_error":

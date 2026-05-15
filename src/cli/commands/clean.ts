@@ -22,6 +22,7 @@ import type { Command } from "commander";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { globalJson } from "../resolve.ts";
+import { getApi } from "../util/api-context.ts";
 
 export interface CleanOptions {
   api?: string;
@@ -195,8 +196,13 @@ export function registerClean(program: Command): void {
     .option("--all", "Remove every tracked auto-generated file in the workspace (includes probes/)")
     .option("--force", "Actually delete files (default is dry-run)")
     .action(async (opts, cmd: Command) => {
+      // ARV-238 (R-03/F11/SD9): `--api` exists both at program level (TASK-290)
+      // and on this subcommand; commander absorbs the value into the program
+      // option, leaving `opts.api` undefined. Fall back via `getApi` so users
+      // who follow `zond clean --api <name>` (per skill / --help) actually
+      // scope the run instead of hitting "Specify a scope".
       process.exitCode = await cleanCommand({
-        api: opts.api,
+        api: getApi(cmd, opts),
         probes: opts.probes === true,
         all: opts.all === true,
         force: opts.force === true,
