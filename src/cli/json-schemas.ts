@@ -78,11 +78,16 @@ export const JsonEnvelopeSchema = z.object({
  *  pins the per-command payload so agents can validate findings without
  *  parsing them by-hand. ARV-11 adds `recommended_action` as a closed
  *  enum on each finding. */
-export const SeveritySchema = z.enum(["low", "medium", "high", "critical"]);
+export const SeveritySchema = z.enum(["critical", "high", "medium", "low", "info"]);
+export const CategorySchema = z.enum(["security", "reliability", "contract", "hygiene"]);
 
 export const CheckFindingSchema = z.object({
   check: z.string(),
   severity: SeveritySchema,
+  // ARV-251: category drives per-section roll-up. Optional on the wire
+  // for backwards compat with older NDJSON streams — derived by reader
+  // from check id if absent.
+  category: CategorySchema.optional(),
   operation: z.object({
     path: z.string(),
     method: z.string(),
@@ -107,10 +112,17 @@ export const CheckRunSummarySchema = z.object({
   checks_run: z.number().int().nonnegative(),
   findings: z.number().int().nonnegative(),
   by_severity: z.object({
-    low: z.number().int().nonnegative(),
-    medium: z.number().int().nonnegative(),
-    high: z.number().int().nonnegative(),
     critical: z.number().int().nonnegative(),
+    high: z.number().int().nonnegative(),
+    medium: z.number().int().nonnegative(),
+    low: z.number().int().nonnegative(),
+    info: z.number().int().nonnegative(),
+  }),
+  by_category: z.object({
+    security: z.number().int().nonnegative(),
+    reliability: z.number().int().nonnegative(),
+    contract: z.number().int().nonnegative(),
+    hygiene: z.number().int().nonnegative(),
   }),
   // ARV-26: per-(check, reason) skip tally — surfaces probe outcomes that
   // never produced a checkable response (e.g. probe got 4xx, schema only on

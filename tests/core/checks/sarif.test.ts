@@ -91,17 +91,18 @@ describe("SARIF reporter", () => {
     expect(run.tool.driver.version).toBe("0.0.0-test");
     expect(run.results).toHaveLength(3);
 
-    // Findings are sorted deterministically by ruleId.
+    // Findings are sorted deterministically by ruleId. ARV-251
+    // remapped categories: 5xx → reliability, data-rejection → contract.
     const ids = run.results.map((r) => r.ruleId);
     expect(ids).toEqual([
-      "conformance-not_a_server_error",
-      "data-rejection-negative_data_rejection",
+      "contract-negative_data_rejection",
+      "reliability-not_a_server_error",
       "security-ignored_auth",
     ]);
 
-    expect(run.results[0]!.level).toBe("error");        // high → error
-    expect(run.results[1]!.level).toBe("warning");      // medium → warning
-    expect(run.results[2]!.level).toBe("error");        // critical → error
+    expect(run.results[0]!.level).toBe("warning");      // medium negative_data_rejection → warning
+    expect(run.results[1]!.level).toBe("error");        // high not_a_server_error → error
+    expect(run.results[2]!.level).toBe("error");        // critical ignored_auth → error
 
     // ruleIndex matches the position in tool.driver.rules.
     for (const r of run.results) {
@@ -154,9 +155,10 @@ describe("SARIF reporter", () => {
   });
 
   test("ruleId follows <category>-<check_id> form (oasdiff-style)", () => {
-    expect(ruleIdFor("not_a_server_error")).toBe("conformance-not_a_server_error");
+    // ARV-251: categories under the m-21 4-tier taxonomy.
+    expect(ruleIdFor("not_a_server_error")).toBe("reliability-not_a_server_error");
     expect(ruleIdFor("ignored_auth")).toBe("security-ignored_auth");
-    expect(ruleIdFor("negative_data_rejection")).toBe("data-rejection-negative_data_rejection");
+    expect(ruleIdFor("negative_data_rejection")).toBe("contract-negative_data_rejection");
   });
 
   test("partialFingerprintFor is deterministic and key-sensitive", () => {
@@ -185,11 +187,12 @@ describe("SARIF reporter", () => {
     const actions = sarif.runs[0]!.results.map(
       (r) => (r.properties as Record<string, unknown> | undefined)?.recommendedAction,
     );
-    // Sorted by ruleId — same order as AC#2 above.
+    // Sorted by ruleId — same order as AC#2 above (ARV-251 category
+    // remap: contract-negative_data_rejection sorts first now).
     expect(actions).toEqual([
-      "report_backend_bug", // not_a_server_error
-      "tighten_validation", // negative_data_rejection
-      "fix_auth_config",    // ignored_auth
+      "tighten_validation", // contract-negative_data_rejection
+      "report_backend_bug", // reliability-not_a_server_error
+      "fix_auth_config",    // security-ignored_auth
     ]);
   });
 
@@ -203,8 +206,11 @@ describe("SARIF reporter", () => {
     // Built-ins from ARV-1..4 — 12 checks. Adding new checks should
     // grow this list but never shrink it.
     expect(ids.length).toBeGreaterThanOrEqual(12);
-    expect(ids).toContain("conformance-not_a_server_error");
+    // ARV-251: categories reshuffled to the m-21 4-tier taxonomy
+    // (security/reliability/contract/hygiene). 5xx detection is
+    // reliability, not conformance; data-rejection becomes contract.
+    expect(ids).toContain("reliability-not_a_server_error");
     expect(ids).toContain("security-ignored_auth");
-    expect(ids).toContain("data-rejection-positive_data_acceptance");
+    expect(ids).toContain("contract-positive_data_acceptance");
   });
 });

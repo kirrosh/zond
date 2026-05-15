@@ -20,41 +20,16 @@ import { createHash } from "node:crypto";
 import { listChecks } from "./registry.ts";
 import { listStatefulChecks } from "./stateful.ts";
 import type { CheckFinding, Severity } from "./types.ts";
+import { categoryFor, type Category } from "../severity/category.ts";
+import { severityToSarifLevel } from "../severity/index.ts";
 
-/** Categories used in `<category>-<check_id>` ruleIds and `properties.tags`.
- *  Adding a new check requires extending this map; the SARIF tests assert
- *  full coverage so a missing entry fails loudly rather than silently
- *  emitting `other-<id>`. */
-const CATEGORY_BY_ID: Record<string, "conformance" | "security" | "data-rejection"> = {
-  not_a_server_error: "conformance",
-  status_code_conformance: "conformance",
-  content_type_conformance: "conformance",
-  response_headers_conformance: "conformance",
-  response_schema_conformance: "conformance",
-  missing_required_header: "conformance",
-  unsupported_method: "conformance",
-  ignored_auth: "security",
-  use_after_free: "security",
-  ensure_resource_availability: "security",
-  negative_data_rejection: "data-rejection",
-  positive_data_acceptance: "data-rejection",
-};
-
-export function categoryFor(checkId: string): string {
-  return CATEGORY_BY_ID[checkId] ?? "other";
-}
+export { categoryFor };
 
 export function ruleIdFor(checkId: string): string {
   return `${categoryFor(checkId)}-${checkId}`;
 }
 
-/** SARIF level mapping. critical/high → error gates a Code Scanning alert
- *  by default; medium → warning; low → note (informational, no alert). */
-function severityToLevel(s: Severity): "error" | "warning" | "note" {
-  if (s === "critical" || s === "high") return "error";
-  if (s === "medium") return "warning";
-  return "note";
-}
+const severityToLevel = severityToSarifLevel;
 
 /** RFC 6901 JSON Pointer for the operation: `/paths/<escaped>/<method>`.
  *  Escapes `~` → `~0` and `/` → `~1` so paths like `/users/{id}` survive
@@ -83,7 +58,7 @@ interface SarifReportingDescriptor {
   defaultConfiguration: { level: "error" | "warning" | "note" };
   helpUri?: string;
   properties: {
-    category: string;
+    category: Category;
     severity: Severity;
     references: string[];
     tags: string[];

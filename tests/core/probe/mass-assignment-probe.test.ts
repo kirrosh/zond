@@ -361,7 +361,7 @@ describe("runMassAssignmentProbes", () => {
     expect(calls.some(c => c.method === "DELETE")).toBe(true);
   });
 
-  it("flags accepted-and-ignored (LOW) when extras silently dropped", async () => {
+  it("flags accepted-and-ignored (INFO) when extras silently dropped (ARV-250)", async () => {
     let createdId = "22222222-2222-2222-2222-222222222222";
     responder = (req) => {
       if (req.method === "POST" && isBaseline(req.body)) {
@@ -386,13 +386,13 @@ describe("runMassAssignmentProbes", () => {
     });
 
     const v = result.verdicts[0]!;
-    expect(v.severity).toBe("low");
+    expect(v.severity).toBe("info");
     expect(v.summary).toMatch(/silently ignored/);
     const adminField = v.fields.find(f => f.field === "is_admin")!;
     expect(adminField.outcome).toBe("ignored");
   });
 
-  it("flags inconclusive (MEDIUM) when no GET counterpart exists", async () => {
+  it("flags inconclusive (INFO) when no GET counterpart exists (ARV-252)", async () => {
     responder = (req) => {
       if (req.method === "POST" && isBaseline(req.body)) {
         return { status: 201, body: { id: "baseline-id", name: "alice" } };
@@ -407,7 +407,7 @@ describe("runMassAssignmentProbes", () => {
       noCleanup: true,
     });
     const v = result.verdicts[0]!;
-    expect(v.severity).toBe("medium");
+    expect(v.severity).toBe("info");
     expect(v.summary).toMatch(/inconclusive/);
   });
 

@@ -1,0 +1,138 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Mock testbed (ARV-193)",
+    "version": "0.1.0",
+    "description": "Intentionally buggy API used to regression-validate m-20 stateful probes (cross_call_references, pagination_invariants, idempotency_replay, lifecycle_transitions). Each declared bug below maps 1:1 to one probe. See docs/recipes/mock-testbed-setup.md."
+  },
+  "servers": [{ "url": "http://127.0.0.1:0", "description": "Replaced at runtime." }],
+  "paths": {
+    "/widgets": {
+      "get": {
+        "operationId": "list_widgets",
+        "summary": "List widgets (cursor pagination).",
+        "parameters": [
+          { "name": "limit",          "in": "query", "required": false, "schema": { "type": "integer" } },
+          { "name": "starting_after", "in": "query", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "has_more"],
+                  "properties": {
+                    "data":     { "type": "array", "items": { "$ref": "#/components/schemas/Widget" } },
+                    "has_more": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "create_widget",
+        "summary": "Create a widget (honors Idempotency-Key per spec).",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Replays with the same key MUST return the same resource id and a bit-identical response.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name":  { "type": "string" },
+                  "color": { "type": "string", "description": "Persisted server-side; readable via GET /widgets/{id}." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Widget" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/widgets/{id}": {
+      "get": {
+        "operationId": "read_widget",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Widget" }
+              }
+            }
+          },
+          "404": { "description": "not found" }
+        }
+      },
+      "delete": {
+        "operationId": "delete_widget",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "204": { "description": "deleted" },
+          "404": { "description": "not found" }
+        }
+      }
+    },
+    "/widgets/{id}/publish": {
+      "post": {
+        "operationId": "publish_widget",
+        "summary": "Publish a widget (lifecycle action — should move status draft → published).",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "ok",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Widget" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Widget": {
+        "type": "object",
+        "required": ["id", "name", "status"],
+        "properties": {
+          "id":     { "type": "string" },
+          "name":   { "type": "string" },
+          "color":  { "type": "string", "description": "Per spec, always returned by GET. The mock server intentionally drops it on read — verifies cross_call_references." },
+          "status": { "type": "string", "enum": ["draft", "published", "archived"] }
+        }
+      }
+    }
+  }
+}

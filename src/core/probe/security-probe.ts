@@ -47,9 +47,19 @@ export type SecurityClass = "ssrf" | "crlf" | "open-redirect";
 
 export const SECURITY_CLASSES: SecurityClass[] = ["ssrf", "crlf", "open-redirect"];
 
+/**
+ * Security-probe severity ladder. Includes 'info' (ARV-253) for
+ * sanitization-only signals (CRLF accept-without-reflection) and
+ * 'medium' (ARV-254) for SSRF accept on endpoints declaring delivery
+ * semantics. The full m-21 matrix governs the cap: HIGH requires
+ * evidence_chain proof, OOB-backed SSRF lands here only when ARV-177
+ * lifts.
+ */
 export type SecuritySeverity =
   | "high"
+  | "medium"
   | "low"
+  | "info"
   | "inconclusive"
   | "inconclusive-baseline"
   | "ok"
@@ -530,7 +540,7 @@ async function probeOneEndpoint(
         });
         continue;
       }
-      const finding = classify(hit, payload, resp);
+      const finding = classify(hit, payload, resp, { endpoint: ep });
       // ARV-126: route the 2xx-no-echo low-severity classification
       // through the anti-FP registry. When the response body deeply
       // equals the baseline body, the server ignored the attack
@@ -582,11 +592,15 @@ async function probeOneEndpoint(
     }
   }
 
-  // Roll up to the worst severity.
+  // Roll up to the worst severity. ARV-253: "info" sits below "low"
+  // (single_signal sanitization-only). ARV-254: "medium" sits between
+  // "high" and "low" (SSRF accept on endpoint declaring delivery).
   const severities: SecuritySeverity[] = verdict.findings.map(f => f.severity);
   if (severities.includes("high")) verdict.severity = "high";
   else if (severities.includes("inconclusive")) verdict.severity = "inconclusive";
+  else if (severities.includes("medium")) verdict.severity = "medium";
   else if (severities.includes("low")) verdict.severity = "low";
+  else if (severities.includes("info")) verdict.severity = "info";
   else verdict.severity = "ok";
 
   verdict.summary = summaryLine(verdict);
@@ -765,47 +779,198 @@ function stampAction(f: SecurityFinding): SecurityFinding {
   return f;
 }
 
+interface ClassifyResp {
+  status: number;
+  body?: unknown;
+  body_parsed?: unknown;
+  headers?: Record<string, string>;
+}
+
 function classify(
   hit: SecurityFieldHit,
   payload: string,
-  resp: { status: number; body?: unknown; body_parsed?: unknown },
+  resp: ClassifyResp,
+  ctx: { endpoint?: EndpointInfo } = {},
 ): SecurityFinding {
-  return stampAction(classifyInner(hit, payload, resp));
+  return stampAction(classifyInner(hit, payload, resp, ctx));
+}
+
+/**
+ * ARV-254: detect whether an endpoint declares delivery semantics for
+ * a URL field — i.e. the server is documented to actually hit the URL
+ * (webhook receiver, push subscription, callback).
+ *
+ * Without OOB infrastructure (interactsh / Burp Collaborator —
+ * deferred to ARV-177 post-pivot), zond can't prove the server fetched
+ * the URL. So SSRF "accept" lands as LOW by default. But if the spec
+ * declares delivery, we know the URL gets fetched on some schedule,
+ * which raises the stakes — surface as MEDIUM with an explicit
+ * disclaimer that OOB verification is still required for HIGH.
+ *
+ * Heuristic: path or tag contains "webhook" / "callback" / "subscription"
+ * (case-insensitive). When ARV-189 lands, this also reads
+ * `x-zond-delivery: true` from the spec.
+ */
+function endpointDeclaresDelivery(ep: EndpointInfo | undefined): boolean {
+  if (!ep) return false;
+  const haystacks: string[] = [ep.path.toLowerCase()];
+  if (Array.isArray(ep.tags)) {
+    for (const t of ep.tags) haystacks.push(String(t).toLowerCase());
+  }
+  return haystacks.some((h) => /webhook|callback|subscription/.test(h));
+}
+
+/**
+ * Check whether the CRLF payload reflects into any response header
+ * value. ARV-253: header reflection is the smoking gun for CRLF —
+ * response splitting / header injection becomes exploitable as soon as
+ * the server emits attacker-controlled bytes in headers.
+ *
+ * We check raw payload AND its URL-decoded form so encodings like
+ * `%0d%0a` survive the comparison.
+ */
+function reflectsInHeaders(payload: string, headers: Record<string, string> | undefined): string | null {
+  if (!headers || !payload) return null;
+  const decoded = safeDecodeURI(payload);
+  const variants = [payload, decoded].filter((v) => v && v.length >= 3);
+  for (const [name, value] of Object.entries(headers)) {
+    for (const v of variants) {
+      if (value.includes(v)) return name;
+    }
+  }
+  return null;
+}
+
+function isHtmlContentType(headers: Record<string, string> | undefined): boolean {
+  const ct = headers?.["content-type"] ?? headers?.["Content-Type"] ?? "";
+  return /text\/html|application\/xhtml/i.test(ct);
 }
 
 function classifyInner(
   hit: SecurityFieldHit,
   payload: string,
-  resp: { status: number; body?: unknown; body_parsed?: unknown },
+  resp: ClassifyResp,
+  ctx: { endpoint?: EndpointInfo } = {},
 ): SecurityFinding {
   const status = resp.status;
   const echo = classifyEcho(resp.body_parsed ?? resp.body, payload, hit.class);
   const echoed = echo.matched;
 
   if (status >= 500) {
+    // ARV-250: 5xx on attack payload is a reliability signal, not a
+    // proven security issue. Single-signal proof (one crashed response)
+    // caps severity at LOW per the m-21 severity matrix. ARV-251
+    // relocates this signal to the reliability category; the existing
+    // `not_a_server_error` check already tracks 5xx on positive input,
+    // so the security probe here is a secondary signal at best.
     return {
       field: hit.field,
       class: hit.class,
       payload,
       status,
       echoed,
-      severity: "high",
-      reason: `5xx unhandled — server crashed on ${hit.class} payload`,
+      severity: "low",
+      reason: `5xx unhandled — server crashed on ${hit.class} payload (reliability signal; see also not_a_server_error check)`,
     };
   }
   if (status >= 200 && status < 300) {
+    // ARV-253: CRLF severity now keyed on reflection context, not on
+    // raw echo. The pivot principle: HIGH requires evidence the stored
+    // payload reaches a dangerous rendering context (header value /
+    // unescaped HTML). Echo in a JSON body alone is single_signal —
+    // storage is real, exploit pathway is not. Caps at LOW.
+    if (hit.class === "crlf") {
+      const headerName = reflectsInHeaders(payload, resp.headers);
+      if (headerName) {
+        return {
+          field: hit.field,
+          class: hit.class,
+          payload,
+          status,
+          echoed: true,
+          severity: "high",
+          reason: `payload reflected in response header \`${headerName}\` — response-splitting / header-injection candidate (evidence_chain)`,
+        };
+      }
+      if (echoed && isHtmlContentType(resp.headers)) {
+        return {
+          field: hit.field,
+          class: hit.class,
+          payload,
+          status,
+          echoed,
+          severity: "high",
+          reason: `payload echoed (${echo.kind}) in text/html response — unescaped reflection candidate (evidence_chain)`,
+        };
+      }
+      if (echoed) {
+        return {
+          field: hit.field,
+          class: hit.class,
+          payload,
+          status,
+          echoed,
+          severity: "low",
+          reason: `payload echoed (${echo.kind}) in JSON body — storage observed, no dangerous-context reflection. Manual follow-up: check whether the stored value reaches a downstream renderer (HTML page, RSS, custom header).`,
+        };
+      }
+      return {
+        field: hit.field,
+        class: hit.class,
+        payload,
+        status,
+        echoed: false,
+        severity: "info",
+        reason: `${status} accepted ${hit.class} payload but no reflection observed — sanitization may be missing but no exploit pathway proven`,
+      };
+    }
+    // ARV-254: SSRF / open-redirect severity rebalance.
+    //
+    // Without an out-of-band (OOB) channel zond can't prove the server
+    // actually fetched the injected URL. "API accepted 169.254" is
+    // single_signal proof — caps at LOW per the m-21 matrix.
+    //
+    // Stake-raising signal: when the spec declares delivery semantics
+    // (path/tag mentions webhook / callback / subscription), the server
+    // is documented to fetch the URL — surface MEDIUM. Full HIGH is
+    // gated on OOB confirmation which lands with ARV-177 (deferred-
+    // post-pivot, out of scope for now).
+    const declaresDelivery = endpointDeclaresDelivery(ctx.endpoint);
+    const oobDisclaimer = "no OOB channel — accept ≠ proven fetch. Verify with Burp Collaborator / interactsh manually for HIGH severity.";
     if (echoed) {
       const label = echo.kind === "verbatim"
         ? "payload echoed verbatim"
         : `payload echoed (${echo.kind})`;
+      if (declaresDelivery) {
+        return {
+          field: hit.field,
+          class: hit.class,
+          payload,
+          status,
+          echoed,
+          severity: "low",
+          reason: `${label}; ${hit.class}: endpoint declares delivery (webhook/callback) but ${oobDisclaimer}`,
+        };
+      }
       return {
         field: hit.field,
         class: hit.class,
         payload,
         status,
         echoed,
-        severity: "high",
-        reason: `${label} — stored ${hit.class} candidate`,
+        severity: "low",
+        reason: `${label} — stored ${hit.class} candidate; ${oobDisclaimer}`,
+      };
+    }
+    if (declaresDelivery) {
+      return {
+        field: hit.field,
+        class: hit.class,
+        payload,
+        status,
+        echoed,
+        severity: "medium",
+        reason: `2xx accepted ${hit.class} payload on endpoint declaring delivery semantics (webhook/callback). ${oobDisclaimer}`,
       };
     }
     return {
@@ -815,7 +980,7 @@ function classifyInner(
       status,
       echoed,
       severity: "low",
-      reason: `2xx accepted ${hit.class} payload but no echo observed — verify side-effects manually`,
+      reason: `2xx accepted ${hit.class} payload but no echo observed. ${oobDisclaimer}`,
     };
   }
   if (status >= 400) {
@@ -940,11 +1105,11 @@ export function classifyEcho(body: unknown, payload: string, cls: SecurityClass)
 
 function summaryLine(v: SecurityVerdict): string {
   const counts: Record<SecuritySeverity, number> = {
-    high: 0, low: 0, inconclusive: 0, "inconclusive-baseline": 0, ok: 0, skipped: 0,
+    high: 0, medium: 0, low: 0, info: 0, inconclusive: 0, "inconclusive-baseline": 0, ok: 0, skipped: 0,
   };
   for (const f of v.findings) counts[f.severity]++;
   const fields = Array.from(new Set(v.detectedFields.map(d => d.field))).join(", ");
-  return `fields=[${fields}] · HIGH=${counts.high} LOW=${counts.low} INCONCLUSIVE=${counts.inconclusive} OK=${counts.ok}`;
+  return `fields=[${fields}] · HIGH=${counts.high} MED=${counts.medium} LOW=${counts.low} INFO=${counts.info} INCONCLUSIVE=${counts.inconclusive} OK=${counts.ok}`;
 }
 
 // ──────────────────────────────────────────────
@@ -1080,6 +1245,31 @@ function skipped(ep: EndpointInfo, reason: string): SecurityVerdict {
 /** TASK-154 §N: clip noisy payloads (some SSRF/CRLF/redirect strings are URL-
  *  encoded blobs > 60 chars). Keep the leading prefix users recognise plus an
  *  ellipsis, so the digest line stays readable. */
+/** ARV-245 (R-04/F16): percent-encode unsafe characters per path segment
+ *  for paste-ready manual repro lines in the digest. Mirrors the encoding
+ *  rules used by `cleanup --orphans` so the printed command works against
+ *  the same APIs the probe targeted. */
+function encodeDeletePathForRepro(deletePath: string): string {
+  const SAFE = /[A-Za-z0-9._~!$&'()*+,;=:@-]/;
+  return deletePath
+    .split("/")
+    .map((segment) => {
+      if (segment.length === 0) return segment;
+      let out = "";
+      for (let i = 0; i < segment.length; i++) {
+        const ch = segment.charAt(i);
+        if (ch === "%" && /^[0-9A-Fa-f]{2}$/.test(segment.slice(i + 1, i + 3))) {
+          out += segment.slice(i, i + 3);
+          i += 2;
+          continue;
+        }
+        out += SAFE.test(ch) ? ch : encodeURIComponent(ch);
+      }
+      return out;
+    })
+    .join("/");
+}
+
 function truncatePayload(payload: string, max: number): string {
   if (payload.length <= max) return payload;
   return payload.slice(0, max - 1) + "…";
@@ -1123,19 +1313,31 @@ export function formatSecurityDigest(
     lines.push("");
     for (const v of cleanupFailures) {
       lines.push(`- **${v.method} ${v.path}** — ${v.cleanup!.error}`);
+      // ARV-245 (R-04/F16): paste-ready manual repro when we have a
+      // deletePath. Auto-encode the path so operators dealing with
+      // CRLF-poisoned ids (round-4 GitHub labels) don't have to remember
+      // to percent-encode `\r`/`\n`/spaces themselves.
+      const dp = v.cleanup?.deletePath;
+      if (dp) {
+        const encoded = encodeDeletePathForRepro(dp);
+        const note = /[\r\n\t ]/.test(dp) ? " (note: id contains whitespace/CRLF — percent-encoded)" : "";
+        lines.push(`  - Manual repro: \`zond request DELETE ${encoded} --api <name>\`${note}`);
+      }
     }
     lines.push("");
   }
 
   const buckets: Record<SecuritySeverity, SecurityVerdict[]> = {
-    high: [], low: [], inconclusive: [], "inconclusive-baseline": [], ok: [], skipped: [],
+    high: [], medium: [], low: [], info: [], inconclusive: [], "inconclusive-baseline": [], ok: [], skipped: [],
   };
   for (const v of result.verdicts) buckets[v.severity].push(v);
 
-  const ordered: SecuritySeverity[] = ["high", "inconclusive", "inconclusive-baseline", "low", "ok", "skipped"];
+  const ordered: SecuritySeverity[] = ["high", "inconclusive", "inconclusive-baseline", "medium", "low", "info", "ok", "skipped"];
   const titles: Record<SecuritySeverity, string> = {
-    high: "🚨 HIGH — server crashed or echoed payload",
-    low: "🟡 LOW — 2xx accepted but no echo (verify manually)",
+    high: "🚨 HIGH — header-reflection / HTML reflection / 5xx",
+    medium: "⚠️ MEDIUM — SSRF accept on endpoint declaring delivery (no OOB confirmation)",
+    low: "🟡 LOW — storage observed, no dangerous-context reflection (verify manually)",
+    info: "·  INFO — accepted, no reflection observed (sanitization signal only)",
     inconclusive: "❓ INCONCLUSIVE — could not classify",
     "inconclusive-baseline": "⚠️ INCONCLUSIVE-BASELINE — baseline 4xx, attacks not run",
     ok: "✅ OK — payloads rejected with 4xx",
@@ -1176,7 +1378,12 @@ export function emitSecurityRegressionSuites(
 ): RawSuite[] {
   const suites: RawSuite[] = [];
   for (const v of result.verdicts) {
-    if (v.severity !== "ok" && v.severity !== "low") continue;
+    // ARV-247 (R-04/F18): `high` findings are 2xx-with-echoed-payload — the
+    // strongest regression signal we have. Skipping them meant CI had nothing
+    // to gate on for confirmed stored injections. Treat them like `ok` here:
+    // the suite locks in the *expected* state (attack rejected) once the API
+    // owner ships a fix, and fails loud while it's still broken.
+    if (v.severity !== "ok" && v.severity !== "low" && v.severity !== "high") continue;
     const ep = endpoints.find(
       e => e.path === v.path && e.method.toUpperCase() === v.method,
     );
@@ -1184,7 +1391,10 @@ export function emitSecurityRegressionSuites(
     const suiteHeaders = getAuthHeaders(ep, schemes);
     const tests: RawStep[] = [];
     for (const f of v.findings) {
-      const expected = f.severity === "ok" ? ATTACK_EXPECTED_STATUS : [200, 201, 202, 204];
+      // `ok` = attack already rejected; `high` = attack accepted+echoed (the
+      // regression target is rejection, same expected set as `ok`). `low` =
+      // attack accepted but no echo — lock in the 2xx-without-echo shape.
+      const expected = (f.severity === "ok" || f.severity === "high") ? ATTACK_EXPECTED_STATUS : [200, 201, 202, 204];
       const body = ep.requestBodySchema ? generateFromSchema(ep.requestBodySchema) : {};
       if (typeof body === "object" && body !== null && !Array.isArray(body)) {
         (body as Record<string, unknown>)[f.field] = f.payload;

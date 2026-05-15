@@ -360,7 +360,25 @@ export function liveAuthHeaders(
   schemes: SecuritySchemeInfo[],
   vars: Record<string, string>,
 ): Record<string, string> {
-  if (ep.security.length === 0) return {};
+  if (ep.security.length === 0) {
+    // ARV-218 (R15/F25): for bare specs (no components.securitySchemes,
+    // empty per-endpoint .security — GitHub publishes its OpenAPI this
+    // way), zond's workspace-level conventions still wire `auth_token`
+    // end-to-end (ARV-201 seeds it in .env.yaml; zond request — see
+    // resolveAdHocRequest — auto-attaches `Authorization: Bearer
+    // {{auth_token}}`). Mirror that fallback into the live-call path so
+    // probes (mass-assignment / security) and stateful create-steps don't
+    // 401 their baseline on these specs. Without this, the whole
+    // depth-pass on GitHub-style APIs stays unauth even after ARV-212
+    // emitted the suite-level Bearer header for `zond run`.
+    if (schemes.length === 0) {
+      const tok = vars["auth_token"];
+      if (typeof tok === "string" && tok.length > 0) {
+        return { Authorization: `Bearer ${tok}` };
+      }
+    }
+    return {};
+  }
 
   // Two-pass walk: prefer bearer/apiKey over basic (ARV-148, mirrors the
   // generator-side fix in `getAuthHeaders` above). Without this, every

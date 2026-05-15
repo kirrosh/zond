@@ -83,7 +83,7 @@ describe("runSecurityProbes — happy path", () => {
     expect(posts).toHaveLength(1);
   });
 
-  it("classifies HIGH when payload is echoed in 2xx response (stored injection)", async () => {
+  it("ARV-253: CRLF echoed in JSON body alone → LOW (storage signal, no dangerous-context reflection)", async () => {
     harness.setResponder((req) => {
       if (req.method === "DELETE") return { status: 204 };
       const body = req.body as Record<string, unknown> | undefined;
@@ -91,20 +91,20 @@ describe("runSecurityProbes — happy path", () => {
       return { status: 201, body: { id: "msg_1", subject } };
     });
     const result = await runSecurityProbes({
-      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
+      allowLeaks: true,
       endpoints: [ep({ method: "POST", path: "/messages", requestBodySchema: emailSchema })],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
       classes: ["crlf"],
     });
     const v = result.verdicts[0]!;
-    expect(v.severity).toBe("high");
-    const high = v.findings.filter(f => f.severity === "high");
-    expect(high.length).toBeGreaterThan(0);
-    expect(high[0]!.echoed).toBe(true);
-    // TASK-294: high/low findings carry recommended_action so an agent can route
-    // straight to "report_backend_bug" without re-classifying severity.
-    expect(high[0]!.recommended_action).toBe("report_backend_bug");
+    // JSON body echo is single_signal proof — storage observed, but no
+    // header/HTML reflection means no exploit pathway. Caps at LOW.
+    expect(v.severity).toBe("low");
+    const lows = v.findings.filter(f => f.severity === "low");
+    expect(lows.length).toBeGreaterThan(0);
+    expect(lows[0]!.echoed).toBe(true);
+    expect(lows[0]!.reason).toMatch(/JSON body/);
   });
 
   it("classifies OK when API rejects payload with 4xx", async () => {
@@ -151,24 +151,26 @@ describe("runSecurityProbes — happy path", () => {
     expect(v.summary).toContain("dry-run");
   });
 
-  it("open-redirect: end-to-end run classifies HIGH when redirect payload is echoed", async () => {
+  it("open-redirect: ARV-254 — echoed redirect classifies LOW (no OOB confirmation)", async () => {
     harness.setResponder((req) => {
       if (req.method === "DELETE") return { status: 204 };
       const body = req.body as Record<string, unknown> | undefined;
       const redirect = body?.redirect;
-      // Echo back — typical stored open-redirect surface.
+      // Echo back — without OOB-confirmed delivery, this is single_signal
+      // proof. Severity caps at LOW with explicit disclaimer.
       return { status: 201, body: { id: "r_1", redirect } };
     });
     const result = await runSecurityProbes({
-      allowLeaks: true, // ARV-140: legacy attack-on-POST-without-DELETE expectations
+      allowLeaks: true,
       endpoints: [ep({ method: "POST", path: "/r", requestBodySchema: redirectSchema })],
       securitySchemes: [],
       vars: { base_url: "https://api.test" },
       classes: ["open-redirect"],
     });
     const v = result.verdicts[0]!;
-    expect(v.severity).toBe("high");
+    expect(v.severity).toBe("low");
     expect(v.detectedFields[0]!.class).toBe("open-redirect");
+    expect(v.findings[0]!.reason).toMatch(/OOB/i);
   });
 
   it("open-redirect: rejected payload (4xx) classifies as OK", async () => {
@@ -232,8 +234,9 @@ describe("runSecurityProbes — happy path", () => {
     const hooks = result.verdicts.find(v => v.path === "/webhooks")!;
     const msgs = result.verdicts.find(v => v.path === "/messages")!;
     expect(hooks.severity).toBe("ok");
-    // /messages echoes back subject → HIGH on CRLF.
-    expect(msgs.severity).toBe("high");
+    // ARV-253: /messages echoes back subject in JSON body — single_signal
+    // proof caps at LOW. HIGH would require header/HTML reflection.
+    expect(msgs.severity).toBe("low");
   });
 
   it("skips endpoints with no detected fields", async () => {

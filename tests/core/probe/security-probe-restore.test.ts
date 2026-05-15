@@ -200,10 +200,15 @@ describe("runSecurityProbes — TASK-152 partial-body fallback on PUT", () => {
       classes: ["crlf"],
     });
     const v = result.verdicts[0]!;
-    expect(v.severity).toBe("high");
-    const high = v.findings.filter(f => f.severity === "high");
-    expect(high.length).toBeGreaterThan(0);
-    expect(high[0]!.reason).toContain("[partial-body]");
+    // ARV-253: partial-body PUT echoes CRLF in JSON body alone → LOW.
+    // The partial-fallback mechanism still works (the request reached
+    // the server, was accepted, and echoed back) — severity just
+    // honours the m-21 evidence-chain principle (no header/HTML
+    // reflection = no HIGH).
+    expect(v.severity).toBe("low");
+    const lows = v.findings.filter(f => f.severity === "low");
+    expect(lows.length).toBeGreaterThan(0);
+    expect(lows[0]!.reason).toContain("[partial-body]");
     expect(lastPutBody).not.toBeNull();
     expect(Object.keys(lastPutBody!)).toHaveLength(1);
   });

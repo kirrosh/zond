@@ -69,9 +69,13 @@ export function loadConfig(opts: {
 function normaliseSetting(raw: string): RuleSetting {
   const v = raw.toLowerCase();
   if (v === "off" || v === "false" || v === "no") return "off";
-  if (v === "high" || v === "error") return "high";
-  if (v === "medium" || v === "warn" || v === "warning") return "medium";
-  if (v === "low" || v === "info" || v === "informational") return "low";
+  // ARV-255: spec-lint is hygiene — severity capped at LOW/INFO. User
+  // overrides via `--rule R=high|medium` are still parsed for back-compat
+  // but silently downgraded so the cap is enforced uniformly.
+  if (v === "high" || v === "error") return "low";
+  if (v === "medium" || v === "warn" || v === "warning") return "low";
+  if (v === "low") return "low";
+  if (v === "info" || v === "informational") return "info";
   return "off";
 }
 
