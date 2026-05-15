@@ -15,6 +15,15 @@
         "info"
       ]
     },
+    "category": {
+      "type": "string",
+      "enum": [
+        "security",
+        "reliability",
+        "contract",
+        "hygiene"
+      ]
+    },
     "operation": {
       "type": "object",
       "properties": {

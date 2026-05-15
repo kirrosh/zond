@@ -22,7 +22,9 @@ import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
 // checks, now needed for hygiene-class findings per m-21 pivot).
 import type { Severity } from "../severity/index.ts";
 import { emptySeverityBuckets } from "../severity/index.ts";
-export type { Severity };
+import type { Category } from "../severity/category.ts";
+import { emptyCategoryBuckets } from "../severity/category.ts";
+export type { Severity, Category };
 
 export type Phase = "examples" | "coverage" | "all";
 
@@ -134,6 +136,11 @@ export interface Check {
 export interface CheckFinding {
   check: string;
   severity: Severity;
+  /** ARV-251: finding category drives per-section roll-up in reports.
+   *  Optional for backwards compat — when absent, downstream code derives
+   *  it via `categoryFor(check)`. Storing it on the finding keeps probe
+   *  emitters and check emitters using the same shape. */
+  category?: Category;
   operation: { path: string; method: string; operationId?: string };
   request_signature: string;
   response_summary: { status: number; content_type?: string };
@@ -152,6 +159,10 @@ export interface CheckRunSummary {
   checks_run: number;
   findings: number;
   by_severity: Record<Severity, number>;
+  /** ARV-251: per-category roll-up — small teams use this to triage
+   *  "0 security, 12 reliability, 40 contract, 200 hygiene" instead of
+   *  reading one flat severity pile. */
+  by_category: Record<Category, number>;
   /** ARV-26: count of `kind: "skip"` outcomes returned by checks, keyed by
    *  `"<check_id>: <reason>"`. Surfaces the gap between probe and runtime
    *  validators — e.g. `response_schema_conformance: no JSON Schema on this
@@ -172,6 +183,7 @@ export function emptySummary(): CheckRunSummary {
     checks_run: 0,
     findings: 0,
     by_severity: emptySeverityBuckets(),
+    by_category: emptyCategoryBuckets(),
     skipped_outcomes: {},
   };
 }
