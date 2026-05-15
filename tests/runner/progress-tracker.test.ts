@@ -12,7 +12,7 @@ function passingStep(durationMs = 100): StepResult {
     status: "pass",
     duration_ms: durationMs,
     request: { method: "GET", url: "http://x", headers: {} },
-    response: { status: 200, headers: {}, body_raw: "", duration_ms: durationMs },
+    response: { status: 200, headers: {}, body: "", duration_ms: durationMs },
     assertions: [],
     captures: {},
   };

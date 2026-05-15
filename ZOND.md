@@ -122,6 +122,8 @@ Commands group around the lifecycle phase they belong to (mirrors `zond --help`)
 | `refresh-api <name>` | Re-snapshot spec.json + regenerate the 3 artifacts | `--spec <path\|url>`, `--insecure` |
 | `doctor` | Fixture gaps in `.env.yaml` + artifact freshness vs spec.json (exit 0/1/2) | `--api <name>`, `--json` |
 | `prepare-fixtures` | Auto-fill `.env.yaml` FK ids — single-pass discover by default; `--cascade` enables the multi-pass discover+seed flow | `--api <name>`, `--apply`, `--verify`, `--refresh`, `--cascade`, `--seed`, `--force`, `--max-passes <n>`, `--env <path>`, `--timeout <ms>`, `--json` |
+| `fixtures add <var>=<value>` | Manual fixture set — for path-FK ids that auto-discover/--seed can't reach (vendor-dashboard ids). Optional `--validate` GETs the read-by-id endpoint and classifies live/stale/unknown (ARV-195) | `--api <name>`, `--validate`, `--apply`, `--json` |
+| `fixtures import --from-curl` | Import fixtures from a curl command (paste from devtools / vendor dashboard). URL is matched against spec paths longest-template-first to extract `{var}` bindings (ARV-195) | `--api <name>`, `--curl <text>`, `--apply`, `--json` |
 | `clean` | Remove auto-generated files tracked in `.zond/manifest.json` | `--api <name>`, `--probes`, `--dry-run`, `--force` |
 | `cleanup` | Retry probe leftovers; currently only `--orphans` re-issues DELETE for resources captured in `~/.zond/orphans/` | `--orphans`, `--db <path>`, `--json` |
 
@@ -138,6 +140,7 @@ Commands group around the lifecycle phase they belong to (mirrors `zond --help`)
 |---------|-------------|-----------|
 | `check tests <path>` | Schema-validate YAML test files | `--verbose`, `--json` |
 | `check spec [spec]` | Static OpenAPI analysis (no HTTP); see [check spec](#check-spec--static-openapi-analysis-pre-flight-zero-http) below | `--api <name>`, `--strict`, `--rule <list>`, `--severity <list>`, `--top <N>`, `--verbose`, `--config <path>`, `--include-path <glob>`, `--max-issues <N>`, `--ndjson`, `--no-db`, `--json` |
+| `lint [spec]` | ARV-255: alias of `check spec` for the hygiene category. Severity capped at LOW/INFO so spec-lint never gates CI unless `--strict`. Same flag surface | same as `check spec` |
 | `coverage` | Pass-coverage and hit-coverage side-by-side. Exit 0 = full coverage (or ≥ `--fail-on-coverage`); 1 = uncovered/below threshold; 2 = bad input | `--api <name>`, `--spec`, `--tests`, `--run-id`, `--session-id`, `--union <selector>` (`session\|since:<dur>\|tag:<name>\|runs:<ids>`), `--fail-on-coverage <N>`, `--db <path>`, `--json` |
 | `db collections\|runs\|run\|diagnose\|compare` | Query the SQLite history; `db diagnose` is the triage workhorse | `--db <path>`, `--api`, `--limit`, `--status`, `--since`, `--json` |
 | `describe [spec]` | List endpoints from a spec | `--api <name>`, `--compact`, `--list-params`, `--method`, `--path` |
@@ -310,6 +313,7 @@ Flag cheat-sheet:
 | `--workers <n\|auto>` | ARV-8: bounded async-pool concurrency at the *operation* level (cases inside one op stay sequential — CRUD chains rely on it). `auto` = `min(cpus, 8)`; numeric is clamped to `[1, 64]`. Default `1` = pre-ARV-8 sequential behaviour. |
 | `--rate-limit <rps\|auto>` | ARV-8: global RPS budget across the worker pool. `auto` = adaptive limiter that paces from `RateLimit-*` response headers (RFC 9568). Combine with `--workers` so N workers never exceed `<rps>`. |
 | `--report ndjson` | ARV-10/118: stream events as NDJSON on stdout (one JSON object per line — types `check_start`, `check_result`, `finding`, `summary`). Schema published at `docs/json-schema/ndjson-events.schema.json`. Combine with `--output <path>` to redirect the stream to a file. Stderr carries the human-readable summary line; stdout stays a clean stream for `\| jq` / ajv. |
+| `--max-requests <n>` | ARV-227: hard cap on outbound HTTP requests for the whole run (per-response + stateful share the same budget). Once reached, remaining cases short-circuit with `max-requests-cap-reached` in `summary.skipped_outcomes`. Use to bound coverage runs against large specs (github / kubernetes). |
 
 Each finding carries an ARV-11 closed-enum `recommended_action` so an
 agent can route on it without parsing free-form messages:
