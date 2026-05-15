@@ -92,12 +92,3 @@ export function emptyCategoryBuckets(): Record<Category, number> {
   return { security: 0, reliability: 0, contract: 0, hygiene: 0 };
 }
 
-/** Console glyph per category. Stable per-glyph keeps fb-loop diff clean. */
-export function categoryGlyph(c: Category): string {
-  switch (c) {
-    case "security":    return "🛡";
-    case "reliability": return "⚙";
-    case "contract":    return "📜";
-    case "hygiene":     return "·";
-  }
-}

@@ -24,6 +24,15 @@ zond doctor --api my-api --missing-only                # gap report: which vars 
 zond prepare-fixtures --api my-api --apply [--seed]    # fill apis/my-api/.env.yaml from live API
 ```
 
+For path-FK ids that auto-discover/--seed can't reach (vendor-dashboard
+ids like `cus_*`, GitHub PR numbers, Sentry issue ids), use the manual
+helpers (ARV-195):
+
+```bash
+zond fixtures add --api my-api customer_id=cus_123 --validate --apply
+pbpaste | zond fixtures import --api my-api --from-curl --apply        # paste a curl from devtools
+```
+
 `zond init` writes a self-contained [`AGENTS.md`](AGENTS.md) and Claude Code
 skills — agents read it and use the CLI directly (`zond run`,
 `zond probe static`, `zond db diagnose`, …). No daemon, no transport, no

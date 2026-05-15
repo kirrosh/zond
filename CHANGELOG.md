@@ -4,6 +4,155 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+(Empty — next development cycle.)
+
+## [0.23.0] — 2026-05-15
+
+Big release covering m-15 → m-21 (155 ARV tickets across depth-checks,
+schemathesis-comparison, m-20 stateful probes, agent-augmented annotation,
+deep-testing-and-tuning). The detailed per-task list survives below
+under the legacy TASK-* headings (m-13 carry-over); this section is the
+release-summary for the m-15..m-21 epic series.
+
+### Highlights — m-15 to m-21
+
+#### `zond checks` — schemathesis-style depth checks (m-15, ARV-1..12)
+
+- **17 registered checks** across two registries: per-response
+  (`status_code_conformance`, `content_type_conformance`,
+  `response_headers_conformance`, `response_schema_conformance`,
+  `missing_required_header`, `unsupported_method`, `negative_data_rejection`,
+  `positive_data_acceptance`, `not_a_server_error`,
+  `rate_limit_headers_absent`) and stateful (`ignored_auth`,
+  `use_after_free`, `ensure_resource_availability`, `cross_call_references`,
+  `idempotency_replay`, `pagination_invariants`, `lifecycle_transitions`,
+  `open_cors_on_sensitive`).
+- **Anti-FP infrastructure** (`core/anti-fp/`) with per-rule registry,
+  6 documented schemathesis-FP fixture-pack regressions
+  (`tests/regression/schemathesis-fps/`), and per-finding `recommended_action`
+  enum (`fix_test_data` / `fix_test_logic` / `report_to_api_owner` / …).
+- **Coverage phase** (`--phase coverage`) for deterministic boundary-value
+  enumeration over body + param schemas; complements `--phase examples`.
+- **SARIF v2.1.0 reporter** with stable `partialFingerprints` for GitHub
+  Code Scanning integration.
+- **NDJSON streaming reporter** (`--report ndjson`) with published
+  JSON Schema (`docs/json-schema/ndjsonEvent.schema.json`).
+- **`--workers` async-pool** for op-level concurrency, gated by an
+  optional `--rate-limit auto` adaptive limiter (RFC 9568 RateLimit-* headers).
+- **`--include` / `--exclude` selectors** unified across `generate`, `run`,
+  `checks` (path/method/tag/operation-id grammar).
+
+#### m-18 — schemathesis parity baselines (ARV-174..186)
+
+- Stripe / Resend / Sentry parity baselines (3 baseline-fixed bugs:
+  ARV-179 unsupported_method exhaustive enumeration, ARV-180
+  status_code_conformance param-axis coverage, ARV-181 ignored_auth
+  pathVars + strict-401, ARV-183 phantom-findings fix, ARV-184
+  missing_required_header exhaustive). Documented schemathesis-V4
+  comparison matrix.
+
+#### m-20 — stateful probes (ARV-169..173, 187, 191)
+
+- **`cross_call_references`** (ARV-169) — POST→GET shape-diff probe.
+  Surfaces `state_not_persisted` (HIGH) when the server echoes a field on
+  create but drops it on read.
+- **`idempotency_replay`** (ARV-170) — `Idempotency-Key` honor probe.
+  Two POSTs with the same key must return the same id and bit-identical
+  response (`duplicate_resource` / `non_bit_identical`).
+- **`pagination_invariants`** (ARV-171) — cursor-style page consistency.
+  Detects off-by-one duplicates across pages, partial-page-with-has_more,
+  and inconsistent has_more.
+- **`lifecycle_transitions`** (ARV-172) — declared state machine
+  verification with action-replay idempotency probe.
+- **`probe webhooks`** (ARV-173) — webhook shape-conformance against
+  `spec.webhooks` event log; recipe in `docs/recipes/webhook-receiver.md`.
+- **`zond api annotate`** (ARV-187) — agent-augmented annotation flow:
+  `dump` slices spec for the agent, `apply` merges its YAML answers into
+  `.api-resources.local.yaml` (no LLM inside zond — see
+  `feedback_zond_no_llm_calls` memory).
+- **Form-encoded stateful checks** (ARV-191) — stateful probes honor
+  `requestBodyContentType` so Stripe-style APIs aren't broken-baseline.
+- **`.api-resources.local.yaml` `patches:` block** (ARV-169) — field-level
+  overlay survives `refresh-api`; replaces the deprecated re-declaration
+  pattern.
+
+#### m-21 — deep-testing-and-tuning (ARV-188..256)
+
+- **Severity rebalance** (ARV-250..256) under "no-OOB" constraint —
+  small-team API hygiene scanner positioning. SSRF / CORS / rate-limit
+  / missing-auth probes recalibrated; `report categorization` into
+  security / reliability / contract / hygiene buckets (ARV-251).
+- **Spec-lint cap at LOW/INFO** (ARV-255) — dedicated `zond lint` command
+  separates static spec hygiene from runtime probes.
+- **Mock-API testbed** (ARV-193) — `apis/_mock/` with 4 intentional bugs
+  per m-20 stateful probe; `tests/regression/mock-testbed.test.ts` is the
+  regression-floor for probe-quality.
+- **`zond fixtures add` / `import --from-curl`** (ARV-195) — manual
+  fixture-bootstrap for path-FK ids that auto-discover/--seed can't reach
+  (vendor-dashboard ids).
+- **Stripe form-encoding fix** (ARV-196) — bootstrap seed POST honors
+  `application/x-www-form-urlencoded` with bracket nesting
+  (`card[number]`, `items[0][price]`).
+
+### Performance & operability
+
+- **`--max-requests` cap** for `zond checks run` (ARV-227) — shared
+  budget for per-response + stateful phases bounds long runs against
+  large specs (github / kubernetes).
+- **Schema-validation safety net** (ARV-214) — oversized response schemas
+  in `--validate-schema` skip with a stderr warning instead of hanging
+  for 15+ min on AJV.compile. Configurable via
+  `ZOND_VALIDATE_SCHEMA_MAX_BYTES` (default 1 MiB) and
+  `ZOND_VALIDATE_SCHEMA_SLOW_COMPILE_MS` (default 1000ms).
+- **Rate-limiter adaptive mode** (ARV-8 follow-ups) — paces from
+  `RateLimit-*` response headers (RFC 9568) so multi-worker runs respect
+  vendor budgets globally.
+
+### Skills & workflow
+
+- Skills consolidated 5 → 3 (`zond`, `zond-checks`, `zond-triage`) with
+  `zond init --prune-stale-skills` (ARV-197) for upgrades.
+- Skill `update-on-feature-change` ritual formalized; per-feature CLI
+  changes gate on skill update (`feedback_update_skills_per_feature`
+  memory).
+- Iron rules in `skills/zond.md`: `--dry-run` for destructive ops,
+  `--redact-identity` for triage artefacts, mandatory
+  `zond doctor --missing-only` first step.
+
+### Fixed (selected)
+
+- ARV-145: `zond add api` no longer crashes on cyclic OpenAPI specs
+  (Stripe). `decycleSchema` writes `x-circular` sentinel; downstream
+  parsers skip cleanly.
+- ARV-200: extractEndpoints filters `x-circular` param stubs (R10/F1
+  feedback-loop crash).
+- ARV-209: `--validate-schema` auto-resolves spec from
+  `apis/<name>/tests/` path (R12/F11 — manual `--spec` no longer
+  required for skill-driven runs).
+- ARV-244: `cleanup --orphans` percent-encodes unsafe characters in
+  `deletePath`.
+- ARV-238: `clean --api <name>` resolves global `--api` fallback.
+- 50+ feedback-loop bug fixes from R01..R18 against Resend / Sentry /
+  Stripe / GitHub baselines (search `git log --grep "R[0-9]\+/F"` for the full list).
+
+### Workspace contract
+
+- **Manifest vs values** (m-17, decision-7) — `.api-fixtures.yaml` is
+  the manifest of required vars; `.env.yaml` carries values. The split
+  is enforced by `prepare-fixtures` ("not in manifest, ignored" warning)
+  and documented in `skills/zond.md`.
+- **`.api-resources.local.yaml`** (ARV-111) — survives
+  `add-api`/`refresh-api`. Use `extensions:` for full resource entries,
+  `patches:` for field-level overlays (readback_diff, idempotency,
+  pagination, lifecycle, seed_body).
+- **Single API-resolution chain** (TASK-290) — `--api` flag → `ZOND_API`
+  env → `.zond/current-api` (set by `zond use <name>`).
+
+---
+
+The legacy m-13 TASK-* changelog continues below; entries originally in
+`[Unreleased]` are now part of 0.23.0.
+
 ### Added
 
 - **TASK-301: workspace defaults for `--timeout` and `--rate-limit` in `zond.config.yml`.**
