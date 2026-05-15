@@ -184,6 +184,11 @@ export interface MassAssignmentOptions {
    *  fields named `*_id` / `*_slug` / `*_uuid` get filled from the matching
    *  collection list endpoint, eliminating most INCONCLUSIVE-baseline noise). */
   discover?: boolean;
+  /** ARV-252: per-run extension to SUSPECTED_FIELDS (curated list of
+   *  classic mass-assignment vectors). CLI surfaces this as repeatable
+   *  `--suspect-field name=value`. Full per-api spec-extension support
+   *  (x-zond-suspect-fields) is tracked in ARV-189. */
+  extraSuspectFields?: Record<string, unknown>;
 }
 
 export interface MassAssignmentResult {
@@ -250,10 +255,17 @@ function serverAssignedExtras(ep: EndpointInfo): Record<string, unknown> {
 }
 
 /** Extra fields that aren't legitimate request-body properties. */
-function suspectedExtras(ep: EndpointInfo): Record<string, unknown> {
+function suspectedExtras(
+  ep: EndpointInfo,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
   const reqProps = requestPropertyNames(ep.requestBodySchema);
   const out: Record<string, unknown> = {};
-  for (const [name, value] of Object.entries(SUSPECTED_FIELDS)) {
+  // ARV-252: per-run extras (CLI --suspect-field) compose with the
+  // curated SUSPECTED_FIELDS list. Later additions win on key collision
+  // so a user can override a sentinel value if needed.
+  const merged: Record<string, unknown> = { ...SUSPECTED_FIELDS, ...extra };
+  for (const [name, value] of Object.entries(merged)) {
     if (!reqProps.has(name)) out[name] = value;
   }
   return out;
@@ -368,6 +380,7 @@ export async function runMassAssignmentProbes(
       timeoutMs,
       bodyFkMisses,
       bodyFkOverlay,
+      extraSuspectFields: opts.extraSuspectFields,
     });
     stampRecommendedAction(verdict);
     verdicts.push(verdict);
@@ -406,6 +419,8 @@ async function probeEndpoint(
     /** TASK-137: field→value pairs from body-FK discovery. Overlaid on baseline
      *  after generation so a real id/slug replaces the random sentinel. */
     bodyFkOverlay?: Record<string, string>;
+    /** ARV-252: per-run extras for the suspect-fields list. */
+    extraSuspectFields?: Record<string, unknown>;
   },
 ): Promise<EndpointVerdict> {
   const m = ep.method.toUpperCase();
@@ -425,7 +440,7 @@ async function probeEndpoint(
     }
   }
 
-  const suspects = suspectedExtras(ep);
+  const suspects = suspectedExtras(ep, opts.extraSuspectFields);
   const serverFields = serverAssignedExtras(ep);
   // Suspects win over server-assigned: if a field is both (e.g. `is_admin`
   // appears in the response schema AND is in our suspect list), the suspect
@@ -841,19 +856,20 @@ function finaliseSeverity(v: EndpointVerdict, strict: boolean) {
     return;
   }
   if (absent.length > 0) {
-    // ARV-250: absent-but-unverifiable is single_signal proof (we sent
-    // the field, server returned 2xx, but the follow-up GET can't tell
-    // us whether the field persisted). Per the m-21 severity matrix,
-    // single-signal claims cap at LOW. ARV-252 rewrites the probe to
-    // either escalate proof (try harder follow-up) or stay silent.
-    v.severity = "low";
+    // ARV-252: absent-but-unverifiable carries single_signal proof.
+    // Surfaced as INFO and only shown under --verbose so the report
+    // stays clean; the verdict still travels through the JSON envelope
+    // for agents that want to triage it explicitly.
+    v.severity = "info";
     v.summary = `inconclusive — could not verify via follow-up GET (${absent.map(f => f.field).join(", ")})`;
     return;
   }
-  // ARV-250: silent-drop = correct framework behaviour (Rails strong
-  // params / FastAPI extra=ignore). Demoted from LOW to INFO so it no
-  // longer noise-floors the report. ARV-252 will silence this case
-  // entirely once evidence-chain rewrite lands.
+  // ARV-252: silently-ignored = correct framework behaviour (Rails
+  // strong params / FastAPI extra=ignore). Severity stays INFO so it
+  // never gates CI, AND the CLI display layer suppresses it entirely
+  // (even under --verbose). Reports must not be noise-floored by
+  // correct behaviour. Verdicts still travel through the JSON envelope
+  // for agents that explicitly want to inspect them.
   v.severity = "info";
   const status = v.response?.status ?? 0;
   v.summary = `accepted ${status} but extras silently ignored${strict ? " (despite additionalProperties:false — server should reject)" : ""}`;
