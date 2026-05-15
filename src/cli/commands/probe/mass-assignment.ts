@@ -76,6 +76,15 @@ export interface ProbeMassAssignmentOptions {
   exclude?: string[];
   /** m-17 / ARV-51: format for --output / non-json stdout. */
   report?: "markdown" | "json";
+  /** ARV-252: surface INFO-severity inconclusive verdicts (absent-but-
+   *  unverifiable). Silently-ignored verdicts are never shown — they
+   *  represent correct framework behaviour. */
+  verbose?: boolean;
+  /** ARV-252: additional suspect fields to inject, in `name=value`
+   *  form. Extends the curated SUSPECTED_FIELDS list per-run. Full
+   *  spec-extension support (x-zond-suspect-fields) is tracked in
+   *  ARV-189. */
+  suspectField?: string[];
 }
 
 export async function probeMassAssignmentCommand(
@@ -178,12 +187,23 @@ export async function probeMassAssignmentCommand(
       noCleanup: options.noCleanup,
       timeoutMs: options.timeoutMs,
       discover: !options.noDiscover,
+      extraSuspectFields: parseSuspectFieldFlags(options.suspectField),
     });
+
+    // ARV-252: filter verdicts for display under the evidence-chain
+    // principle. Silently-ignored (correct framework behaviour) never
+    // surfaces; absent-but-unverifiable surfaces only under --verbose.
+    // HIGH and inconclusive-baseline/5xx always show. JSON envelope
+    // always carries the full unfiltered list (agents triage explicitly).
+    const displayResult: MassAssignmentResult = {
+      ...result,
+      verdicts: filterVerdictsForDisplay(result.verdicts, { verbose: options.verbose === true }),
+    };
 
     // TASK-168 (m-10): vars came from .env.yaml — register them so any
     // echoed token (URL, body, header) gets redacted in the digest.
     getSecretRegistry().registerAll(vars);
-    const md = applySanitizer(formatDigestMarkdown(result, options.specPath));
+    const md = applySanitizer(formatDigestMarkdown(displayResult, options.specPath));
 
     // m-17 / ARV-51: --output writes whichever format `--report` selected
     // (default markdown). `--json` envelope is always structured.
@@ -368,6 +388,54 @@ function parseMethodPath(s: string): { method: string; path: string } | null {
 }
 
 // m-17 / ARV-51: structured per-endpoint shape for mass-assignment.
+
+/**
+ * ARV-252: parse repeatable `--suspect-field name=value` flags into the
+ * extra-fields map. Values are kept as strings — generateFromSchema /
+ * sentinel inference happens server-side via the suspect-fields machinery.
+ * Malformed entries (no `=`) are skipped silently rather than failing the
+ * run — this keeps ad-hoc CLI usage forgiving.
+ */
+function parseSuspectFieldFlags(raw: string[] | undefined): Record<string, unknown> | undefined {
+  if (!raw || raw.length === 0) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const entry of raw) {
+    const eq = entry.indexOf("=");
+    if (eq <= 0) continue;
+    const name = entry.slice(0, eq).trim();
+    const value = entry.slice(eq + 1);
+    if (name) out[name] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * ARV-252: filter verdicts for the digest/console display under the
+ * evidence-chain principle.
+ *
+ * - HIGH (applied) — always show; this is the actual finding.
+ * - inconclusive-baseline / inconclusive-5xx / ok / skipped — always
+ *   show; operator needs them to triage probe coverage.
+ * - INFO with at least one `absent` outcome (couldn't verify via
+ *   follow-up GET) — show only under --verbose. This is the "single
+ *   signal, no proof" case.
+ * - INFO with only `ignored` outcomes (silently dropped — correct
+ *   framework behaviour) — NEVER show. Reports must not noise-floor
+ *   on intentional behaviour.
+ *
+ * JSON envelope is unfiltered; this is a display-layer transform only.
+ */
+function filterVerdictsForDisplay(
+  verdicts: EndpointVerdict[],
+  opts: { verbose: boolean },
+): EndpointVerdict[] {
+  return verdicts.filter((v) => {
+    if (v.severity !== "info") return true;
+    const hasAbsent = v.fields.some((f) => f.outcome === "absent");
+    if (!hasAbsent) return false; // silently-ignored: always hidden
+    return opts.verbose;
+  });
+}
 
 function maStatusFromSeverity(s: EndpointVerdict["severity"]): ProbeEndpointStatus {
   switch (s) {
