@@ -90,6 +90,7 @@ probes/                      ← probe-emitted suites
 | `zond add api` / `refresh-api` | rebuilds | seeds skeleton |
 | `zond generate` | extends (adds new `{{vars}}` discovered) | does **not** modify |
 | `zond prepare-fixtures` | reads | writes values |
+| `zond fixtures add` / `import` | reads | writes values (manual) |
 | user editing | never | always |
 
 - `{{var}}` in a generated test but NOT in `.api-fixtures.yaml` is a
@@ -99,6 +100,23 @@ probes/                      ← probe-emitted suites
   `prepare-fixtures` warns `not in manifest, ignored`.
 - "Generate should sync `.env.yaml`" is a rejected design (decision-7,
   m-17).
+
+### Manual fixture-bootstrap (when `prepare-fixtures --seed` can't help)
+
+`prepare-fixtures --seed` requires a discoverable list endpoint or a
+postable create. Path-id ids that live only in a vendor dashboard
+(Stripe `cus_*`, GitHub PR numbers, Sentry issue ids) need a manual
+hand-off:
+
+| Input you have | Command |
+|---|---|
+| Concrete id values | `zond fixtures add <var>=<id> [--validate] --apply` |
+| Curl from devtools / dashboard | `pbpaste \| zond fixtures import --from-curl --apply` (URL is matched against spec paths to extract `{var}` bindings) |
+
+`--validate` GETs the spec's read-by-id endpoint and classifies the
+fixture as `live` / `stale` / `unknown` so dead ids don't silently
+break later runs (ARV-32). Both commands write to `apis/<name>/.env.yaml`
+with a `.env.yaml.bak` backup, mirroring `prepare-fixtures --apply`.
 
 ### When to read which file
 
