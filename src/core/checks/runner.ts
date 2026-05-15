@@ -23,6 +23,7 @@ import {
   type ParamCoverageCase,
 } from "../generator/coverage-phase.ts";
 import { executeRequest } from "../runner/http-client.ts";
+import { reserveRequest, MAX_REQUESTS_SKIP_REASON, type RequestBudget } from "../runner/executor.ts";
 import { createSchemaValidator, type SchemaValidator } from "../runner/schema-validator.ts";
 import type { HttpRequest, HttpResponse } from "../runner/types.ts";
 import {
@@ -120,6 +121,13 @@ export interface RunChecksOptions {
    *  vars are filled. Keyed by path-param name (e.g. `issue_id`); falls back
    *  to the legacy schema-driven placeholder when the name isn't in the map. */
   pathVars?: Record<string, string>;
+  /** ARV-227: hard cap on outbound HTTP requests for the entire run.
+   *  Once `used >= limit`, every subsequent case short-circuits and the
+   *  summary surfaces the cap via `summary.skipped_outcomes
+   *  ["max-requests-cap-reached"]`. Stateful-phase sends count toward
+   *  the same budget so a cap of 100 means 100 requests total across
+   *  per-response + stateful, not per-phase. Undefined ⇒ uncapped. */
+  maxRequests?: number;
 }
 
 export interface RunChecksResult {
@@ -534,6 +542,14 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     strict401: opts.strict401 === true,
   };
 
+  // ARV-227: shared budget across per-response + stateful phases.
+  // Mutated in-place by `reserveRequest`; safe under our worker model
+  // because JS is single-threaded between awaits.
+  const requestBudget: RequestBudget | undefined =
+    opts.maxRequests !== undefined && opts.maxRequests > 0
+      ? { limit: opts.maxRequests, used: 0 }
+      : undefined;
+
   const phase = opts.phase ?? "examples";
   const wantsExamples = phase === "examples" || phase === "all";
   const wantsCoverage = phase === "coverage" || phase === "all";
@@ -593,6 +609,14 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     for (const built of cases) {
       if (!caseMatchesMode(built.case.mode, mode)) continue;
       if (opts.authHeaders) injectAuthHeadersIntoCase(built, opts.authHeaders);
+      // ARV-227: stop dispatching new HTTP requests once the cap is
+      // reached. Bucket the skip so the summary surfaces it, then keep
+      // looping so we still tally the would-have-run count for the user.
+      if (!reserveRequest(requestBudget)) {
+        localSkipped[`max_requests: ${MAX_REQUESTS_SKIP_REASON}`] =
+          (localSkipped[`max_requests: ${MAX_REQUESTS_SKIP_REASON}`] ?? 0) + 1;
+        continue;
+      }
       // ARV-8: gate the request through the rate-limiter (no-op when
       // none configured). Acquire happens *inside* the worker so a pool
       // of N workers can't leak more requests/sec than the limiter
@@ -711,6 +735,9 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       pathVars: opts.pathVars,
       options: checkRuntimeOptions,
       resourceConfigs: opts.resourceConfigs,
+      // ARV-227: same budget instance as the per-response phase so a
+      // cap of N applies to the whole run, not per-phase.
+      requestBudget,
     });
     const crudGroups = activeStateful.some((c) => c.phase === "crud") ? detectCrudGroups(allOps) : [];
     summary.checks_run += activeStateful.length;

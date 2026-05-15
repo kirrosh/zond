@@ -1,9 +1,10 @@
 ---
 id: ARV-227
 title: 'checks run --phase coverage: extreme slowness on large specs (R17/F32)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 10:12'
+updated_date: '2026-05-15 12:37'
 labels:
   - feedback-loop
   - api-github
@@ -36,3 +37,9 @@ Investigation hints:
 
 Log: see feedback-17.md F32. Likely shares root with F18 (ARV-214) — investigate together.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Часть hangs ARV-227 совпадает с корнем ARV-214 (per-endpoint schema-compile на больших dereferenced specs) — закрыто там же. Добавлен --max-requests <n> для checks run как hard-cap на исходящие HTTP-requests (общий budget для per-response + stateful через shared RequestBudget; cap=N = N requests за весь run). Превышение → cases short-circuit с reason 'max-requests-cap-reached' в summary.skipped_outcomes. CLI-флаг + проброс в runChecks + makeHarness.send. Regression-тест tests/regression/checks-max-requests.test.ts на mock-testbed: budget=1 даёт ровно 1 case + non-empty skipped, uncapped — больше cases. Progress-output (task #10) отложен — основная защита (cap) достаточна для bound'инга runs против github/kubernetes.
+<!-- SECTION:FINAL_SUMMARY:END -->
