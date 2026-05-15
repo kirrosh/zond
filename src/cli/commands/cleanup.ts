@@ -34,6 +34,45 @@ export interface CleanupOptions {
   timeoutMs?: number;
 }
 
+/**
+ * ARV-244 (R-04/F15): orphan records store `deletePath` as it was used at
+ * probe time — typically built by concatenating literal id segments captured
+ * from the response. CRLF / open-redirect probes can poison those ids with
+ * raw `\r`, `\n`, spaces, etc. (e.g. label name `zond-safe\rX-Zond: yes`),
+ * which makes the DELETE URL malformed: the API gets a request line with an
+ * embedded CR and silently splits or routes elsewhere → 404 → record stays
+ * in the queue and the resource leaks.
+ *
+ * Encode unsafe characters per path-segment while preserving anything that
+ * is already percent-encoded. Slashes (segment separators), the unreserved
+ * set, and a conservative slice of sub-delims are kept verbatim.
+ */
+export function encodeOrphanPath(deletePath: string): string {
+  const SAFE = /[A-Za-z0-9._~!$&'()*+,;=:@-]/;
+  return deletePath
+    .split("/")
+    .map((segment) => {
+      if (segment.length === 0) return segment;
+      let out = "";
+      for (let i = 0; i < segment.length; i++) {
+        const ch = segment.charAt(i);
+        // Preserve existing percent escapes (`%XX`) — probe pre-encoded.
+        if (ch === "%" && /^[0-9A-Fa-f]{2}$/.test(segment.slice(i + 1, i + 3))) {
+          out += segment.slice(i, i + 3);
+          i += 2;
+          continue;
+        }
+        if (SAFE.test(ch)) {
+          out += ch;
+        } else {
+          out += encodeURIComponent(ch);
+        }
+      }
+      return out;
+    })
+    .join("/");
+}
+
 export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
   if (!opts.orphans) {
     const m = "Nothing to do — pass --orphans to retry leaked probe resources.";
@@ -133,7 +172,7 @@ export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
     }
     baseUrlByApi.set(r.api, baseUrl);
 
-    const url = `${baseUrl.replace(/\/+$/, "")}${r.deletePath}`;
+    const url = `${baseUrl.replace(/\/+$/, "")}${encodeOrphanPath(r.deletePath)}`;
     try {
       const resp = await executeRequest(
         { method: "DELETE", url, headers: {} },
