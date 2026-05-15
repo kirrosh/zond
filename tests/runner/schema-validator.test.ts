@@ -401,4 +401,50 @@ describe("schema-validator", () => {
       expect(v.validate("GET", "/emails", 200, { created_at: "2026-13-29T07:10:44Z" })).toHaveLength(1);
     });
   });
+
+  describe("ARV-214 — oversized response schemas don't hang", () => {
+    function deepSchema(depth: number, branching: number): OpenAPIV3.SchemaObject {
+      if (depth === 0) return { type: "string" };
+      const props: Record<string, OpenAPIV3.SchemaObject> = {};
+      for (let k = 0; k < branching; k++) props[`f${k}`] = deepSchema(depth - 1, branching);
+      return { type: "object", properties: props as OpenAPIV3.SchemaObject["properties"] };
+    }
+
+    test("schema crossing ZOND_VALIDATE_SCHEMA_MAX_BYTES is skipped, not compiled", () => {
+      const prevMax = process.env.ZOND_VALIDATE_SCHEMA_MAX_BYTES;
+      process.env.ZOND_VALIDATE_SCHEMA_MAX_BYTES = "10000"; // 10 KiB cap
+      try {
+        // depth 5, branching 5 → ~10 KiB+ stringified — comfortably over the cap.
+        const fat = deepSchema(5, 5);
+        const v = buildValidator(fat);
+        const t0 = performance.now();
+        const result = v.validate("GET", "/emails", 200, { f0: { f0: "x" } });
+        const elapsed = performance.now() - t0;
+        // Must skip without invoking AJV compile — i.e. complete in
+        // milliseconds, not the seconds an actual compile would take on
+        // a deep schema. 200 ms is generous; the real path is < 5 ms.
+        expect(elapsed).toBeLessThan(200);
+        expect(result).toHaveLength(1);
+        expect(result[0]?.rule).toBe("schema.skipped_too_large");
+        expect(result[0]?.passed).toBe(true);
+      } finally {
+        if (prevMax === undefined) delete process.env.ZOND_VALIDATE_SCHEMA_MAX_BYTES;
+        else process.env.ZOND_VALIDATE_SCHEMA_MAX_BYTES = prevMax;
+      }
+    });
+
+    test("MAX_BYTES=0 disables the cap (parity with previous behaviour)", () => {
+      const prevMax = process.env.ZOND_VALIDATE_SCHEMA_MAX_BYTES;
+      process.env.ZOND_VALIDATE_SCHEMA_MAX_BYTES = "0";
+      try {
+        const v = buildValidator({ type: "object", properties: { x: { type: "string" } } });
+        // Same shape, normal validation path, no skip assertion.
+        const result = v.validate("GET", "/emails", 200, { x: 1 });
+        expect(result.some((a) => a.rule === "schema.skipped_too_large")).toBe(false);
+      } finally {
+        if (prevMax === undefined) delete process.env.ZOND_VALIDATE_SCHEMA_MAX_BYTES;
+        else process.env.ZOND_VALIDATE_SCHEMA_MAX_BYTES = prevMax;
+      }
+    });
+  });
 });
