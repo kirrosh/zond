@@ -236,9 +236,18 @@ zond checks run --api myapi --mode positive       # contract verification only
 zond checks run --api myapi --mode negative       # malicious-input probes only
 
 # Pick a phase
-zond checks run --api myapi --phase coverage      # deterministic boundary values
-zond checks run --api myapi --phase examples      # default — one positive + one negative per op
+zond checks run --api myapi --phase coverage      # ~×1.75 cases per op; real bug-hunt phase
+zond checks run --api myapi --phase examples      # default — 1 positive + 1 negative per op (smoke)
 ```
+
+**`--phase examples` is smoke, not depth.** It runs one positive + one
+negative example per operation, finishes ~3× faster, but routinely
+returns zero HIGH findings on well-formed APIs because boundary
+mutations never fire. For an actual bug-hunt sweep, pass
+`--phase coverage` — it expands each operation to ~×1.75 cases with
+deterministic boundary values (min/max ints, empty strings, length
+overflows, RFC-3339 edge dates, …). Use `examples` only for fast
+gate-keeping in CI; use `coverage` once before sign-off.
 
 `--allow-x00` adds the NUL byte (`\x00`) to string boundaries during
 coverage — off by default (some HTTP/JSON stacks panic on it).
