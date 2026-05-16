@@ -188,6 +188,8 @@ async function deriveResourceConfigsFromApi(
         limitParam: r.pagination.limit_param,
         defaultLimit: r.pagination.default_limit,
         itemsField: r.pagination.items_field,
+        pageParam: r.pagination.page_param,
+        startPage: r.pagination.start_page,
       };
     }
     if (r.lifecycle) {

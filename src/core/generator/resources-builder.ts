@@ -78,10 +78,12 @@ export interface IdempotencyConfig {
  * disjointness + has_more consistency.
  *
  * Supported types in this milestone:
- *   • `cursor` — Stripe/GitHub style: caller passes a cursor (e.g.
+ *   • `cursor` — Stripe-style: caller passes a cursor (e.g.
  *     `starting_after=<id>`) derived from the last item of the
- *     previous page. The check is built around this pattern.
- *   • `page` and `offset` — declared for forward compatibility; the
+ *     previous page.
+ *   • `page` — page-number style (GitHub, GitLab, Atlassian, Notion,
+ *     Linear): `?page=N&per_page=M`. ARV-220 enabled this in m-21.
+ *   • `offset` and `token` — declared for forward compatibility; the
  *     check currently skips with a "pagination type not implemented"
  *     reason so the yaml block stays a stable schema.
  *
@@ -178,19 +180,29 @@ export function validateLifecycleManifest(cfg: LifecycleConfig): string[] {
 export interface PaginationConfig {
   /** Pagination flavor. Default `cursor`. */
   type?: "cursor" | "page" | "offset" | "token";
-  /** Query-param name that takes the cursor value. Default `starting_after`. */
+  /** Query-param name that takes the cursor value. Default `starting_after`.
+   *  Only used when `type: cursor`. */
   cursorParam?: string;
-  /** Response field on each item that becomes the next cursor. Default `id`. */
+  /** Response field on each item that becomes the next cursor (cursor-style)
+   *  and the dedupe key when comparing pages (both styles). Default `id`. */
   cursorField?: string;
-  /** Response field that signals "more pages remain". Default `has_more`. */
+  /** Response field that signals "more pages remain". Default `has_more`.
+   *  Only consulted for `type: cursor` — page-style APIs typically rely on
+   *  Link headers or `total_pages` instead, so the field is ignored there. */
   hasMoreField?: string;
-  /** Query-param name for page size. Default `limit`. */
+  /** Query-param name for page size. Default `limit` for cursor-style,
+   *  `per_page` for page-style. */
   limitParam?: string;
   /** Probe page-size. Default 2 (small enough to land two replies fast). */
   defaultLimit?: number;
   /** Response field carrying the array of items. Default `data` (Stripe);
    *  falls back to `items` / `results` when missing. */
   itemsField?: string;
+  /** Page-number query-param name. Default `page`. Only used when `type: page`. */
+  pageParam?: string;
+  /** First page number (1-based on GitHub/GitLab, 0-based on some custom APIs).
+   *  Default 1. Only used when `type: page`. */
+  startPage?: number;
 }
 
 /** ARV-187: LLM-authored example POST body. Stateful checks prefer this
@@ -614,6 +626,8 @@ export function serializeApiResourceMap(m: ApiResourceMap): string {
       if (r.pagination.limitParam) lines.push(`      limit_param: ${escape(r.pagination.limitParam)}`);
       if (r.pagination.defaultLimit != null) lines.push(`      default_limit: ${r.pagination.defaultLimit}`);
       if (r.pagination.itemsField) lines.push(`      items_field: ${escape(r.pagination.itemsField)}`);
+      if (r.pagination.pageParam) lines.push(`      page_param: ${escape(r.pagination.pageParam)}`);
+      if (r.pagination.startPage != null) lines.push(`      start_page: ${r.pagination.startPage}`);
     }
     if (r.lifecycle) {
       lines.push(`    lifecycle:`);

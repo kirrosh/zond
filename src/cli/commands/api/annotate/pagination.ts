@@ -14,6 +14,8 @@ const PaginationSchema = z.object({
   limit_param: z.string().optional(),
   default_limit: z.number().int().positive().optional(),
   items_field: z.string().optional(),
+  page_param: z.string().optional(),
+  start_page: z.number().int().nonnegative().optional(),
 });
 
 const ResponseSchema = z.object({
@@ -26,13 +28,15 @@ const ResponseSchema = z.object({
 export const EXPECTED_OUTPUT_SHAPE = {
   resource: "string (echo input)",
   pagination: {
-    type: "cursor | page | offset | token",
-    cursor_param: "string (optional — query param carrying cursor value)",
-    cursor_field: "string (optional — response field that becomes next cursor)",
-    has_more_field: "string (optional — boolean response field signalling more)",
-    limit_param: "string (optional)",
-    default_limit: "integer (optional)",
+    type: "cursor | page | offset | token (cursor and page are implemented; offset/token short-circuit)",
+    cursor_param: "string (optional — only for type=cursor; query param carrying cursor value)",
+    cursor_field: "string (optional — for cursor: next-cursor field; for page: dedupe key across pages; default `id`)",
+    has_more_field: "string (optional — only for type=cursor; boolean response field signalling more)",
+    limit_param: "string (optional — page size param; default `limit` for cursor, `per_page` for page)",
+    default_limit: "integer (optional — probe page size; default 2)",
     items_field: "string (optional — response field carrying array)",
+    page_param: "string (optional — only for type=page; default `page`)",
+    start_page: "integer (optional — only for type=page; first page number, default 1; some APIs use 0)",
   },
   rationale: "string (optional)",
   confidence: "low | medium | high",

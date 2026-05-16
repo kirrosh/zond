@@ -101,12 +101,11 @@ Pragmatic режим (default) — реалистичный для production AP
 
 ## Phase pre-0 — Annotation (mandatory for `--check stateful`)
 
-> **Heads-up for `pagination_invariants`:** only cursor-style pagination
-> is implemented in this milestone (`cursor`/`next`-token responses).
-> APIs with `type: page` / `type: offset` (GitHub, Linear, Resend, …)
-> are accepted by `annotate apply` but the check short-circuits with
-> "type not implemented" — annotating page-based pagination has **no
-> runtime effect**, skip the dump+apply step for those resources.
+> **Heads-up for `pagination_invariants`:** `cursor` (Stripe-style) and
+> `page` (GitHub/GitLab/Atlassian/Notion-style `?page=N&per_page=M`)
+> are implemented. `offset` / `token` annotations parse but the check
+> short-circuits with "type not implemented" — skip dump+apply for
+> those resources until later milestones.
 
 m-20 stateful checks rely on per-resource config in
 `.api-resources.local.yaml` (overlay that survives `refresh-api`).
@@ -366,45 +365,61 @@ resources:
 Anti-FP: 429/409 on the 2nd POST → skip with cleanup. No DELETE on the
 group → finding still fires, evidence carries `cleanup_warning`.
 
-## Pagination invariants (m-20 ARV-171)
+## Pagination invariants (m-20 ARV-171, m-21 ARV-220)
 
-`pagination_invariants` — fetch two consecutive cursor pages and assert
-the contract holds:
+`pagination_invariants` — fetch two consecutive pages and assert the
+contract holds. Two styles implemented:
+
+**Cursor style** (Stripe / Notion / Linear, default when
+`starting_after` / `cursor` / `after` / `page_token` query param is
+detected):
 
 - **duplicate_items** — an item id appears on both page A and page B
   (off-by-one / cursor stops one short). HIGH-signal.
 - **has_more_inconsistent** — page A said `has_more=true`, but page B is
-  empty and doesn't flip to `has_more=false`. Surfaces broken end-of-list
-  signalling.
+  empty and doesn't flip to `has_more=false`. Broken end-of-list signal.
 - **partial_page_with_has_more** — page A returns fewer items than the
-  requested limit *yet* advertises `has_more=true`. Means the cursor is
-  prematurely truncating responses.
+  requested limit *yet* advertises `has_more=true`. Cursor truncates.
 
-Cursor-style only in this milestone (Stripe / GitHub / Resend / Linear
-pattern). `page` / `offset` / `token` declarations parse but the check
-short-circuits with a "type not implemented" reason so the yaml block
-stays a stable schema.
+**Page-number style** (GitHub / GitLab / Atlassian / Notion, default
+when `page` / `page_number` query param is detected):
 
-Auto-detect: if the list endpoint declares `starting_after` / `cursor` /
-`after` / `page_token` as a query parameter, the check runs with
-defaults (`cursor_field=id`, `items_field=data|items|results`,
-`has_more_field=has_more`, `limit=2`).
+- **duplicate_items** — items overlap across pages N and N+1.
+- **per_page_exceeded** — server returned more items than `per_page=N`
+  (e.g. asked for 2, got 5). `has_more` is NOT enforced — most APIs in
+  this family signal end-of-list via Link headers / `total_pages`.
+
+`offset` / `token` declarations parse but the check short-circuits with
+a "type not implemented" reason so the yaml block stays a stable schema.
+
+Defaults: `cursor_field=id`, `items_field=data|items|results|value`,
+`has_more_field=has_more`, `limit=2`. Page-style adds `page_param=page`,
+`start_page=1`, `limit_param=per_page`.
 
 Per-resource yaml override (author via Phase pre-0
 `annotate dump --pagination` → agent → `apply`):
 
 ```yaml
 resources:
-  - resource: customer
-    # … existing fields …
+  - resource: customer            # Stripe-style cursor
     pagination:
-      type: cursor                   # only cursor supported today
-      cursor_param: starting_after   # Stripe-style; "after" / "cursor" / "page_token" also work
-      cursor_field: id               # field on each item that feeds the next cursor
-      has_more_field: has_more       # response field that flips on end-of-list
-      limit_param: limit             # query param for page size
-      default_limit: 2               # probe page size — small on purpose
-      items_field: data              # array container (falls back to items / results / value)
+      type: cursor
+      cursor_param: starting_after  # Stripe; "after" / "cursor" / "page_token" also work
+      cursor_field: id              # field on each item that feeds the next cursor
+      has_more_field: has_more      # response field that flips on end-of-list
+      limit_param: limit
+      default_limit: 2
+      items_field: data             # array container (falls back to items / results / value)
+
+  - resource: issue               # GitHub-style page
+    pagination:
+      type: page
+      page_param: page              # query param carrying page number (default `page`)
+      start_page: 1                 # 1-based on GitHub/GitLab; 0 for some APIs
+      limit_param: per_page         # default `per_page` for page-style
+      default_limit: 2
+      cursor_field: id              # dedupe key across pages
+      items_field: data             # omit if response is a bare array
 ```
 
 ## Lifecycle transitions (m-20 ARV-172)
