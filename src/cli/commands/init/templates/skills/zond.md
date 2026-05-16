@@ -159,7 +159,8 @@ accept `--json` — use `--report json`.
 
 | User asked… | Start at |
 |---|---|
-| "audit this API", "test the whole API", "raise coverage" | Phase 0 → `zond audit --api <name>` (one-shot) OR walk Phase 0–8 |
+| "smoke this API", "quick first pass", "demo / CI gate" | `zond audit --api <name>` (breadth+coverage only) |
+| "audit this API", "test the whole API", "raise coverage", "deep pass" | walk Phase 0–9 — audit covers smoke; depth (stateful, security, learn-apply) needs phase-level decisions |
 | "find bugs", "test for 5xx", "probe sweep" | Phase 0 → Phase 7 (Probes) |
 | "security only / SSRF / CRLF" | Phase 7.2 directly with `--dry-run` first |
 | "deep depth-checks", "SARIF", "stateful invariants" | Hand off → `zond-checks` |
@@ -512,24 +513,40 @@ Offer this proactively after a run surfaces `definitely_bug`
 (5xx / schema violation / mass-assignment 2xx). Skip for `env_issue` /
 `quirk`.
 
-## One-shot full audit
+## One-shot smoke audit — `zond audit`
 
-`zond audit --api <name>` runs the whole pipeline in one shot:
-prepare-fixtures → generate → probe static → session-wrapped run on
-tests+probes → coverage → `audit-report.html`. Each stage prints
-`==> Stage N/M: <name>`; stage failure doesn't stop the rest; final
-exit 1 if any stage failed.
+**`zond audit` is the breadth pass, not "full audit".** It covers the
+*smoke + coverage* slice — prepare-fixtures → generate → probe static
+→ session-wrapped run on tests+probes → coverage → `audit-report.html`.
+Depth (stateful checks, security probes against R18 evidence-gates,
+m-20 annotate, `--learn-apply` iteration) is the **skill's job, not
+audit's**: those stages need decisions audit can't make
+(annotate-before-stateful, scoping after auth-cluster, evidence
+preconditions). Use audit for: CI smoke, demo, "first 5 minutes on a
+new API". For a real depth campaign, walk Phase 0–9 from this skill.
 
 ```bash
-zond audit --api <name> --dry-run                       # plan
+zond audit --api <name> --dry-run                       # print stage plan
 zond audit --api <name>                                  # minimal pipeline
 zond audit --api <name> --seed                           # add prepare-fixtures --cascade --seed
-zond audit --api <name> --with-mass-assignment --with-security
+zond audit --api <name> --with-mass-assignment --with-security   # add live probes (light depth)
 zond audit --api <name> --out reports/audit-<name>.html
 ```
 
+Each stage prints `==> Stage N/M: <name>` and a completion line
+`└─ OK · Ns` / `FAIL (exit K) · Ns` / `SKIPPED (reason)`. Exit 1 if
+any non-coverage stage failed.
+
 `generate` skipped via mtime when `tests/` is fresher than `spec.json`
 (pass `--force` to override).
+
+**Session reuse (ARV-65)**: if `.zond/current-session` is already set
+when audit starts (i.e. user ran `zond session start` first), audit
+reuses that session — `session-start` and `session-end` stages skip
+with reason `reusing active session <id>`. The user's session stays
+active after audit returns; runs inside audit are stamped with the
+outer `session_id` and roll up under the user's `coverage --union
+session` later.
 
 ARV-158: when any run inside the audit session has failures, the
 generated `audit-report.html` embeds a "Failures by run" section with
@@ -538,11 +555,6 @@ first example (method, path, status, reason) + concrete drill-down
 commands (`zond db diagnose --run-id N --json`, `zond report export
 N`). Triage starts from the rendered HTML; you only fall back to CLI
 queries when you need fields outside the example slice.
-
-**Gotchas**:
-- Wraps its own session — closes any prior `session start` silently.
-- Can exit 0 on failed stages (parse stdout `Warning: N failed`).
-- `audit-report.html` path not echoed by default — pass `--out`.
 
 When NOT to use audit: narrow asks ("fix run X", "why this endpoint
 500s") — walk phases.

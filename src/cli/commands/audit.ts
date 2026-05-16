@@ -34,6 +34,7 @@ import { getApi, MISSING_API_MESSAGE } from "../util/api-context.ts";
 import { jsonOk, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
 import { diagnoseRun, type DiagnoseResult } from "../../core/diagnostics/db-analysis.ts";
+import { readCurrentSession } from "../../core/context/session.ts";
 
 interface Stage {
   key: string;
@@ -146,11 +147,34 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
     });
   }
 
+  // ARV-65: if the user already has an active session, REUSE it — don't
+  // clobber their .zond/current-session by spawning audit's own. Skipping
+  // session-end is the critical half: otherwise audit clears the user's
+  // session even when start was a no-op.
+  const existingSession = readCurrentSession();
   const sessionLabel = `audit-${new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)}`;
-  stages.push({ key: "session-start", name: `session start (${sessionLabel})`, args: ["session", "start", "--label", sessionLabel] });
-  stages.push({ key: "run-tests", name: "run tests", args: ["run", join(apiDir, "tests"), "--api", api] });
-  stages.push({ key: "run-probes", name: "run probes", args: ["run", join(apiDir, "probes"), "--api", api] });
-  stages.push({ key: "session-end", name: "session end", args: ["session", "end"] });
+  if (existingSession) {
+    const reuseReason = `reusing active session ${existingSession.id}${existingSession.label ? ` (${existingSession.label})` : ""}`;
+    stages.push({
+      key: "session-start",
+      name: "session start (reused)",
+      args: ["session", "start", "--label", sessionLabel],
+      skip: () => reuseReason,
+    });
+    stages.push({ key: "run-tests", name: "run tests", args: ["run", join(apiDir, "tests"), "--api", api] });
+    stages.push({ key: "run-probes", name: "run probes", args: ["run", join(apiDir, "probes"), "--api", api] });
+    stages.push({
+      key: "session-end",
+      name: "session end (reused — kept active)",
+      args: ["session", "end"],
+      skip: () => reuseReason,
+    });
+  } else {
+    stages.push({ key: "session-start", name: `session start (${sessionLabel})`, args: ["session", "start", "--label", sessionLabel] });
+    stages.push({ key: "run-tests", name: "run tests", args: ["run", join(apiDir, "tests"), "--api", api] });
+    stages.push({ key: "run-probes", name: "run probes", args: ["run", join(apiDir, "probes"), "--api", api] });
+    stages.push({ key: "session-end", name: "session end", args: ["session", "end"] });
+  }
   // ARV-108: surface the post-stage coverage capture in the plan so the
   // dry-run listing matches the actual pipeline. The stage is special-cased
   // in auditCommand — we keep stdout for JSON parsing rather than inheriting.
@@ -175,13 +199,15 @@ async function runStage(stage: Stage, idx: number, total: number, json: boolean)
   const proc = Bun.spawn(cmd, { stdout: "inherit", stderr: "inherit" });
   const code = await proc.exited;
   const ms = Date.now() - t0;
-  return {
-    key: stage.key,
-    name: stage.name,
-    status: code === 0 ? "ok" : "failed",
-    exit_code: code,
-    duration_ms: ms,
-  };
+  const status: StageResult["status"] = code === 0 ? "ok" : "failed";
+  // ARV-66: print a per-stage completion line so the user sees OK/FAIL inline
+  // next to "Stage N/M" instead of inferring from the final summary. Subprocess
+  // stdio is inherited above, so this line lands AFTER the stage's own output.
+  if (!json) {
+    const tag = status === "ok" ? "OK" : `FAIL (exit ${code})`;
+    console.log(`    └─ ${tag} · ${(ms / 1000).toFixed(1)}s`);
+  }
+  return { key: stage.key, name: stage.name, status, exit_code: code, duration_ms: ms };
 }
 
 interface CoverageCapture {
@@ -284,6 +310,11 @@ export async function auditCommand(options: AuditOptions): Promise<number> {
               ? `coverage exited ${coverageCapture.exitCode}`
               : undefined,
       });
+      // ARV-66: per-stage completion line for the coverage special-case too.
+      if (!options.json) {
+        const tag = status === "ok" ? "OK" : status === "skipped" ? "SKIPPED" : `FAIL (exit ${coverageCapture.exitCode})`;
+        console.log(`    └─ ${tag} · ${(coverageCapture.durationMs / 1000).toFixed(1)}s`);
+      }
       continue;
     }
     results.push(await runStage(stage, i + 1, stages.length, options.json === true));
@@ -552,7 +583,7 @@ ${drilldownBlocks}
 export function registerAudit(program: Command): void {
   program
     .command("audit")
-    .description("Macro: prepare-fixtures → generate → probes → run → coverage → HTML report (TASK-262)")
+    .description("Smoke + breadth-coverage macro: prepare-fixtures → generate → probe static → session-wrapped run → coverage → HTML report. For depth-checks / security probes / stateful invariants, drive the `zond` skill — `audit` is the breadth pass, depth is the skill's job.")
     // ARV-29: not `requiredOption` — same regression that hit prepare-fixtures
     // (TASK-20) and checks run (TASK-17). Commander routes `--api` to the
     // program-level option, so the subcommand's opts.api ends up undefined and
