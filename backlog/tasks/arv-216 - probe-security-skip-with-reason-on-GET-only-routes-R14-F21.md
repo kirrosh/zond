@@ -1,10 +1,10 @@
 ---
 id: ARV-216
 title: 'probe security: skip-with-reason on GET-only routes (R14/F21)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 10:05'
-updated_date: '2026-05-16 07:35'
+updated_date: '2026-05-16 09:06'
 labels:
   - feedback-loop
   - api-github
@@ -35,5 +35,7 @@ Log: see feedback-14.md F21.
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-round-16 F21 withdrawn by tester — was artifact of narrow --include (GET-only routes); with broader scope (no --include) probe security shows clear skip reasons 'no-body', 'no-matched-field'. Skill drift SD16 still valid (Phase 7 docs don't mention vulnerable-field+body criterion). Reclassify to LOW skill-update.
+Closed as docs-only fix (R16 withdrew the missing-feature finding; targeting works — see security-probe-class.ts:58/71 skip_reason=no-body/no-matched-field).
+
+zond/SKILL.md Phase 7.2 (line 440-471) now documents both targeting filters explicitly: (1) endpoint must have JSON body, (2) ≥1 field name must match the class detectors (SSRF/CRLF/redirect/prompt-injection). Includes operator hint: '0 planned' under narrow --include means GET-only scope, drop --include to see per-endpoint reasons. Added prompt-injection detectors list (was missing).
 <!-- SECTION:NOTES:END -->
