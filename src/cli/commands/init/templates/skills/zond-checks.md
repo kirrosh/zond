@@ -74,6 +74,30 @@ Pragmatic режим (default) — реалистичный для production AP
 - **Auth headers are auto-derived from `--api <name>` `.env.yaml`**
   (`auth_token` → `Authorization: Bearer …`, `api_key` → `X-API-Key`).
   Add explicit ones with `--auth-header 'Name: value'` (repeatable).
+- **Prewarm a fresh workspace before `zond checks run`.** Right after
+  `zond add api <name>`, `.env.yaml` only has the auth skeleton — list
+  endpoints can return 401 until a `setup:` suite captures session
+  vars. Running `--check stateful` immediately surfaces dozens of
+  spurious `ignored_auth` / `report_backend_bug` findings (cold-state
+  race, F1/F18 in feedback loop). Fix: run one smoke pass first
+  (`zond run apis/<name>/tests --safe --report json` or `zond doctor
+  --api <name> --missing-only`), let `prepare-fixtures` warm
+  `.env.yaml`, then `zond checks run`.
+- **Treat per-check noise as fixture / generator drift, not a backend
+  bug.** Two checks are reliably noisy on production APIs and need a
+  pre-filter before triage:
+  - `positive_data_acceptance` — emits MEDIUM when a generated body is
+    rejected with 422. On APIs with **semantic validation** (Resend
+    domain ownership, Stripe currency vs country, …) this is almost
+    always `fix_generator` / `fix_fixture`, not `report_backend_bug`.
+    Inspect the 422 reason; if it mentions a business rule the
+    generator can't satisfy, file under `regenerate_suite` or annotate
+    `seed_body`.
+  - `response_schema_conformance` — HIGH on format-only mismatches
+    (`format: email` rejecting a free-form string the server returned)
+    is contract drift; HIGH on a field the server actually doesn't
+    persist is a backend bug. Use `cross_call_references` to
+    disambiguate before reporting.
 
 ## Phase pre-0 — Annotation (mandatory for `--check stateful`)
 

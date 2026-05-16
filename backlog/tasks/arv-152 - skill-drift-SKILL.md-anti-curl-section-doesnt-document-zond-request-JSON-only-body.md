@@ -3,10 +3,10 @@ id: ARV-152
 title: >-
   skill drift: SKILL.md anti-curl section doesn't document zond request
   JSON-only body
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 09:12'
-updated_date: '2026-05-16 07:35'
+updated_date: '2026-05-16 08:11'
 labels:
   - feedback-loop
   - skill-drift
@@ -30,3 +30,9 @@ Fix: after ARV-149 lands (zond request --form), update skill to mention 'use --f
 
 Log: $HANDOFF/rounds/feedback-02.md
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Updated zond.md anti-curl iron rule — documented --form flag for form-encoded APIs (Stripe v1), auto-detection hint via .api-catalog.yaml requestBody.content. ARV-149 dependency satisfied.
+<!-- SECTION:NOTES:END -->
