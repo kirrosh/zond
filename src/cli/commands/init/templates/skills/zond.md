@@ -508,6 +508,14 @@ zond audit --api <name> --out reports/audit-<name>.html
 `generate` skipped via mtime when `tests/` is fresher than `spec.json`
 (pass `--force` to override).
 
+ARV-158: when any run inside the audit session has failures, the
+generated `audit-report.html` embeds a "Failures by run" section with
+collapsible `<details>` per run — `by_recommended_action` buckets +
+first example (method, path, status, reason) + concrete drill-down
+commands (`zond db diagnose --run-id N --json`, `zond report export
+N`). Triage starts from the rendered HTML; you only fall back to CLI
+queries when you need fields outside the example slice.
+
 **Gotchas**:
 - Wraps its own session — closes any prior `session start` silently.
 - Can exit 0 on failed stages (parse stdout `Warning: N failed`).
