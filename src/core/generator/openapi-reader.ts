@@ -159,6 +159,12 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
         responses.some(r => r.statusCode === 412) ||
         parameters.some(p => p.name.toLowerCase() === "if-match" && p.in === "header");
 
+      // ARV-189: harvest `x-*` vendor extensions. Operation-level wins on
+      // key collision over path-level so spec authors can default at the
+      // path and override per-operation. Empty result = undefined (avoids
+      // a churn-y `extensions: {}` field in serialised endpoint snapshots).
+      const extensions = collectExtensions(pathItem, operation);
+
       endpoints.push({
         path,
         method: method.toUpperCase(),
@@ -173,6 +179,7 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
         security,
         deprecated: (operation.deprecated ?? false) || isMarkedDeprecatedInText(operation.summary, operation.description, operation.operationId),
         requiresEtag,
+        ...(extensions ? { extensions } : {}),
       });
     }
   }
@@ -182,6 +189,23 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
   // so the manifest derives per-resource vars and tests stop sharing one
   // global `id`. In-memory only; on-disk spec stays untouched.
   return disambiguateGenericPathParams(endpoints);
+}
+
+/** Collect `x-*` vendor extensions from a path item and operation,
+ *  with operation values winning on key collision. Returns undefined
+ *  when neither has any so callers can omit the field cleanly. */
+function collectExtensions(
+  pathItem: OpenAPIV3.PathItemObject,
+  operation: OpenAPIV3.OperationObject,
+): Record<string, unknown> | undefined {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(pathItem)) {
+    if (k.startsWith("x-")) out[k] = v;
+  }
+  for (const [k, v] of Object.entries(operation)) {
+    if (k.startsWith("x-")) out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** Spec authors often mark endpoints as deprecated in the summary or

@@ -28,6 +28,12 @@ export interface EndpointInfo {
   security: string[];
   deprecated?: boolean;
   requiresEtag?: boolean;
+  /** ARV-189 (m-21): vendor extensions starting with `x-` from the
+   *  operation (and merged from the path item — operation wins on key
+   *  collision). Used by the `x-zond-*` opt-in/skip rules so callers can
+   *  declare check-level policy directly in the spec without an overlay
+   *  yaml file. Empty/undefined when the spec carries no extensions. */
+  extensions?: Record<string, unknown>;
 }
 
 export interface SecuritySchemeInfo {

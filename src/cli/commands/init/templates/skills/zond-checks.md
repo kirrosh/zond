@@ -99,6 +99,46 @@ Pragmatic режим (default) — реалистичный для production AP
     persist is a backend bug. Use `cross_call_references` to
     disambiguate before reporting.
 
+## In-spec `x-zond-*` extensions (ARV-189, m-21)
+
+Low-friction per-endpoint policy via OpenAPI vendor extensions —
+when a single operation needs an exception, avoid the round-trip
+through `.api-resources.local.yaml`. Implemented today:
+
+| Extension | Type | Effect |
+|---|---|---|
+| `x-zond-skip: [check_id, …]` (or single string) | string\[] | skip those checks for this op |
+| `x-zond-public: true` | boolean | shortcut: skip auth-class checks (`ignored_auth`, `missing_required_header`) |
+
+Place at operation level (preferred) or path-item level — operation
+wins on key collision.
+
+```yaml
+paths:
+  /v1/public/status:
+    get:
+      x-zond-public: true                       # public health route
+      responses: { '200': { description: ok } }
+  /v1/admin/raw-debug:
+    get:
+      x-zond-skip: [status_code_conformance]    # known 500-on-bad-input
+      responses: { '500': { description: 'debug 500' } }
+```
+
+Skipped runs surface in `--report` `skipped_outcomes` as
+`<check>: x-zond-skip listed "<id>" at the spec level` or
+`<check>: x-zond-public: true (auth check suppressed …)` so the
+operator can tell spec-level suppression apart from runtime skips.
+
+Priority (highest first): `.api-resources.local.yaml` overlay >
+`x-zond-*` extensions > `.api-resources.yaml` baseline > built-in
+defaults. For one-shots use extensions; for resource-wide policy
+(`idempotency.header`, `lifecycle.field`, …) use the overlay yaml.
+
+Not yet implemented: `x-zond-resource` / `x-zond-idempotent` /
+`x-zond-lifecycle-field` — these need deeper overlay-config wiring
+and are tracked separately. Use `annotate apply` for those today.
+
 ## Phase pre-0 — Annotation (mandatory for `--check stateful`)
 
 > **Heads-up for `pagination_invariants`:** `cursor` (Stripe-style) and

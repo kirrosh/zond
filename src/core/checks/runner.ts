@@ -41,6 +41,7 @@ import { nowIso, type NdjsonEvent } from "../reporter/ndjson.ts";
 import { runPool } from "../runner/async-pool.ts";
 import type { RateLimiter } from "../runner/rate-limiter.ts";
 import { recommendForCheck } from "./recommended-action.ts";
+import { endpointSkipsCheck, reasonForSkip } from "./zond-extensions.ts";
 import {
   emptySummary,
   type CaseKind,
@@ -667,6 +668,15 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       for (const check of selection.selected) {
         if (!checkKinds(check).includes(built.case.kind)) continue;
         if (!check.applies(op)) continue;
+        // ARV-189: per-operation `x-zond-skip` / `x-zond-public` opt-out.
+        // Fires AFTER applies() so the applicability count still reflects
+        // the universe of checks that *would* have run; the spec-level
+        // skip is surfaced through the skipped-outcomes summary instead.
+        if (endpointSkipsCheck(op, check.id)) {
+          const key = `${check.id}: ${reasonForSkip(op, check.id)}`;
+          localSkipped[key] = (localSkipped[key] ?? 0) + 1;
+          continue;
+        }
         // ARV-60: applies()=true → bump applicability + cases-by-check.
         localApplicable.add(check.id);
         localCasesByCheck[check.id] = (localCasesByCheck[check.id] ?? 0) + 1;
@@ -797,7 +807,20 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     }
     for (const check of activeStateful) {
       if (check.phase === "auth") {
-        const applicable = ops.filter((op) => check.applies(op));
+        const allApplicable = ops.filter((op) => check.applies(op));
+        // ARV-189: spec-level x-zond-skip removes endpoints from the
+        // worker pool entirely. The skip is surfaced via skipped_outcomes
+        // so the operator sees how many ops were spec-suppressed.
+        const applicable: typeof allApplicable = [];
+        for (const op of allApplicable) {
+          if (endpointSkipsCheck(op, check.id)) {
+            const key = `${check.id}: ${reasonForSkip(op, check.id)}`;
+            summary.skipped_outcomes[key] = (summary.skipped_outcomes[key] ?? 0) + 1;
+            summary.cases += 1;
+            continue;
+          }
+          applicable.push(op);
+        }
         // ARV-60: track applicability + cases for spec_findings rollup.
         perCheckApplicable.set(check.id, (perCheckApplicable.get(check.id) ?? 0) + applicable.length);
         // ARV-154: track per-op cases + skip reasons for the stateful auth
@@ -850,7 +873,22 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           }
         }
       } else {
-        const applicable = crudGroups.filter((g) => check.applies(g));
+        const allApplicable = crudGroups.filter((g) => check.applies(g));
+        // ARV-189: spec-level x-zond-skip on the resource's canonical
+        // endpoint (create > list > read) opts the entire CRUD group
+        // out — `x-zond-skip: [...]` placed on POST /widgets suppresses
+        // every stateful check listed there for the whole widget chain.
+        const applicable: typeof allApplicable = [];
+        for (const g of allApplicable) {
+          const repOp = g.create ?? g.list ?? g.read;
+          if (repOp && endpointSkipsCheck(repOp, check.id)) {
+            const key = `${check.id}: ${reasonForSkip(repOp, check.id)}`;
+            summary.skipped_outcomes[key] = (summary.skipped_outcomes[key] ?? 0) + 1;
+            summary.cases += 1;
+            continue;
+          }
+          applicable.push(g);
+        }
         // ARV-60: track applicability + cases for spec_findings rollup.
         perCheckApplicable.set(check.id, (perCheckApplicable.get(check.id) ?? 0) + applicable.length);
         // ARV-154: mirror the auth-phase observability — count CRUD groups

@@ -1,10 +1,10 @@
 ---
 id: ARV-190
 title: 'Dynamic value functions в yaml: #(uuid), #(today), #(todayPlus(N))'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 12:06'
-updated_date: '2026-05-13 19:20'
+updated_date: '2026-05-16 09:45'
 labels:
   - m-20
   - dx
@@ -59,3 +59,23 @@ Pattern скопирован из Dochia. См. backlog/notes/m-20-validation.md
 - AC4: redaction registry автоматически регистрирует evaluated values если они от secrets
 - AC5: docs в zond-base.md skill
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented dynamic-value substitution in .env.yaml (m-21).
+
+New module src/core/parser/dynamic-values.ts:
+- resolveDynamicValues / resolveDynamicValuesDeep with per-call cache (Map<expression, value>) so repeated #(uuid) in one .env.yaml resolves to the same value within one run (critical for idempotency-replay multi-step flows; AC1).
+- Functions: uuid (random per cache-miss), uuidStable(seed) (sha-256 → v4-shape deterministic), today, todayPlus(N) (N may be negative), now, unix, alphanumeric(N) (default 8), env:VAR (alias to ${VAR}). All AC2-shaped.
+- Nested resolution: 'prefix-#(uuid)-#(today)' yields prefix-<uuid>-2026-MM-DD (AC3).
+- Helpful error messages: unknown function lists supported names; #(env:UNSET) tells operator where it came from; bad alphanumeric length is bounded 1..1024.
+
+Wired into loadEnvFile (variables.ts) right after ${ENV} interpolation, BEFORE @secret/@identity refs — secret-stored values that happen to contain #(...) stay opaque (security: anti-pattern from task description). Resolution order is now: ${env} → #() → @secret → @identity.
+
+Tests: 23 (parser/dynamic-values.test.ts) — every function, cache stability within/across runs, deterministic uuidStable, nested + multi-token strings, deep object walk, end-to-end loadEnvFile integration with a temp .env.yaml.
+
+zond.md skill section 'Dynamic value functions in .env.yaml' with table + yaml example + resolution-order note (AC5).
+
+NOT in this MVP: .api-resources.yaml/scenarios .yaml paths (task lists them) — deferred to a follow-up because those paths have their own loading semantics. AC4 (redaction registry hook for secret-derived values) not applicable: #() doesn't read from secrets in current resolution order. 2241/2241 unit tests; tsc clean.
+<!-- SECTION:NOTES:END -->
