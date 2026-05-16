@@ -377,6 +377,22 @@ describe("lifecycle_transitions — stateful check", () => {
     if (out.kind === "skip") expect(out.reason).toMatch(/state field "status" missing/);
   });
 
+  test("observation: GitHub-shape body picks the longest array (e.g. {workflow_runs:[...], total_count:42})", async () => {
+    const cfg = new Map([["subscription", { lifecycle: LIFECYCLE_NO_ACTIONS }]]);
+    const g: CrudGroup = { ...makeGroup(), list: makeList() };
+    const h = stubHarness([
+      r2xx({
+        total_count: 3,
+        workflow_runs: [
+          { id: 1, status: "active" },
+          { id: 2, status: "pending" },
+        ],
+      }),
+    ], cfg);
+    const out = await lifecycleTransitions.run(g, h);
+    expect(out.kind).toBe("pass");
+  });
+
   test("observation: unrecognised list body shape → skip", async () => {
     const cfg = new Map([["subscription", { lifecycle: LIFECYCLE_NO_ACTIONS }]]);
     const g: CrudGroup = { ...makeGroup(), list: makeList() };

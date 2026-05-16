@@ -308,7 +308,20 @@ function extractListItems(body: unknown): unknown[] | null {
     const v = obj[f];
     if (Array.isArray(v)) return v;
   }
-  return null;
+  // ARV-219 follow-up: GitHub-shape responses use API-specific keys
+  // (`workflow_runs`, `check_runs`, `artifacts`, `installations`, …)
+  // alongside metadata fields like `total_count`. Pick the longest
+  // array-valued property as the items collection — that's the
+  // canonical shape across the GitHub REST API. Wrong-array picks
+  // surface as `state field missing on all items` (informative skip),
+  // never as a finding.
+  let best: unknown[] | null = null;
+  for (const v of Object.values(obj)) {
+    if (Array.isArray(v) && (!best || v.length > best.length)) {
+      best = v as unknown[];
+    }
+  }
+  return best;
 }
 
 function pickSampleId(item: unknown, idParam: string): string | null {
