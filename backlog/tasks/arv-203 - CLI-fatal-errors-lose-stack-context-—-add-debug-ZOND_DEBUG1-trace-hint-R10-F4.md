@@ -3,10 +3,10 @@ id: ARV-203
 title: >-
   CLI: fatal errors lose stack/context — add --debug/ZOND_DEBUG=1 trace hint
   (R10/F4)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 08:11'
-updated_date: '2026-05-16 10:55'
+updated_date: '2026-05-16 11:20'
 labels:
   - feedback-loop
   - api-github
@@ -31,3 +31,9 @@ Actual: one bare error line, no hints.
 
 Log: any failing zond generate/prepare-fixtures call.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done 2026-05-16 (polish-m-22 batch-1): printError(msg, err?) now respects ZOND_DEBUG=1 (dumps stack) and prints a one-time hint about the env var otherwise (output.ts). Wired through generate.ts catch site; other catch sites will inherit when they migrate to the new signature.
+<!-- SECTION:NOTES:END -->

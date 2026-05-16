@@ -23,7 +23,7 @@
 
 import { existsSync, statSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Command } from "commander";
 import { globalJson } from "../resolve.ts";
 import { getDb } from "../../db/schema.ts";
@@ -379,7 +379,10 @@ export async function auditCommand(options: AuditOptions): Promise<number> {
     }));
   } else {
     console.log("");
-    const summary = `Audit complete (${results.length} stages, ${(totalMs / 1000).toFixed(1)}s) → ${out}`;
+    // ARV-80: print absolute path so the user can open the HTML report
+    // without traversing — `audit-report.html` (relative) hid the location
+    // behind cwd, especially when audit was invoked from a parent dir.
+    const summary = `Audit complete (${results.length} stages, ${(totalMs / 1000).toFixed(1)}s) → ${resolve(out)}`;
     if (failed === 0) {
       printSuccess(summary);
     } else {

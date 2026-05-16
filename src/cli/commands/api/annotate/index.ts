@@ -144,10 +144,20 @@ function buildDumpBundles(
     switch (kind) {
       case "seed-bodies":
       case "idempotency":
-      case "pagination":
       case "readback":
         data = sliceData(slice);
         break;
+      case "pagination": {
+        // ARV-235: when the list endpoint already declares standard
+        // page-style params, agent doesn't need to re-read the full
+        // params schema to produce the annotation — surface a precomputed
+        // hint so the response can be `{ type: page, page_param, limit_param }`
+        // without inspecting the spec slice further.
+        const hint = detectPaginationHint(slice);
+        const base = sliceData(slice) as Record<string, unknown>;
+        data = hint ? { ...base, pagination_hint: hint } : base;
+        break;
+      }
       case "lifecycle":
         data = {
           ...(sliceData(slice) as Record<string, unknown>),
@@ -173,6 +183,46 @@ function sliceData(slice: ResourceSlice): unknown {
     itemPath: slice.itemPath,
     endpoints: slice.endpoints,
   };
+}
+
+/**
+ * ARV-235: detect well-known page-style pagination params on the list
+ * endpoint so the dump's response shape becomes a one-liner for the
+ * agent. Returns null if the params don't match a known shape — the
+ * agent then walks the full slice as before.
+ */
+function detectPaginationHint(slice: ResourceSlice): null | {
+  detected_style: "page" | "offset";
+  page_param?: string;
+  limit_param?: string;
+  offset_param?: string;
+  note: string;
+} {
+  const list = slice.endpoints.list;
+  if (!list || !list.parameters) return null;
+  const queryNames = new Set(
+    list.parameters.filter((p) => p.in === "query").map((p) => p.name.toLowerCase()),
+  );
+  const pageParam = ["page"].find((n) => queryNames.has(n));
+  const limitParam = ["per_page", "page_size", "pagesize", "limit"].find((n) => queryNames.has(n));
+  const offsetParam = ["offset", "skip", "start"].find((n) => queryNames.has(n));
+  if (pageParam) {
+    return {
+      detected_style: "page",
+      page_param: pageParam,
+      limit_param: limitParam,
+      note: "list endpoint declares page-style params; respond with { type: 'page', page_param, limit_param } to skip rereading the full spec slice.",
+    };
+  }
+  if (offsetParam) {
+    return {
+      detected_style: "offset",
+      offset_param: offsetParam,
+      limit_param: limitParam,
+      note: "list endpoint declares offset-style params; pagination check short-circuits offset/token (per m-20). Skip annotation for this resource or return { pagination: null }.",
+    };
+  }
+  return null;
 }
 
 function isSliceApplicable(kind: SubcommandKind, slice: ResourceSlice): boolean {
