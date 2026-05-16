@@ -234,6 +234,36 @@ cannot harvest a value (write-only ingest endpoints, SDK-only ids,
 slugs that live in user's project config). Touch values only — never
 add keys not in `.api-fixtures.yaml`.
 
+### Dynamic value functions in `.env.yaml` (ARV-190, m-21)
+
+Stale hardcoded UUIDs / dates / idempotency keys pin existing rows or
+expire mid-run. Use `#(funcName)` / `#(funcName(args))` references —
+evaluated at load time, stable within one run:
+
+| Token | Resolves to | Use for |
+|---|---|---|
+| `#(uuid)` | fresh UUID v4 (same value across all references in this run) | Idempotency-Key, request id |
+| `#(uuidStable(<seed>))` | deterministic UUID from seed (sha-256 shaped as v4) | reproducible tests |
+| `#(today)` | `YYYY-MM-DD` (UTC) | expiry-from dates |
+| `#(todayPlus(N))` | today + N days (N may be negative) | expires_at, valid_until |
+| `#(now)` | ISO 8601 timestamp | created_at hints |
+| `#(unix)` | seconds since epoch | epoch timestamps |
+| `#(alphanumeric(N))` | N random `[a-z0-9]` chars (default 8) | one-shot tokens |
+| `#(env:VAR)` | `process.env.VAR` (alias for `${VAR}`) | secrets passed through |
+
+```yaml
+# apis/foo/.env.yaml
+idempotency_key: "#(uuid)"          # same uuid across every step in this run
+trial_expires:   "#(todayPlus(30))"  # 30 days from now
+request_id:      "req-#(uuid)"       # embedded; shares uuid with above
+```
+
+Resolution order: `${ENV}` → `#(...)` → `@secret:` → `@identity:`. Dynamic
+functions run BEFORE secret/identity refs so a secret value that happens to
+contain `#(...)` stays opaque (no double-expansion). Per-run cache means
+`#(uuid)` referenced twice in the same `.env.yaml` returns the same value
+— critical for idempotency-replay flows.
+
 ## Phase 2 — Annotate (NEW, m-20 / ARV-187)
 
 **Critical**: zond itself does NOT call any LLM. The flow is
