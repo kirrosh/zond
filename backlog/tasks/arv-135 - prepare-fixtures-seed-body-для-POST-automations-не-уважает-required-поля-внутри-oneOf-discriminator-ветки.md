@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-11 17:53'
+updated_date: '2026-05-16 08:26'
 labels:
   - feedback-loop
   - api-resend
@@ -42,3 +43,13 @@ Log: ~/Projects/zond-test/.fb-loop/rounds/raw-01.log (Seed attempts), apis/resen
 - [ ] #3 regression: POST /automations seed-attempt у resend перестаёт получать 422 'Missing steps/config/event_name'
 - [ ] #4 если ни одна ветка oneOf не резолвится — explicit miss-reason 'unresolvable-discriminator-branch' (не silent skip)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Cross-ref update (2026-05-16): the deeply-nested oneOf/discriminator gap is now explicitly documented as a known limitation in src/cli/commands/init/templates/skills/zond.md Phase 1 (closed via ARV-94, commit bacbfa3). Doc-side workaround: agents are told to escape via annotate seed_body or zond fixtures add when --seed loops.
+
+ARV-135 = the actual builder-side fix that would obviate the caveat. Until shipped, the caveat is the user-facing contract.
+
+When implementing: also remove the 'silver bullet caveat' paragraph from zond.md Phase 1, OR update it to say 'rare edge cases only'. Coordinate with ARV-94 docstring in the same commit.
+<!-- SECTION:NOTES:END -->

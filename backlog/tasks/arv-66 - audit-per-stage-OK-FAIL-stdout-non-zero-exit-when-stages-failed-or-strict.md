@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-11 06:50'
-updated_date: '2026-05-16 07:35'
+updated_date: '2026-05-16 08:25'
 labels:
   - feedback-loop
   - api-resend
@@ -24,5 +24,10 @@ Source: feedback round 01, finding F6, class likely_bug. Repro: zond audit --api
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Merged ARV-136 (validation-sprint 2026-05-16): run --safe verify-skip cascade — часть UX-clarity audit pipeline (per-stage OK/FAIL + exit codes).
+Correction (2026-05-16): prior Implementation Notes line 'Merged ARV-136 (validation-sprint 2026-05-16): run --safe verify-skip cascade' is INCORRECT — ARV-136 is still To Do (separate scope). ARV-66 scope is ONLY:
+1. per-stage OK/FAIL stdout next to 'Stage N/M'
+2. non-zero exit when any stage failed (or --strict flag)
+3. audit-report.html path echoed on success
+
+Do NOT bundle with ARV-136. Verified 2026-05-16: 'zond audit --help' still has no --strict / per-stage status. Keep MEDIUM.
 <!-- SECTION:NOTES:END -->
