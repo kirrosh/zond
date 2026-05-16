@@ -13,7 +13,7 @@
 
 import type { EndpointInfo, CrudGroup } from "./types.ts";
 import type { OpenAPIV3 } from "openapi-types";
-import { detectCrudGroups } from "./suite-generator.ts";
+import { detectCrudGroups, singularizeResource } from "./suite-generator.ts";
 
 export interface ResourceFkRef {
   /** Variable name expected in `.env.yaml` to satisfy the FK (e.g. `audience_id`). */
@@ -266,6 +266,91 @@ function isParamSeg(seg: string | undefined): boolean {
   return !!seg && /^\{[^}]+\}$/.test(seg);
 }
 
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * ARV-134 (resource-builder fix #1): when two CRUD groups would collide on
+ * the same `resource` name (e.g. `POST /segments` and `POST /contacts/
+ * {contact_id}/segments` both produce `resource: "segments"`), keep the
+ * canonical (shortest basePath) entry and rename the nested ones to
+ * `<parent-noun>_<resource>` — `contact_segments` here. Without this,
+ * `.api-resources.yaml` ends up with duplicate entries that break
+ * map-by-name lookups (annotate overlay, refresh-api idempotence,
+ * stateful-check resource configs).
+ */
+function disambiguateResourceCollisions(groups: CrudGroup[]): CrudGroup[] {
+  const byName = new Map<string, CrudGroup[]>();
+  for (const g of groups) {
+    const arr = byName.get(g.resource) ?? [];
+    arr.push(g);
+    byName.set(g.resource, arr);
+  }
+
+  const renames = new Map<CrudGroup, string>();
+  const usedNames = new Set<string>(byName.keys());
+
+  for (const [name, members] of byName) {
+    if (members.length < 2) continue;
+    // Canonical name goes to the entry with the *strictly* shortest
+    // basePath (the top-level collection in the typical /segments vs
+    // /contacts/{id}/segments case). If two members tie for shortest,
+    // there is no obvious winner — rename all of them so the yaml never
+    // silently picks one arbitrary entry as canonical.
+    const sorted = [...members].sort((a, b) => a.basePath.length - b.basePath.length);
+    const shortest = sorted[0]!.basePath.length;
+    const tiedAtShortest = sorted.filter(g => g.basePath.length === shortest).length;
+    const startFromIndex = tiedAtShortest === 1 ? 1 : 0;
+
+    for (let i = startFromIndex; i < sorted.length; i++) {
+      const g = sorted[i]!;
+      const prefix = parentNounForBasePath(g.basePath);
+      const singularPrefix = prefix ? singularizeResource(prefix) : null;
+      let candidate = singularPrefix ? `${singularPrefix}_${name}` : `${name}_${i + 1}`;
+      let n = 2;
+      while (usedNames.has(candidate)) {
+        candidate = singularPrefix ? `${singularPrefix}_${name}_${n++}` : `${name}_${n++}`;
+      }
+      usedNames.add(candidate);
+      renames.set(g, candidate);
+    }
+  }
+
+  if (renames.size === 0) return groups;
+  return groups.map(g => (renames.has(g) ? { ...g, resource: renames.get(g)! } : g));
+}
+
+function parentNounForBasePath(basePath: string): string | null {
+  const segs = pathStripSlash(basePath).split("/").filter(Boolean);
+  // Skip the last segment (the resource itself); walk back to the nearest
+  // non-param noun. `/contacts/{contact_id}/segments` → "contacts".
+  for (let i = segs.length - 2; i >= 0; i--) {
+    if (!isParamSeg(segs[i])) return segs[i]!;
+  }
+  return null;
+}
+
+/**
+ * ARV-134 (resource-builder fix #2): for an implicit list-only resource
+ * (no CRUD group), look for a GET-by-id companion endpoint that gives us
+ * a real idParam + itemPath. Resend's `/logs/{log_id}` and `/automations/
+ * {automation_id}/runs/{run_id}` were getting `idParam: ""` because the
+ * implicit-resource constructor never inspected the spec for their item
+ * endpoints — `prepare-fixtures` then skipped them.
+ */
+function findItemEndpointForListPath(
+  listPath: string,
+  endpoints: EndpointInfo[],
+): EndpointInfo | null {
+  const itemRe = new RegExp(`^${escapeRegex(listPath)}/\\{([^}]+)\\}/?$`);
+  for (const ep of endpoints) {
+    if (ep.method.toUpperCase() !== "GET" || ep.deprecated) continue;
+    if (itemRe.test(pathStripSlash(ep.path))) return ep;
+  }
+  return null;
+}
+
 function getCaptureField(create: EndpointInfo): string {
   // Look at the create endpoint's success response schema for an `id`-ish
   // field. Falls back to "id" — the universal default.
@@ -442,8 +527,17 @@ export interface BuildResourcesParams {
 }
 
 export function buildApiResourceMap(params: BuildResourcesParams): ApiResourceMap {
-  const groups = detectCrudGroups(params.endpoints);
+  const groups = disambiguateResourceCollisions(detectCrudGroups(params.endpoints));
   const ownerListPaths = resolveOwnerListPaths(params.endpoints);
+
+  // ARV-134: reverse-index ownerListPaths so implicit resources can fall
+  // back to the FK param name when no direct GET-by-id companion exists.
+  const paramsByListPath = new Map<string, string[]>();
+  for (const [param, listPath] of ownerListPaths) {
+    const arr = paramsByListPath.get(listPath) ?? [];
+    arr.push(param);
+    paramsByListPath.set(listPath, arr);
+  }
 
   // Index CRUD-group list paths by normalised path so the FK resolver can
   // hand back the resource name a structural lookup pointed at.
@@ -472,14 +566,45 @@ export function buildApiResourceMap(params: BuildResourcesParams): ApiResourceMa
     );
     if (!listEp) continue;
     const name = listPathToResourceName(listPath);
+
+    // ARV-134: try to recover idParam + itemPath from a GET-by-id companion
+    // (e.g. implicit `logs` at `/logs` + `GET /logs/{log_id}` → log_id).
+    // Falls back to the reverse-indexed ownerListPaths param when no direct
+    // item endpoint exists — preferring a name that matches the resource's
+    // singular form so e.g. `attachment_id` wins over a sibling FK that
+    // happens to point at the same list path.
+    const itemEp = findItemEndpointForListPath(listPath, params.endpoints);
+    let idParam = "";
+    let itemPath = "";
+    const endpoints: ApiResourceEntry["endpoints"] = { list: epLabel(listEp) };
+    if (itemEp) {
+      const m = pathStripSlash(itemEp.path).match(/\{([^}]+)\}\/?$/);
+      if (m) {
+        idParam = m[1]!;
+        itemPath = itemEp.path;
+        endpoints.read = epLabel(itemEp);
+      }
+    }
+    if (!idParam) {
+      const candidates = paramsByListPath.get(listPath) ?? [];
+      if (candidates.length > 0) {
+        const singular = singularizeResource(name).toLowerCase();
+        const preferred = candidates.find(p => {
+          const lower = p.toLowerCase();
+          return lower === singular || lower.startsWith(`${singular}_`);
+        });
+        idParam = preferred ?? candidates[0]!;
+      }
+    }
+
     implicitResources.push({
       resource: name,
       basePath: listPath,
-      itemPath: "",
-      idParam: "",
+      itemPath,
+      idParam,
       captureField: "id",
       hasFullCrud: false,
-      endpoints: { list: epLabel(listEp) },
+      endpoints,
       fkDependencies: [],
     });
     resourceByListPath.set(listPath, name);

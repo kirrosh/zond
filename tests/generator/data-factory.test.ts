@@ -934,3 +934,148 @@ describe("discriminator-aware oneOf variant selection (ARV-78)", () => {
     expect(body.steps[0]!.config!.event_name).toBeDefined();
   });
 });
+
+describe("ARV-135 — variant selection prefers fewest-unresolvable-required + mapping fallback", () => {
+  test("picks the more-complete variant when the first one has unresolvable required fields", () => {
+    // Variant A is listed first AND has the single-enum discriminator, but
+    // it declares required:[type, config, event_name] without `event_name`
+    // in properties — the generator can't synthesise event_name and the
+    // server 422s with "Missing event_name". Variant B has all required
+    // fields resolvable; the new scorer must prefer B.
+    const schema: OpenAPIV3.SchemaObject = {
+      discriminator: { propertyName: "type" },
+      oneOf: [
+        {
+          type: "object",
+          required: ["type", "config", "event_name"],
+          properties: {
+            type: { type: "string", enum: ["trigger"] },
+            config: { type: "object" },
+            // event_name MISSING from properties → unresolvable required
+          },
+        },
+        {
+          type: "object",
+          required: ["type", "name"],
+          properties: {
+            type: { type: "string", enum: ["action"] },
+            name: { type: "string" },
+          },
+        },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const body = generateFromSchema(schema) as Record<string, unknown>;
+    expect(body.type).toBe("action"); // B picked because A had 1 unresolvable
+    expect(body.name).toBeDefined();
+  });
+
+  test("when both variants are equally resolvable, the discriminator-tagged one wins over the untagged one", () => {
+    const schema: OpenAPIV3.SchemaObject = {
+      discriminator: { propertyName: "type" },
+      oneOf: [
+        // No discriminator enum/const, but otherwise complete.
+        {
+          type: "object",
+          required: ["type"],
+          properties: { type: { type: "string" }, payload: { type: "string" } },
+        },
+        // Has single-enum discriminator → tie-breaks ahead.
+        {
+          type: "object",
+          required: ["type"],
+          properties: { type: { type: "string", enum: ["chosen"] }, x: { type: "string" } },
+        },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const body = generateFromSchema(schema) as Record<string, unknown>;
+    expect(body.type).toBe("chosen");
+  });
+
+  test("discriminator.mapping fills the stamped value when the picked variant has no inline enum/const", () => {
+    // Stripe/Linear-style: variants declare shape via mapping, not inline.
+    const schema: OpenAPIV3.SchemaObject = {
+      discriminator: {
+        propertyName: "kind",
+        mapping: { primary: "#/components/schemas/Primary", secondary: "#/components/schemas/Secondary" },
+      },
+      oneOf: [
+        {
+          type: "object",
+          required: ["kind", "label"],
+          properties: {
+            kind: { type: "string" }, // no enum/const
+            label: { type: "string" },
+          },
+        },
+        {
+          type: "object",
+          required: ["kind", "tag"],
+          properties: {
+            kind: { type: "string" },
+            tag: { type: "string" },
+          },
+        },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const body = generateFromSchema(schema) as Record<string, unknown>;
+    expect(body.kind).toBe("primary"); // first mapping key
+  });
+
+  test("F24/ARV-135 repro: deeply-nested oneOf where the first inline variant is incomplete", () => {
+    // Mirrors the Resend automations failure: outer schema is fine, but
+    // `steps[].config` is itself oneOf and the spec-order-first variant
+    // lacks `event_name` from properties despite requiring it.
+    const configSchema: OpenAPIV3.SchemaObject = {
+      discriminator: { propertyName: "config_kind" },
+      oneOf: [
+        {
+          type: "object",
+          required: ["config_kind", "event_name"],
+          properties: {
+            config_kind: { type: "string", enum: ["event"] },
+            // event_name MISSING — first variant cannot fully satisfy required.
+          },
+        },
+        {
+          type: "object",
+          required: ["config_kind", "event_name", "timing"],
+          properties: {
+            config_kind: { type: "string", enum: ["scheduled"] },
+            event_name: { type: "string" },
+            timing: { type: "string" },
+          },
+        },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const stepSchema: OpenAPIV3.SchemaObject = {
+      discriminator: { propertyName: "type" },
+      oneOf: [
+        {
+          type: "object",
+          required: ["type", "config"],
+          properties: {
+            type: { type: "string", enum: ["trigger"] },
+            config: configSchema,
+          },
+        },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const body = generateFromSchema(stepSchema) as { type: string; config: Record<string, unknown> };
+    expect(body.type).toBe("trigger");
+    // The inner config oneOf must pick the variant with event_name resolvable.
+    expect(body.config.config_kind).toBe("scheduled");
+    expect(body.config.event_name).toBeDefined();
+    expect(body.config.timing).toBeDefined();
+  });
+
+  test("regression: still skips type:null variants (3.1 nullable shorthand)", () => {
+    const schema: OpenAPIV3.SchemaObject = {
+      oneOf: [
+        { type: "null" } as unknown as OpenAPIV3.SchemaObject,
+        { type: "object", properties: { x: { type: "string" } } },
+      ],
+    } as unknown as OpenAPIV3.SchemaObject;
+    const body = generateFromSchema(schema);
+    expect(typeof body).toBe("object");
+  });
+});
