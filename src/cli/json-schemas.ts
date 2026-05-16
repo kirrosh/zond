@@ -179,6 +179,10 @@ export const NdjsonCheckResultEventSchema = z.object({
   type: z.literal("check_result"),
   ts: z.string(),
   check: z.string(),
+  // ARV-215: severity from the registry (mirrors `zond checks list`
+  // [high|medium|low]). Lets consumers group NDJSON by severity without
+  // re-joining against the registry.
+  severity: z.enum(["info", "low", "medium", "high", "critical"]),
   verdict: z.enum(["pass", "fail"]),
   operation: OperationRefSchema,
   request_signature: z.string(),
