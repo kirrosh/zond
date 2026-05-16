@@ -27,6 +27,7 @@ import {
   type NdjsonCheckResultEventSchema,
   type NdjsonFindingEventSchema,
   type NdjsonSummaryEventSchema,
+  type NdjsonSpecFindingEventSchema,
 } from "../../../src/cli/json-schemas.ts";
 import type { z } from "zod";
 
@@ -34,6 +35,7 @@ type AnyEvent =
   | z.infer<typeof NdjsonCheckStartEventSchema>
   | z.infer<typeof NdjsonCheckResultEventSchema>
   | z.infer<typeof NdjsonFindingEventSchema>
+  | z.infer<typeof NdjsonSpecFindingEventSchema>
   | z.infer<typeof NdjsonSummaryEventSchema>;
 
 describe("zond checks --ndjson reporter (ARV-10)", () => {

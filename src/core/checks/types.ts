@@ -171,9 +171,54 @@ export interface CheckRunSummary {
   skipped_outcomes: Record<string, number>;
 }
 
+/** ARV-60: spec-level rollup of a systemic gap that manifests on N
+ *  operations. When ≥80% of a check's applicable operations share the same
+ *  root cause (same response status undeclared, same missing-schema skip
+ *  reason, or zero cases when a detector finds no pair), the runner emits
+ *  a single `SpecFinding` instead of (or in addition to) the N per-op rows.
+ *
+ *  Consumed by the CLI to print one summary line; surfaced verbatim in the
+ *  JSON envelope and as a dedicated `spec_finding` NDJSON event. Per-op
+ *  findings are NOT removed from `findings[]` — agents that prefer per-op
+ *  triage keep their existing surface; agents that triage by spec hit just
+ *  one row per drift. */
+export interface SpecFinding {
+  check: string;
+  /** Classifier so consumers can branch:
+   *  - `status_drift`: response status code clustered across operations
+   *    (status_code_conformance / negative_data_rejection / ignored_auth).
+   *  - `missing_declaration`: every applicable case skipped for the same
+   *    "spec didn't declare X" reason (response_schema_conformance,
+   *    response_headers_conformance).
+   *  - `no_detector`: check is applicable to ≥5 operations but ran 0 cases
+   *    (use_after_free without DELETE+GET pair, cross_call_references
+   *    without followups in scope).
+   *  - `other`: skip-cluster that doesn't fit the above. */
+  kind: "status_drift" | "missing_declaration" | "no_detector" | "other";
+  /** Severity inherited from the underlying findings (status_drift) or
+   *  fixed to "info" for missing_declaration / no_detector — those signal
+   *  "spec gap, not server bug" so the team knows where to act. */
+  severity: Severity;
+  category?: Category;
+  /** One-line root cause statement — surfaces what zond observed. */
+  reason: string;
+  /** Actionable next step. References a spec edit, a tolerate flag, or
+   *  another zond command. Empty string when no automatic suggestion. */
+  fix_hint: string;
+  /** Operations the rollup covers (path + method). count = length. */
+  affected_operations: Array<{ path: string; method: string; operationId?: string }>;
+  count: number;
+  /** Applicable population the cluster was measured against. ratio =
+   *  count / applicable. Lets consumers re-threshold without re-running. */
+  applicable: number;
+}
+
 export interface CheckRunData {
   findings: CheckFinding[];
   summary: CheckRunSummary;
+  /** ARV-60: spec-level rollup, see SpecFinding. Always present (empty
+   *  array when no clusters cross the 80% threshold). */
+  spec_findings: SpecFinding[];
 }
 
 export function emptySummary(): CheckRunSummary {

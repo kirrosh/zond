@@ -130,9 +130,31 @@ export const CheckRunSummarySchema = z.object({
   skipped_outcomes: z.record(z.string(), z.number().int().nonnegative()),
 });
 
+/** ARV-60: spec-level rollup row. Emitted when ≥80% of a check's
+ *  applicable operations share the same root cause (status drift,
+ *  missing-declaration skip cluster, or no-detector zero-case). Lives in
+ *  `data.spec_findings` and as its own `spec_finding` NDJSON event. */
+export const SpecFindingSchema = z.object({
+  check: z.string(),
+  kind: z.enum(["status_drift", "missing_declaration", "no_detector", "other"]),
+  severity: SeveritySchema,
+  category: CategorySchema.optional(),
+  reason: z.string(),
+  fix_hint: z.string(),
+  affected_operations: z.array(z.object({
+    path: z.string(),
+    method: z.string(),
+    operationId: z.string().optional(),
+  })),
+  count: z.number().int().nonnegative(),
+  applicable: z.number().int().nonnegative(),
+});
+
 export const ChecksRunDataSchema = z.object({
   findings: z.array(CheckFindingSchema),
   summary: CheckRunSummarySchema,
+  // ARV-60: always present (empty array when no clusters cross 80%).
+  spec_findings: z.array(SpecFindingSchema),
 });
 
 /** ARV-10 (m-15): NDJSON streaming events emitted by `zond checks run
@@ -184,10 +206,22 @@ export const NdjsonSummaryEventSchema = z.object({
   summary: CheckRunSummarySchema,
 });
 
+/** ARV-60: rolled-up spec-level finding event. Emitted before the
+ *  terminal `summary` event so streaming consumers see clusters in the
+ *  same order the CLI renders them. Per-op `finding` events are NOT
+ *  removed — both layers coexist. */
+export const NdjsonSpecFindingEventSchema = z.object({
+  type: z.literal("spec_finding"),
+  ts: z.string(),
+  check: z.string(),
+  spec_finding: SpecFindingSchema,
+});
+
 export const NdjsonEventSchema = z.discriminatedUnion("type", [
   NdjsonCheckStartEventSchema,
   NdjsonCheckResultEventSchema,
   NdjsonFindingEventSchema,
+  NdjsonSpecFindingEventSchema,
   NdjsonSummaryEventSchema,
 ]);
 
