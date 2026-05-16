@@ -51,6 +51,10 @@ import {
   type CheckRunSummary,
 } from "./types.ts";
 import { categoryFor } from "../severity/category.ts";
+import {
+  computeSpecFindings,
+  type PerCheckObservations,
+} from "./spec-findings.ts";
 
 export interface RunChecksOptions {
   specPath: string;
@@ -562,12 +566,25 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     cases: number;
     /** ARV-26: skip-outcome counts keyed by `"<check_id>: <reason>"`. */
     skipped: Record<string, number>;
+    /** ARV-60: check ids that returned `applies(op) === true` for this
+     *  operation. Counted at merge-time to derive each check's
+     *  applicable-operation population for spec_findings rollup. One
+     *  entry per check per op (deduplicated within the op). */
+    applicableChecks: string[];
+    /** ARV-60: per-check case count for this op (passed + failed +
+     *  skipped). Summed at merge-time. */
+    casesByCheck: Record<string, number>;
   }
 
   async function processOperation(op: EndpointInfo): Promise<OpReport> {
     const localFindings: CheckFinding[] = [];
     let localCases = 0;
     const localSkipped: Record<string, number> = {};
+    // ARV-60: per-check observations for this op — `applies()` membership
+    // and case-count. Deduplicated within the op (one applies-vote per
+    // check regardless of how many case kinds we generate against it).
+    const localApplicable = new Set<string>();
+    const localCasesByCheck: Record<string, number> = {};
     if (opts.onEvent) {
       opts.onEvent({
         type: "check_start",
@@ -650,6 +667,9 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       for (const check of selection.selected) {
         if (!checkKinds(check).includes(built.case.kind)) continue;
         if (!check.applies(op)) continue;
+        // ARV-60: applies()=true → bump applicability + cases-by-check.
+        localApplicable.add(check.id);
+        localCasesByCheck[check.id] = (localCasesByCheck[check.id] ?? 0) + 1;
         const outcome = check.run({
           case: built.case,
           response: checkResp,
@@ -679,7 +699,13 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
         }
       }
     }
-    return { findings: localFindings, cases: localCases, skipped: localSkipped };
+    return {
+      findings: localFindings,
+      cases: localCases,
+      skipped: localSkipped,
+      applicableChecks: [...localApplicable],
+      casesByCheck: localCasesByCheck,
+    };
   }
 
   // ARV-8: parallelize the op-loop. workers=1 (default) preserves the
@@ -689,10 +715,22 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   const opReports = await runPool(ops, workers, processOperation);
 
   const findings: CheckFinding[] = [];
+  /** ARV-60: per-check accumulator for spec_findings rollup. Built from
+   *  the per-op `applicableChecks` and `casesByCheck` fields each worker
+   *  returns; skipped is reconstructed from `summary.skipped_outcomes`
+   *  after the loop. */
+  const perCheckApplicable: Map<string, number> = new Map();
+  const perCheckCases: Map<string, number> = new Map();
   for (const report of opReports) {
     summary.cases += report.cases;
     for (const [key, n] of Object.entries(report.skipped)) {
       summary.skipped_outcomes[key] = (summary.skipped_outcomes[key] ?? 0) + n;
+    }
+    for (const id of report.applicableChecks) {
+      perCheckApplicable.set(id, (perCheckApplicable.get(id) ?? 0) + 1);
+    }
+    for (const [id, n] of Object.entries(report.casesByCheck)) {
+      perCheckCases.set(id, (perCheckCases.get(id) ?? 0) + n);
     }
     for (const f of report.findings) {
       // ARV-251: stamp finding category from check id if not already
@@ -759,6 +797,8 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     for (const check of activeStateful) {
       if (check.phase === "auth") {
         const applicable = ops.filter((op) => check.applies(op));
+        // ARV-60: track applicability + cases for spec_findings rollup.
+        perCheckApplicable.set(check.id, (perCheckApplicable.get(check.id) ?? 0) + applicable.length);
         // ARV-154: track per-op cases + skip reasons for the stateful auth
         // path. Previously this loop only forwarded `fail` outcomes; runs
         // like `--check ignored_auth` on a fully-protected API where every
@@ -801,6 +841,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
         });
         for (const o of opReports) {
           summary.cases += 1;
+          perCheckCases.set(check.id, (perCheckCases.get(check.id) ?? 0) + 1);
           if (o.kind === "fail") pushStateful(o.finding);
           else if (o.kind === "skip") {
             const key = `${check.id}: ${o.reason}`;
@@ -809,6 +850,8 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
         }
       } else {
         const applicable = crudGroups.filter((g) => check.applies(g));
+        // ARV-60: track applicability + cases for spec_findings rollup.
+        perCheckApplicable.set(check.id, (perCheckApplicable.get(check.id) ?? 0) + applicable.length);
         // ARV-154: mirror the auth-phase observability — count CRUD groups
         // attempted and record skip reasons, not just failures.
         type StatefulOutcome =
@@ -846,6 +889,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
         });
         for (const o of groupReports) {
           summary.cases += 1;
+          perCheckCases.set(check.id, (perCheckCases.get(check.id) ?? 0) + 1);
           if (o.kind === "fail") pushStateful(o.finding);
           else if (o.kind === "skip") {
             const key = `${check.id}: ${o.reason}`;
@@ -861,13 +905,46 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     (f) => f.severity === "high" || f.severity === "critical",
   ).length;
 
+  // ARV-60: spec-level rollup. Build per-check observations from the
+  // accumulators above + the skipped-outcome buckets keyed by
+  // `<check_id>: <reason>`. Then compute clusters that cross the 80%
+  // threshold so the CLI / JSON envelope / NDJSON stream all agree on
+  // which findings are really "one spec gap × N sites".
+  const perCheck: Map<string, PerCheckObservations> = new Map();
+  const allCheckIds = new Set<string>([
+    ...perCheckApplicable.keys(),
+    ...perCheckCases.keys(),
+  ]);
+  for (const id of allCheckIds) {
+    const skipped: Record<string, number> = {};
+    const prefix = `${id}: `;
+    for (const [key, n] of Object.entries(summary.skipped_outcomes)) {
+      if (key.startsWith(prefix)) skipped[key] = n;
+    }
+    perCheck.set(id, {
+      applicable: perCheckApplicable.get(id) ?? 0,
+      cases: perCheckCases.get(id) ?? 0,
+      skipped,
+    });
+  }
+  const spec_findings = computeSpecFindings(findings, perCheck);
+
+  // ARV-60: emit each spec finding as its own NDJSON event before the
+  // terminal summary line, so a streaming consumer sees rollups in the
+  // same order the CLI prints them.
+  if (opts.onEvent) {
+    for (const sf of spec_findings) {
+      opts.onEvent({ type: "spec_finding", ts: nowIso(), check: sf.check, spec_finding: sf });
+    }
+  }
+
   // ARV-10: terminal event so downstream consumers know the run wrapped
   // (vs. the producer crashing). Mirrors what the JSON envelope's
   // `summary` field carries, just delivered as the final NDJSON line.
   if (opts.onEvent) opts.onEvent({ type: "summary", ts: nowIso(), summary });
 
   return {
-    data: { findings, summary },
+    data: { findings, summary, spec_findings },
     selection,
     high_or_critical: highOrCritical,
   };

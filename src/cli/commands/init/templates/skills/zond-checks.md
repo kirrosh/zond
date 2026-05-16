@@ -157,13 +157,42 @@ can route without parsing free-form messages:
 Triage by `recommended_action` first, then by severity. HIGH/CRITICAL
 gates exit-code 1; LOW/MEDIUM is informational.
 
+### Spec-level rollup (ARV-60)
+
+When a single spec-level gap manifests on many operations (`401 not
+declared in spec` × 83 sites; `no JSON Schema on this response branch` ×
+all skipped cases; `use_after_free` ran 0 cases because there's no
+DELETE+GET pair in the spec), the runner emits a single `spec_finding`
+instead of N per-op rows. Threshold: ≥80% of the check's applicable
+operations sharing one root cause.
+
+Each `spec_finding` has:
+
+| Field | Meaning |
+|---|---|
+| `kind` | `status_drift` / `missing_declaration` / `no_detector` / `other` |
+| `reason` | One-line root cause statement |
+| `fix_hint` | Actionable next step (spec edit / tolerate flag / annotate command) |
+| `affected_operations` | Operations covered (empty for skip/no-detector clusters) |
+| `count` / `applicable` | Cluster size + the population it was measured against |
+
+Triage spec_findings first — they collapse 1×N noise into one decision.
+Per-op findings still live in `data.findings`; `--verbose` brings the
+full unaggregated list back to stdout. SARIF + JSON envelope always
+carry both layers.
+
+```bash
+zond checks run --api myapi --json | jq '.data.spec_findings'
+zond checks run --api myapi --report ndjson | jq -c 'select(.type == "spec_finding")'
+```
+
 ## Output formats
 
 ```bash
-zond checks run --api myapi --json                 # one envelope: findings[] + summary
+zond checks run --api myapi --json                 # one envelope: findings[] + spec_findings[] + summary
 zond checks run --api myapi --report sarif --output zond.sarif
                                                     # SARIF v2.1.0 for github/codeql-action/upload-sarif@v3
-zond checks run --api myapi --report ndjson | jq -c '.'   # streaming events: check_start, check_result, finding, summary
+zond checks run --api myapi --report ndjson | jq -c '.'   # streaming events: check_start | check_result | finding | spec_finding | summary
 ```
 
 NDJSON event schema is published at `docs/json-schema/ndjson-events.schema.json`

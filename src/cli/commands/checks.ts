@@ -612,38 +612,53 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       }
       const skipLine = formatSkippedOutcomes(s.skipped_outcomes);
       if (skipLine) console.log(`  ${skipLine}`);
-      // ARV-18: aggregate identical findings (same check + same response
-      // status + same severity) so a 30-operation 401-not-in-spec sweep
-      // collapses to one row instead of drowning out single-shot findings.
-      // Per-operation detail is restored under --verbose; the JSON envelope
-      // and SARIF sidecar always carry the full unaggregated list.
+      // ARV-60: spec-level rollup. When the runner detected ≥80% of a
+      // check's applicable ops sharing one root cause, print one summary
+      // row with an actionable fix hint instead of N per-op rows that
+      // all say the same thing. `--verbose` always shows per-op detail
+      // (and JSON/SARIF carry the full unaggregated list regardless).
+      const rolledUpOps = new Set<string>();
+      if (!opts.verbose) {
+        for (const sf of result.data.spec_findings) {
+          if (sf.kind === "status_drift") {
+            for (const op of sf.affected_operations) {
+              rolledUpOps.add(`${sf.check}|${op.method} ${op.path}`);
+            }
+            console.log(
+              `  [${sf.severity}] ${sf.check} — ${sf.reason} (${sf.count}/${sf.applicable} operations)`,
+            );
+            console.log(`         → ${sf.fix_hint}`);
+          } else {
+            // missing_declaration / no_detector / other — no affected_operations
+            // to enumerate; surfaces as a single info row + fix hint.
+            const tag = sf.kind === "no_detector"
+              ? `${sf.count === 0 ? "0 cases" : `${sf.count} cases`} / ${sf.applicable} applicable ops`
+              : `${sf.count}/${sf.applicable} cases`;
+            console.log(`  [${sf.severity}] ${sf.check} — ${sf.reason} (${tag})`);
+            console.log(`         → ${sf.fix_hint}`);
+          }
+        }
+      }
+      // Per-op findings — skip those already covered by a status_drift
+      // rollup unless --verbose was passed.
       if (opts.verbose) {
         for (const f of result.data.findings) {
           console.log(`  [${f.severity}] ${f.check} ${f.operation.method} ${f.operation.path} — ${f.message}`);
         }
       } else {
-        const groups = new Map<string, { severity: string; check: string; status: number; ops: Set<string>; sample: string }>();
+        // ARV-18: dedup identical findings on the SAME op (multiple cases
+        // hitting the same gap) before printing. Spec-rollup above already
+        // handled the across-op clusters; this collapses the within-op
+        // duplicates so the human summary stays readable even when boundary
+        // mutations each trip the same status.
+        const seen = new Set<string>();
         for (const f of result.data.findings) {
-          const status = f.response_summary?.status ?? 0;
-          const key = `${f.severity}|${f.check}|${status}`;
-          const opKey = `${f.operation.method} ${f.operation.path}`;
-          let g = groups.get(key);
-          if (!g) {
-            g = { severity: f.severity, check: f.check, status, ops: new Set(), sample: f.message };
-            groups.set(key, g);
-          }
-          g.ops.add(opKey);
-        }
-        for (const g of groups.values()) {
-          if (g.ops.size <= 1) {
-            const op = [...g.ops][0] ?? "(unknown op)";
-            console.log(`  [${g.severity}] ${g.check} ${op} — ${g.sample}`);
-          } else {
-            const stem = g.status > 0
-              ? `Status ${g.status} not declared / unexpected`
-              : g.sample.replace(/ for [A-Z]+ .+$/, "");
-            console.log(`  [${g.severity}] ${g.check} — ${stem} (${g.ops.size} operation${g.ops.size === 1 ? "" : "s"} affected; --verbose for per-op detail)`);
-          }
+          const opKey = `${f.check}|${f.operation.method} ${f.operation.path}`;
+          if (rolledUpOps.has(opKey)) continue;
+          const dedupKey = `${f.severity}|${opKey}|${f.response_summary?.status ?? 0}|${f.message}`;
+          if (seen.has(dedupKey)) continue;
+          seen.add(dedupKey);
+          console.log(`  [${f.severity}] ${f.check} ${f.operation.method} ${f.operation.path} — ${f.message}`);
         }
       }
     }

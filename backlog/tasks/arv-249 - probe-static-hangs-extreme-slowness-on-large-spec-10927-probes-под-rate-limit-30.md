@@ -3,10 +3,10 @@ id: ARV-249
 title: >-
   probe static: hangs/extreme slowness on large spec (10927 probes под
   rate-limit 30)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-15 05:42'
-updated_date: '2026-05-15 06:09'
+updated_date: '2026-05-16 07:38'
 labels:
   - feedback-loop
   - api-github
@@ -90,8 +90,8 @@ zond: [42s] suites 12/1183 (1%), steps 234/10927 (2%), ~30 req/s, ETA ~5m12s
 7. Скилл `init/templates/skills/run.md` обновлён.
 
 - [x] #1 probe static печатает scale-warning блок с ETA для --rate-limit 10/30/60, когда totalProbes >= 2000
-- [ ] #2 zond run на сьюте с >=100 шагами выводит progress-строку в stderr каждые ~5s: elapsed, completed/total, %, effective req/s, ETA
-- [ ] #3 progress подавляется под --quiet, --json, --report ndjson (stderr чистый)
+- [x] #2 zond run на сьюте с >=100 шагами выводит progress-строку в stderr каждые ~5s: elapsed, completed/total, %, effective req/s, ETA
+- [x] #3 progress подавляется под --quiet, --json, --report ndjson (stderr чистый)
 - [x] #4 zond run --max-requests N делает строго <= N HTTP-вызовов; оставшиеся шаги skipped с reason max-requests-cap-reached
 - [x] #5 summary добавляет строку про сработавший --max-requests cap
 - [x] #6 existing reporter snapshot tests (console/json/ndjson/junit) остаются зелёными
@@ -141,4 +141,6 @@ zond: [42s] suites 12/1183 (1%), steps 234/10927 (2%), ~30 req/s, ETA ~5m12s
 - tests/runner/probe-static-scale-notice.test.ts (4 test)
 
 AC #2 / #3 — прогрессбар проверен вручную в TTY; авто-тест на TTY-режим CLI требует отдельного pty-харнеса и оставлен на будущее (см. tests/runner/progress-tracker.test.ts покрывает ядро трекера + formatter).
+
+Closed in validation-sprint 2026-05-16. Shipped в commit 566d488 (m-21, v0.23.0): scale-warning в src/cli/commands/probe/static.ts:21+, progress-tracker в src/core/runner/progress-tracker.ts, --max-requests cap в src/cli/commands/run.ts:126+. Skill (zond.md:330) обновлён. Stale In Progress status — забыли закрыть после shipping.
 <!-- SECTION:NOTES:END -->
