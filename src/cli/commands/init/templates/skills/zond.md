@@ -29,6 +29,12 @@ For triage of a failing run — see `zond-triage`.
 - **NEVER `curl` or `wget`** — use `zond request <method> <url> --api <name>`
   for ad-hoc HTTP so it lands in the run DB and respects auth. Never
   shell-substitute the token by hand (`$(yq …)` is blocked by the sandbox).
+  `--body '{…}'` always sends `application/json`. For form-encoded APIs
+  (Stripe v1, classic webforms) pass `--form` — zond URL-encodes the
+  JSON body. Auto-detect from spec: if `requestBody.content` in
+  `.api-catalog.yaml` declares only `application/x-www-form-urlencoded`,
+  use `--form`; mixed content-types → pick by `Content-Type` header you
+  want to test.
 - **NEVER hardcode tokens** — put them in `apis/<name>/.secrets.yaml`
   (auto-gitignored), reference from `.env.yaml` as `@secret:auth_token`.
   Plain `${SHELL_VAR}` references also work. Tests read the resolved
@@ -317,6 +323,13 @@ zond session end
 **Always pass `--validate-schema` for CRUD** — contract drift is
 invisible without it. `schema_violation` failures are real backend bugs;
 treat them like 5xx.
+
+**After any `zond run` with failures → delegate to `zond-triage`.** Do
+NOT parse `runs/run-NN.json` with `jq` by hand. The triage skill reads
+`zond db diagnose --json` (which already buckets by `recommended_action`
+in `data.by_recommended_action`, ARV-228) and routes by closed enum —
+re-implementing that logic with prose heuristics drifts. Only fall back
+to manual CLI queries when the failure is outside the example slice.
 
 Rate limit: `zond run` defaults to an adaptive limiter (no-op until
 `RateLimit-*` headers appear). Pass `--rate-limit <N>` for a hard cap;
