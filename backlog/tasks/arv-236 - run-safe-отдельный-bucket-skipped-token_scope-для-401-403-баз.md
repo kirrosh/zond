@@ -4,10 +4,12 @@ title: 'run --safe: отдельный bucket ''skipped: token_scope'' для 40
 status: To Do
 assignee: []
 created_date: '2026-05-14 11:16'
+updated_date: '2026-05-16 10:55'
 labels:
   - feedback-loop
   - api-github
   - m-16
+  - polish-m-22
 dependencies: []
 priority: low
 ---

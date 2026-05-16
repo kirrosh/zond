@@ -4,10 +4,12 @@ title: 'zond request --json-path: support ''length'' for arrays (jq-style) (R11/
 status: To Do
 assignee: []
 created_date: '2026-05-14 08:22'
+updated_date: '2026-05-16 10:55'
 labels:
   - feedback-loop
   - api-github
   - m-21
+  - polish-m-22
 dependencies: []
 priority: low
 ---

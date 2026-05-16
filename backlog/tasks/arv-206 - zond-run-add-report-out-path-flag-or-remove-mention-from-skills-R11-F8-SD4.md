@@ -3,10 +3,10 @@ id: ARV-206
 title: >-
   zond run: add --report-out <path> flag (or remove mention from skills)
   (R11/F8/SD4)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 08:22'
-updated_date: '2026-05-14 10:40'
+updated_date: '2026-05-16 10:55'
 labels:
   - feedback-loop
   - api-github
@@ -35,4 +35,6 @@ Log: see feedback-11.md F8.
 
 <!-- SECTION:NOTES:BEGIN -->
 round-01 (R-01/F1+SD1): подтверждено повторно на github API — --report-out → exit 1 без alias/hint
+
+Closed in triage 2026-05-16: superseded by --output (ARV-117 / m-19 decision). Skills no longer reference --report-out; the legacy flag is intentionally absent. No code change required.
 <!-- SECTION:NOTES:END -->

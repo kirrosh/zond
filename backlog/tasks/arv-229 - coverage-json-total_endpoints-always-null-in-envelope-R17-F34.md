@@ -1,9 +1,10 @@
 ---
 id: ARV-229
 title: 'coverage --json: total_endpoints always null in envelope (R17/F34)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 10:12'
+updated_date: '2026-05-16 10:55'
 labels:
   - feedback-loop
   - api-github
@@ -25,3 +26,9 @@ Expected: total_endpoints filled (1183), or removed from envelope if unused.
 
 Log: see feedback-17.md F34.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Closed in triage 2026-05-16: total_endpoints field removed from coverage envelope. Canonical replacement: totals.all (endpoint count) and hit_coverage.total (idem). Tester read a stale field name; current envelope is correct.
+<!-- SECTION:NOTES:END -->

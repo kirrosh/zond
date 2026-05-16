@@ -4,10 +4,12 @@ title: 'run: --learn-apply should imply --learn (or suggest it in error) (F16)'
 status: To Do
 assignee: []
 created_date: '2026-05-14 08:09'
+updated_date: '2026-05-16 10:55'
 labels:
   - feedback-loop
   - api-stripe
   - m-21
+  - polish-m-22
 dependencies: []
 priority: low
 ---

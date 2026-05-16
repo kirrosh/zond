@@ -4,11 +4,12 @@ title: 'zond request: interpolate {{var}} in --header values (R10/F3)'
 status: To Do
 assignee: []
 created_date: '2026-05-14 08:11'
-updated_date: '2026-05-14 08:25'
+updated_date: '2026-05-16 10:55'
 labels:
   - feedback-loop
   - api-github
   - m-21
+  - polish-m-22
 dependencies: []
 priority: low
 ---

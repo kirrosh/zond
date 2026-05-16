@@ -4,10 +4,12 @@ title: 'annotate dump: clarify YAML vs JSON-as-YAML in output / skill (R12/F14)'
 status: To Do
 assignee: []
 created_date: '2026-05-14 08:26'
+updated_date: '2026-05-16 10:55'
 labels:
   - feedback-loop
   - api-github
   - m-21
+  - polish-m-22
 dependencies: []
 priority: low
 ---
