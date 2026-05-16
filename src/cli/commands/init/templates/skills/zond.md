@@ -205,15 +205,25 @@ schema-derived body. Bracket-notation nested params (Stripe's
 some APIs will 400 here; **don't ask the user to fill missing ids
 manually first**, jump to Phase 2 (annotate seed_body) instead.
 
-`--seed` is **not** a silver bullet. Builder handles top-level
-required fields and discriminator-aware `oneOf` (ARV-67/78), but
-*deeply nested* `oneOf` subschemas (required fields inside a chosen
-discriminator branch with their own nested `oneOf`/`anyOf` — e.g.
-`POST /automations` triggers with conditional payload) still 422
-silently. If `--seed --cascade` reports `miss-seed-422` for a resource
-with a complex body, the right escape is annotate `seed_body` (Phase 2)
-or `zond fixtures add <var>=<value>` with a hand-crafted body. Don't
-loop on `--cascade` waiting for it to converge — it won't.
+`--seed` handles most schema shapes including top-level required fields
+(ARV-67), discriminator-aware `oneOf` (ARV-78), and — since ARV-135 in
+m-21 — nested `oneOf`/`anyOf` with `discriminator.mapping`-only refs and
+multi-level discriminator chains. The variant picker now scores each
+candidate by how many of its required fields are resolvable from
+`properties` and prefers the most complete branch, so cases like the
+Resend `POST /automations` triggers stop 422-ing on missing
+`config`/`event_name`.
+
+Rare edge cases that still warrant `annotate seed_body` (Phase 2):
+- Required fields whose values are server-validated against external
+  state (a `webhook_url` that must resolve to a live HTTPS endpoint, a
+  `dns_record` that must already be verified).
+- Schemas that omit `required` AND `properties` for fields the API
+  silently enforces — the builder has no signal to synthesise them.
+
+If `--seed --cascade` reports `miss-seed-422` two passes in a row,
+escape to `annotate seed_body` or `zond fixtures add <var>=<value>`
+rather than looping.
 
 If `--seed` converges but vars stay UNSET, the reason is outside the
 API path (email verify / paid plan / SCIM / TOS limits). Document the
