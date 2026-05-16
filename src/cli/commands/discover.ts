@@ -320,6 +320,8 @@ export interface ResourceYaml {
     limit_param?: string;
     default_limit?: number;
     items_field?: string;
+    page_param?: string;
+    start_page?: number;
   };
   /** ARV-172: per-resource state machine + action endpoints. */
   lifecycle?: {
