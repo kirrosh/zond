@@ -34,6 +34,7 @@ import { hashSpec } from "../../core/meta/meta-store.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError } from "../output.ts";
 import { getApi } from "../util/api-context.ts";
+import { detectSkillDrift } from "./init/skills.ts";
 
 export interface DoctorOptions {
   api?: string;
@@ -341,6 +342,21 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   const warnings: string[] = [];
   if (!specExists) warnings.push(`spec.json not found at ${specAbsPath}`);
   if (!manifest) warnings.push(`.api-fixtures.yaml missing — run \`zond refresh-api ${apiName}\``);
+
+  // ARV-237: warn when workspace .claude/skills/ copy drifts from the
+  // in-binary template (binary upgraded but `zond init` not re-run).
+  // `missing` is silent — user may have opted out via `--no-skills`.
+  try {
+    const wsRoot = findWorkspaceRoot().root;
+    const outdated = detectSkillDrift(wsRoot).filter(d => d.status === "outdated");
+    if (outdated.length > 0) {
+      warnings.push(
+        `workspace skills outdated (${outdated.map(d => d.name).join(", ")}) — run \`zond init\` to refresh .claude/skills/`,
+      );
+    }
+  } catch {
+    // not in a workspace — skip
+  }
   const placeholderRows = [...requiredOut, ...optionalOut].filter(r => r.placeholder);
   if (placeholderRows.length > 0) {
     warnings.push(
