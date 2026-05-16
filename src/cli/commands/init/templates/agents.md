@@ -1,73 +1,77 @@
 ## API testing with zond
 
-This workspace uses [zond](https://github.com/kirrosh/zond) for API testing. The MCP
-server is **not** configured for this workspace, so use the CLI directly.
+This workspace uses [zond](https://github.com/kirrosh/zond) for API testing — CLI
+only, no MCP server in this workspace.
 
-### Detailed playbooks (skills)
+### Skills
 
-Detailed task-specific playbooks live in `.claude/skills/` and are auto-discovered by
-Claude Code. Other agents (Codex, Cursor, Aider) can read them as plain markdown:
+- **`.claude/skills/zond/SKILL.md` (primary)** — artifact model + iron
+  rules + full workflow: fixtures → annotate → generate → smoke → CRUD
+  → stateful checks → probes → coverage → report, plus single-flow
+  scenario authoring. Loads on workspace touch and on intent ("audit
+  this API", "find bugs", "write a test for X flow").
+- **`.claude/skills/zond-checks/SKILL.md`** — depth-check reference:
+  conformance + security + m-20 stateful invariants
+  (cross_call_references, idempotency_replay, pagination_invariants,
+  lifecycle_transitions) and the `zond api annotate dump+apply` flow.
+- **`.claude/skills/zond-triage/SKILL.md`** — read-only triage of a
+  finished run / probe artifact. Routes by `recommended_action` enum.
 
-- `.claude/skills/zond/SKILL.md` — end-to-end API testing: generate from OpenAPI,
-  run, diagnose failures, hunt bugs via probes, report coverage. Has explicit
-  entry points so narrow requests (only diagnose, only probe) skip earlier phases.
-- `.claude/skills/zond-scenarios/SKILL.md` — author multi-step user-journey tests
-  and fixture creation via the API (hand-written YAML with captures,
-  `setup: true`, `always: true`). NOT for spec coverage or bug hunting.
+Both skills work off the per-API artifacts written by `zond add api`:
 
-### Mandatory rules (always-on)
-
-- **NEVER** read OpenAPI/Swagger/JSON spec files with Read/cat — use `zond describe`,
-  `zond catalog`, or the generated `.api-catalog.yaml`.
-- **NEVER** use curl/wget for ad-hoc requests — use `zond request <method> <url>`.
-- **NEVER** write test YAML from scratch — start with `zond generate <spec> --output <dir>`,
-  then edit failing cases.
-- **NEVER** hardcode tokens — put them in `apis/<name>/.env.yaml` (already gitignored)
-  and reference as `{{auth_token}}` in test YAML.
-- `--safe` enforces GET-only; never run CRUD tests against production without explicit
-  user confirmation and a staging environment.
-- When `zond db diagnose` reports `recommended_action: report_backend_bug` — STOP, do
-  not change the test to make it pass.
-
-### Workflow — covering an API end-to-end
-
-```bash
-# 1. Register the API
-zond init --spec <path-or-url> --name <name> [--base-url <url>]
-zond use <name>                              # remember as current
-
-# 2. Inspect endpoints (avoid reading the raw spec)
-zond catalog <spec> --output apis/<name>     # writes .api-catalog.yaml
-zond describe <spec> --compact
-
-# 3. Generate test stubs and run smoke (GET-only)
-zond generate <spec> --output apis/<name>/tests --tag smoke
-zond run --safe --json
-
-# 4. Diagnose failures
-zond db runs --limit 5
-zond db diagnose <run-id> --json
-
-# 5. Coverage gate
-zond coverage --fail-on-coverage 50
-
-# 6. CRUD only with explicit user confirmation + staging env
-zond run --tag crud --dry-run                # show what would be sent
-zond run --tag crud --env staging
+```
+apis/<name>/
+  spec.json              # dereferenced OpenAPI (machine source — only generators read it)
+  .api-catalog.yaml      # endpoint index (cheap to read, agent-friendly)
+  .api-resources.yaml    # CRUD chains, FK deps, ETag/soft-delete flags
+  .api-fixtures.yaml     # MANIFEST: required {{vars}} (read-only, auto-generated)
+  .env.yaml              # VALUES: variable values (user-edited; auto-gitignored)
+  tests/  scenarios/  probes/
 ```
 
-### Filtering by tag
+`.api-fixtures.yaml` is the **manifest** (single source of truth for the
+list of vars an API needs) and `.env.yaml` holds their **values**. Don't
+add a key to `.env.yaml` that's not in the manifest — it'll be warned and
+ignored. A missing entry in the manifest is a generator/manifest bug, not
+an env fix.
 
-`--tag <name>` filters suites. If a `setup` suite primes auth tokens, always include
-its tag together with the target group: `--tag crud,setup`.
+### Setup flow
 
-### Auth patterns
+```bash
+zond init                                              # bootstrap workspace (no fixture changes)
+zond add api <name> --spec <path-or-url>               # register API + emit manifest + seed empty .env.yaml
+zond doctor --api <name> --missing-only                # gap report: which vars are UNSET
+zond prepare-fixtures --api <name> --apply [--seed]    # fill .env.yaml from live API
+zond doctor --api <name>                               # re-check (exit 0 = ready)
+```
 
-For in-memory or test backends that issue tokens via login, use a `setup.yaml` suite
-with `setup: true`. Captured variables (e.g. `auth_token`) propagate to subsequent
-suites in the same run. Do NOT hardcode bearer tokens for these flows.
+What each step does to `.env.yaml`:
 
-### Environments
+| Command | Touches `.env.yaml`? |
+|---|---|
+| `zond init` | no — only writes workspace/skills files |
+| `zond add api` | seeds skeleton with empty placeholders for every required var |
+| `zond doctor` | no — read-only diagnostic |
+| `zond prepare-fixtures --apply` | writes discovered values (`.bak` backup); `--seed` POST-creates resources when list endpoints return `[]` |
+| `zond refresh-api` | no — only re-snapshots `spec.json` and rebuilds the manifest |
 
-`zond run --env <name>` loads `.env.<name>.yaml` (or `.env.yaml` by default) from the
-API directory. Environment files are auto-gitignored by `zond init`.
+`zond refresh-api <name> [--spec <new-source>]` re-snapshots when the upstream
+spec changes.
+
+**Re-running `zond init`** is safe and expected after a CLI upgrade: it
+re-emits skills/AGENTS.md/zond.config.yml only. Fixtures stay exactly as
+they were — never relies on init to fill `.env.yaml`.
+
+### Mandatory rules (mirrored from the skills — non-negotiable)
+
+- **NEVER read raw OpenAPI/Swagger** with Read/cat/grep — use the artifacts
+  in `apis/<name>/.api-*.yaml`. Drop into `spec.json` only when a probe
+  generator needs full schemas.
+- **NEVER use curl/wget** — use `zond request <method> <url>` for ad-hoc HTTP.
+- **NEVER write test YAML from scratch for autogen flows** — start with
+  `zond generate`, then edit failures. (Hand-written YAML is fine for
+  scenarios.)
+- **NEVER hardcode tokens** — `apis/<name>/.env.yaml` (auto-gitignored),
+  reference as `{{auth_token}}`.
+- **`recommended_action: report_backend_bug` (5xx) → STOP**, do not edit
+  assertions to make the test pass.

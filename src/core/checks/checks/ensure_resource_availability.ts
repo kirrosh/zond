@@ -1,0 +1,62 @@
+/**
+ * `ensure_resource_availability` (m-15 ARV-3) — create a resource via
+ * POST, then GET by id; the read must succeed (2xx). Catches lost-
+ * write bugs where the create returns 201 but the resource never
+ * actually appears in storage.
+ */
+import type { CrudStatefulCheck } from "../stateful.ts";
+import { extractIdFromCreateResponse, fillPathWithId, fillPathParams, serializeCheckBody, resolveCreateBody } from "./_crud-helpers.ts";
+
+export const ensureResourceAvailability: CrudStatefulCheck = {
+  id: "ensure_resource_availability",
+  severity: "medium",
+  defaultExpected: "GET on a freshly-created resource must succeed (2xx)",
+  references: [{ id: "CWE-924" }],
+  phase: "crud",
+  applies(g) {
+    return Boolean(g.create && g.read);
+  },
+  async run(g, h) {
+    if (h.bootstrapCleanupFailed) {
+      return { kind: "skip", reason: "bootstrap-cleanup failed — security checks paused (ARV-3 AC #6)" };
+    }
+    const create = g.create!;
+    const read = g.read!;
+    const baseHeaders = { Accept: "application/json", ...h.authHeaders };
+    // ARV-191: form-urlencoded vs JSON dispatch — Stripe-style APIs
+    // declare x-www-form-urlencoded; JSON.stringify would yield "400
+    // missing param" the broken-baseline guard then silently swallows.
+    // ARV-187: prefer LLM-authored seed_body over generator.
+    const seedBody = h.resourceConfigs?.get(g.resource)?.seedBody;
+    const generated = resolveCreateBody(create, seedBody) ?? {};
+    const { body, contentType } = serializeCheckBody(
+      create,
+      generated,
+      h.pathVars,
+      seedBody?.contentType,
+    );
+    const createResp = await h.send({
+      method: "POST",
+      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(create.path, h.pathVars)}`,
+      headers: { ...baseHeaders, "Content-Type": contentType },
+      body,
+    });
+    if (createResp.status < 200 || createResp.status >= 300) {
+      return { kind: "skip", reason: `create returned ${createResp.status} — broken-baseline guard` };
+    }
+    const id = extractIdFromCreateResponse(createResp.body_parsed ?? createResp.body, g.idParam);
+    if (id == null) return { kind: "skip", reason: "could not extract id from create response" };
+
+    const readResp = await h.send({
+      method: "GET",
+      url: `${h.baseUrl.replace(/\/+$/, "")}${fillPathWithId(fillPathParams(read.path, h.pathVars), g.idParam, id)}`,
+      headers: baseHeaders,
+    });
+    if (readResp.status >= 200 && readResp.status < 300) return { kind: "pass" };
+    return {
+      kind: "fail",
+      message: `GET on freshly-created resource ${id} returned ${readResp.status}`,
+      evidence: { resource: g.resource, id, create_status: createResp.status, read_status: readResp.status },
+    };
+  },
+};

@@ -2,9 +2,12 @@ import { describe, test, expect } from "bun:test";
 import {
   generateStep,
   detectCrudGroups,
+  detectCrudGroupsWithDiagnostics,
   generateCrudSuite,
   generateSuites,
   generateAuthSuite,
+  singularizeResource,
+  resourceVar,
 } from "../../src/core/generator/suite-generator.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../src/core/generator/types.ts";
 import type { OpenAPIV3 } from "openapi-types";
@@ -71,18 +74,72 @@ describe("generateStep", () => {
     expect(step.expect.status).toBe(201);
   });
 
-  test("falls back to first response status if no 2xx", () => {
+  test("TASK-96: falls back to method default when no 2xx is declared (only 3xx)", () => {
     const ep = makeEndpoint({
       path: "/pets",
       method: "GET",
       responses: [{ statusCode: 302, description: "Redirect" }],
     });
     const step = generateStep(ep, noSecurity);
-    expect(step.expect.status).toBe(302);
+    // Asserting 302 as success would generate a guaranteed-failing test:
+    // the runtime is unlikely to follow the redirect by itself.
+    expect(step.expect.status).toBe(200);
   });
 
-  test("defaults to 200 if no responses", () => {
+  test("TASK-96: only-4xx spec falls back to method default (POST→201)", () => {
+    const ep = makeEndpoint({
+      path: "/things",
+      method: "POST",
+      responses: [{ statusCode: 400, description: "Bad request" }],
+    });
+    const step = generateStep(ep, noSecurity);
+    expect(step.expect.status).toBe(201);
+  });
+
+  test("TASK-96: only-5xx spec falls back to method default (DELETE→204)", () => {
+    const ep = makeEndpoint({
+      path: "/things/{id}",
+      method: "DELETE",
+      responses: [{ statusCode: 500, description: "Server error" }],
+    });
+    const step = generateStep(ep, noSecurity);
+    expect(step.expect.status).toBe(204);
+  });
+
+  test("TASK-96: status is always finite — never NaN", () => {
+    const ep = makeEndpoint({
+      path: "/things",
+      method: "GET",
+      responses: [],
+    });
+    const step = generateStep(ep, noSecurity);
+    expect(Number.isFinite(step.expect.status)).toBe(true);
+  });
+
+  test("defaults to 200 if no responses (GET)", () => {
     const ep = makeEndpoint({ path: "/pets", method: "GET", responses: [] });
+    const step = generateStep(ep, noSecurity);
+    expect(step.expect.status).toBe(200);
+  });
+
+  test("TASK-42: defaults to 201 for POST without declared 2xx response", () => {
+    const ep = makeEndpoint({ path: "/audiences", method: "POST", responses: [] });
+    const step = generateStep(ep, noSecurity);
+    expect(step.expect.status).toBe(201);
+  });
+
+  test("TASK-42: defaults to 204 for DELETE without declared 2xx response", () => {
+    const ep = makeEndpoint({ path: "/audiences/{id}", method: "DELETE", responses: [] });
+    const step = generateStep(ep, noSecurity);
+    expect(step.expect.status).toBe(204);
+  });
+
+  test("TASK-42: declared 2xx still wins over the method-aware default", () => {
+    const ep = makeEndpoint({
+      path: "/audiences",
+      method: "POST",
+      responses: [{ statusCode: 200, description: "OK (some specs do return 200 on POST)" }],
+    });
     const step = generateStep(ep, noSecurity);
     expect(step.expect.status).toBe(200);
   });
@@ -214,10 +271,11 @@ describe("detectCrudGroups", () => {
     expect(groups).toHaveLength(0);
   });
 
-  test("requires GET on item path (POST alone not enough)", () => {
+  test("requires SOME item endpoint (POST alone, no item path → skipped)", () => {
+    // TASK-260: POST + DELETE/{id} now produces a headless chain. Pure POST
+    // without any item endpoint still skips.
     const endpoints = [
       makeEndpoint({ path: "/pets", method: "POST" }),
-      makeEndpoint({ path: "/pets/{petId}", method: "DELETE" }),
     ];
     const groups = detectCrudGroups(endpoints);
     expect(groups).toHaveLength(0);
@@ -230,6 +288,93 @@ describe("detectCrudGroups", () => {
     ];
     const groups = detectCrudGroups(endpoints);
     expect(groups).toHaveLength(0);
+  });
+
+  test("TASK-139: matches Sentry-style trailing-slash POST + non-slash GET", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/alert-rules/", method: "POST" }),
+      makeEndpoint({ path: "/alert-rules/{ruleId}", method: "GET" }),
+      makeEndpoint({ path: "/alert-rules/{ruleId}", method: "DELETE" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.basePath).toBe("/alert-rules");
+    expect(groups[0]!.idParam).toBe("ruleId");
+    expect(groups[0]!.delete).toBeDefined();
+  });
+
+  test("TASK-139: matches POST + GET both with trailing slash", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/alert-rules/", method: "POST" }),
+      makeEndpoint({ path: "/alert-rules/{ruleId}/", method: "GET" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.idParam).toBe("ruleId");
+  });
+
+  test("TASK-139: list endpoint matches across slash variants", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/alert-rules", method: "GET" }), // list, no slash
+      makeEndpoint({ path: "/alert-rules/", method: "POST" }), // create, slash
+      makeEndpoint({ path: "/alert-rules/{ruleId}", method: "GET" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.list).toBeDefined();
+  });
+
+  test("TASK-139: diagnostics report skipped POSTs with reason", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/alerts", method: "POST" }), // no item endpoint
+    ];
+    const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
+    expect(groups).toHaveLength(0);
+    expect(diagnostics).toHaveLength(1);
+    const alerts = diagnostics.find(d => d.basePath === "/alerts")!;
+    expect(alerts.verdict).toBe("skipped");
+    expect(alerts.reason).toMatch(/no item endpoint/);
+  });
+
+  // TASK-260: accept headless chains — POST + DELETE/{id} or POST + PUT/{id}
+  // without GET-by-id. The captured ID still flows from POST response into
+  // the update/delete steps; the read/verify steps just won't be emitted.
+  test("TASK-260: POST + DELETE/{id} without GET → headless chain", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/audit", method: "POST" }),
+      makeEndpoint({ path: "/audit/{id}", method: "DELETE" }),
+    ];
+    const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.read).toBeUndefined();
+    expect(groups[0]!.delete).toBeDefined();
+    const audit = diagnostics.find(d => d.basePath === "/audit")!;
+    expect(audit.verdict).toBe("chain");
+    expect(audit.reason).toMatch(/headless: no GET-by-id/);
+  });
+
+  test("TASK-260: POST + PUT/{id} without GET → headless chain", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/external-teams", method: "POST" }),
+      makeEndpoint({ path: "/external-teams/{id}", method: "PUT" }),
+    ];
+    const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.update).toBeDefined();
+    const ext = diagnostics.find(d => d.basePath === "/external-teams")!;
+    expect(ext.reason).toMatch(/PUT\/\{id\} matched/);
+  });
+
+  test("TASK-260: POST with item endpoint that has only unsupported methods → still skipped", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/x", method: "POST" }),
+      makeEndpoint({ path: "/x/{id}", method: "HEAD" }),
+    ];
+    const { groups, diagnostics } = detectCrudGroupsWithDiagnostics(endpoints);
+    expect(groups).toHaveLength(0);
+    const x = diagnostics.find(d => d.basePath === "/x")!;
+    expect(x.verdict).toBe("skipped");
+    expect(x.reason).toMatch(/no GET\/PUT\/PATCH\/DELETE on \/\{id\}/);
   });
 });
 
@@ -283,22 +428,23 @@ describe("generateCrudSuite", () => {
     expect(suite.base_url).toBe("{{base_url}}");
     expect(suite.tests).toHaveLength(5); // create, read, update, delete, verify
 
-    // Create step has capture
+    // Create step has capture — ARV-137: captureVar = group.idParam (the
+    // spec's path-param name `petId`), not synthesised `<resource>_id`.
     const createStep = suite.tests[0]!;
-    expect(createStep.expect.body?.id).toEqual({ capture: "pet_id" });
+    expect(createStep.expect.body?.id).toEqual({ capture: "petId" });
 
     // Read uses captured var
     const readStep = suite.tests[1]!;
-    expect(readStep.GET).toBe("/pets/{{pet_id}}");
+    expect(readStep.GET).toBe("/pets/{{petId}}");
 
     // Delete step
     const deleteStep = suite.tests[3]!;
-    expect(deleteStep.DELETE).toBe("/pets/{{pet_id}}");
+    expect(deleteStep.DELETE).toBe("/pets/{{petId}}");
     expect(deleteStep.expect.status).toBe(204);
 
     // Verify deleted
     const verifyStep = suite.tests[4]!;
-    expect(verifyStep.GET).toBe("/pets/{{pet_id}}");
+    expect(verifyStep.GET).toBe("/pets/{{petId}}");
     expect(verifyStep.expect.status).toBe(404);
   });
 
@@ -315,6 +461,58 @@ describe("generateCrudSuite", () => {
     expect(suite.tests[0]!.GET).toBe("/pets");
     expect(suite.tests[0]!.name).toBe("listPets");
     expect(suite.tests[1]!.POST).toBe("/pets");
+  });
+
+  test("TASK-139: captures slug field when path-param matches and response has no `id`", () => {
+    const endpoints = [
+      makeEndpoint({
+        path: "/projects",
+        method: "POST",
+        operationId: "createProject",
+        responses: [{
+          statusCode: 201,
+          description: "Created",
+          schema: {
+            type: "object",
+            properties: {
+              slug: { type: "string" } as OpenAPIV3.SchemaObject,
+              name: { type: "string" } as OpenAPIV3.SchemaObject,
+            },
+          } as OpenAPIV3.SchemaObject,
+        }],
+      }),
+      makeEndpoint({ path: "/projects/{slug}", method: "GET", operationId: "getProject" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    const suite = generateCrudSuite(groups[0]!, noSecurity);
+    // Create step captures `slug` field — ARV-137: capture var = idParam
+    // (the spec path-param name `slug`), so the response field and the
+    // capture target share the same name. Previously this was synthesised
+    // to `project_id`.
+    const createStep = suite.tests[0]!;
+    expect(createStep.expect.body?.slug).toEqual({ capture: "slug" });
+    expect(suite.tests[1]!.GET).toBe("/projects/{{slug}}");
+  });
+
+  test("TASK-139: rule_id path-param maps to id field on response", () => {
+    const endpoints = [
+      makeEndpoint({
+        path: "/alert-rules",
+        method: "POST",
+        responses: [{
+          statusCode: 201,
+          description: "Created",
+          schema: {
+            type: "object",
+            properties: { id: { type: "string" } as OpenAPIV3.SchemaObject },
+          } as OpenAPIV3.SchemaObject,
+        }],
+      }),
+      makeEndpoint({ path: "/alert-rules/{rule_id}", method: "GET" }),
+    ];
+    const groups = detectCrudGroups(endpoints);
+    const suite = generateCrudSuite(groups[0]!, noSecurity);
+    expect(suite.tests[0]!.expect.body?.id).toBeDefined();
   });
 
   test("minimal CRUD (POST + GET only) — no verify step", () => {
@@ -368,6 +566,38 @@ describe("generateCrudSuite", () => {
 // ── generateSuites ──
 
 describe("generateSuites", () => {
+  // ARV-212 (R13/F16): when the spec ships no securitySchemes but the
+  // workspace is wired for Bearer auth (`auth_token` present in .env.yaml),
+  // generated suites must carry a suite-level
+  //   headers:
+  //     Authorization: 'Bearer {{auth_token}}'
+  // Otherwise every generated GitHub-style suite goes unauth and bricks
+  // on the first rate-limited 60 requests.
+  test("F16: emits Authorization header at suite level via defaultAuthVar when spec has no securitySchemes", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/zen", method: "GET", tags: ["meta"] }),
+      makeEndpoint({ path: "/octocat", method: "GET", tags: ["meta"] }),
+    ];
+    const suites = generateSuites({
+      endpoints,
+      securitySchemes: noSecurity,
+      defaultAuthVar: "auth_token",
+    });
+    const positive = suites.find((s) => s.name === "meta-smoke-positive");
+    expect(positive).toBeDefined();
+    expect(positive!.headers).toEqual({ Authorization: "Bearer {{auth_token}}" });
+  });
+
+  test("F16: without defaultAuthVar, suites for bare specs stay header-less (back-compat)", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/zen", method: "GET", tags: ["meta"] }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
+    const positive = suites.find((s) => s.name === "meta-smoke-positive");
+    expect(positive).toBeDefined();
+    expect(positive!.headers).toBeUndefined();
+  });
+
   test("separates GET and non-GET into smoke and smoke-unsafe", () => {
     const endpoints = [
       makeEndpoint({ path: "/pets", method: "GET", tags: ["pets"] }),
@@ -379,8 +609,8 @@ describe("generateSuites", () => {
     const smokeNames = suites.filter(s => s.tags?.includes("smoke") && !s.tags?.includes("unsafe")).map(s => s.name);
     const unsafeNames = suites.filter(s => s.tags?.includes("unsafe")).map(s => s.name);
 
-    expect(smokeNames).toContain("pets-smoke");
-    expect(smokeNames).toContain("users-smoke");
+    expect(smokeNames).toContain("pets-smoke-positive");
+    expect(smokeNames).toContain("users-smoke-positive");
     expect(unsafeNames).toContain("pets-smoke-unsafe");
   });
 
@@ -399,7 +629,7 @@ describe("generateSuites", () => {
     expect(crudSuites[0]!.name).toBe("pets-crud");
 
     // /health should be in smoke, not CRUD
-    const systemSmoke = suites.find(s => s.name === "system-smoke");
+    const systemSmoke = suites.find(s => s.name === "system-smoke-positive");
     expect(systemSmoke).toBeDefined();
     expect(systemSmoke!.tests).toHaveLength(1);
   });
@@ -411,22 +641,36 @@ describe("generateSuites", () => {
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
 
-    const petsSuite = suites.find(s => s.name === "pets-smoke");
+    const petsSuite = suites.find(s => s.name === "pets-smoke-positive");
     expect(petsSuite).toBeUndefined();
 
-    const usersSuite = suites.find(s => s.name === "users-smoke");
+    const usersSuite = suites.find(s => s.name === "users-smoke-positive");
     expect(usersSuite).toBeDefined();
   });
 
-  test("untagged endpoints go to 'untagged' slug", () => {
+  test("TASK-80 — includeDeprecated: true emits suites for deprecated endpoints", () => {
     const endpoints = [
-      makeEndpoint({ path: "/ping", method: "GET" }),
+      makeEndpoint({ path: "/pets", method: "GET", deprecated: true, tags: ["pets"] }),
+      makeEndpoint({ path: "/users", method: "GET", tags: ["users"] }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity, includeDeprecated: true });
+
+    const petsSuite = suites.find(s => s.name === "pets-smoke-positive");
+    expect(petsSuite).toBeDefined();
+  });
+
+  test("untagged endpoints fall back to first-path-segment grouping (TASK-36)", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/audiences", method: "GET" }),
+      makeEndpoint({ path: "/audiences/{id}", method: "DELETE" }),
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
 
-    // /ping matches healthcheck pattern → sanity suite is also generated
-    const smokeSuite = suites.find(s => s.name === "untagged-smoke");
-    expect(smokeSuite).toBeDefined();
+    // Tagless endpoints under /audiences should land in audiences-* suites,
+    // not a generic untagged-smoke pile.
+    const audSmoke = suites.find(s => s.name === "audiences-smoke-positive");
+    expect(audSmoke).toBeDefined();
+    expect(suites.find(s => s.name === "untagged-smoke-positive")).toBeUndefined();
   });
 
   test("suite-level auth when all endpoints share same security", () => {
@@ -436,7 +680,7 @@ describe("generateSuites", () => {
     ];
     const suites = generateSuites({ endpoints, securitySchemes: bearerSecurity });
 
-    const smoke = suites.find(s => s.name === "pets-smoke");
+    const smoke = suites.find(s => s.name === "pets-smoke-positive");
     expect(smoke?.headers?.Authorization).toBe("Bearer {{auth_token}}");
     // Individual steps should NOT have headers
     for (const t of smoke!.tests) {
@@ -705,7 +949,7 @@ describe("smoke suite path seeds (T27 — positive variant)", () => {
     expect(negativeSuite!.tests[0]!["GET"]).toBe("/users/00000000-0000-0000-0000-000000000000");
   });
 
-  test("GET endpoint without path params stays in regular smoke (no positive/negative split)", () => {
+  test("GET endpoint without path params lands in unified smoke-positive (no negative)", () => {
     const endpoints = [
       makeEndpoint({
         path: "/items",
@@ -714,12 +958,15 @@ describe("smoke suite path seeds (T27 — positive variant)", () => {
       }),
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
-    expect(suites.find(s => s.name === "items-smoke")).toBeDefined();
-    expect(suites.find(s => s.name === "items-smoke-positive")).toBeUndefined();
+    const positive = suites.find(s => s.name === "items-smoke-positive");
+    expect(positive).toBeDefined();
+    // No path-params → no needs-id tag
+    expect(positive!.tags).toEqual(["smoke", "positive"]);
+    expect(suites.find(s => s.name === "items-smoke")).toBeUndefined();
     expect(suites.find(s => s.name === "items-smoke-negative")).toBeUndefined();
   });
 
-  test("paramless and path-param GETs in same tag produce 3 suites (smoke + negative + positive)", () => {
+  test("paramless and path-param GETs merge into one smoke-positive + smoke-negative (TASK-240)", () => {
     const endpoints = [
       makeEndpoint({ path: "/items", method: "GET", tags: ["items"] }),
       makeEndpoint({
@@ -730,9 +977,13 @@ describe("smoke suite path seeds (T27 — positive variant)", () => {
       }),
     ];
     const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
-    expect(suites.find(s => s.name === "items-smoke")).toBeDefined();
+    const positive = suites.find(s => s.name === "items-smoke-positive");
+    expect(positive).toBeDefined();
+    expect(positive!.tests).toHaveLength(2);
+    // needs-id only because at least one test has skip_if
+    expect(positive!.tags).toEqual(["smoke", "positive", "needs-id"]);
     expect(suites.find(s => s.name === "items-smoke-negative")).toBeDefined();
-    expect(suites.find(s => s.name === "items-smoke-positive")).toBeDefined();
+    expect(suites.find(s => s.name === "items-smoke")).toBeUndefined();
   });
 });
 
@@ -776,5 +1027,40 @@ describe("generateCrudSuite ETag", () => {
     // Update step has If-Match header
     const updateStep = suite.tests[updateIdx]!;
     expect((updateStep as any).headers?.["If-Match"]).toBeDefined();
+  });
+});
+
+// ARV-100 (F5): the generator and the manifest-builder must agree on the
+// `{{<resource>_id}}` capture-var name. Two regressions tester hit on the
+// Sentry spec:
+//   1. `singularizeResource("Releases")` → "Releas" (the `s` alternative
+//      in `(ch|sh|x|s|z)es$` greedily consumed the regular -s plural and
+//      `slice(-2)` chopped "es"). The fix narrows it to `ss`.
+//   2. `resourceVar("Groups", "id")` → "Group_id" while path-params with the
+//      same id were normalised to "group_id" by fixtures-builder. Forcing
+//      lowercase in resourceVar keeps both producers in the same namespace.
+describe("ARV-100 (F5): singularizeResource + resourceVar normalise consistently", () => {
+  test("singularizeResource handles regular -s plurals with vowel+s stems", () => {
+    expect(singularizeResource("releases")).toBe("release");
+    expect(singularizeResource("phases")).toBe("phase");
+    expect(singularizeResource("houses")).toBe("house");
+    // Regression guard: genuine sibilant doubles still drop the trailing
+    // "es" — `addresses` → `address`, `boxes` → `box`.
+    expect(singularizeResource("addresses")).toBe("address");
+    expect(singularizeResource("boxes")).toBe("box");
+    // -ies plurals still flip to -y.
+    expect(singularizeResource("properties")).toBe("property");
+  });
+
+  test("resourceVar always lowercases — capitalised resource names normalise", () => {
+    // Capitalised resource (e.g. when a tag/path segment in the spec is
+    // PascalCase) must still produce a lowercase var matching what
+    // fixtures-builder writes for path-params on the same endpoint.
+    expect(resourceVar("Groups", "id")).toBe("group_id");
+    expect(resourceVar("Users", "id")).toBe("user_id");
+    expect(resourceVar("Releases", "id")).toBe("release_id");
+    // Already lowercase / dashed cases stay normalised the same way.
+    expect(resourceVar("templates", "id")).toBe("template_id");
+    expect(resourceVar("contact-properties", "id")).toBe("contact_property_id");
   });
 });

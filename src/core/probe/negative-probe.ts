@@ -6,9 +6,15 @@
  * is simple: any client-supplied invalid input MUST produce a 4xx, never a 5xx.
  *
  * For each endpoint we generate a suite of probe steps. Each step expects a
- * "no 5xx" response (status in [400, 401, 403, 404, 405, 409, 415, 422]).
+ * "no 5xx" response (status in [400, 401, 403, 404, 405, 409, 415, 422, 429]).
  * If the API returns 500/502/503 — the test fails and the runner logs it as
  * a bug candidate via the regular reporter / `zond db diagnose` flow.
+ *
+ * ARV-34: 429 is in the allow-set because rate-limiting is itself a valid
+ * server-side rejection of the request — the API refused to process invalid
+ * input, the contract is satisfied. Throttled probe runs were producing
+ * hundreds of false failures with the warning "N requests hit rate limit"
+ * already saying the same thing.
  *
  * The probes are deterministic — same spec → same suites — so the generated
  * YAML can be committed as a regression test.
@@ -17,6 +23,17 @@ import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
+import {
+  convertPath,
+  endpointStem,
+  getAuthHeaders,
+  renderPath,
+  isMutating,
+  findDeleteCounterpart,
+  captureFieldFor,
+  headersEqual,
+  hasJsonBody,
+} from "./shared.ts";
 
 // ──────────────────────────────────────────────
 // Constants
@@ -24,8 +41,9 @@ import { generateFromSchema } from "../generator/data-factory.ts";
 
 /** Statuses we consider an *acceptable* response to invalid input. Anything
  *  outside this set (notably 5xx, but also 200/201 which would mean the API
- *  silently accepted the bad input) is a probe failure. */
-const ACCEPTABLE_4XX = [400, 401, 403, 404, 405, 409, 415, 422];
+ *  silently accepted the bad input) is a probe failure. ARV-34: 429 stays in
+ *  the allow-set — server-side throttling is a valid rejection. */
+const ACCEPTABLE_4XX = [400, 401, 403, 404, 405, 409, 415, 422, 429];
 
 /** Long string for boundary probes — 10_000 chars. */
 const LONG_STRING = "a".repeat(10_000);
@@ -34,12 +52,13 @@ const LONG_STRING = "a".repeat(10_000);
 const UNICODE_MIX = "Mix🌐مرحبا\u200B";
 
 /** Sentinel non-UUID inputs for path/UUID probes. */
-const INVALID_UUID_VALUES = [
+export const INVALID_UUID_SENTINELS = [
   "not-a-uuid",
   "12345",
   "00000000",
   "../../etc/passwd",
-];
+] as const;
+const INVALID_UUID_VALUES = INVALID_UUID_SENTINELS;
 
 /** Sentinel invalid emails. */
 const INVALID_EMAIL_VALUES = [
@@ -77,6 +96,15 @@ export interface ProbeOptions {
    * (staging dump-and-reset) where cleanup is handled out of band.
    */
   noCleanup?: boolean;
+  /**
+   * TASK-135: when true (default), non-attacked path-params are emitted as
+   * runtime placeholders `{{name}}` so `zond run` substitutes them from
+   * `.env.yaml`. This avoids the short-circuit where every probe targeting a
+   * nested path resolved `{org}=nonexistent-zzzzz` and got 404 before the
+   * leaf validator ever fired. Set to false to keep the legacy behaviour
+   * (synthetic-by-type for every param).
+   */
+  useRealParents?: boolean;
 }
 
 export interface ProbeResult {
@@ -98,66 +126,6 @@ export interface ProbeResult {
 // ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
-
-function convertPath(path: string): string {
-  return path.replace(/\{([^}]+)\}/g, "{{$1}}");
-}
-
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "");
-}
-
-function endpointStem(ep: EndpointInfo): string {
-  const path = ep.path
-    .replace(/\{[^}]+\}/g, "by-id")
-    .replace(/^\//, "")
-    .replace(/\//g, "-");
-  return slugify(`${ep.method.toLowerCase()}-${path}`);
-}
-
-function getAuthHeaders(
-  ep: EndpointInfo,
-  schemes: SecuritySchemeInfo[],
-): Record<string, string> | undefined {
-  if (ep.security.length === 0) return undefined;
-  for (const secName of ep.security) {
-    const scheme = schemes.find((s) => s.name === secName);
-    if (!scheme) continue;
-    if (scheme.type === "http") {
-      if (scheme.scheme === "bearer" || !scheme.scheme) {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      if (scheme.scheme === "basic") {
-        return { Authorization: "Basic {{auth_token}}" };
-      }
-    }
-    if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
-      if (scheme.apiKeyName === "Authorization") {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      return { [scheme.apiKeyName]: "{{api_key}}" };
-    }
-  }
-  return undefined;
-}
-
-/** Path with placeholders replaced by valid-but-nonexistent IDs (for body probes
- *  on PUT/PATCH/DELETE — we don't want path validation to mask body errors). */
-function pathWithPlaceholders(ep: EndpointInfo, badId: string): string {
-  return ep.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
-    const param = ep.parameters.find((p) => p.name === name && p.in === "path");
-    const schema = param?.schema as OpenAPIV3.SchemaObject | undefined;
-    if (badId === "valid-shape") {
-      if (schema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
-      if (schema?.type === "integer" || schema?.type === "number") return "999999999";
-      return "nonexistent-zzzzz";
-    }
-    return badId;
-  });
-}
 
 function findUuidPathParams(ep: EndpointInfo): OpenAPIV3.ParameterObject[] {
   return ep.parameters.filter((p) => {
@@ -207,6 +175,11 @@ function collectAllProps(
  * Build a step that targets `endpoint`, but with an arbitrary body override.
  * Authentication and required path params are populated with valid placeholders
  * so the request reaches the body-validation layer.
+ *
+ * `pathOverride` (if provided) is treated as already-final — no further
+ * placeholder conversion is applied. Otherwise the path is rendered via
+ * `renderPath` with no attack target (so all path-params become runtime
+ * placeholders / synthetic sentinels depending on `useRealParents`).
  */
 function buildStep(
   ep: EndpointInfo,
@@ -216,17 +189,25 @@ function buildStep(
     json?: unknown;
     pathOverride?: string;
     expectStatusOk?: number[];
+    useRealParents: boolean;
   },
 ): RawStep {
   const method = ep.method.toUpperCase();
-  const path = opts.pathOverride ?? pathWithPlaceholders(ep, "valid-shape");
+  const path = opts.pathOverride ?? renderPath(ep, null, { useRealParents: opts.useRealParents });
   const headers = getAuthHeaders(ep, schemes);
 
+  const expectedStatus = opts.expectStatusOk ?? ACCEPTABLE_4XX;
+  const responseBranch = Array.isArray(expectedStatus) ? expectedStatus.map(String).join("|") : String(expectedStatus);
   const step: RawStep = {
     name: opts.name,
-    [method]: convertPath(path),
+    source: {
+      generator: "negative-probe",
+      endpoint: `${method} ${ep.path}`,
+      response_branch: responseBranch,
+    },
+    [method]: path,
     expect: {
-      status: opts.expectStatusOk ?? ACCEPTABLE_4XX,
+      status: expectedStatus,
     },
   };
   if (headers) step.headers = headers;
@@ -234,7 +215,11 @@ function buildStep(
   return step;
 }
 
-function probeEmptyBody(ep: EndpointInfo, schemes: SecuritySchemeInfo[]): RawStep | null {
+function probeEmptyBody(
+  ep: EndpointInfo,
+  schemes: SecuritySchemeInfo[],
+  useRealParents: boolean,
+): RawStep | null {
   if (!hasJsonBody(ep)) return null;
   const required = collectRequiredFields(ep.requestBodySchema);
   // Only meaningful when there *is* required data — otherwise {} is valid.
@@ -242,6 +227,7 @@ function probeEmptyBody(ep: EndpointInfo, schemes: SecuritySchemeInfo[]): RawSte
   return buildStep(ep, schemes, {
     name: "empty body — must reject (no 5xx)",
     json: {},
+    useRealParents,
   });
 }
 
@@ -249,6 +235,7 @@ function probeMissingRequired(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   if (!hasJsonBody(ep) || !ep.requestBodySchema) return [];
   const required = collectRequiredFields(ep.requestBodySchema);
@@ -267,6 +254,7 @@ function probeMissingRequired(
       buildStep(ep, schemes, {
         name: `missing required field "${field.name}" — must reject (no 5xx)`,
         json: variant,
+        useRealParents,
       }),
     );
   }
@@ -277,6 +265,7 @@ function probeBoundaryString(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   if (!hasJsonBody(ep) || !ep.requestBodySchema) return [];
   const props = collectAllProps(ep.requestBodySchema).filter(
@@ -295,14 +284,17 @@ function probeBoundaryString(
       buildStep(ep, schemes, {
         name: `${field.name}: empty string — must reject (no 5xx)`,
         json: { ...baseline, [field.name]: "" },
+        useRealParents,
       }),
       buildStep(ep, schemes, {
         name: `${field.name}: 10000-char string — must reject or accept (no 5xx)`,
         json: { ...baseline, [field.name]: LONG_STRING },
+        useRealParents,
       }),
       buildStep(ep, schemes, {
         name: `${field.name}: unicode/emoji/RTL — must not 5xx`,
         json: { ...baseline, [field.name]: UNICODE_MIX },
+        useRealParents,
       }),
     );
   }
@@ -313,6 +305,7 @@ function probeTypeConfusion(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   if (!hasJsonBody(ep) || !ep.requestBodySchema) return [];
   const props = collectAllProps(ep.requestBodySchema);
@@ -330,6 +323,7 @@ function probeTypeConfusion(
       buildStep(ep, schemes, {
         name: `${field.name}: wrong type (${describeType(field.schema)} → ${typeof wrongValue}) — must reject (no 5xx)`,
         json: { ...baseline, [field.name]: wrongValue },
+        useRealParents,
       }),
     );
   }
@@ -340,6 +334,7 @@ function probeInvalidFormat(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   if (!hasJsonBody(ep) || !ep.requestBodySchema) return [];
   const props = collectAllProps(ep.requestBodySchema);
@@ -360,6 +355,7 @@ function probeInvalidFormat(
       buildStep(ep, schemes, {
         name: `${field.name}: invalid ${fmt} (${JSON.stringify(badValue)}) — must reject (no 5xx)`,
         json: { ...baseline, [field.name]: badValue },
+        useRealParents,
       }),
     );
   }
@@ -370,6 +366,7 @@ function probeInvalidEnum(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   if (!hasJsonBody(ep) || !ep.requestBodySchema) return [];
   const baseline = generateFromSchema(ep.requestBodySchema) as Record<string, unknown>;
@@ -384,6 +381,7 @@ function probeInvalidEnum(
         buildStep(ep, schemes, {
           name: `${field.name}: unknown enum value "zond_invalid_value" — must reject (no 5xx)`,
           json: { ...baseline, [field.name]: "zond_invalid_value" },
+          useRealParents,
         }),
       );
     }
@@ -399,6 +397,7 @@ function probeInvalidEnum(
           buildStep(ep, schemes, {
             name: `${field.name}: array with unknown value ["zond.nonexistent.event"] — must reject (no 5xx)`,
             json: { ...baseline, [field.name]: ["zond.nonexistent.event"] },
+            useRealParents,
           }),
         );
       }
@@ -411,6 +410,7 @@ function probeInvalidPathId(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
   budget: number,
+  useRealParents: boolean,
 ): RawStep[] {
   const params = findUuidPathParams(ep);
   if (params.length === 0) return [];
@@ -419,18 +419,91 @@ function probeInvalidPathId(
   for (const param of params) {
     for (const bad of INVALID_UUID_VALUES) {
       if (out.length >= budget) break;
-      const path = ep.path.replace(/\{([^}]+)\}/g, (_, name: string) => {
-        if (name === param.name) return bad;
-        const other = ep.parameters.find((p) => p.name === name && p.in === "path");
-        const schema = other?.schema as OpenAPIV3.SchemaObject | undefined;
-        if (schema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
-        if (schema?.type === "integer" || schema?.type === "number") return "999999999";
-        return "nonexistent-zzzzz";
-      });
+      const path = renderPath(ep, { name: param.name, value: bad }, { useRealParents });
       out.push(
         buildStep(ep, schemes, {
           name: `path param ${param.name}=${JSON.stringify(bad)} — must reject (no 5xx)`,
           pathOverride: path,
+          useRealParents,
+        }),
+      );
+    }
+  }
+  return out;
+}
+
+/** TASK-67: numeric coercion probes for integer/number params (query + path).
+ *  Round-2 found `GET /emails?limit=1.5` → 500 — the bug class probe-validation
+ *  exists for. T49 covered numeric type-confusion in body, this extends to
+ *  query/path. */
+const NUMERIC_BAD_VALUES: Array<{ value: string; label: string }> = [
+  { value: "1.5", label: "float on integer" },
+  { value: "-1", label: "negative" },
+  { value: "0", label: "zero" },
+  { value: "abc", label: "non-numeric" },
+  { value: "", label: "empty string" },
+  // null on a query param means literal "null" string — most parsers treat it as bad input
+  { value: "null", label: "literal null" },
+  // Number.MAX_SAFE_INTEGER + 1 = 9007199254740992
+  { value: "9007199254740992", label: "MAX_SAFE_INTEGER+1" },
+];
+
+function isNumericSchema(schema: OpenAPIV3.SchemaObject | undefined): boolean {
+  return schema?.type === "integer" || schema?.type === "number";
+}
+
+function probeNumericQueryParams(
+  ep: EndpointInfo,
+  schemes: SecuritySchemeInfo[],
+  budget: number,
+  useRealParents: boolean,
+): RawStep[] {
+  const numericQuery = ep.parameters.filter(
+    (p) => p.in === "query" && isNumericSchema(p.schema as OpenAPIV3.SchemaObject | undefined),
+  );
+  if (numericQuery.length === 0) return [];
+
+  const out: RawStep[] = [];
+  for (const param of numericQuery) {
+    for (const { value, label } of NUMERIC_BAD_VALUES) {
+      if (out.length >= budget) break;
+      const basePath = renderPath(ep, null, { useRealParents });
+      const sep = basePath.includes("?") ? "&" : "?";
+      const pathWithQuery = `${basePath}${sep}${param.name}=${encodeURIComponent(value)}`;
+      out.push(
+        buildStep(ep, schemes, {
+          name: `query ${param.name}=${JSON.stringify(value)} (${label}) — must reject (no 5xx)`,
+          pathOverride: pathWithQuery,
+          useRealParents,
+        }),
+      );
+    }
+  }
+  return out;
+}
+
+function probeNumericPathParams(
+  ep: EndpointInfo,
+  schemes: SecuritySchemeInfo[],
+  budget: number,
+  useRealParents: boolean,
+): RawStep[] {
+  const numericPath = ep.parameters.filter(
+    (p) => p.in === "path" && isNumericSchema(p.schema as OpenAPIV3.SchemaObject | undefined),
+  );
+  if (numericPath.length === 0) return [];
+
+  const out: RawStep[] = [];
+  for (const param of numericPath) {
+    for (const { value, label } of NUMERIC_BAD_VALUES) {
+      if (value === "") continue; // empty path segment yields a different endpoint
+      if (out.length >= budget) break;
+      const overriddenPath = renderPath(ep, { name: param.name, value }, { useRealParents });
+      out.push(
+        buildStep(ep, schemes, {
+          name: `path param ${param.name}=${JSON.stringify(value)} (${label}) — must reject (no 5xx)`,
+          pathOverride: overriddenPath,
+          useRealParents,
         }),
       );
     }
@@ -465,62 +538,6 @@ function describeType(schema: OpenAPIV3.SchemaObject): string {
   return schema.type ?? "any";
 }
 
-function hasJsonBody(ep: EndpointInfo): boolean {
-  return (
-    ep.method !== "GET" &&
-    ep.method !== "DELETE" &&
-    ep.requestBodyContentType === "application/json" &&
-    ep.requestBodySchema !== undefined
-  );
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function isMutating(method: string): boolean {
-  const m = method.toUpperCase();
-  return m === "POST" || m === "PUT" || m === "PATCH";
-}
-
-/**
- * Find the DELETE endpoint that owns resources created by `ep`:
- *  - POST /collection            → DELETE /collection/{id}
- *  - PUT  /collection/{id}       → DELETE /collection/{id}    (same path)
- *  - PATCH /collection/{id}      → DELETE /collection/{id}    (same path)
- */
-function findDeleteCounterpart(
-  ep: EndpointInfo,
-  all: EndpointInfo[],
-): EndpointInfo | undefined {
-  const m = ep.method.toUpperCase();
-  if (m === "POST") {
-    const re = new RegExp(`^${escapeRegex(ep.path)}/\\{[^}]+\\}$`);
-    return all.find(e => e.method.toUpperCase() === "DELETE" && !e.deprecated && re.test(e.path));
-  }
-  if (m === "PUT" || m === "PATCH") {
-    return all.find(e => e.method.toUpperCase() === "DELETE" && !e.deprecated && e.path === ep.path);
-  }
-  return undefined;
-}
-
-/**
- * Pick the response field that holds the new resource's id. Defaults to "id";
- * falls back to the first integer / uuid property when no `id` field exists.
- */
-function captureFieldFor(ep: EndpointInfo): string {
-  const success = ep.responses.find(r => r.statusCode >= 200 && r.statusCode < 300 && r.schema);
-  const schema = success?.schema;
-  if (schema?.properties) {
-    if ("id" in schema.properties) return "id";
-    for (const [name, propSchema] of Object.entries(schema.properties)) {
-      const s = propSchema as OpenAPIV3.SchemaObject;
-      if (s.type === "integer" || s.format === "uuid") return name;
-    }
-  }
-  return "id";
-}
-
 /** Build a cleanup-DELETE step for a single mutating probe. The capture var
  *  must come from the paired probe step. If the probe didn't capture (e.g.
  *  the API correctly returned 4xx and no resource was created), the runner
@@ -537,6 +554,10 @@ function buildCleanupStep(
   const headers = getAuthHeaders(deleteEp, schemes);
   const step: RawStep = {
     name: `cleanup leaked resource from "${probeStepName}"`,
+    source: {
+      generator: "negative-probe-cleanup",
+      endpoint: `DELETE ${deleteEp.path}`,
+    },
     always: true,
     DELETE: path,
     expect: {
@@ -547,14 +568,6 @@ function buildCleanupStep(
   return step;
 }
 
-function headersEqual(a: Record<string, string>, b: Record<string, string>): boolean {
-  const ka = Object.keys(a);
-  const kb = Object.keys(b);
-  if (ka.length !== kb.length) return false;
-  for (const k of ka) if (a[k] !== b[k]) return false;
-  return true;
-}
-
 // ──────────────────────────────────────────────
 // Public API
 // ──────────────────────────────────────────────
@@ -563,6 +576,9 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
   const { endpoints, securitySchemes } = opts;
   const cap = opts.maxProbesPerEndpoint ?? 50;
   const noCleanup = opts.noCleanup === true;
+  // TASK-135: default ON. Non-attacked path-params are emitted as runtime
+  // placeholders `{{name}}` and resolved from `.env.yaml` by `zond run`.
+  const useRealParents = opts.useRealParents !== false;
 
   const suites: RawSuite[] = [];
   const warnings: string[] = [];
@@ -577,17 +593,25 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
     const remaining = () => Math.max(0, cap - steps.length);
 
     // 1. Path-id probes (cheap, deterministic)
-    steps.push(...probeInvalidPathId(ep, securitySchemes, remaining()));
+    steps.push(...probeInvalidPathId(ep, securitySchemes, remaining(), useRealParents));
+
+    // 1b. Numeric query / path coercion probes (T67) — float-on-integer,
+    //     negative, non-numeric, etc. Catches `GET /x?limit=1.5` → 500.
+    const numericQueryProbes = probeNumericQueryParams(ep, securitySchemes, remaining(), useRealParents);
+    steps.push(...numericQueryProbes);
+    const numericPathProbes = probeNumericPathParams(ep, securitySchemes, remaining(), useRealParents);
+    steps.push(...numericPathProbes);
+    const hasNumericCoercion = numericQueryProbes.length + numericPathProbes.length > 0;
 
     // 2. Body probes (only for body-bearing methods)
-    const empty = probeEmptyBody(ep, securitySchemes);
+    const empty = probeEmptyBody(ep, securitySchemes, useRealParents);
     if (empty && steps.length < cap) steps.push(empty);
 
-    steps.push(...probeMissingRequired(ep, securitySchemes, remaining()));
-    steps.push(...probeTypeConfusion(ep, securitySchemes, remaining()));
-    steps.push(...probeInvalidFormat(ep, securitySchemes, remaining()));
-    steps.push(...probeBoundaryString(ep, securitySchemes, remaining()));
-    steps.push(...probeInvalidEnum(ep, securitySchemes, remaining()));
+    steps.push(...probeMissingRequired(ep, securitySchemes, remaining(), useRealParents));
+    steps.push(...probeTypeConfusion(ep, securitySchemes, remaining(), useRealParents));
+    steps.push(...probeInvalidFormat(ep, securitySchemes, remaining(), useRealParents));
+    steps.push(...probeBoundaryString(ep, securitySchemes, remaining(), useRealParents));
+    steps.push(...probeInvalidEnum(ep, securitySchemes, remaining(), useRealParents));
 
     if (steps.length === 0) {
       skippedEndpoints++;
@@ -644,7 +668,17 @@ export function generateNegativeProbes(opts: ProbeOptions): ProbeResult {
     const stem = endpointStem(ep);
     const suite: RawSuite = {
       name: `probe ${ep.method} ${ep.path}`,
-      tags: ["probe-validation", "negative-input", "no-5xx"],
+      tags: [
+        "probe-validation",
+        "negative-input",
+        "no-5xx",
+        ...(hasNumericCoercion ? ["query-coercion"] : []),
+      ],
+      source: {
+        type: "probe-suite",
+        generator: "negative-probe",
+        endpoint: `${ep.method.toUpperCase()} ${ep.path}`,
+      },
       fileStem: `probe-${stem}`,
       base_url: "{{base_url}}",
       ...(suiteHeaders ? { headers: suiteHeaders } : {}),

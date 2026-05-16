@@ -1,10 +1,11 @@
 import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
-import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, recommendedAction, softDeleteHint, type RecommendedAction } from "./failure-hints.ts";
-import { AUTH_PATH_RE } from "../runner/execute-run.ts";
+import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, clusterEnvIssues, buildEnvIssue, recommendedActionForGenerated, isGeneratedTest, softDeleteHint, type RecommendedAction, type EnvIssue } from "./failure-hints.ts";
+import { buildSuggestedFixes, type SuggestedFix } from "./suggested-fixes.ts";
+import { AUTH_PATH_RE } from "../runner/auth-path.ts";
 
-export function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
+function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
   if (!raw) return undefined;
   if (verbose || raw.length < 500) return raw;
   const lines = raw.split(/\r?\n/);
@@ -24,7 +25,7 @@ export function truncateErrorMessage(raw: string | null | undefined, verbose?: b
   return msgLines.join("\n");
 }
 
-export function parseBodySafe(raw: string | null | undefined): unknown {
+function parseBodySafe(raw: string | null | undefined): unknown {
   if (!raw) return undefined;
   const truncated = raw.length > 2000 ? raw.slice(0, 2000) + "\u2026[truncated]" : raw;
   try {
@@ -40,7 +41,33 @@ const USEFUL_HEADERS = new Set([
 ]);
 const USEFUL_PREFIXES = ["x-", "ratelimit"];
 
-export function filterHeaders(raw: string | null | undefined): Record<string, string> | undefined {
+/** ARV-103 (F8): true when at least one assertion on the failing step is
+ *  a schema-validation kind. `--validate-schema` annotates each violated
+ *  field with `kind: "schema"` (set in src/core/runner/schema-validator.ts).
+ *  The assertions column is stored as JSON in SQLite; parse defensively. */
+function hasSchemaAssertion(raw: string | unknown[] | null | undefined): boolean {
+  if (raw === null || raw === undefined) return false;
+  let arr: unknown[];
+  if (Array.isArray(raw)) {
+    arr = raw;
+  } else if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return false;
+      arr = parsed;
+    } catch {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  for (const a of arr) {
+    if (a && typeof a === "object" && (a as { kind?: unknown }).kind === "schema") return true;
+  }
+  return false;
+}
+
+function filterHeaders(raw: string | null | undefined): Record<string, string> | undefined {
   if (!raw) return undefined;
   try {
     const h = JSON.parse(raw) as Record<string, string>;
@@ -145,9 +172,13 @@ export interface DiagnoseResult {
     network_errors: number;
   };
   agent_directive?: string;
-  env_issue?: string;
+  env_issue?: EnvIssue;
   auth_hint?: string;
   cascade_skips?: CascadeSkipGroup[];
+  /** TASK-29: actionable suggestions populated from 404 placeholder
+   *  detection + .env.yaml unfilled-key audit. Empty / undefined when
+   *  nothing actionable was found. */
+  suggested_fixes?: SuggestedFix[];
   failures: Array<{
     suite_name: string;
     test_name: string;
@@ -165,8 +196,23 @@ export interface DiagnoseResult {
     response_headers?: Record<string, string>;
     assertions: unknown;
     duration_ms: number | null;
+    /** ARV-159: when this entry is the representative of a collapsed group
+     *  (status|failure_type signature), the total size of that group. Lets
+     *  consumers reading `.data.failures[]` see "this signature stands for
+     *  N underlying tests" without cross-referencing `.grouped_failures[]`.
+     *  Omitted when no collapsing occurred (failures ≤ 5 or
+     *  --verbose). */
+    group_count?: number;
   }>;
   grouped_failures?: FailureGroup[];
+  /** ARV-101 (F6): top-level aggregation keyed by `recommended_action`
+   *  enum so triage agents (zond-triage skill) can route on the canonical
+   *  action without re-folding `failures[].recommended_action` through
+   *  `jq | group_by`. Built from the *full* failure set (not the compact
+   *  subset), so counts match `.summary.failed`. Each bucket carries
+   *  total count + a small examples list (`<suite>/<test>`). Empty when
+   *  there are no failures. */
+  by_recommended_action?: Record<string, { count: number; examples: string[] }>;
 }
 
 export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, maxExamples?: number): DiagnoseResult {
@@ -191,7 +237,16 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
         softDeleteHint(r.response_status, r.request_method, parsedBody) ??
         statusHint(r.response_status);
       const failure_type = classifyFailure(r.status, r.response_status);
-      const rec_action = recommendedAction(failure_type, r.response_status);
+      // ARV-42: generator-emitted suites should not route to fix_test_logic —
+      // editing the YAML gets clobbered on the next `zond audit`.
+      const generated = isGeneratedTest(r.provenance, r.suite_file);
+      // ARV-103 (F8): walk the assertions array to detect a schema-kind
+      // failure (--validate-schema annotates each assertion with its kind).
+      // When present, propagate the flag so the classifier routes to
+      // report_backend_bug — schema violations are real contract bugs, not
+      // test-logic mistakes.
+      const schema_violation = hasSchemaAssertion(r.assertions);
+      const rec_action = recommendedActionForGenerated(failure_type, r.response_status, generated, schema_violation);
       const sHint = schemaHint(failure_type, r.response_status);
       return {
         suite_name: r.suite_name,
@@ -213,7 +268,56 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
       };
     });
 
-  const sharedEnvHint = computeSharedEnvIssue(failures, envFilePath);
+  // TASK-70 + TASK-98 — env_issue detector.
+  //
+  // Two passes:
+  //   1. Run-level: if every non-5xx failure shares a single env-category,
+  //      treat it as a global env_issue (legacy TASK-70 behaviour). This
+  //      catches the most common case — base_url unset, every test broken.
+  //   2. Suite-level clustering: group failures by suite, flag each suite
+  //      whose non-5xx failures are ≥80% env-symptomatic (TASK-98). Catches
+  //      per-suite missing variables, expired auth tokens, dead webhook
+  //      hosts — situations where the run is *mixed* but a specific suite
+  //      is clearly env-broken.
+  //
+  // The fix_env override only applies to failures inside an affected suite.
+  // 5xx (api_error) is excluded everywhere — backend bugs stay
+  // report_backend_bug regardless of env state.
+  let env_issue: EnvIssue | undefined;
+  const legacyEnvHint = computeSharedEnvIssue(failures, envFilePath);
+  const clusters = clusterEnvIssues(failures);
+  const built = buildEnvIssue(clusters, envFilePath);
+
+  let affectedSuites: Set<string>;
+  if (built) {
+    env_issue = built;
+    affectedSuites = new Set(built.affected_suites);
+  } else if (legacyEnvHint) {
+    // Legacy global env_issue (no clustered match — e.g. only one failure,
+    // or every suite has a single failing test). Preserve the original
+    // single-message form but expose it via the new envelope shape so
+    // downstream consumers see one stable contract.
+    const allSuites = [...new Set(failures.filter(f => f.failure_type !== "api_error").map(f => f.suite_name))].sort();
+    env_issue = {
+      message: legacyEnvHint,
+      scope: "run",
+      affected_suites: allSuites,
+      symptoms: {},
+    };
+    affectedSuites = new Set(allSuites);
+  } else {
+    affectedSuites = new Set();
+  }
+
+  if (env_issue) {
+    for (const f of failures) {
+      if (f.failure_type === "api_error") continue; // real backend bug — keep
+      if (!affectedSuites.has(f.suite_name)) continue; // out-of-scope suite
+      f.recommended_action = "fix_env";
+      delete f.hint;
+      delete f.schema_hint;
+    }
+  }
 
   let apiErrors = 0, assertionFailures = 0, networkErrors = 0;
   let authFailureCount = 0;
@@ -274,6 +378,37 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
     ? { grouped_failures: undefined, compactFailures: failures }
     : groupFailures(failures, maxExamples);
 
+  // TASK-29: surface placeholder path-params + unfilled .env.yaml keys.
+  const suggestedFixes = buildSuggestedFixes({
+    failures: failures.map(f => ({
+      response_status: f.response_status,
+      request_url: f.request_url,
+      suite_name: f.suite_name,
+      test_name: f.test_name,
+    })),
+    envFilePath,
+  });
+
+  // ARV-101 (F6): aggregate failures by recommended_action enum so triage
+  // agents read .data.by_recommended_action.fix_env.count instead of
+  // re-folding failures[].recommended_action through `jq | group_by`. Built
+  // from the full failure set (not compactFailures) so counts match
+  // .summary.failed. Bounded examples list (5) keeps payload small while
+  // still pointing at concrete suites the agent can open.
+  const by_recommended_action: Record<string, { count: number; examples: string[] }> = {};
+  for (const f of failures) {
+    const key = f.recommended_action;
+    let bucket = by_recommended_action[key];
+    if (!bucket) {
+      bucket = { count: 0, examples: [] };
+      by_recommended_action[key] = bucket;
+    }
+    bucket.count += 1;
+    if (bucket.examples.length < 5) {
+      bucket.examples.push(`${f.suite_name}/${f.test_name}`);
+    }
+  }
+
   return {
     run: {
       id: diagRun.id,
@@ -290,15 +425,17 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
       network_errors: networkErrors,
     },
     ...(agent_directive ? { agent_directive } : {}),
-    ...(sharedEnvHint ? { env_issue: sharedEnvHint } : {}),
+    ...(env_issue ? { env_issue } : {}),
     ...(auth_hint ? { auth_hint } : {}),
     ...(cascade_skips ? { cascade_skips } : {}),
+    ...(suggestedFixes.length > 0 ? { suggested_fixes: suggestedFixes } : {}),
     failures: compactFailures,
     ...(grouped_failures ? { grouped_failures } : {}),
+    ...(failures.length > 0 ? { by_recommended_action } : {}),
   };
 }
 
-type FailureItem = { suite_name: string; test_name: string; failure_type: string; recommended_action: RecommendedAction; hint?: string; response_status: number | null };
+type FailureItem = { suite_name: string; test_name: string; failure_type: string; recommended_action: RecommendedAction; hint?: string; response_status: number | null; group_count?: number };
 
 /** Group similar failures for compact output. Exported for testing. */
 export function groupFailures<T extends FailureItem>(failures: T[], maxExamples = 2): { grouped_failures?: FailureGroup[]; compactFailures: T[] } {
@@ -352,7 +489,10 @@ export function groupFailures<T extends FailureItem>(failures: T[], maxExamples 
     if (isApiError) {
       compactFailures.push(...group.items);
     } else {
-      compactFailures.push(group.items[0]!);
+      // ARV-159: tag the representative with the group size so
+      // `.data.failures[]` carries the multiplier inline.
+      const rep = { ...group.items[0]!, group_count: group.items.length };
+      compactFailures.push(rep as T);
     }
   }
 

@@ -1,75 +1,55 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "fs";
-import { tmpdir } from "os";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 import { useCommand } from "../../src/cli/commands/use.ts";
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  let captured = "";
-  process.stdout.write = mock((data: any) => {
-    captured += String(data);
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = mock(() => true) as typeof process.stderr.write;
-  return {
-    restore() {
-      process.stdout.write = origOut;
-      process.stderr.write = origErr;
-    },
-    get captured() {
-      return captured;
-    },
-  };
-}
+import { captureOutput } from "../_helpers/output";
+import { makeWorkspace } from "../_helpers/workspace";
 
 describe("useCommand", () => {
   let cwd: string;
-  let originalCwd: string;
-  let output: ReturnType<typeof suppressOutput>;
+  let cleanupWs: () => void;
+  let output: ReturnType<typeof captureOutput>;
 
   beforeEach(() => {
-    cwd = mkdtempSync(join(tmpdir(), "zond-use-"));
-    originalCwd = process.cwd();
-    process.chdir(cwd);
-    output = suppressOutput();
+    const ws = makeWorkspace({ prefix: "zond-use-", chdir: true });
+    cwd = ws.path;
+    cleanupWs = ws.cleanup;
+    output = captureOutput();
   });
   afterEach(() => {
     output.restore();
-    process.chdir(originalCwd);
-    rmSync(cwd, { recursive: true, force: true });
+    cleanupWs();
   });
 
-  test("zond use <api> writes .zond-current", async () => {
+  test("zond use <api> writes .zond/current-api", async () => {
     const code = await useCommand({ api: "petstore" });
     expect(code).toBe(0);
-    const path = join(cwd, ".zond-current");
+    const path = join(cwd, ".zond/current-api");
     expect(existsSync(path)).toBe(true);
     expect(readFileSync(path, "utf-8").trim()).toBe("petstore");
   });
 
-  test("zond use --clear removes .zond-current", async () => {
+  test("zond use --clear removes .zond/current-api", async () => {
     await useCommand({ api: "petstore" });
     const code = await useCommand({ clear: true });
     expect(code).toBe(0);
-    expect(existsSync(join(cwd, ".zond-current"))).toBe(false);
+    expect(existsSync(join(cwd, ".zond/current-api"))).toBe(false);
   });
 
   test("zond use (no args) prints current value", async () => {
     await useCommand({ api: "petstore" });
     output.restore();
-    output = suppressOutput();
+    output = captureOutput();
     const code = await useCommand({});
     expect(code).toBe(0);
-    expect(output.captured.trim()).toBe("petstore");
+    expect(output.out.trim()).toBe("petstore");
   });
 
   test("--json envelope reports action", async () => {
     const code = await useCommand({ api: "petstore", json: true });
     expect(code).toBe(0);
-    const env = JSON.parse(output.captured);
+    const env = JSON.parse(output.out);
     expect(env.ok).toBe(true);
     expect(env.command).toBe("use");
     expect(env.data.action).toBe("set");

@@ -260,4 +260,79 @@ describe("validateSuite", () => {
     });
     expect(suite.setup).toBeUndefined();
   });
+
+  test("accepts parameterize map at suite level", () => {
+    const suite = validateSuite({
+      name: "schema-test",
+      parameterize: { endpoint: ["/a", "/b"] },
+      tests: [{ name: "x", GET: "{{endpoint}}", expect: { status: 200 } }],
+    });
+    expect(suite.parameterize).toEqual({ endpoint: ["/a", "/b"] });
+  });
+
+  // TASK-244 / TASK-257 — body-key hints: error message lists json/form/multipart
+  // so users with file-upload endpoints find the multipart syntax immediately.
+  describe("body-key hints", () => {
+    test("'raw:' rejects with hint mentioning multipart for file upload", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "upload", POST: "/files", raw: "...", expect: {} } as unknown as Record<string, unknown>],
+      })).toThrow(/multipart: \{ field: \{ file: <path> \} \}/);
+    });
+
+    test("'body:' rejects with hint mentioning all three formats", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "post", POST: "/x", body: { k: "v" }, expect: {} } as unknown as Record<string, unknown>],
+      })).toThrow(/json.*form.*multipart/);
+    });
+
+    test("'payload:' rejects with json suggestion", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "p", POST: "/x", payload: { k: "v" }, expect: {} } as unknown as Record<string, unknown>],
+      })).toThrow(/Did you mean 'json'/);
+    });
+  });
+
+  // TASK-249 — expect.status spot-message: surface a single-line hint instead
+  // of the raw zod-issue path for the most common wrong shapes (oneOf, string,
+  // mixed array). The message must mention the supported shapes.
+  describe("expect.status spot-message", () => {
+    const HINT = /use a number .* array of numbers/;
+    test("rejects oneOf: [...] with hint", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: { oneOf: [200, 404] } } } as unknown as Record<string, unknown>],
+      })).toThrow(/oneOf/);
+    });
+    test("rejects anyOf: [...] with hint", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: { anyOf: [200, 404] } } } as unknown as Record<string, unknown>],
+      })).toThrow(HINT);
+    });
+    test("rejects string status with hint", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: "200" } } as unknown as Record<string, unknown>],
+      })).toThrow(HINT);
+    });
+    test("rejects array containing strings with hint", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: [200, "404"] } } as unknown as Record<string, unknown>],
+      })).toThrow(HINT);
+    });
+    test("accepts number and array of numbers", () => {
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: 200 } }],
+      })).not.toThrow();
+      expect(() => validateSuite({
+        name: "x",
+        tests: [{ name: "t", GET: "/x", expect: { status: [200, 404] } }],
+      })).not.toThrow();
+    });
+  });
 });

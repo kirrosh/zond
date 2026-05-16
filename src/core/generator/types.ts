@@ -8,6 +8,14 @@ export interface ResponseInfo {
 
 export interface EndpointInfo {
   path: string;
+  /** ARV-183: original spec path before ARV-40 path-param disambiguation
+   *  renamed `{id}` → `{<resource>_id}`. Set only when a rename happened;
+   *  unset means `path` is the original. Used by checks that look up
+   *  `doc.paths[...]` by string equality (status_code_conformance,
+   *  response_headers_conformance) — without this they miss the spec
+   *  entry and either fire phantom findings (status_code) or silently
+   *  skip (response_headers). */
+  originalPath?: string;
   method: string;
   operationId?: string;
   summary?: string;

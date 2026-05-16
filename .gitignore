@@ -1,6 +1,9 @@
 # dependencies (bun install)
 node_modules
 
+# strategy notes (private)
+strategy/
+
 # output
 out
 dist
@@ -9,9 +12,11 @@ dist
 # compiled binary
 zond
 zond.exe
+zond-v2
+zond-v2.exe
 
 # code coverage
-coverage
+/coverage
 *.lcov
 
 # logs
@@ -45,3 +50,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # test playground
 playground/
 .mcp.json
+
+# Claude Code local state
+.claude/

@@ -1,15 +1,14 @@
 # zond workspace config
 #
 # The presence of this file marks the workspace root for `zond` walk-up
-# resolution (zond.db, apis/<name>/, .zond-current are anchored here).
-#
-# Schema below is a placeholder — TASK-12 will wire a real config loader.
-# Uncomment and edit as needed.
+# resolution (zond.db, apis/<name>/, .zond/current-api are anchored here).
 
 version: 1
 
-# default_reporter: console     # console | json | junit
-# default_safe: false
-# default_timeout_ms: 30000
-# default_tags: []
-# fail_on_coverage: 0
+# Workspace-level defaults. Per-command flags always win; per-API
+# override lives in apis/<name>/.env.yaml as `rateLimit:` / `timeoutMs:`.
+# Resolution: CLI flag > .env.yaml meta > defaults below > built-in fallback.
+#
+# defaults:
+#   timeout_ms: 30000   # cleanup / prepare-fixtures / probe / request
+#   rate_limit: 5       # `zond run` (number rps, or "auto" for adaptive)

@@ -25,6 +25,9 @@ permissions:
   contents: read
   checks: write
   pull-requests: write
+  # ARV-5: required for github/codeql-action/upload-sarif to surface
+  # zond-checks findings in the Code Scanning tab.
+  security-events: write
 
 jobs:
   test:
@@ -54,6 +57,21 @@ jobs:
           zond run apis/ --tag crud --exclude-tag persistent-write --env staging --report junit --no-db > test-results/crud.xml
           # Add --env-var "BASE_URL=\${{ secrets.STAGING_URL }}" for staging URL
         continue-on-error: true
+
+      - name: Run depth checks (SARIF for Code Scanning)
+        run: |
+          zond checks run --api myapi --report sarif --output test-results/zond-checks.sarif || true
+          # ARV-5: \`|| true\` keeps the workflow green even when HIGH/CRITICAL
+          # findings would otherwise exit 1 — Code Scanning will still get the
+          # SARIF and gate on the alerts via branch protection if desired.
+        continue-on-error: true
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: test-results/zond-checks.sarif
+          category: zond-checks
 
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2
@@ -177,4 +195,29 @@ export async function ciInitCommand(options: CiInitOptions): Promise<number> {
   }
 
   return 0;
+}
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+
+export function registerCi(program: Command): void {
+  const ci = program.command("ci").description("CI/CD scaffolding");
+  ci
+    .command("init")
+    .description("Generate CI/CD workflow (GitHub Actions, GitLab CI)")
+    .option("--github", "Generate GitHub Actions workflow")
+    .option("--gitlab", "Generate GitLab CI config")
+    .option("--dir <path>", "Project root directory (default: current directory)")
+    .option("--force", "Overwrite existing CI config")
+    .action(async (opts, cmd: Command) => {
+      let platform: "github" | "gitlab" | undefined;
+      if (opts.github === true) platform = "github";
+      else if (opts.gitlab === true) platform = "gitlab";
+      process.exitCode = await ciInitCommand({
+        platform,
+        force: opts.force === true,
+        dir: opts.dir,
+        json: globalJson(cmd),
+      });
+    });
 }

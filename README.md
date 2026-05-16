@@ -15,17 +15,49 @@ curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
 iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex        # Windows
 ```
 
-Bootstrap a workspace and register your first API:
+Bootstrap a workspace, register your first API, then fill its fixtures:
 
 ```bash
-zond init --workspace --with-spec ./openapi.json
+zond init                                              # bootstrap workspace (no fixture changes)
+zond add api my-api --spec ./openapi.json              # register: copies spec.json + emits manifest
+zond doctor --api my-api --missing-only                # gap report: which vars are UNSET
+zond prepare-fixtures --api my-api --apply [--seed]    # fill apis/my-api/.env.yaml from live API
 ```
 
-`zond init` writes a self-contained [`AGENTS.md`](AGENTS.md) — agents read it
-and use the CLI directly (`zond run`, `zond probe-validation`,
-`zond db diagnose`, …). No daemon, no transport, no extra configuration.
+For path-FK ids that auto-discover/--seed can't reach (vendor-dashboard
+ids like `cus_*`, GitHub PR numbers, Sentry issue ids), use the manual
+helpers (ARV-195):
+
+```bash
+zond fixtures add --api my-api customer_id=cus_123 --validate --apply
+pbpaste | zond fixtures import --api my-api --from-curl --apply        # paste a curl from devtools
+```
+
+`zond init` writes a self-contained [`AGENTS.md`](AGENTS.md) and Claude Code
+skills — agents read it and use the CLI directly (`zond run`,
+`zond probe static`, `zond db diagnose`, …). No daemon, no transport, no
+extra configuration. `init` is workspace-only — it never touches
+`.env.yaml`; the fixture loop above is the canonical path.
+
+Each registered API gets four files in `apis/<name>/`:
+
+- `spec.json` — dereferenced OpenAPI snapshot (canonical machine source).
+- `.api-catalog.yaml` — endpoint index for agents (cheap to read).
+- `.api-resources.yaml` — CRUD chains, FK dependencies, ETag/soft-delete flags.
+- `.api-fixtures.yaml` — **manifest** of required `{{vars}}` (read-only, auto-generated).
+
+Plus a sibling `.env.yaml` that you (or `zond prepare-fixtures`) fill with
+the **values** for those vars. The manifest/values split is strict — see
+the [workspace contract](AGENTS.md#workspace-contract) for details.
+
+Run `zond refresh-api <name> [--spec <new-source>]` to re-snapshot when the
+upstream spec changes.
 
 Then say to your agent: _"Safely cover the API from openapi.json with tests."_
+
+Want the whole pipeline at once? `zond audit --api my-api` runs
+prepare-fixtures → generate → probes → run → coverage → HTML report in a
+single shot.
 
 <details>
 <summary>Other installation methods (npx)</summary>
@@ -58,6 +90,11 @@ Claude Code can write pytest from scratch — but it takes 30-60 minutes per flo
 | **Spec-Grounded** | Tests are derived from your OpenAPI schema, not invented from scratch. The spec is the source of truth. |
 | **Full Visibility** | Every run is stored in SQLite. Compare runs, track regressions, see exactly what the server returned. |
 | **Coverage Tracking** | See which endpoints are tested, which aren't, and what broke since last run. |
+| **Schema Validation** | `--validate-schema` checks every JSON response against the OpenAPI schema (types, required, enum, format, `$ref`) — catches contract drift the YAML expectations miss. |
+| **Spec Linting** | `zond check spec` static-analyses the OpenAPI document for internal-consistency bugs (e.g. example violates `format: date-time`) and strictness gaps (path-params without `format`, integer params without min/max) — surfaces issues before any HTTP request. |
+| **Depth Checks (m-15)** | `zond checks run` runs a schemathesis-style catalog of conformance + security probes (`status_code_conformance`, `negative_data_rejection`, `ignored_auth`, `use_after_free`, …) — boundary-value coverage, broken-auth detection, soft-deleted resource leaks. Every finding ships with a `recommended_action` enum so the agent triages without parsing messages. |
+| **SARIF for Code Scanning** | `--report sarif` emits SARIF v2.1.0 with stable `partialFingerprints` — drop-in for `github/codeql-action/upload-sarif@v3` so depth-checks findings show up in GitHub's Security tab. |
+| **Concurrent Workers** | `--workers auto` parallelizes runs at the operation level (bounded async-pool, no threading) — runs that took minutes finish in seconds. Pair with `--rate-limit` to stay within an API's RPS budget. |
 | **CI-Ready** | One command generates GitHub Actions or GitLab CI workflow. Tests in YAML, in git, with code review. |
 
 ## Try It
@@ -67,6 +104,21 @@ Claude Code can write pytest from scratch — but it takes 30-60 minutes per flo
 "Run only smoke tests against staging"
 "What broke since last run?"
 "Set up CI for API tests"
+```
+
+## Upgrading
+
+`zond update` was removed in favour of system package managers:
+
+```bash
+# macOS / Linux — re-run the installer
+curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
+
+# npm
+npm install -g @kirrosh/zond@latest
+
+# bun
+bun install -g @kirrosh/zond@latest
 ```
 
 ## Shell completions
@@ -82,7 +134,7 @@ zond completions fish > ~/.config/fish/completions/zond.fish
 - [ZOND.md](ZOND.md) — full CLI reference
 - [docs/quickstart.md](docs/quickstart.md) — step-by-step quickstart (RU)
 - [docs/ci.md](docs/ci.md) — CI/CD integration
-- [backlog/](backlog/) — project tasks (powered by [Backlog.md](https://backlog.md), see [docs/backlog.md](docs/backlog.md))
+- [backlog/](backlog/) — project tasks (powered by [Backlog.md](https://backlog.md))
 
 ## License
 

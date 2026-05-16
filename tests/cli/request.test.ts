@@ -1,32 +1,19 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
+import { join } from "node:path";
 import { requestCommand } from "../../src/cli/commands/request.ts";
+import { setupApi } from "../../src/core/setup-api.ts";
+import { closeDb } from "../../src/db/schema.ts";
 
-const originalFetch = globalThis.fetch;
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  const origLog = console.log;
-  let captured = "";
-  process.stdout.write = mock((data: any) => { captured += String(data); return true; }) as typeof process.stdout.write;
-  process.stderr.write = mock(() => true) as typeof process.stderr.write;
-  console.log = mock((...args: unknown[]) => { captured += args.map(String).join(" ") + "\n"; });
-  return {
-    restore() {
-      process.stdout.write = origOut;
-      process.stderr.write = origErr;
-      console.log = origLog;
-    },
-    getCaptured() { return captured; },
-  };
-}
+import { captureOutput } from "../_helpers/output";
+import { restoreFetch } from "../_helpers/fetch-mock";
+import { makeWorkspace } from "../_helpers/workspace";
 
 describe("requestCommand", () => {
-  let output: ReturnType<typeof suppressOutput>;
+  let output: ReturnType<typeof captureOutput>;
 
   afterEach(() => {
     output?.restore();
-    globalThis.fetch = originalFetch;
+    restoreFetch();
   });
 
   test("sends GET request and returns JSON envelope", async () => {
@@ -37,7 +24,7 @@ describe("requestCommand", () => {
       })
     ) as unknown as typeof fetch;
 
-    output = suppressOutput();
+    output = captureOutput({ console: true });
 
     const code = await requestCommand({
       method: "GET",
@@ -46,7 +33,7 @@ describe("requestCommand", () => {
     });
 
     expect(code).toBe(0);
-    const envelope = JSON.parse(output.getCaptured());
+    const envelope = JSON.parse(output.out);
     expect(envelope.ok).toBe(true);
     expect(envelope.data.status).toBe(200);
     expect(envelope.data.body.hello).toBe("world");
@@ -62,7 +49,7 @@ describe("requestCommand", () => {
       });
     }) as unknown as typeof fetch;
 
-    output = suppressOutput();
+    output = captureOutput({ console: true });
 
     const code = await requestCommand({
       method: "POST",
@@ -75,6 +62,107 @@ describe("requestCommand", () => {
     expect(capturedBody).toBe('{"name":"test"}');
   });
 
+  test("--api with relative path auto-prefixes base_url from .env.yaml", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-", marker: "config", chdir: true });
+    const workspace = ws.path;
+    try {
+      await setupApi({
+        name: "jp",
+        envVars: { base_url: "https://example.com" },
+        dbPath: join(workspace, "zond.db"),
+      });
+      closeDb();
+
+      let calledUrl = "";
+      globalThis.fetch = mock(async (url: string | URL | Request) => {
+        calledUrl = String(url);
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+      }) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+
+      const code = await requestCommand({
+        method: "GET",
+        url: "/users/1",
+        api: "jp",
+        dbPath: join(workspace, "zond.db"),
+        json: true,
+      });
+
+      expect(code).toBe(0);
+      expect(calledUrl).toBe("https://example.com/users/1");
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--api unknown gives actionable error", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-", marker: "config", chdir: true });
+    const workspace = ws.path;
+    try {
+      output = captureOutput({ console: true });
+      const code = await requestCommand({
+        method: "GET",
+        url: "/users/1",
+        api: "ghost",
+        dbPath: join(workspace, "zond.db"),
+        json: true,
+      });
+      expect(code).toBe(1);
+      const envelope = JSON.parse(output.out);
+      expect(envelope.ok).toBe(false);
+      expect(envelope.errors[0].message).toMatch(/not registered/);
+      expect(envelope.errors[0].message).toMatch(/zond add api/);
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  // TASK-272 — auto-auth hint discoverability
+  test("on 401 without --api in apis/ workspace prints --api hint to stderr", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-hint-", marker: "config", chdir: true });
+    try {
+      // create apis/sentry/ to trigger the hint
+      const fs = await import("node:fs");
+      fs.mkdirSync(join(ws.path, "apis", "sentry"), { recursive: true });
+
+      globalThis.fetch = mock(async () =>
+        new Response("{}", { status: 401, headers: { "Content-Type": "application/json" } })
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      const code = await requestCommand({
+        method: "GET",
+        url: "http://localhost/x",
+        // no api set
+      });
+      expect(code).toBe(0);
+      expect(output.err).toMatch(/--api sentry/);
+      expect(output.err).toMatch(/auto-load Authorization/);
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("no --api hint when apis/ workspace is absent", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-no-hint-", marker: "config", chdir: true });
+    try {
+      globalThis.fetch = mock(async () =>
+        new Response("{}", { status: 401, headers: { "Content-Type": "application/json" } })
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      await requestCommand({ method: "GET", url: "http://localhost/x" });
+      expect(output.err).not.toMatch(/--api/);
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
   test("sends request with headers", async () => {
     let capturedHeaders: Record<string, string> = {};
     globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
@@ -85,7 +173,7 @@ describe("requestCommand", () => {
       });
     }) as unknown as typeof fetch;
 
-    output = suppressOutput();
+    output = captureOutput({ console: true });
 
     const code = await requestCommand({
       method: "GET",
@@ -96,5 +184,359 @@ describe("requestCommand", () => {
 
     expect(code).toBe(0);
     expect(capturedHeaders["Authorization"]).toBe("Bearer token123");
+  });
+
+  // ──────────────────────────────────────────────
+  // TASK-142: --validate-schema / --validate-against
+  // ──────────────────────────────────────────────
+
+  function writeSpec(dir: string, name = "spec.json"): string {
+    const fs = require("fs") as typeof import("fs");
+    const p = join(dir, name);
+    const spec = {
+      openapi: "3.0.3",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/users/{id}": {
+          get: {
+            parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      required: ["id", "name"],
+                      properties: { id: { type: "string" }, name: { type: "string" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    fs.writeFileSync(p, JSON.stringify(spec));
+    return p;
+  }
+
+  test("--validate-schema PASS via auto-resolved templated path /users/{id}", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-vs-", marker: "config", chdir: true });
+    try {
+      const specPath = writeSpec(ws.path);
+      await setupApi({
+        name: "vs",
+        spec: specPath,
+        envVars: { base_url: "https://example.com" },
+        dbPath: join(ws.path, "zond.db"),
+      });
+      closeDb();
+
+      globalThis.fetch = mock(async () =>
+        new Response(JSON.stringify({ id: "abc", name: "Alice" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      const code = await requestCommand({
+        method: "GET",
+        url: "/users/abc",
+        api: "vs",
+        dbPath: join(ws.path, "zond.db"),
+        validateSchema: true,
+        json: true,
+      });
+      expect(code).toBe(0);
+      const env = JSON.parse(output.out);
+      expect(env.data.schema_validation.status).toBe("PASS");
+      expect(env.data.schema_validation.matchedEndpoint.path).toBe("/users/{id}");
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--validate-schema FAIL when body misses required field", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-vs-", marker: "config", chdir: true });
+    try {
+      const specPath = writeSpec(ws.path);
+      await setupApi({
+        name: "vs",
+        spec: specPath,
+        envVars: { base_url: "https://example.com" },
+        dbPath: join(ws.path, "zond.db"),
+      });
+      closeDb();
+
+      globalThis.fetch = mock(async () =>
+        new Response(JSON.stringify({ id: "abc" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      const code = await requestCommand({
+        method: "GET",
+        url: "/users/abc",
+        api: "vs",
+        dbPath: join(ws.path, "zond.db"),
+        validateSchema: true,
+        json: true,
+      });
+      expect(code).toBe(1);
+      const env = JSON.parse(output.out);
+      expect(env.data.schema_validation.status).toBe("FAIL");
+      expect(env.data.schema_validation.errors[0].rule).toContain("schema.required");
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--validate-against overrides auto-resolution", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-vs-", marker: "config", chdir: true });
+    try {
+      const specPath = writeSpec(ws.path);
+      await setupApi({
+        name: "vs",
+        spec: specPath,
+        envVars: { base_url: "https://example.com" },
+        dbPath: join(ws.path, "zond.db"),
+      });
+      closeDb();
+
+      globalThis.fetch = mock(async () =>
+        new Response(JSON.stringify({ id: "x", name: "y" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      const code = await requestCommand({
+        method: "GET",
+        url: "/anything-else", // would not auto-resolve
+        api: "vs",
+        dbPath: join(ws.path, "zond.db"),
+        validateAgainst: "GET:/users/{id}",
+        json: true,
+      });
+      expect(code).toBe(0);
+      const env = JSON.parse(output.out);
+      expect(env.data.schema_validation.status).toBe("PASS");
+      expect(env.data.schema_validation.matchedEndpoint.path).toBe("/users/{id}");
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--validate-schema with no matching endpoint returns no-endpoint with hint", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-vs-", marker: "config", chdir: true });
+    try {
+      const specPath = writeSpec(ws.path);
+      await setupApi({
+        name: "vs",
+        spec: specPath,
+        envVars: { base_url: "https://example.com" },
+        dbPath: join(ws.path, "zond.db"),
+      });
+      closeDb();
+
+      globalThis.fetch = mock(async () =>
+        new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      const code = await requestCommand({
+        method: "GET",
+        url: "/widgets/1",
+        api: "vs",
+        dbPath: join(ws.path, "zond.db"),
+        validateSchema: true,
+        json: true,
+      });
+      expect(code).toBe(0); // not a FAIL — validation is a soft no-op when nothing matches
+      const env = JSON.parse(output.out);
+      expect(env.data.schema_validation.status).toBe("no-endpoint");
+      expect(env.data.schema_validation.message).toMatch(/--validate-against/);
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--validate-schema without --api returns no-spec with hint", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    const code = await requestCommand({
+      method: "GET",
+      url: "http://localhost/x",
+      validateSchema: true,
+      json: true,
+    });
+    expect(code).toBe(0);
+    const env = JSON.parse(output.out);
+    expect(env.data.schema_validation.status).toBe("no-spec");
+    expect(env.data.schema_validation.message).toMatch(/requires --api/);
+  });
+
+  // ──────────────────────────────────────────────
+  // ARV-110: envelope shape is identical with and without --api
+  //
+  // F17 reported the envelope "differed" between modes when extracting via
+  // --json-path. Empirically the shape is identical — the confusion was that
+  // --json-path addresses the response body, not the envelope. These tests
+  // pin both: (a) envelope keys parity across modes, (b) a stderr hint when
+  // the user writes a path like `body.id` / `data.id` that looks like they
+  // meant to address the envelope.
+  // ──────────────────────────────────────────────
+
+  test("envelope shape matches between bare URL and --api (same HTTP response)", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-env-", marker: "config", chdir: true });
+    try {
+      await setupApi({
+        name: "demo",
+        envVars: { base_url: "https://example.com" },
+        dbPath: join(ws.path, "zond.db"),
+      });
+      closeDb();
+
+      const body = { id: "u-1", value: 42 };
+      globalThis.fetch = mock(async () =>
+        new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }),
+      ) as unknown as typeof fetch;
+
+      output = captureOutput({ console: true });
+      await requestCommand({ method: "GET", url: "https://example.com/users/1", json: true });
+      const bare = JSON.parse(output.out);
+      output.restore();
+
+      output = captureOutput({ console: true });
+      await requestCommand({
+        method: "GET",
+        url: "/users/1",
+        api: "demo",
+        dbPath: join(ws.path, "zond.db"),
+        json: true,
+      });
+      const withApi = JSON.parse(output.out);
+
+      expect(Object.keys(bare).sort()).toEqual(Object.keys(withApi).sort());
+      expect(Object.keys(bare.data).sort()).toEqual(Object.keys(withApi.data).sort());
+      expect(bare.data.body).toEqual(withApi.data.body);
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--json-path body.id on {id:...} response prints envelope-confusion hint to stderr", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify({ id: "u-1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    const code = await requestCommand({
+      method: "GET",
+      url: "http://example.com/x",
+      jsonPath: "body.id",
+    });
+    expect(code).toBe(0);
+    expect(output.err).toMatch(/did not resolve.*"body"/);
+    expect(output.err).toMatch(/extracts from the response body, not the zond envelope/);
+  });
+
+  test("envelope-confusion hint also fires under --json (stderr) so pipelines see it", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify({ id: "u-1" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    const code = await requestCommand({
+      method: "GET",
+      url: "http://example.com/x",
+      jsonPath: "data.id",
+      json: true,
+    });
+    expect(code).toBe(0);
+    expect(output.err).toMatch(/did not resolve.*"data"/);
+    expect(output.err).toMatch(/extracts from the response body, not the zond envelope/);
+    // envelope itself still printed to stdout
+    const env = JSON.parse(output.out);
+    expect(env.ok).toBe(true);
+  });
+
+  // ARV-144: top-level array bodies (Sentry, GitHub-style REST).
+  test("--json-path [0].id resolves a top-level array element to stdout", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify([{ id: "a" }, { id: "b" }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    const code = await requestCommand({
+      method: "GET",
+      url: "http://example.com/list",
+      jsonPath: "[0].id",
+    });
+    expect(code).toBe(0);
+    expect(output.out.trim()).toBe("a");
+  });
+
+  test("--json-path data[0].id on top-level array body emits top-level-array hint (not envelope hint)", async () => {
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify([{ id: "a" }]), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    await requestCommand({
+      method: "GET",
+      url: "http://example.com/list",
+      jsonPath: "data[0].id",
+    });
+    expect(output.err).toMatch(/response body is a top-level array/);
+    expect(output.err).toMatch(/\[0\]\.id/);
+    expect(output.err).not.toMatch(/extracts from the response body, not the zond envelope/);
+  });
+
+  test("no envelope hint when path failed deeper than the first segment", async () => {
+    // `items[0].id` on a body that has items but the inner object lacks `id`
+    // should NOT trigger the envelope hint — the user clearly meant to walk
+    // the response body, they just have the wrong key.
+    globalThis.fetch = mock(async () =>
+      new Response(JSON.stringify({ items: [{ uuid: "x" }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ) as unknown as typeof fetch;
+
+    output = captureOutput({ console: true });
+    await requestCommand({
+      method: "GET",
+      url: "http://example.com/x",
+      jsonPath: "items[0].id",
+    });
+    expect(output.err).toMatch(/did not resolve/);
+    expect(output.err).not.toMatch(/extracts from the response body/);
   });
 });

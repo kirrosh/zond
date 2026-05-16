@@ -37,16 +37,19 @@ describe("extractEndpoints", () => {
     const doc = await readOpenApiSpec(FIXTURE);
     const endpoints = extractEndpoints(doc);
 
-    expect(endpoints.length).toBe(7); // login + 5 pet routes + health
-
-    const methods = endpoints.map((e) => `${e.method} ${e.path}`);
-    expect(methods).toContain("POST /auth/login");
-    expect(methods).toContain("GET /pets");
-    expect(methods).toContain("POST /pets");
-    expect(methods).toContain("GET /pets/{id}");
-    expect(methods).toContain("PUT /pets/{id}");
-    expect(methods).toContain("DELETE /pets/{id}");
-    expect(methods).toContain("GET /health");
+    // TASK-208 AC#3: assert by content (sorted set), not by length — adding
+    // a route to the fixture shouldn't break this test, only "missing
+    // expected route" should.
+    const methods = endpoints.map((e) => `${e.method} ${e.path}`).sort();
+    expect(methods).toEqual([
+      "DELETE /pets/{id}",
+      "GET /health",
+      "GET /pets",
+      "GET /pets/{id}",
+      "POST /auth/login",
+      "POST /pets",
+      "PUT /pets/{id}",
+    ]);
   });
 
   test("extracts operationId and summary", async () => {
@@ -203,5 +206,57 @@ describe("extractEndpoints — media-level example lifting (T33)", () => {
     const endpoints = extractEndpoints(doc);
     const ep = endpoints[0]!;
     expect(ep.requestBodySchema?.example).toEqual({ name: "schema-wins" });
+  });
+});
+
+// TASK-96 — non-numeric response keys (e.g. "default") must be skipped so
+// that downstream code never sees a NaN status.
+describe("extractEndpoints — non-numeric response keys (TASK-96)", () => {
+  test("'default' response key is dropped from responses[]", () => {
+    const doc = {
+      openapi: "3.0.0",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/things": {
+          post: {
+            operationId: "createThing",
+            responses: { default: { description: "any" } },
+          },
+        },
+      },
+    } as Awaited<ReturnType<typeof readOpenApiSpec>>;
+    const endpoints = extractEndpoints(doc);
+    const ep = endpoints[0]!;
+    expect(ep.responses.length).toBe(0);
+    expect(ep.responses.every((r) => Number.isFinite(r.statusCode))).toBe(true);
+  });
+});
+
+describe("extractEndpoints — x-circular param stubs (ARV-200/F1)", () => {
+  test("filters out parameter stubs without .name/.in (decycleSchema sentinels)", () => {
+    const doc = {
+      openapi: "3.0.0",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/widgets": {
+          parameters: [{ "x-circular": true } as any],
+          get: {
+            operationId: "listWidgets",
+            parameters: [
+              { name: "limit", in: "query", schema: { type: "integer" } },
+              { "x-circular": true } as any,
+              null as any,
+            ],
+            responses: { 200: { description: "ok" } },
+          },
+        },
+      },
+    } as Awaited<ReturnType<typeof readOpenApiSpec>>;
+    const endpoints = extractEndpoints(doc);
+    expect(endpoints.length).toBe(1);
+    const ep = endpoints[0]!;
+    expect(ep.parameters.length).toBe(1);
+    expect(ep.parameters[0]!.name).toBe("limit");
+    expect(ep.parameters.every((p) => typeof p.name === "string" && typeof p.in === "string")).toBe(true);
   });
 });

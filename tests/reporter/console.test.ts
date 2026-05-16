@@ -7,40 +7,7 @@ import {
   formatGrandTotal,
   consoleReporter,
 } from "../../src/core/reporter/console.ts";
-import type { TestRunResult, StepResult } from "../../src/core/runner/types.ts";
-
-function makeStep(overrides?: Partial<StepResult>): StepResult {
-  return {
-    name: "Test step",
-    status: "pass",
-    duration_ms: 100,
-    request: { method: "GET", url: "http://localhost/test", headers: {} },
-    response: {
-      status: 200,
-      headers: {},
-      body: "{}",
-      body_parsed: {},
-      duration_ms: 100,
-    },
-    assertions: [],
-    captures: {},
-    ...overrides,
-  };
-}
-
-function makeResult(overrides?: Partial<TestRunResult>): TestRunResult {
-  return {
-    suite_name: "Test Suite",
-    started_at: "2024-01-01T00:00:00.000Z",
-    finished_at: "2024-01-01T00:00:01.000Z",
-    total: 1,
-    passed: 1,
-    failed: 0,
-    skipped: 0,
-    steps: [makeStep()],
-    ...overrides,
-  };
-}
+import { makeStep, makeResult } from "../_helpers/reporter-fixtures";
 
 // --- formatDuration ---
 
@@ -124,6 +91,76 @@ describe("formatFailures", () => {
     const step = makeStep({ status: "error", error: "Connection refused" });
     const out = formatFailures(step, false);
     expect(out).toContain("Error: Connection refused");
+  });
+
+  test("schema-rule failure renders humanised expected, not [object Object] (TASK-277)", () => {
+    const step = makeStep({
+      status: "fail",
+      assertions: [
+        {
+          field: "body",
+          rule: "schema.required",
+          passed: false,
+          actual: { plugins: [] },
+          expected: 'missing required field "name"; expected required: [id, slug, name]',
+          kind: "schema",
+        },
+      ],
+    });
+    const out = formatFailures(step, false);
+    expect(out).not.toContain("[object Object]");
+    expect(out).toContain('missing required field "name"');
+    expect(out).toContain("expected required: [id, slug, name]");
+  });
+
+  test("schema-rule format failure shows the offending primitive (ARV-27)", () => {
+    const step = makeStep({
+      status: "fail",
+      assertions: [
+        {
+          field: "body.data.0.created_at",
+          rule: "schema.format",
+          passed: false,
+          actual: "2026-04-28 07:18:18.314+00",
+          expected: 'format "date-time"',
+          kind: "schema",
+        },
+      ],
+    });
+    const out = formatFailures(step, false);
+    expect(out).toContain('format "date-time"');
+    expect(out).toContain('(got "2026-04-28 07:18:18.314+00")');
+  });
+
+  test("schema-rule with object actual still skips the JSON dump (TASK-277 holds)", () => {
+    const step = makeStep({
+      status: "fail",
+      assertions: [
+        {
+          field: "body",
+          rule: "schema.required",
+          passed: false,
+          actual: { plugins: [] },
+          expected: 'missing required field "name"',
+          kind: "schema",
+        },
+      ],
+    });
+    const out = formatFailures(step, false);
+    expect(out).not.toContain("(got ");
+    expect(out).toContain('missing required field "name"');
+  });
+
+  test("non-schema actual objects render as JSON, not [object Object]", () => {
+    const step = makeStep({
+      status: "fail",
+      assertions: [
+        { field: "body", rule: "equals", passed: false, actual: { a: 1 }, expected: { a: 2 } },
+      ],
+    });
+    const out = formatFailures(step, false);
+    expect(out).not.toContain("[object Object]");
+    expect(out).toContain('{"a":1}');
   });
 
   test("returns empty for step with no failures", () => {

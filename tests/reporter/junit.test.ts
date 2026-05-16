@@ -1,55 +1,14 @@
-import { describe, test, expect, mock, afterEach } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import { junitReporter } from "../../src/core/reporter/junit.ts";
 import type { TestRunResult, StepResult } from "../../src/core/runner/types.ts";
+import { captureOutput } from "../_helpers/output";
 
 // ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
 
-function makeStep(overrides?: Partial<StepResult>): StepResult {
-  return {
-    name: "Get user",
-    status: "pass",
-    duration_ms: 450,
-    request: { method: "GET", url: "http://localhost/users/1", headers: {} },
-    response: {
-      status: 200,
-      headers: { "content-type": "application/json" },
-      body: '{"id":1}',
-      body_parsed: { id: 1 },
-      duration_ms: 450,
-    },
-    assertions: [{ field: "status", rule: "equals 200", passed: true, actual: 200, expected: 200 }],
-    captures: {},
-    ...overrides,
-  };
-}
+import { makeStep, makeResult } from "../_helpers/reporter-fixtures";
 
-function makeResult(overrides?: Partial<TestRunResult>): TestRunResult {
-  return {
-    suite_name: "Users CRUD",
-    started_at: "2024-01-01T00:00:00.000Z",
-    finished_at: "2024-01-01T00:00:01.000Z",
-    total: 1,
-    passed: 1,
-    failed: 0,
-    skipped: 0,
-    steps: [makeStep()],
-    ...overrides,
-  };
-}
-
-function captureLog() {
-  const origLog = console.log;
-  let output = "";
-  console.log = mock((...args: unknown[]) => {
-    output += args.map(String).join(" ") + "\n";
-  });
-  return {
-    get: () => output.trim(),
-    restore: () => { console.log = origLog; },
-  };
-}
 
 // ──────────────────────────────────────────────
 // XML structure
@@ -60,11 +19,11 @@ describe("JUnit Reporter — XML structure", () => {
   afterEach(() => restoreFn?.());
 
   test("outputs XML declaration and root element", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     junitReporter.report([makeResult()]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
     expect(xml).toContain("<testsuites");
@@ -72,7 +31,7 @@ describe("JUnit Reporter — XML structure", () => {
   });
 
   test("root testsuites has correct aggregated attributes", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     const results = [
@@ -80,21 +39,21 @@ describe("JUnit Reporter — XML structure", () => {
       makeResult({ suite_name: "Suite B", total: 2, passed: 2, steps: [makeStep(), makeStep()] }),
     ];
     junitReporter.report(results);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain('tests="5"');
     expect(xml).toContain('failures="1"');
   });
 
   test("each result becomes a testsuite element", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     junitReporter.report([
       makeResult({ suite_name: "Suite A" }),
       makeResult({ suite_name: "Suite B" }),
     ]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain('name="Suite A"');
     expect(xml).toContain('name="Suite B"');
@@ -102,11 +61,11 @@ describe("JUnit Reporter — XML structure", () => {
   });
 
   test("testsuite attributes: tests, failures, errors, skipped", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     junitReporter.report([makeResult({ total: 2, passed: 1, failed: 1, skipped: 0 })]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain('tests="2"');
     expect(xml).toContain('failures="1"');
@@ -115,13 +74,13 @@ describe("JUnit Reporter — XML structure", () => {
   });
 
   test("passing step renders self-closing testcase", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     junitReporter.report([makeResult()]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
-    expect(xml).toContain('<testcase name="Get user"');
+    expect(xml).toContain('<testcase name="step"');
     expect(xml).toContain('"/>');
     expect(xml).not.toContain("<failure");
     expect(xml).not.toContain("<error");
@@ -129,19 +88,19 @@ describe("JUnit Reporter — XML structure", () => {
   });
 
   test("skipped step renders <skipped/> element", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     const step = makeStep({ name: "Verify deleted", status: "skip", duration_ms: 0 });
     junitReporter.report([makeResult({ total: 1, passed: 0, skipped: 1, steps: [step] })]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain('<testcase name="Verify deleted"');
     expect(xml).toContain("<skipped/>");
   });
 
   test("failed step renders <failure> with message", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     const step = makeStep({
@@ -153,7 +112,7 @@ describe("JUnit Reporter — XML structure", () => {
       ],
     });
     junitReporter.report([makeResult({ total: 1, passed: 0, failed: 1, steps: [step] })]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain('<testcase name="Update user"');
     expect(xml).toContain("<failure");
@@ -162,7 +121,7 @@ describe("JUnit Reporter — XML structure", () => {
   });
 
   test("error step renders <error> element", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     const step = makeStep({
@@ -172,7 +131,7 @@ describe("JUnit Reporter — XML structure", () => {
       error: "Connection refused",
     });
     junitReporter.report([makeResult({ total: 1, passed: 0, failed: 0, steps: [step] })]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain("<error");
     expect(xml).toContain("Connection refused");
@@ -180,11 +139,11 @@ describe("JUnit Reporter — XML structure", () => {
   });
 
   test("empty results produce empty testsuites", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     junitReporter.report([]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain('tests="0"');
     expect(xml).toContain("<testsuites");
@@ -201,36 +160,36 @@ describe("JUnit Reporter — time formatting", () => {
   afterEach(() => restoreFn?.());
 
   test("time is in seconds with 3 decimal places", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     junitReporter.report([makeResult({ steps: [makeStep({ duration_ms: 450 })] })]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain('time="0.450"');
   });
 
   test("aggregates step times for testsuite time", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     const steps = [makeStep({ duration_ms: 100 }), makeStep({ duration_ms: 200 })];
     junitReporter.report([makeResult({ total: 2, passed: 2, steps })]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     // testsuite time = 0.300
     expect(xml).toContain('time="0.300"');
   });
 
   test("root testsuites time is total across all suites", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     junitReporter.report([
       makeResult({ steps: [makeStep({ duration_ms: 100 })] }),
       makeResult({ suite_name: "B", steps: [makeStep({ duration_ms: 200 })] }),
     ]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     // root time = 0.300
     const match = xml.match(/<testsuites[^>]+time="([^"]+)"/);
@@ -247,28 +206,28 @@ describe("JUnit Reporter — XML escaping", () => {
   afterEach(() => restoreFn?.());
 
   test("escapes & < > in suite name", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     junitReporter.report([makeResult({ suite_name: "A & B <Suite>" })]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain("A &amp; B &lt;Suite&gt;");
     expect(xml).not.toContain("A & B <Suite>");
   });
 
   test("escapes & < > in step name", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     junitReporter.report([makeResult({ steps: [makeStep({ name: 'Create "item" & verify' })] })]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain("Create &quot;item&quot; &amp; verify");
   });
 
   test("escapes failure message", () => {
-    const cap = captureLog();
+    const cap = captureOutput({ console: true });
     restoreFn = cap.restore;
 
     const step = makeStep({
@@ -276,7 +235,7 @@ describe("JUnit Reporter — XML escaping", () => {
       assertions: [{ field: "body", rule: "contains <html>", passed: false, actual: "<html>", expected: "json" }],
     });
     junitReporter.report([makeResult({ total: 1, passed: 0, failed: 1, steps: [step] })]);
-    const xml = cap.get();
+    const xml = cap.out.trim();
 
     expect(xml).toContain("&lt;html&gt;");
     expect(xml).not.toContain("<html>");

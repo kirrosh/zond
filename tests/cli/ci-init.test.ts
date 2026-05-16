@@ -1,36 +1,25 @@
-import { describe, test, expect, beforeEach, afterEach, mock } from "bun:test";
-import { mkdtempSync, existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
-import { tmpdir } from "os";
 import { ciInitCommand } from "../../src/cli/commands/ci-init.ts";
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  process.stdout.write = mock(() => true) as typeof process.stdout.write;
-  process.stderr.write = mock(() => true) as typeof process.stderr.write;
-  return () => {
-    process.stdout.write = origOut;
-    process.stderr.write = origErr;
-  };
-}
+import { captureOutput } from "../_helpers/output";
+import { makeWorkspace } from "../_helpers/workspace";
 
 describe("zond ci init", () => {
   let tmpDir: string;
-  let origCwd: string;
+  let cleanupWs: () => void;
   let restoreOutput: () => void;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "zond-ci-init-"));
-    origCwd = process.cwd();
-    process.chdir(tmpDir);
-    restoreOutput = suppressOutput();
+    const ws = makeWorkspace({ prefix: "zond-ci-init-", chdir: true });
+    tmpDir = ws.path;
+    cleanupWs = ws.cleanup;
+    restoreOutput = captureOutput().restore;
   });
 
   afterEach(() => {
-    process.chdir(origCwd);
     restoreOutput();
-    rmSync(tmpDir, { recursive: true, force: true });
+    cleanupWs();
   });
 
   test("--github creates GitHub Actions workflow", async () => {

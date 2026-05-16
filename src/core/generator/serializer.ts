@@ -1,21 +1,22 @@
 import { resolve } from "path";
+import type { SourceMetadata } from "../parser/types.ts";
 
 // ──────────────────────────────────────────────
 // Utility functions (moved from skeleton.ts)
 // ──────────────────────────────────────────────
 
-export function isRelativeUrl(url: string): boolean {
+function isRelativeUrl(url: string): boolean {
   return url.startsWith("/") && !url.includes("://");
 }
 
-export function resolveSpecPath(specPath: string): string {
+function resolveSpecPath(specPath: string): string {
   if (specPath.startsWith("http://") || specPath.startsWith("https://")) {
     return specPath;
   }
   return resolve(specPath);
 }
 
-export function sanitizeEnvName(name: string): string {
+function sanitizeEnvName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
 }
 
@@ -25,6 +26,7 @@ export function sanitizeEnvName(name: string): string {
 
 export interface RawStep {
   name: string;
+  source?: SourceMetadata;
   [methodKey: string]: unknown;
   expect: {
     status?: number | number[];
@@ -37,6 +39,7 @@ export interface RawSuite {
   name: string;
   setup?: boolean;
   tags?: string[];
+  source?: SourceMetadata;
   folder?: string;
   fileStem?: string;
   base_url?: string;
@@ -66,10 +69,19 @@ export function serializeSuite(suite: RawSuite): string {
       lines.push(`  ${hk}: ${yamlScalar(String(hv))}`);
     }
   }
+  if (suite.source && Object.keys(suite.source).length > 0) {
+    lines.push("source:");
+    serializeValue(suite.source, 1, lines);
+  }
   lines.push("tests:");
 
   for (const test of suite.tests) {
     lines.push(`  - name: ${yamlScalar(test.name)}`);
+
+    if (test.source && Object.keys(test.source).length > 0) {
+      lines.push("    source:");
+      serializeValue(test.source, 3, lines);
+    }
 
     // Write method-as-key (the shorthand)
     for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"]) {
@@ -90,6 +102,27 @@ export function serializeSuite(suite: RawSuite): string {
     if (test.json !== undefined) {
       lines.push("    json:");
       serializeValue(test.json, 3, lines);
+    }
+
+    // ARV-149: form body (application/x-www-form-urlencoded). The runner
+    // serialises this via URLSearchParams; values are flat strings with
+    // bracket notation for nested fields (e.g. `address[line1]`).
+    //
+    // ARV-162 (round-08 F19): form values are ALWAYS strings on the wire —
+    // x-www-form-urlencoded has no native numbers/bools/nulls. YAML parsing
+    // `phone: +1234567890` or `width: 12.5` as int/float makes `zond check
+    // tests` reject the suite ("expected string, received number"), and
+    // `zond run` silently skipped 21/68 generated Stripe suites this way.
+    // Force-quote every value regardless of shape; key still uses yamlScalar
+    // because bracket keys (`address[line1]`) need quoting too.
+    if (test.form !== undefined && typeof test.form === "object" && test.form !== null) {
+      const formEntries = Object.entries(test.form as Record<string, unknown>);
+      if (formEntries.length > 0) {
+        lines.push("    form:");
+        for (const [fk, fv] of formEntries) {
+          lines.push(`      ${yamlScalar(fk)}: "${escapeYamlDoubleQuoted(String(fv))}"`);
+        }
+      }
     }
 
     // query
@@ -151,7 +184,10 @@ export function serializeSuite(suite: RawSuite): string {
               lines.push(`          ${rk}:`);
               serializeValue(rv, 6, lines);
             } else {
-              lines.push(`          ${rk}: ${yamlScalar(String(rv))}`);
+              // Preserve scalar types — `not_equals: true` (boolean) must not
+              // become `not_equals: "true"` (string), or assertions silently
+              // mistype against real boolean fields.
+              lines.push(`          ${rk}: ${formatInlineValue(rv)}`);
             }
           }
         }
@@ -182,16 +218,24 @@ function serializeValue(value: unknown, indent: number, lines: string[]): void {
         if (entries.length > 0) {
           const [firstKey, firstVal] = entries[0]!;
           if (typeof firstVal === "object" && firstVal !== null) {
-            lines.push(`${prefix}- ${firstKey}:`);
-            serializeValue(firstVal, indent + 1, lines);
+            if (isEmptyContainer(firstVal)) {
+              lines.push(`${prefix}- ${firstKey}: ${Array.isArray(firstVal) ? "[]" : "{}"}`);
+            } else {
+              lines.push(`${prefix}- ${firstKey}:`);
+              serializeValue(firstVal, indent + 1, lines);
+            }
           } else {
             lines.push(`${prefix}- ${firstKey}: ${formatInlineValue(firstVal)}`);
           }
           for (let i = 1; i < entries.length; i++) {
             const [k, v] = entries[i]!;
             if (typeof v === "object" && v !== null) {
-              lines.push(`${prefix}  ${k}:`);
-              serializeValue(v, indent + 1, lines);
+              if (isEmptyContainer(v)) {
+                lines.push(`${prefix}  ${k}: ${Array.isArray(v) ? "[]" : "{}"}`);
+              } else {
+                lines.push(`${prefix}  ${k}:`);
+                serializeValue(v, indent + 1, lines);
+              }
             } else {
               lines.push(`${prefix}  ${k}: ${formatInlineValue(v)}`);
             }
@@ -209,13 +253,26 @@ function serializeValue(value: unknown, indent: number, lines: string[]): void {
   if (typeof value === "object") {
     for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
       if (typeof val === "object" && val !== null) {
-        lines.push(`${prefix}${key}:`);
-        serializeValue(val, indent + 1, lines);
+        if (isEmptyContainer(val)) {
+          lines.push(`${prefix}${key}: ${Array.isArray(val) ? "[]" : "{}"}`);
+        } else {
+          lines.push(`${prefix}${key}:`);
+          serializeValue(val, indent + 1, lines);
+        }
       } else {
         lines.push(`${prefix}${key}: ${formatInlineValue(val)}`);
       }
     }
   }
+}
+
+/** Empty `{}` / `[]` written as a bare `key:` (no value, no children) is
+ *  re-parsed by YAML as `null` — sending `null` for an `object`-typed field
+ *  guarantees 422 against strict APIs. Emit inline flow form to preserve type. */
+function isEmptyContainer(val: unknown): boolean {
+  if (Array.isArray(val)) return val.length === 0;
+  if (typeof val === "object" && val !== null) return Object.keys(val).length === 0;
+  return false;
 }
 
 function formatInlineValue(val: unknown): string {
@@ -224,6 +281,17 @@ function formatInlineValue(val: unknown): string {
   return String(val);
 }
 
+/** ARV-62 (feedback round-01 / F3): security probes emit attack payloads
+ *  with raw CRLF (`crlf:`, header-injection) and other control bytes.
+ *  When written into a double-quoted YAML scalar these *must* be escaped
+ *  (`\r` / `\n` / `\t` / `\xNN`) — emitting the raw byte produces YAML
+ *  that the parser rejects with "bad indentation of a mapping entry"
+ *  (`zond run` then fails the whole suite at load-time before sending a
+ *  single request). The check also covers `\r`, `\t`, `\x00–\x1f`, and
+ *  `\x7f` so any other control byte that sneaks into a payload survives
+ *  the YAML round-trip. */
+// eslint-disable-next-line no-control-regex
+const CONTROL_BYTE_RE = /[\x00-\x1f\x7f]/;
 function yamlScalar(value: string): string {
   if (
     value === "" ||
@@ -232,7 +300,6 @@ function yamlScalar(value: string): string {
     value === "null" ||
     value.includes(":") ||
     value.includes("#") ||
-    value.includes("\n") ||
     value.includes("'") ||
     value.includes('"') ||
     value.includes("{") ||
@@ -245,9 +312,32 @@ function yamlScalar(value: string): string {
     value.startsWith("%") ||
     value.startsWith("@") ||
     value.startsWith("`") ||
-    /^\d+$/.test(value)
+    /^\d+$/.test(value) ||
+    CONTROL_BYTE_RE.test(value)
   ) {
-    return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+    return `"${escapeYamlDoubleQuoted(value)}"`;
   }
   return value;
+}
+
+function escapeYamlDoubleQuoted(value: string): string {
+  let out = "";
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i]!;
+    const code = ch.charCodeAt(0);
+    if (ch === "\\") { out += "\\\\"; continue; }
+    if (ch === '"') { out += '\\"'; continue; }
+    if (ch === "\n") { out += "\\n"; continue; }
+    if (ch === "\r") { out += "\\r"; continue; }
+    if (ch === "\t") { out += "\\t"; continue; }
+    if (code < 0x20 || code === 0x7f) {
+      // YAML 1.2 allows \xNN for any byte in (0..0xff); use this for any
+      // control character that doesn't have a dedicated short escape
+      // (covers \x00–\x1f minus the three handled above, plus DEL).
+      out += "\\x" + code.toString(16).padStart(2, "0");
+      continue;
+    }
+    out += ch;
+  }
+  return out;
 }
