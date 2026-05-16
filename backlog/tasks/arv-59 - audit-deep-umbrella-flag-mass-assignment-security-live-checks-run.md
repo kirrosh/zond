@@ -4,14 +4,14 @@ title: 'audit: --deep umbrella flag (mass-assignment + security live + checks ru
 status: To Do
 assignee: []
 created_date: '2026-05-11 02:45'
-updated_date: '2026-05-16 08:25'
+updated_date: '2026-05-16 08:43'
 labels:
   - audit
   - feedback-loop
   - m-16
   - depth
 dependencies: []
-priority: medium
+priority: low
 ---
 
 ## Description
@@ -44,5 +44,17 @@ Reference: feedback-18, F3/F4 (UX-инициаторы); existing tasks ARV-3 (i
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Description correction (2026-05-16 strategy review): description mentions '12 depth-checks' — actual count is 18 (zond checks list). Update ratio accordingly: '8/18 depth-checks not run' rather than '8/12'. Strategy alignment: hygiene-scanner pivot (R18) makes --deep more valuable, not less — full coverage out-of-box is exactly the hygiene-scanner promise. Keep MEDIUM.
+Deferred / low priority (2026-05-16 strategy review).
+
+Rationale: zond.md skill now explicitly repositions audit as smoke+breadth pass; depth (stateful checks, security probes, learn-apply) is the skill's job. --deep umbrella adds opt-in stages that audit can't make smart decisions on:
+
+1. zond checks run --check stateful requires api annotate first (m-20 iron rule: defaults miss API quirks). zond has no LLM; annotate is the skill's job. Hardcoding --with-checks runs stateful on defaults → poor findings.
+
+2. R18 pivot (no evidence → no high severity): security probes need scoping + cleanup feasibility checks the skill orchestrates. Hardcoded --with-security flag duplicates iron-rule logic that's already in zond.md.
+
+3. Growth pressure: today --with-checks, tomorrow --with-learn, next --with-annotate-pre. Each new stage = another flag + dependency chain. Skill = instructions in markdown; audit flags = instructions in Commander-options. Markdown wins.
+
+Not Won't Do (still kept for future re-raise): if zond ever ships an in-binary annotation engine (currently scoped out per memory zond_no_llm_calls), --deep becomes viable. Until then, the right path is: zond audit (smoke) → walk Phase 0–9 in skill (depth).
+
+ARV-65 + ARV-66 (correctness fixes for audit smoke) shipped instead — commits 2026-05-16.
 <!-- SECTION:NOTES:END -->

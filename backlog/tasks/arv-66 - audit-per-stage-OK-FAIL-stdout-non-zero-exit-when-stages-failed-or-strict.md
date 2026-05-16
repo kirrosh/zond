@@ -3,10 +3,10 @@ id: ARV-66
 title: >-
   audit: per-stage OK/FAIL stdout + non-zero exit when stages failed (or
   --strict)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 06:50'
-updated_date: '2026-05-16 08:25'
+updated_date: '2026-05-16 08:43'
 labels:
   - feedback-loop
   - api-resend
@@ -24,10 +24,14 @@ Source: feedback round 01, finding F6, class likely_bug. Repro: zond audit --api
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Correction (2026-05-16): prior Implementation Notes line 'Merged ARV-136 (validation-sprint 2026-05-16): run --safe verify-skip cascade' is INCORRECT — ARV-136 is still To Do (separate scope). ARV-66 scope is ONLY:
-1. per-stage OK/FAIL stdout next to 'Stage N/M'
-2. non-zero exit when any stage failed (or --strict flag)
-3. audit-report.html path echoed on success
+Added per-stage completion line printed after each stage (audit.ts runStage + coverage special-case):
+  └─ OK · 1.2s
+  └─ FAIL (exit 1) · 3.4s
+  └─ SKIPPED (reason)
 
-Do NOT bundle with ARV-136. Verified 2026-05-16: 'zond audit --help' still has no --strict / per-stage status. Keep MEDIUM.
+Non-zero exit on stage failure was already correct (auditCommand returns failed === 0 ? 0 : 1); ARV-66's primary user-visible gap was the missing per-stage OK/FAIL inline status — that's what landed.
+
+audit-report.html path is already echoed via printSuccess('… → out') / printWarning summary lines.
+
+--strict flag: skipped — exit-code already non-zero on failure, --strict has no additional semantics.
 <!-- SECTION:NOTES:END -->
