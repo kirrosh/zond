@@ -204,6 +204,16 @@ schema-derived body. Bracket-notation nested params (Stripe's
 some APIs will 400 here; **don't ask the user to fill missing ids
 manually first**, jump to Phase 2 (annotate seed_body) instead.
 
+`--seed` is **not** a silver bullet. Builder handles top-level
+required fields and discriminator-aware `oneOf` (ARV-67/78), but
+*deeply nested* `oneOf` subschemas (required fields inside a chosen
+discriminator branch with their own nested `oneOf`/`anyOf` — e.g.
+`POST /automations` triggers with conditional payload) still 422
+silently. If `--seed --cascade` reports `miss-seed-422` for a resource
+with a complex body, the right escape is annotate `seed_body` (Phase 2)
+or `zond fixtures add <var>=<value>` with a hand-crafted body. Don't
+loop on `--cascade` waiting for it to converge — it won't.
+
 If `--seed` converges but vars stay UNSET, the reason is outside the
 API path (email verify / paid plan / SCIM / TOS limits). Document the
 gap; don't loop further.
