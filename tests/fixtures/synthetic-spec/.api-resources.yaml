@@ -1,0 +1,12 @@
+resources:
+  - resource: users
+    basePath: /users
+    itemPath: /users/{id}
+    idParam: id
+    captureField: id
+    hasFullCrud: false
+    endpoints:
+      list: GET /users
+      create: POST /users
+      read: GET /users/{id}
+    fkDependencies: []

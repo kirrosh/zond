@@ -75,16 +75,39 @@ export function formatFailures(step: StepResult, color: boolean): string {
 
   const failed = step.assertions.filter((a) => !a.passed);
   for (const a of failed) {
-    const msg = `${a.field}: expected ${a.rule} but got ${formatValue(a.actual)}`;
+    const msg = formatAssertion(a);
     lines.push(color ? `    ${RED}${msg}${RESET}` : `    ${msg}`);
   }
   return lines.join("\n");
+}
+
+function formatAssertion(a: { field: string; rule: string; actual: unknown; expected: unknown; kind?: string }): string {
+  // Schema assertions already carry a humanised `expected` string ("missing
+  // required field …", "type integer", …). Use it directly — interpolating
+  // the actual subtree via String() turns into "[object Object]" and buries
+  // the actionable detail (TASK-277).
+  //
+  // ARV-27: when `actual` is a primitive (string/number/bool/null), append it
+  // to the message so format/type/enum/const failures show the offending value
+  // — same shape as runtime asserts ("expected equals 200 but got 422").
+  // Skipped for objects/arrays to avoid burying the message under JSON dumps
+  // (the original TASK-277 concern).
+  if (a.kind === "schema" && typeof a.expected === "string") {
+    if (isPrimitive(a.actual)) return `${a.field}: ${a.expected} (got ${formatValue(a.actual)})`;
+    return `${a.field}: ${a.expected}`;
+  }
+  return `${a.field}: expected ${a.rule} but got ${formatValue(a.actual)}`;
+}
+
+function isPrimitive(v: unknown): boolean {
+  return v === null || typeof v === "string" || typeof v === "number" || typeof v === "boolean";
 }
 
 function formatValue(value: unknown): string {
   if (value === undefined) return "undefined";
   if (value === null) return "null";
   if (typeof value === "string") return `"${value}"`;
+  if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }
 
@@ -126,6 +149,10 @@ export function formatSuiteResult(result: TestRunResult, color: boolean): string
     const label = `${fiveXx} 5xx`;
     parts.push(color ? `${BOLD}${YELLOW}${label}${RESET}` : label);
   }
+  const errored = result.steps.filter(s => s.status === "error").length;
+  if (errored > 0) {
+    parts.push(color ? `${RED}${errored} errored${RESET}` : `${errored} errored`);
+  }
   if (result.skipped > 0) {
     parts.push(color ? `${GRAY}${result.skipped} skipped${RESET}` : `${result.skipped} skipped`);
   }
@@ -140,7 +167,7 @@ export function formatSuiteResult(result: TestRunResult, color: boolean): string
 }
 
 export function formatGrandTotal(results: TestRunResult[], color: boolean): string {
-  const totals = { passed: 0, failed: 0, skipped: 0, total: 0, fiveXx: 0 };
+  const totals = { passed: 0, failed: 0, skipped: 0, errored: 0, total: 0, fiveXx: 0 };
   let minStart = Infinity;
   let maxEnd = -Infinity;
 
@@ -148,6 +175,7 @@ export function formatGrandTotal(results: TestRunResult[], color: boolean): stri
     totals.passed += r.passed;
     totals.failed += r.failed;
     totals.skipped += r.skipped;
+    totals.errored += r.steps.filter(s => s.status === "error").length;
     totals.total += r.total;
     totals.fiveXx += count5xx(r.steps);
     const start = Date.parse(r.started_at);
@@ -170,6 +198,9 @@ export function formatGrandTotal(results: TestRunResult[], color: boolean): stri
     const label = `${totals.fiveXx} 5xx`;
     parts.push(color ? `${BOLD}${YELLOW}${label}${RESET}` : label);
   }
+  if (totals.errored > 0) {
+    parts.push(color ? `${RED}${totals.errored} errored${RESET}` : `${totals.errored} errored`);
+  }
   if (totals.skipped > 0) {
     parts.push(color ? `${GRAY}${totals.skipped} skipped${RESET}` : `${totals.skipped} skipped`);
   }
@@ -184,6 +215,14 @@ export const consoleReporter: Reporter = {
 
     if (results.length === 0) {
       console.log("No test suites found.");
+      return;
+    }
+
+    // TASK-265: --quiet collapses output to one summary line. Exit code
+    // still differentiates pass/fail; this is for CI logs and `run --watch`
+    // where per-test detail is noise between iterations.
+    if (options?.quiet) {
+      console.log(formatGrandTotal(results, color));
       return;
     }
 

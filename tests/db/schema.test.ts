@@ -1,19 +1,7 @@
 import { describe, test, expect, afterEach } from "bun:test";
-import { tmpdir } from "os";
-import { join } from "path";
-import { existsSync, unlinkSync } from "fs";
-import { getDb, closeDb } from "../../src/db/schema.ts";
-
-function tmpDb(): string {
-  return join(tmpdir(), `zond-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-}
-
-function tryUnlink(path: string): void {
-  // WAL mode creates -wal and -shm sidecar files; cleanup is best-effort on Windows
-  for (const suffix of ["", "-wal", "-shm"]) {
-    try { unlinkSync(path + suffix); } catch { /* ignore */ }
-  }
-}
+import { existsSync } from "fs";
+import { getDb, closeDb, withDbRetry } from "../../src/db/schema.ts";
+import { tmpDb, unlinkDb as tryUnlink } from "../_helpers/tmp-db";
 
 describe("getDb / schema", () => {
   let dbPath: string | undefined;
@@ -86,6 +74,13 @@ describe("getDb / schema", () => {
     expect(row.journal_mode).toBe("wal");
   });
 
+  test("ARV-163: sets busy_timeout to 5s", () => {
+    dbPath = tmpDb();
+    const db = getDb(dbPath);
+    const row = db.query("PRAGMA busy_timeout").get() as { timeout: number };
+    expect(row.timeout).toBe(5000);
+  });
+
   test("enables foreign keys", () => {
     dbPath = tmpDb();
     const db = getDb(dbPath);
@@ -97,7 +92,7 @@ describe("getDb / schema", () => {
     dbPath = tmpDb();
     const db = getDb(dbPath);
     const row = db.query("PRAGMA user_version").get() as { user_version: number };
-    expect(row.user_version).toBe(2);
+    expect(row.user_version).toBe(10);
   });
 
   test("closeDb resets singleton so next call opens fresh db", () => {
@@ -137,5 +132,82 @@ describe("getDb / schema", () => {
     const db = getDb(dbPath);
     const rows = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='runs'").all();
     expect(rows).toHaveLength(1);
+  });
+
+  test("ARV-55: v9→v10 backfills run_kind from results.suite_file", () => {
+    dbPath = tmpDb();
+    // Simulate a v9 schema: open at the live version, then roll user_version
+    // back to 9 *after* dropping the column run_kind would have added.
+    // Practically, we mimic the legacy state by inserting rows and then
+    // re-running migrations after stripping run_kind.
+    const db = getDb(dbPath);
+    // Insert a probe-only run, a check-only run, a mixed run, and a regular run.
+    const insertRun = db.prepare(
+      "INSERT INTO runs (started_at) VALUES (?) RETURNING id",
+    );
+    const probeRunId = (insertRun.get("2026-05-10T12:00:00Z") as { id: number }).id;
+    const checkRunId = (insertRun.get("2026-05-10T12:01:00Z") as { id: number }).id;
+    const mixedRunId = (insertRun.get("2026-05-10T12:02:00Z") as { id: number }).id;
+    const regRunId   = (insertRun.get("2026-05-10T12:03:00Z") as { id: number }).id;
+
+    // Hand-set run_kind back to 'regular' (the v9 default) so the backfill
+    // UPDATEs in v10 are what we're actually exercising.
+    db.exec("UPDATE runs SET run_kind = 'regular'");
+
+    const insertResult = db.prepare(
+      "INSERT INTO results (run_id, suite_name, test_name, status, duration_ms, suite_file) " +
+      "VALUES (?, 's', 't', 'pass', 0, ?)",
+    );
+    insertResult.run(probeRunId, "apis/r/probes/static/x.yaml");
+    insertResult.run(probeRunId, "apis/r/probes/static/y.yaml");
+    insertResult.run(checkRunId, "apis/r/checks/content-type.yaml");
+    insertResult.run(mixedRunId, "apis/r/probes/static/x.yaml");
+    insertResult.run(mixedRunId, "apis/r/tests/smoke.yaml");
+    insertResult.run(regRunId, "apis/r/tests/smoke.yaml");
+
+    // Roll back to v9 state: drop the column (SQLite ≥ 3.35) so the v10
+    // migration's ALTER TABLE actually runs, then re-open to trigger it.
+    db.exec("ALTER TABLE runs DROP COLUMN run_kind");
+    db.exec("PRAGMA user_version = 9");
+    closeDb();
+    const db2 = getDb(dbPath);
+
+    const verify = (id: number) =>
+      (db2.query("SELECT run_kind FROM runs WHERE id = ?").get(id) as { run_kind: string }).run_kind;
+    expect(verify(probeRunId)).toBe("probe");
+    expect(verify(checkRunId)).toBe("check");
+    expect(verify(mixedRunId)).toBe("regular");
+    expect(verify(regRunId)).toBe("regular");
+  });
+});
+
+describe("ARV-163: withDbRetry", () => {
+  test("retries on 'database is locked' and eventually succeeds", () => {
+    let calls = 0;
+    const result = withDbRetry("test", () => {
+      calls++;
+      if (calls < 3) throw new Error("database is locked");
+      return "ok";
+    });
+    expect(result).toBe("ok");
+    expect(calls).toBe(3);
+  });
+
+  test("propagates non-lock errors immediately", () => {
+    let calls = 0;
+    expect(() => withDbRetry("test", () => {
+      calls++;
+      throw new Error("constraint violation");
+    })).toThrow("constraint violation");
+    expect(calls).toBe(1);
+  });
+
+  test("throws after exhausting retries", () => {
+    let calls = 0;
+    expect(() => withDbRetry("test", () => {
+      calls++;
+      throw new Error("database is locked");
+    })).toThrow(/still locked/);
+    expect(calls).toBe(5); // 1 initial + 4 retries
   });
 });

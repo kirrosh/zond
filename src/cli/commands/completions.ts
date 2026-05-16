@@ -174,3 +174,19 @@ export function completionsCommand(options: CompletionsOptions): number {
   process.stdout.write(script);
   return 0;
 }
+
+import { printError } from "../output.ts";
+
+export function registerCompletions(program: Command): void {
+  program
+    .command("completions <shell>")
+    .description(`Generate shell completion script (${COMPLETION_SHELLS.join(", ")})`)
+    .action((shell: string) => {
+      if (!(COMPLETION_SHELLS as readonly string[]).includes(shell)) {
+        printError(`Unsupported shell: ${shell}. Supported: ${COMPLETION_SHELLS.join(", ")}`);
+        process.exitCode = 2;
+        return;
+      }
+      process.exitCode = completionsCommand({ shell: shell as CompletionShell, program });
+    });
+}

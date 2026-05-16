@@ -23,7 +23,7 @@ export async function useCommand(opts: UseOptions): Promise<number> {
     } else if (removed) {
       printSuccess(`Cleared ${path}`);
     } else {
-      process.stdout.write(`No .zond-current file in ${process.cwd()}\n`);
+      process.stdout.write(`No .zond/current-api file in ${process.cwd()}\n`);
     }
     return 0;
   }
@@ -54,4 +54,21 @@ export async function useCommand(opts: UseOptions): Promise<number> {
     process.stdout.write(`No current API set. Run 'zond use <api>'.\n`);
   }
   return 0;
+}
+
+import type { Command } from "commander";
+import { globalJson } from "../resolve.ts";
+
+export function registerUse(program: Command): void {
+  program
+    .command("use [api]")
+    .description("Set or show the current API for this workspace (.zond/current-api). TASK-290: resolution chain is per-cmd --api > global --api > ZOND_API env > this file.")
+    .option("--clear", "Remove .zond/current-api from the workspace")
+    .action(async (api: string | undefined, opts, cmd: Command) => {
+      process.exitCode = await useCommand({
+        api,
+        clear: opts.clear === true,
+        json: globalJson(cmd),
+      });
+    });
 }

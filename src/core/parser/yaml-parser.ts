@@ -1,8 +1,16 @@
 import { Glob } from "bun";
 import { resolve } from "node:path";
 import YAML from "yaml";
-import { validateSuite } from "./schema.ts";
+import { z } from "zod";
+import { validateSuite, formatZodError } from "./schema.ts";
 import type { TestSuite } from "./types.ts";
+
+export interface ParseOptions {
+  /** Surface raw `ZodError.message` (the JSON-formatted issue stack) instead
+   * of the human-friendly summary. Useful for filing zod bugs / debugging the
+   * schema itself; default output is human-readable. (TASK-249) */
+  verbose?: boolean;
+}
 
 /** Convert a 0-based byte offset into a 1-based (line, col) position. */
 function offsetToLineCol(text: string, offset: number): { line: number; col: number } {
@@ -41,7 +49,7 @@ export function formatYamlParseError(filePath: string, text: string, primary: Er
   return new Error(`Invalid YAML in ${filePath}: ${primary.message}`);
 }
 
-export async function parseFile(filePath: string): Promise<TestSuite> {
+export async function parseFile(filePath: string, opts: ParseOptions = {}): Promise<TestSuite> {
   let text: string;
   try {
     text = await Bun.file(filePath).text();
@@ -72,22 +80,40 @@ export async function parseFile(filePath: string): Promise<TestSuite> {
     suite.filePath = resolve(filePath);
     return suite;
   } catch (err) {
+    if (err instanceof z.ZodError && !opts.verbose) {
+      throw new Error(`Validation error in ${filePath}:\n${formatZodError(err)}`);
+    }
     throw new Error(`Validation error in ${filePath}: ${(err as Error).message}`);
   }
 }
 
-export async function parseDirectory(dirPath: string): Promise<TestSuite[]> {
+/**
+ * Files that live alongside test suites but aren't suites themselves. The
+ * yaml-parser scans recursively from the workspace root, so picking these up
+ * would surface spurious "Validation error: missing field name" noise.
+ */
+function isNonSuiteYaml(file: string): boolean {
+  if (file.match(/\.env(\..+)?\.ya?ml$/)) return true;
+  // Workspace marker — present at the root of every zond workspace.
+  if (file === "zond.config.yml" || file === "zond.config.yaml") return true;
+  // Per-API artifact files written by `zond add api` / `zond refresh-api`.
+  // Match the basename so it works for files at any depth (apis/<name>/...).
+  const basename = file.split("/").pop() ?? file;
+  if (/^\.api-[a-z0-9-]+\.ya?ml$/i.test(basename)) return true;
+  return false;
+}
+
+export async function parseDirectory(dirPath: string, opts: ParseOptions = {}): Promise<TestSuite[]> {
   const glob = new Glob("**/*.{yaml,yml}");
   const suites: TestSuite[] = [];
 
   for await (const file of glob.scan({ cwd: dirPath, absolute: false })) {
-    // Skip environment files
-    if (file.match(/\.env(\..+)?\.yaml$/) || file.match(/\.env(\..+)?\.yml$/)) {
+    if (isNonSuiteYaml(file)) {
       continue;
     }
     const fullPath = `${dirPath}/${file}`;
     try {
-      suites.push(await parseFile(fullPath));
+      suites.push(await parseFile(fullPath, opts));
     } catch {
       // Skip files that fail to parse (e.g. invalid AI-generated YAML)
       // so one bad file doesn't block the entire directory
@@ -102,18 +128,18 @@ export interface ParseDirectoryResult {
   errors: { file: string; error: string }[];
 }
 
-export async function parseDirectorySafe(dirPath: string): Promise<ParseDirectoryResult> {
+export async function parseDirectorySafe(dirPath: string, opts: ParseOptions = {}): Promise<ParseDirectoryResult> {
   const glob = new Glob("**/*.{yaml,yml}");
   const suites: TestSuite[] = [];
   const errors: { file: string; error: string }[] = [];
 
   for await (const file of glob.scan({ cwd: dirPath, absolute: false })) {
-    if (file.match(/\.env(\..+)?\.yaml$/) || file.match(/\.env(\..+)?\.yml$/)) {
+    if (isNonSuiteYaml(file)) {
       continue;
     }
     const fullPath = `${dirPath}/${file}`;
     try {
-      suites.push(await parseFile(fullPath));
+      suites.push(await parseFile(fullPath, opts));
     } catch (err) {
       errors.push({ file, error: (err as Error).message });
     }
@@ -122,14 +148,34 @@ export async function parseDirectorySafe(dirPath: string): Promise<ParseDirector
   return { suites, errors };
 }
 
-export async function parse(path: string): Promise<TestSuite[]> {
+export async function parse(path: string, opts: ParseOptions = {}): Promise<TestSuite[]> {
   const file = Bun.file(path);
   const exists = await file.exists();
 
   if (exists) {
-    return [await parseFile(path)];
+    return [await parseFile(path, opts)];
   }
 
   // Not a file, try as directory
-  return parseDirectory(path);
+  return parseDirectory(path, opts);
+}
+
+/**
+ * Like {@link parse}, but never silently drops files. Returns both successfully
+ * parsed suites and per-file parse errors so callers (run, validate, tag-filter)
+ * can surface failures instead of pretending the file did not exist.
+ */
+export async function parseSafe(path: string, opts: ParseOptions = {}): Promise<ParseDirectoryResult> {
+  const file = Bun.file(path);
+  const exists = await file.exists();
+
+  if (exists) {
+    try {
+      return { suites: [await parseFile(path, opts)], errors: [] };
+    } catch (err) {
+      return { suites: [], errors: [{ file: path, error: (err as Error).message }] };
+    }
+  }
+
+  return parseDirectorySafe(path, opts);
 }

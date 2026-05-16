@@ -3,6 +3,8 @@
  * Extracted from query-db.ts for reuse in Web UI.
  */
 
+import { classify } from "../classifier/recommended-action.ts";
+
 export function statusHint(status: number | null | undefined): string | null {
   if (!status) return null;
   if (status >= 500) return "Server-side error — inspect response_body for errorMessage/errorDetail; likely a backend bug";
@@ -41,20 +43,98 @@ export type RecommendedAction =
   | "report_backend_bug"
   | "fix_auth_config"
   | "fix_test_logic"
-  | "fix_network_config";
+  | "fix_network_config"
+  | "fix_env"
+  /** Fix the OpenAPI spec — emitted by lint-spec.Issue (TASK-294) and
+   *  by `status_code_conformance` / `*_conformance` checks (ARV-11). */
+  | "fix_spec"
+  /** Add or correct a fixture in .env.yaml — emitted by discover for
+   *  miss-* states (TASK-294). */
+  | "fix_fixture"
+  /** ARV-42 — generator-emitted suite produced a body the API rejected
+   *  (4xx with validation hint). Editing the YAML is wrong: the next
+   *  `zond generate` would clobber it. Re-run generate (or refine the
+   *  spec/.api-resources hints) instead. */
+  | "regenerate_suite"
+  /** ARV-11 — server accepted an invalid request body. Backend should
+   *  reject earlier; the test isn't wrong. */
+  | "tighten_validation"
+  /** ARV-11 — server didn't enforce a header marked `required: true`
+   *  in the spec. Either enforce it, or drop `required` in the spec. */
+  | "add_required_header"
+  /** ARV-11 — known limitation that the team has accepted. Agents
+   *  should not retry, file a bug, or include in dashboards. */
+  | "wontfix_known_limitation";
 
 export function recommendedAction(
   failureType: "api_error" | "assertion_failed" | "network_error",
   responseStatus: number | null,
 ): RecommendedAction {
-  if (failureType === "api_error") return "report_backend_bug";
-  if (failureType === "network_error") {
-    if (responseStatus === 401 || responseStatus === 403) return "fix_auth_config";
-    return "fix_network_config";
-  }
-  // assertion_failed
-  if (responseStatus === 401 || responseStatus === 403) return "fix_auth_config";
-  return "fix_test_logic";
+  // ARV-56: delegate to the single classifier.
+  const action = classify({
+    finding_class: failureType === "api_error" ? "test:api_error" :
+      failureType === "network_error" ? "test:network_error" : "test:assertion_failed",
+    status: responseStatus,
+  });
+  // The three failure_type classes are total in the classifier — a missing
+  // branch means a future refactor stripped one; surface loudly.
+  if (!action) throw new Error(`classifier returned no action for failure_type=${failureType} status=${responseStatus}`);
+  return action;
+}
+
+/**
+ * ARV-42: extended recommender that knows whether the failing test was
+ * emitted by `zond generate`. For generated suites, "fix_test_logic" is
+ * actively misleading — the generated YAML carries the header
+ * "⚠️ Edits will be overwritten on regenerate" and the next `zond audit`
+ * really does clobber manual edits. Branch into the actually-actionable
+ * remediation instead.
+ *
+ *  - 4xx (400/422) → regenerate_suite: the body the generator emitted
+ *    didn't pass validation; either re-run generate (so newer heuristics
+ *    apply, e.g. ARV-38 default-string) or tighten .api-resources hints.
+ *  - 404 → fix_fixture: a path-param resolved to an empty / stale id
+ *    in .env.yaml; `prepare-fixtures --seed` is the correct remedy.
+ *  - everything else → falls back to recommendedAction (auth → 401/403,
+ *    api_error → 5xx, etc.).
+ *
+ * `isGenerated` is the heuristic from db-analysis: provenance.type
+ * "openapi-generated" OR suite_file under apis/<api>/tests/.
+ */
+export function recommendedActionForGenerated(
+  failureType: "api_error" | "assertion_failed" | "network_error",
+  responseStatus: number | null,
+  isGenerated: boolean,
+  schemaViolation = false,
+): RecommendedAction {
+  // ARV-56: delegate to classifier. `isGenerated` is encoded via a
+  // synthetic suite_path so the same logic flows through classify().
+  // ARV-103 (F8): `schemaViolation` propagates the assertion-kind flag —
+  // when true, the classifier's "treat schema bugs like 5xx" branch wins
+  // over the generator's regenerate_suite default.
+  const action = classify({
+    finding_class: failureType === "api_error" ? "test:api_error" :
+      failureType === "network_error" ? "test:network_error" : "test:assertion_failed",
+    status: responseStatus,
+    ...(isGenerated ? { suite_path: "apis/_/tests/_.yaml" } : {}),
+    ...(schemaViolation ? { schema_violation: true } : {}),
+  });
+  if (!action) throw new Error(`classifier returned no action for failure_type=${failureType} status=${responseStatus}`);
+  return action;
+}
+
+/** ARV-42: classify a failing result row as generator-emitted. The two
+ *  signals are independent — provenance is missing on older runs, while
+ *  suite_file disambiguates against ad-hoc YAMLs the user dropped into
+ *  apis/<api>/tests/ themselves (rare but supported). */
+export function isGeneratedTest(
+  provenance: { type?: string; generator?: string } | null | undefined,
+  suite_file: string | null | undefined,
+): boolean {
+  if (provenance?.type === "openapi-generated") return true;
+  if (provenance?.generator && provenance.generator.toLowerCase().includes("zond")) return true;
+  if (typeof suite_file === "string" && /(^|\/)apis\/[^/]+\/tests\//.test(suite_file)) return true;
+  return false;
 }
 
 export function envCategory(hint: string | undefined): string | null {
@@ -110,4 +190,127 @@ export function computeSharedEnvIssue(
   }
   // url_malformed
   return [...failures.map(f => f.hint).filter(Boolean)][0] ?? null;
+}
+
+// ── TASK-98: per-suite env clustering ──────────────────────────────────────
+//
+// Round-3 review showed that the all-or-nothing run-level detector misses
+// real env_issue scenarios: a single suite needs `{{stripe_key}}`, a webhook
+// host is unreachable for one suite only, an auth token expires part-way
+// through. Cluster classification — group by suite, flag a suite when ≥80%
+// of its non-5xx failures share an env-symptom — closes that gap without
+// laundering 5xx (real backend bugs) into env_issue.
+export type EnvSymptom = "missing_var" | "base_url" | "url_malformed" | "auth_expired";
+
+function envSymptomOf(failure: {
+  hint?: string;
+  failure_type: string;
+  response_status: number | null;
+}): EnvSymptom | null {
+  if (failure.failure_type === "api_error") return null; // 5xx never counted
+  const cat = envCategory(failure.hint);
+  if (cat === "unresolved_variable") return "missing_var";
+  if (cat === "base_url_missing") return "base_url";
+  if (cat === "url_malformed") return "url_malformed";
+  if (failure.response_status === 401 || failure.response_status === 403) return "auth_expired";
+  return null;
+}
+
+export interface EnvIssue {
+  /** Human-readable summary; used by reporters and shown to the user. */
+  message: string;
+  /** "run" when the issue spans most/all suites; "suite:<name>" when localized. */
+  scope: "run" | `suite:${string}`;
+  /** Suites the env_issue covers — one entry for suite scope, ≥2 for run scope. */
+  affected_suites: string[];
+  /** Histogram of root-cause symptoms across affected failures. */
+  symptoms: Partial<Record<EnvSymptom, number>>;
+}
+
+/**
+ * Cluster non-5xx failures by suite and return per-suite env clusters that
+ * meet the env-symptom threshold (default ≥80% AND ≥2 failures). 5xx are
+ * excluded so backend bugs cannot be reclassified as env issues.
+ */
+export function clusterEnvIssues(
+  failures: Array<{
+    suite_name: string;
+    hint?: string;
+    failure_type: string;
+    response_status: number | null;
+  }>,
+  threshold = 0.8,
+): Array<{ suite: string; symptoms: Partial<Record<EnvSymptom, number>>; total: number }> {
+  const bySuite = new Map<string, typeof failures>();
+  for (const f of failures) {
+    if (f.failure_type === "api_error") continue;
+    const list = bySuite.get(f.suite_name) ?? [];
+    list.push(f);
+    bySuite.set(f.suite_name, list);
+  }
+  const clusters: Array<{ suite: string; symptoms: Partial<Record<EnvSymptom, number>>; total: number }> = [];
+  for (const [suite, items] of bySuite) {
+    if (items.length === 0) continue;
+    const symptoms: Partial<Record<EnvSymptom, number>> = {};
+    let envCount = 0;
+    for (const f of items) {
+      const s = envSymptomOf(f);
+      if (s) {
+        symptoms[s] = (symptoms[s] ?? 0) + 1;
+        envCount++;
+      }
+    }
+    if (envCount / items.length >= threshold && envCount >= 1) {
+      clusters.push({ suite, symptoms, total: items.length });
+    }
+  }
+  return clusters;
+}
+
+function formatSymptoms(symptoms: Partial<Record<EnvSymptom, number>>): string {
+  const parts: string[] = [];
+  for (const k of ["missing_var", "base_url", "url_malformed", "auth_expired"] as EnvSymptom[]) {
+    const n = symptoms[k];
+    if (n) parts.push(`${k}=${n}`);
+  }
+  return parts.join(", ");
+}
+
+/**
+ * Build an EnvIssue envelope from clustered failures. Returns null when no
+ * cluster exceeded the threshold. When exactly one suite is affected, scope
+ * is `suite:<name>`; ≥2 suites collapse into a `run` scope aggregator.
+ */
+export function buildEnvIssue(
+  clusters: Array<{ suite: string; symptoms: Partial<Record<EnvSymptom, number>>; total: number }>,
+  envFilePath?: string,
+): EnvIssue | null {
+  if (clusters.length === 0) return null;
+  const envFile = envFilePath ?? ".env.yaml";
+
+  const merged: Partial<Record<EnvSymptom, number>> = {};
+  for (const c of clusters) {
+    for (const [k, v] of Object.entries(c.symptoms)) {
+      merged[k as EnvSymptom] = (merged[k as EnvSymptom] ?? 0) + (v ?? 0);
+    }
+  }
+  const affected_suites = clusters.map(c => c.suite).sort();
+
+  if (clusters.length === 1) {
+    const c = clusters[0]!;
+    const breakdown = formatSymptoms(c.symptoms);
+    return {
+      message: `Suite "${c.suite}" looks env-broken (${breakdown}) — check ${envFile}`,
+      scope: `suite:${c.suite}`,
+      affected_suites,
+      symptoms: merged,
+    };
+  }
+  const breakdown = formatSymptoms(merged);
+  return {
+    message: `${clusters.length} suites look env-broken (${breakdown}) — check ${envFile}`,
+    scope: "run",
+    affected_suites,
+    symptoms: merged,
+  };
 }

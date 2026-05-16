@@ -25,7 +25,7 @@ export interface CompactEndpoint {
   deprecated: boolean;
 }
 
-export function generateTestSnippet(params: {
+function generateTestSnippet(params: {
   method: string;
   path: string;
   operationId?: string;

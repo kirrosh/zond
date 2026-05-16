@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { statusHint, classifyFailure, recommendedAction, softDeleteHint } from "../../src/core/diagnostics/failure-hints.ts";
+import { statusHint, classifyFailure, recommendedAction, recommendedActionForGenerated, isGeneratedTest, softDeleteHint } from "../../src/core/diagnostics/failure-hints.ts";
 
 describe("statusHint", () => {
   test("returns hint for 401", () => {
@@ -60,7 +60,55 @@ describe("recommendedAction", () => {
   });
 });
 
-describe("classifyFailure", () => {
+// ARV-42
+describe("recommendedActionForGenerated", () => {
+  test("non-generated test: behaviour matches plain recommendedAction", () => {
+    expect(recommendedActionForGenerated("assertion_failed", 422, false)).toBe("fix_test_logic");
+    expect(recommendedActionForGenerated("assertion_failed", 404, false)).toBe("fix_test_logic");
+    expect(recommendedActionForGenerated("api_error", 500, false)).toBe("report_backend_bug");
+  });
+
+  test("generated test 422/400: routes to regenerate_suite (editing YAML gets clobbered)", () => {
+    expect(recommendedActionForGenerated("assertion_failed", 422, true)).toBe("regenerate_suite");
+    expect(recommendedActionForGenerated("assertion_failed", 400, true)).toBe("regenerate_suite");
+  });
+
+  test("generated test 404: routes to fix_fixture (path-param needs seeding)", () => {
+    expect(recommendedActionForGenerated("assertion_failed", 404, true)).toBe("fix_fixture");
+  });
+
+  test("generated test 401/403: still fix_auth_config (auth config not generator's fault)", () => {
+    expect(recommendedActionForGenerated("assertion_failed", 401, true)).toBe("fix_auth_config");
+    expect(recommendedActionForGenerated("assertion_failed", 403, true)).toBe("fix_auth_config");
+  });
+
+  test("generated test 5xx: still report_backend_bug", () => {
+    expect(recommendedActionForGenerated("api_error", 500, true)).toBe("report_backend_bug");
+  });
+});
+
+describe("isGeneratedTest", () => {
+  test("provenance.type = openapi-generated → true", () => {
+    expect(isGeneratedTest({ type: "openapi-generated" }, null)).toBe(true);
+  });
+
+  test("provenance.generator mentioning zond → true", () => {
+    expect(isGeneratedTest({ generator: "zond-generate" }, null)).toBe(true);
+  });
+
+  test("suite_file under apis/<api>/tests/ → true", () => {
+    expect(isGeneratedTest(null, "apis/resend/tests/smoke-emails-positive.yaml")).toBe(true);
+    expect(isGeneratedTest(null, "/abs/repo/apis/resend/tests/crud-domains.yaml")).toBe(true);
+  });
+
+  test("manual suite_file outside apis/<api>/tests/ → false", () => {
+    expect(isGeneratedTest(null, "manual/login.yaml")).toBe(false);
+    expect(isGeneratedTest(null, "apis/resend/probes/static/POST_emails-validation.yaml")).toBe(false);
+    expect(isGeneratedTest(null, null)).toBe(false);
+  });
+});
+
+describe("classifyFailure (string label, from failure-hints)", () => {
   test("network_error when status is error and no response", () => {
     expect(classifyFailure("error", null)).toBe("network_error");
   });

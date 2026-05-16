@@ -1,6 +1,7 @@
 import { dereference } from "@readme/openapi-parser";
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, ResponseInfo, SecuritySchemeInfo } from "./types.ts";
+import { disambiguateGenericPathParams } from "./path-param-disambig.ts";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
@@ -57,9 +58,16 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
 
       const parameters: OpenAPIV3.ParameterObject[] = [];
 
+      // Skip circular-ref sentinel stubs emitted by decycleSchema —
+      // they look like `{ "x-circular": true }` (no .name, no .in) and
+      // crash downstream code that expects p.name/p.in. ARV-200 (R10/F1).
+      const isUsableParam = (p: any): p is OpenAPIV3.ParameterObject =>
+        p != null && typeof p === "object" && typeof p.name === "string" && typeof p.in === "string";
+
       // Path-level parameters
       if (pathItem.parameters) {
         for (const p of pathItem.parameters) {
+          if (!isUsableParam(p)) continue;
           parameters.push(p as OpenAPIV3.ParameterObject);
         }
       }
@@ -67,6 +75,7 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
       // Operation-level parameters (override path-level)
       if (operation.parameters) {
         for (const p of operation.parameters) {
+          if (!isUsableParam(p)) continue;
           const param = p as OpenAPIV3.ParameterObject;
           const existingIdx = parameters.findIndex(
             (existing) => existing.name === param.name && existing.in === param.in,
@@ -120,9 +129,12 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
       const responseContentTypesSet = new Set<string>();
       if (operation.responses) {
         for (const [statusCode, responseObj] of Object.entries(operation.responses)) {
+          const parsedStatus = parseInt(statusCode, 10);
+          // Skip non-numeric keys like "default" — they have no asserting status code.
+          if (!Number.isFinite(parsedStatus)) continue;
           const resp = responseObj as OpenAPIV3.ResponseObject;
           const info: ResponseInfo = {
-            statusCode: parseInt(statusCode, 10),
+            statusCode: parsedStatus,
             description: resp.description || "",
           };
           if (resp.content) {
@@ -159,11 +171,33 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
         responseContentTypes: [...responseContentTypesSet],
         responses,
         security,
-        deprecated: operation.deprecated ?? false,
+        deprecated: (operation.deprecated ?? false) || isMarkedDeprecatedInText(operation.summary, operation.description, operation.operationId),
         requiresEtag,
       });
     }
   }
 
-  return endpoints;
+  // ARV-40: when generic path-param names (`{id}`, `{slug}`, ...) collide
+  // across multiple resources, rewrite each to `<parent_singular>_<param>`
+  // so the manifest derives per-resource vars and tests stop sharing one
+  // global `id`. In-memory only; on-disk spec stays untouched.
+  return disambiguateGenericPathParams(endpoints);
+}
+
+/** Spec authors often mark endpoints as deprecated in the summary or
+ *  description text instead of (or in addition to) the `deprecated: true`
+ *  flag — common across many SaaS and legacy specs. Without this
+ *  fallback, generator emits CRUD suites whose POST returns 404 from a dead
+ *  endpoint. (TASK-245) */
+/** Matches `(DEPRECATED) ...`, `[DEPRECATED] ...`, `DEPRECATED: ...` at the
+ *  start of a string. Also matches markdown `## Deprecated` headings, which
+ *  some spec authors use in operation `description` to flag end-of-life
+ *  endpoints. */
+const DEPRECATED_PREFIX_RE = /^\s*[\(\[]?\s*DEPRECATED\s*[\)\]:\-—\s]/i;
+const DEPRECATED_HEADING_RE = /^\s*#+\s*Deprecated\b/im;
+function isMarkedDeprecatedInText(summary?: string, description?: string, operationId?: string): boolean {
+  if (summary && DEPRECATED_PREFIX_RE.test(summary)) return true;
+  if (operationId && DEPRECATED_PREFIX_RE.test(operationId)) return true;
+  if (description && (DEPRECATED_PREFIX_RE.test(description) || DEPRECATED_HEADING_RE.test(description))) return true;
+  return false;
 }

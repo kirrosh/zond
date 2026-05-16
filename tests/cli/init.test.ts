@@ -1,41 +1,22 @@
-import { describe, test, expect, mock, afterEach, beforeEach } from "bun:test";
+import { describe, test, expect, afterEach, beforeEach } from "bun:test";
 import { tmpdir } from "os";
 import { join } from "path";
-import { existsSync, mkdtempSync, unlinkSync, rmSync } from "fs";
-import { initCommand } from "../../src/cli/commands/init.ts";
+import { existsSync, mkdtempSync, rmSync } from "fs";
+import { initCommand } from "../../src/cli/commands/init/index.ts";
 import { closeDb } from "../../src/db/schema.ts";
-
-function tryUnlink(path: string): void {
-  for (const suffix of ["", "-wal", "-shm"]) {
-    try { unlinkSync(path + suffix); } catch { /* ignore */ }
-  }
-}
-
-function suppressOutput() {
-  const origOut = process.stdout.write;
-  const origErr = process.stderr.write;
-  let captured = "";
-  process.stdout.write = mock((data: any) => { captured += String(data); return true; }) as typeof process.stdout.write;
-  process.stderr.write = mock(() => true) as typeof process.stderr.write;
-  return {
-    restore() {
-      process.stdout.write = origOut;
-      process.stderr.write = origErr;
-    },
-    getCaptured() { return captured; },
-  };
-}
+import { captureOutput } from "../_helpers/output";
+import { tmpDb, unlinkDb as tryUnlink } from "../_helpers/tmp-db";
 
 const FIXTURES = `${import.meta.dir}/../fixtures`;
 
 describe("initCommand", () => {
-  let output: ReturnType<typeof suppressOutput>;
+  let output: ReturnType<typeof captureOutput>;
   let tmpDir: string;
   let db: string;
 
   beforeEach(() => {
-    tmpDir = join(tmpdir(), `zond-init-test-${Date.now()}`);
-    db = join(tmpdir(), `zond-init-${Date.now()}.db`);
+    tmpDir = join(tmpdir(), `zond-init-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    db = tmpDb("zond-init");
   });
 
   afterEach(() => {
@@ -46,7 +27,7 @@ describe("initCommand", () => {
   });
 
   test("creates API with spec --json", async () => {
-    output = suppressOutput();
+    output = captureOutput();
     const code = await initCommand({
       name: "test-api",
       spec: `${FIXTURES}/petstore-simple.json`,
@@ -54,7 +35,7 @@ describe("initCommand", () => {
       dbPath: db,
       json: true,
     });
-    const captured = output.getCaptured();
+    const captured = output.out;
     if (code !== 0) console.error("INIT FAILED:", captured);
     expect(code).toBe(0);
     const envelope = JSON.parse(captured);
@@ -65,7 +46,7 @@ describe("initCommand", () => {
   });
 
   test("without spec runs workspace bootstrap (mode=workspace)", async () => {
-    output = suppressOutput();
+    output = captureOutput();
     const wsCwd = mkdtempSync(join(tmpdir(), "zond-init-ws-"));
     const wsHome = mkdtempSync(join(tmpdir(), "zond-init-home-"));
     try {
@@ -76,7 +57,7 @@ describe("initCommand", () => {
         json: true,
       });
       expect(code).toBe(0);
-      const envelope = JSON.parse(output.getCaptured());
+      const envelope = JSON.parse(output.out);
       expect(envelope.ok).toBe(true);
       expect(envelope.data.mode).toBe("workspace");
       expect(envelope.data.configAction).toBe("created");
@@ -91,7 +72,7 @@ describe("initCommand", () => {
   });
 
   test("--with-spec runs bootstrap+register in one call", async () => {
-    output = suppressOutput();
+    output = captureOutput();
     const wsCwd = mkdtempSync(join(tmpdir(), "zond-init-combo-"));
     const wsHome = mkdtempSync(join(tmpdir(), "zond-init-home-"));
     try {
@@ -106,7 +87,7 @@ describe("initCommand", () => {
         json: true,
       });
       expect(code).toBe(0);
-      const envelope = JSON.parse(output.getCaptured());
+      const envelope = JSON.parse(output.out);
       expect(envelope.data.mode).toBe("bootstrap+register");
       expect(envelope.data.endpoints).toBeGreaterThan(0);
       expect(existsSync(join(wsCwd, "zond.config.yml"))).toBe(true);
@@ -118,14 +99,14 @@ describe("initCommand", () => {
   });
 
   test("rejects --spec combined with --workspace", async () => {
-    output = suppressOutput();
+    output = captureOutput();
     const code = await initCommand({
       spec: `${FIXTURES}/petstore-simple.json`,
       workspace: true,
       json: true,
     });
     expect(code).toBe(2);
-    const envelope = JSON.parse(output.getCaptured());
+    const envelope = JSON.parse(output.out);
     expect(envelope.ok).toBe(false);
   });
 });

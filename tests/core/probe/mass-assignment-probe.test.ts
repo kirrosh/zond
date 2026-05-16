@@ -1,0 +1,843 @@
+import { describe, it, expect, beforeEach, afterEach, beforeAll } from "bun:test";
+import { bootstrapAntiFp } from "../../../src/core/anti-fp/bootstrap.ts";
+
+// ARV-125: the inconclusive-baseline summary now consults the anti-FP
+// registry (`subscription-gated/paid-plan-403` rule) instead of an inline regex
+// array. The probe entry-point doesn't bootstrap the registry — the
+// CLI does, in `buildProgram`. Tests bypass that, so we register the
+// shipped rule set explicitly. Idempotent: safe to call repeatedly.
+beforeAll(() => {
+  bootstrapAntiFp();
+});
+import {
+  runMassAssignmentProbes,
+  formatDigestMarkdown,
+  emitRegressionSuites,
+  SUSPECTED_FIELDS,
+  isSubscriptionGated,
+} from "../../../src/core/probe/mass-assignment-probe.ts";
+import type { EndpointInfo } from "../../../src/core/generator/types.ts";
+import type { OpenAPIV3 } from "openapi-types";
+import { postEp as ep } from "../../_helpers/endpoints";
+
+const userSchema: OpenAPIV3.SchemaObject = {
+  type: "object",
+  required: ["name"],
+  properties: {
+    name: { type: "string", example: "alice" },
+    email: { type: "string", format: "email", example: "a@b.io" },
+  },
+};
+
+const userResponseSchema: OpenAPIV3.SchemaObject = {
+  type: "object",
+  properties: {
+    id: { type: "string", format: "uuid" },
+    name: { type: "string" },
+    email: { type: "string", format: "email" },
+    created_at: { type: "string", format: "date-time" },
+    is_admin: { type: "boolean" },
+    role: { type: "string" },
+  },
+};
+
+function postUsersEndpoint(overrides: Partial<EndpointInfo> = {}): EndpointInfo {
+  return ep({
+    method: "POST",
+    path: "/users",
+    requestBodySchema: userSchema,
+    responses: [{ statusCode: 201, description: "created", schema: userResponseSchema }],
+    ...overrides,
+  });
+}
+
+function getUserByIdEndpoint(): EndpointInfo {
+  return ep({
+    method: "GET",
+    path: "/users/{id}",
+    requestBodyContentType: undefined,
+    requestBodySchema: undefined,
+    responses: [{ statusCode: 200, description: "ok", schema: userResponseSchema }],
+    parameters: [
+      {
+        name: "id",
+        in: "path",
+        required: true,
+        schema: { type: "string", format: "uuid" },
+      },
+    ],
+  });
+}
+
+function deleteUserEndpoint(): EndpointInfo {
+  return ep({
+    method: "DELETE",
+    path: "/users/{id}",
+    requestBodyContentType: undefined,
+    requestBodySchema: undefined,
+    responses: [{ statusCode: 204, description: "no content" }],
+    parameters: [
+      {
+        name: "id",
+        in: "path",
+        required: true,
+        schema: { type: "string", format: "uuid" },
+      },
+    ],
+  });
+}
+
+// ──────────────────────────────────────────────
+// Fetch mocking
+// ──────────────────────────────────────────────
+
+interface FetchCall {
+  url: string;
+  method: string;
+  body?: unknown;
+}
+
+interface MockResponseSpec {
+  status: number;
+  body?: unknown;
+}
+
+/** Discriminator: a request body is the "baseline" probe (no extras) when
+ *  none of our suspected fields are present. */
+function isBaseline(body: unknown): boolean {
+  if (typeof body !== "object" || body === null) return true;
+  return !Object.keys(SUSPECTED_FIELDS).some(k => k in (body as Record<string, unknown>));
+}
+
+let originalFetch: typeof fetch;
+let calls: FetchCall[] = [];
+let responder: (req: FetchCall) => MockResponseSpec;
+
+beforeEach(() => {
+  originalFetch = globalThis.fetch;
+  calls = [];
+  responder = () => ({ status: 200, body: {} });
+  globalThis.fetch = (async (input: string | Request | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    const method = (init?.method ?? "GET").toUpperCase();
+    let body: unknown;
+    if (init?.body && typeof init.body === "string") {
+      try { body = JSON.parse(init.body); } catch { body = init.body; }
+    }
+    const call: FetchCall = { url, method, body };
+    calls.push(call);
+    const spec = responder(call);
+    const text = spec.body === undefined ? "" : JSON.stringify(spec.body);
+    return new Response(text, {
+      status: spec.status,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
+// ──────────────────────────────────────────────
+// Tests
+// ──────────────────────────────────────────────
+
+describe("runMassAssignmentProbes", () => {
+  it("classifies rejected (4xx) as OK when baseline is 2xx (TASK-91)", async () => {
+    responder = (req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      // injected → reject
+      return { status: 400, body: { error: "additional property not allowed" } };
+    };
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint(), deleteUserEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("ok");
+    expect(v.summary).toMatch(/extras refused/);
+    // Two POSTs: baseline + injected; one DELETE for baseline cleanup.
+    const posts = calls.filter(c => c.method === "POST");
+    expect(posts).toHaveLength(2);
+    expect(isBaseline(posts[0]!.body)).toBe(true);
+    expect(isBaseline(posts[1]!.body)).toBe(false);
+    // Injected body must include all suspected fields
+    for (const key of Object.keys(SUSPECTED_FIELDS)) {
+      expect(posts[1]!.body as Record<string, unknown>).toHaveProperty(key);
+    }
+  });
+
+  it("TASK-137: --discover-fk auto-resolves required body FK fields from sibling list endpoints", async () => {
+    // Endpoint with required body FK `audience_id` and a sibling
+    // GET /audiences that returns the real id.
+    const contactsBody: OpenAPIV3.SchemaObject = {
+      type: "object",
+      required: ["email", "audience_id"],
+      properties: {
+        email: { type: "string", format: "email" },
+        audience_id: { type: "string", format: "uuid" },
+      },
+    };
+    const contactsResponse: OpenAPIV3.SchemaObject = {
+      type: "object",
+      properties: { id: { type: "string", format: "uuid" }, audience_id: { type: "string", format: "uuid" } },
+    };
+    const audiencesEp = ep({
+      method: "GET",
+      path: "/audiences",
+      requestBodyContentType: undefined,
+      responses: [{ statusCode: 200, description: "ok" }],
+    });
+    const contactsPostEp = ep({
+      method: "POST",
+      path: "/contacts",
+      requestBodySchema: contactsBody,
+      responses: [{ statusCode: 201, description: "created", schema: contactsResponse }],
+    });
+    const contactsDeleteEp = ep({
+      method: "DELETE",
+      path: "/contacts/{id}",
+      requestBodyContentType: undefined,
+      responses: [{ statusCode: 204, description: "deleted" }],
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } } as any,
+      ],
+    });
+
+    const realAudienceId = "aud_real_42";
+    let baselineSawRealAudience = false;
+
+    responder = (req) => {
+      if (req.method === "GET" && req.url.endsWith("/audiences")) {
+        return { status: 200, body: [{ id: realAudienceId, name: "Marketing" }] };
+      }
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        const body = req.body as Record<string, unknown>;
+        if (body.audience_id === realAudienceId) {
+          baselineSawRealAudience = true;
+          return { status: 201, body: { id: "contact_1", audience_id: realAudienceId } };
+        }
+        // Reject baseline that didn't get the real FK — same FK rejection
+        // pattern that produces INCONCLUSIVE-baseline in the audit.
+        return { status: 422, body: { error: "audience_id is invalid" } };
+      }
+      // Injected probe — pretend extras refused.
+      return { status: 400, body: { error: "additional property not allowed" } };
+    };
+
+    const result = await runMassAssignmentProbes({
+      endpoints: [audiencesEp, contactsPostEp, contactsDeleteEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+
+    // The real audience id reached the baseline — auto-discovery worked.
+    expect(baselineSawRealAudience).toBe(true);
+    const v = result.verdicts.find(x => x.path === "/contacts")!;
+    expect(v.severity).not.toBe("inconclusive-baseline");
+  });
+
+  it("TASK-137: INCONCLUSIVE-baseline summary names body FKs that auto-discovery couldn't resolve", async () => {
+    const orphanBody: OpenAPIV3.SchemaObject = {
+      type: "object",
+      required: ["mystery_id"],
+      properties: { mystery_id: { type: "string", format: "uuid" } },
+    };
+    // No sibling /mysteries list endpoint → discovery misses; baseline 4xx.
+    responder = () => ({ status: 422, body: { error: "mystery_id invalid" } });
+    const result = await runMassAssignmentProbes({
+      endpoints: [
+        ep({
+          method: "POST",
+          path: "/things",
+          requestBodySchema: orphanBody,
+          responses: [{ statusCode: 201, description: "created", schema: { type: "object", properties: { id: { type: "string" } } } }],
+        }),
+      ],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("inconclusive-baseline");
+    expect(v.summary).toContain("unresolved body FKs");
+    expect(v.summary).toContain("mystery_id");
+  });
+
+  it("classifies INCONCLUSIVE-baseline when both baseline and injected return 4xx (TASK-91)", async () => {
+    responder = () => ({ status: 404, body: { message: "Domain not found" } });
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("inconclusive-baseline");
+    expect(v.summary).toMatch(/baseline body invalid/);
+    expect(v.summary).toMatch(/Domain not found/);
+    expect(v.summary).toMatch(/fix fixture/);
+    expect(v.baseline?.status).toBe(404);
+  });
+
+  it("classifies extras-bypass as HIGH when baseline 4xx but injected 2xx (TASK-91)", async () => {
+    responder = (req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 422, body: { error: "missing required field" } };
+      }
+      return {
+        status: 201,
+        body: { id: "bypass-id", name: "alice", is_admin: true, role: "admin" },
+      };
+    };
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint(), getUserByIdEndpoint(), deleteUserEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("high");
+    expect(v.summary).toMatch(/extras-bypass/);
+    expect(v.baseline?.status).toBe(422);
+    expect(v.response?.status).toBe(201);
+    // TASK-294: high severity → report_backend_bug for agent routing.
+    expect(v.recommended_action).toBe("report_backend_bug");
+  });
+
+  it("flags accepted-and-applied (HIGH) when GET echoes our injected sentinel", async () => {
+    let createdId = "11111111-1111-1111-1111-111111111111";
+    responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      if (req.method === "POST") {
+        // Server echoes back is_admin: true (the sentinel we injected)
+        return {
+          status: 201,
+          body: {
+            id: createdId,
+            name: "alice",
+            email: "a@b.io",
+            is_admin: true, // ← privilege escalation
+            role: "admin",  // ← privilege escalation
+          },
+        };
+      }
+      if (req.method === "GET") {
+        return {
+          status: 200,
+          body: {
+            id: createdId,
+            name: "alice",
+            is_admin: true,
+            role: "admin",
+          },
+        };
+      }
+      if (req.method === "DELETE") return { status: 204 };
+      return { status: 500 };
+    };
+
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint(), getUserByIdEndpoint(), deleteUserEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+
+    const v = result.verdicts.find(x => x.method === "POST")!;
+    expect(v.severity).toBe("high");
+    expect(v.summary).toMatch(/accepted-and-applied/);
+    const adminField = v.fields.find(f => f.field === "is_admin")!;
+    expect(adminField.outcome).toBe("applied");
+
+    // Cleanup attempted
+    expect(v.cleanup?.attempted).toBe(true);
+    expect(v.cleanup?.status).toBe(204);
+    expect(calls.some(c => c.method === "DELETE")).toBe(true);
+  });
+
+  it("flags accepted-and-ignored (INFO) when extras silently dropped (ARV-250)", async () => {
+    let createdId = "22222222-2222-2222-2222-222222222222";
+    responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      if (req.method === "POST") {
+        // Body echo without our suspicious extras → still need GET to confirm
+        return { status: 201, body: { id: createdId, name: "alice" } };
+      }
+      if (req.method === "GET") {
+        // No is_admin / role / account_id in GET either → ignored
+        return { status: 200, body: { id: createdId, name: "alice" } };
+      }
+      if (req.method === "DELETE") return { status: 204 };
+      return { status: 500 };
+    };
+
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint(), getUserByIdEndpoint(), deleteUserEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("info");
+    expect(v.summary).toMatch(/silently ignored/);
+    const adminField = v.fields.find(f => f.field === "is_admin")!;
+    expect(adminField.outcome).toBe("ignored");
+  });
+
+  it("flags inconclusive (INFO) when no GET counterpart exists (ARV-252)", async () => {
+    responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      return { status: 201, body: { id: "abc", name: "alice" } };
+    };
+
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint()], // no GET, no DELETE
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      noCleanup: true,
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("info");
+    expect(v.summary).toMatch(/inconclusive/);
+  });
+
+  it("notes strict contract when additionalProperties:false and 4xx", async () => {
+    responder = (req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      return { status: 422, body: { error: "additional property not allowed" } };
+    };
+    const strictSchema: OpenAPIV3.SchemaObject = {
+      ...userSchema,
+      additionalProperties: false,
+    };
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint({ requestBodySchema: strictSchema }), deleteUserEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("ok");
+    expect(v.strictContract).toBe(true);
+    expect(v.summary).toMatch(/strict contract honoured/);
+  });
+
+  it("flags 5xx as HIGH when baseline succeeded", async () => {
+    responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      return { status: 500, body: { error: "boom" } };
+    };
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      noCleanup: true,
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("high");
+    expect(v.summary).toMatch(/5xx/);
+  });
+
+  it("classifies baseline 5xx + injected 5xx as INCONCLUSIVE-5XX (TASK-276)", async () => {
+    // Endpoint just crashes — validation-probe will already report this.
+    // Mass-assignment cannot observe extras-handling, so don't surface as
+    // HIGH privilege-escalation noise.
+    responder = () => ({ status: 502, body: { error: "bad gateway" } });
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      noCleanup: true,
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("inconclusive-5xx");
+    expect(v.summary).toMatch(/baseline 502/);
+    expect(v.summary).toMatch(/injected 502/);
+    for (const f of v.fields) expect(f.outcome).toBe("unknown");
+  });
+
+  it("classifies baseline 5xx + injected 2xx as HIGH extras-bypass with crash note (TASK-276)", async () => {
+    responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 500, body: { error: "boom" } };
+      }
+      if (req.method === "POST") {
+        return { status: 201, body: { id: "x", name: "alice", is_admin: true, role: "admin" } };
+      }
+      return { status: 204 };
+    };
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint(), getUserByIdEndpoint(), deleteUserEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      noCleanup: true,
+    });
+    const v = result.verdicts[0]!;
+    expect(v.severity).toBe("high");
+    expect(v.summary).toMatch(/extras-bypass/);
+    expect(v.summary).toMatch(/server crash on baseline/);
+  });
+
+  it("skips PATCH/PUT when env doesn't supply path id (--no-discover)", async () => {
+    const patch = ep({
+      method: "PATCH",
+      path: "/users/{id}",
+      requestBodySchema: userSchema,
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+      ],
+    });
+    const result = await runMassAssignmentProbes({
+      endpoints: [patch],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+      discover: false,
+    });
+    expect(result.verdicts[0]!.severity).toBe("skipped");
+    expect(result.verdicts[0]!.skipReason).toMatch(/PATCH requires existing resource id/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("auto-discovers path-param via GET-on-list (TASK-92)", async () => {
+    let createdId = "discovered-user-id";
+    responder = (req) => {
+      if (req.method === "GET" && req.url === "https://api.test/users") {
+        return { status: 200, body: { data: [{ id: createdId }] } };
+      }
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        // baseline of PATCH? PATCH never sends to POST. So this branch is moot for PATCH.
+        return { status: 200, body: { id: createdId } };
+      }
+      // PATCH calls (baseline or injected)
+      if (req.method === "PATCH") {
+        if (isBaseline(req.body)) return { status: 200, body: { id: createdId, name: "alice" } };
+        return { status: 400, body: { error: "additional property not allowed" } };
+      }
+      return { status: 404 };
+    };
+    const list = ep({
+      method: "GET",
+      path: "/users",
+      requestBodySchema: undefined,
+      requestBodyContentType: undefined,
+      responses: [{ statusCode: 200, description: "ok", schema: userResponseSchema }],
+    });
+    const patch = ep({
+      method: "PATCH",
+      path: "/users/{id}",
+      requestBodySchema: userSchema,
+      responses: [{ statusCode: 200, description: "ok", schema: userResponseSchema }],
+      parameters: [
+        { name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+      ],
+    });
+    const result = await runMassAssignmentProbes({
+      endpoints: [list, patch],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const v = result.verdicts.find(x => x.method === "PATCH")!;
+    expect(v.severity).not.toBe("skipped");
+    // The PATCH URL should have the discovered id substituted in.
+    const patchCall = calls.find(c => c.method === "PATCH")!;
+    expect(patchCall.url).toBe(`https://api.test/users/${createdId}`);
+    // GET /users should have been called exactly once (cached).
+    expect(calls.filter(c => c.method === "GET" && c.url === "https://api.test/users")).toHaveLength(1);
+  });
+
+  it("auth header injected from vars (header captured via fetch mock)", async () => {
+    // Re-install fetch with header capture — the file-level beforeEach mock
+    // discards init.headers, which let the original assertion drift into a
+    // weaker URL-only check (acknowledged by its own comment).
+    const capturedAuth: string[] = [];
+    const prevFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | Request | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      const method = (init?.method ?? "GET").toUpperCase();
+      const headers = new Headers(init?.headers as HeadersInit | undefined);
+      capturedAuth.push(headers.get("authorization") ?? "");
+      let body: unknown;
+      if (init?.body && typeof init.body === "string") {
+        try { body = JSON.parse(init.body); } catch { body = init.body; }
+      }
+      const isPostBaseline = method === "POST" && isBaseline(body);
+      const status = isPostBaseline ? 201 : method === "DELETE" ? 204 : 400;
+      const respBody = isPostBaseline ? { id: "baseline-id", name: "alice" } : {};
+      return new Response(JSON.stringify(respBody), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      await runMassAssignmentProbes({
+        endpoints: [postUsersEndpoint({ security: ["bearerAuth"] })],
+        securitySchemes: [{ name: "bearerAuth", type: "http", scheme: "bearer" }],
+        vars: { base_url: "https://api.test", auth_token: "secret-token" },
+      });
+    } finally {
+      globalThis.fetch = prevFetch;
+    }
+
+    expect(capturedAuth.length).toBeGreaterThan(0);
+    // Every outbound request must carry the substituted Bearer token.
+    for (const auth of capturedAuth) {
+      expect(auth).toBe("Bearer secret-token");
+    }
+  });
+
+  // ARV-150: Stripe v1 declares only application/x-www-form-urlencoded for
+  // mutating endpoints. Before this fix, all 265 such endpoints reported
+  // SKIPPED "no JSON request body" — masking real mass-assignment vectors.
+  it("ARV-150: probes form-urlencoded endpoints (Stripe v1)", async () => {
+    let originalFetchRef: typeof fetch | undefined;
+    const capturedBodies: string[] = [];
+    const capturedCT: string[] = [];
+
+    originalFetchRef = globalThis.fetch;
+    globalThis.fetch = (async (input: string | Request | URL, init?: RequestInit) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      const body = typeof init?.body === "string" ? init.body : "";
+      const ct =
+        (init?.headers as Record<string, string> | undefined)?.["content-type"]
+        ?? (init?.headers as Record<string, string> | undefined)?.["Content-Type"]
+        ?? "";
+      if (method === "POST") {
+        capturedBodies.push(body);
+        capturedCT.push(ct);
+      }
+      return new Response(JSON.stringify({ id: "ch_1", name: "alice" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    try {
+      const formEp = ep({
+        method: "POST",
+        path: "/v1/products",
+        requestBodyContentType: "application/x-www-form-urlencoded",
+        requestBodySchema: userSchema,
+        responses: [{ statusCode: 200, description: "ok", schema: userResponseSchema }],
+      });
+      const result = await runMassAssignmentProbes({
+        endpoints: [formEp],
+        securitySchemes: [],
+        vars: { base_url: "https://api.test" },
+        noCleanup: true,
+      });
+      // The endpoint must NOT be skipped with "no JSON body".
+      expect(result.verdicts[0]!.severity).not.toBe("skipped");
+      // Wire payload is x-www-form-urlencoded with the suspected fields.
+      expect(capturedCT[0]).toBe("application/x-www-form-urlencoded");
+      const injected = capturedBodies[1] ?? "";
+      const parsed = new URLSearchParams(injected);
+      for (const key of Object.keys(SUSPECTED_FIELDS)) {
+        expect(parsed.has(key)).toBe(true);
+      }
+    } finally {
+      if (originalFetchRef) globalThis.fetch = originalFetchRef;
+    }
+  });
+});
+
+describe("formatDigestMarkdown", () => {
+  it("groups verdicts by severity with headers and counts", async () => {
+    responder = (req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      return { status: 400 };
+    };
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint(), deleteUserEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const md = formatDigestMarkdown(result, "spec.yaml");
+    expect(md).toMatch(/# Mass-assignment probe digest/);
+    expect(md).toMatch(/Suspected fields tested/);
+    expect(md).toMatch(/✅ OK — rejected 4xx/);
+    expect(md).toMatch(/POST \/users/);
+  });
+
+  it("renders INCONCLUSIVE-baseline section with hint (TASK-91)", async () => {
+    responder = () => ({ status: 404, body: { message: "Domain not found" } });
+    const result = await runMassAssignmentProbes({
+      endpoints: [postUsersEndpoint()],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const md = formatDigestMarkdown(result, "spec.yaml");
+    expect(md).toMatch(/INCONCLUSIVE — baseline body invalid/);
+    expect(md).toMatch(/Domain not found/);
+    expect(md).toMatch(/set the right fixture/);
+  });
+
+  it("renders a literal HIGH verdict directly without running probes", () => {
+    // Construct the verdict synthetically so the formatter is exercised in
+    // isolation from the probe's classification logic.
+    const md = formatDigestMarkdown(
+      {
+        totalEndpoints: 1,
+        specProbed: 1,
+        verdicts: [
+          {
+            method: "POST",
+            path: "/users",
+            severity: "high",
+            summary: "fields=[is_admin] · applied",
+            request: { injectedFields: ["is_admin", "role"] },
+            baseline: { status: 201 },
+            response: { status: 201 },
+            followUpGet: { status: 200 },
+            fields: [
+              { field: "is_admin", outcome: "applied" },
+              { field: "role", outcome: "applied" },
+            ],
+          } as any,
+        ],
+        warnings: [],
+      } as any,
+      "spec.yaml",
+    );
+    expect(md).toMatch(/# Mass-assignment probe digest/);
+    expect(md).toMatch(/POST \/users/);
+    expect(md).toMatch(/HIGH/i);
+    expect(md).toContain("is_admin");
+  });
+});
+
+describe("emitRegressionSuites", () => {
+  it("emits rejected-baseline suite for OK verdicts", async () => {
+    responder = (req) => {
+      if (req.method === "DELETE") return { status: 204 };
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      return { status: 422, body: { error: "no" } };
+    };
+    const eps = [postUsersEndpoint(), deleteUserEndpoint()];
+    const result = await runMassAssignmentProbes({
+      endpoints: eps,
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const suites = emitRegressionSuites(result, eps, []);
+    expect(suites).toHaveLength(1);
+    expect(suites[0]!.tags).toContain("rejected-baseline");
+    expect(suites[0]!.tests[0]!.expect.status).toEqual([400, 401, 403, 409, 415, 422]);
+  });
+
+  it("emits ignored-baseline suite with follow-up GET assertion + cleanup", async () => {
+    let createdId = "33333333-3333-3333-3333-333333333333";
+    responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      if (req.method === "POST") return { status: 201, body: { id: createdId, name: "alice" } };
+      if (req.method === "GET") return { status: 200, body: { id: createdId, name: "alice" } };
+      if (req.method === "DELETE") return { status: 204 };
+      return { status: 500 };
+    };
+    const eps = [postUsersEndpoint(), getUserByIdEndpoint(), deleteUserEndpoint()];
+    const result = await runMassAssignmentProbes({
+      endpoints: eps,
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const suites = emitRegressionSuites(result, eps, []);
+    expect(suites).toHaveLength(1);
+    expect(suites[0]!.tags).toContain("ignored-baseline");
+    // Three steps: POST probe, GET verify, DELETE cleanup
+    expect(suites[0]!.tests).toHaveLength(3);
+    const cleanup = suites[0]!.tests[2]! as { always?: boolean; DELETE?: string };
+    expect(cleanup.always).toBe(true);
+    expect(cleanup.DELETE).toMatch(/\{\{created_id\}\}/);
+  });
+
+  it("does NOT emit suites for HIGH (applied) verdicts", async () => {
+    responder = (req) => {
+      if (req.method === "POST" && isBaseline(req.body)) {
+        return { status: 201, body: { id: "baseline-id", name: "alice" } };
+      }
+      if (req.method === "POST") return { status: 201, body: { id: "x", is_admin: true } };
+      if (req.method === "GET") return { status: 200, body: { id: "x", is_admin: true } };
+      if (req.method === "DELETE") return { status: 204 };
+      return { status: 500 };
+    };
+    const eps = [postUsersEndpoint(), getUserByIdEndpoint(), deleteUserEndpoint()];
+    const result = await runMassAssignmentProbes({
+      endpoints: eps,
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    const suites = emitRegressionSuites(result, eps, []);
+    expect(suites).toHaveLength(0);
+  });
+
+  it("does NOT emit suites for INCONCLUSIVE-baseline verdicts (TASK-91)", async () => {
+    // Both baseline and injected return 4xx — fixture problem, not a security
+    // signal. Emitting a regression test would make CI 404 every run.
+    responder = () => ({ status: 404, body: { message: "Domain not found" } });
+    const eps = [postUsersEndpoint()];
+    const result = await runMassAssignmentProbes({
+      endpoints: eps,
+      securitySchemes: [],
+      vars: { base_url: "https://api.test" },
+    });
+    expect(result.verdicts[0]!.severity).toBe("inconclusive-baseline");
+    const suites = emitRegressionSuites(result, eps, []);
+    expect(suites).toHaveLength(0);
+  });
+});
+
+// ARV-104 (F9): when the response body of a 403 baseline-failure says
+// the endpoint is subscription-gated (paid plan, scope, feature flag),
+// the user-facing summary must drop the "fix fixture" hint — there's
+// nothing to fix in env. Tester saw 46 INCONCLUSIVE verdicts on Sentry's
+// org endpoints, all with "A paid plan is required to enable this
+// feature." in the body, all advised "fix fixture / FK value / re-probe".
+describe("ARV-104 (F9): subscription-gated 403 detection", () => {
+  it("isSubscriptionGated matches the common SaaS phrasings", () => {
+    expect(isSubscriptionGated("A paid plan is required to enable this feature.")).toBe(true);
+    expect(isSubscriptionGated("This feature is not available on your plan.")).toBe(true);
+    expect(isSubscriptionGated("Your plan does not include this endpoint.")).toBe(true);
+    expect(isSubscriptionGated("Subscription required for this organization.")).toBe(true);
+    expect(isSubscriptionGated("Requires the org:admin scope.")).toBe(true);
+    expect(isSubscriptionGated("Missing the project:write scope")).toBe(true);
+    expect(isSubscriptionGated("Feature is not enabled for this org.")).toBe(true);
+    expect(isSubscriptionGated("Insufficient permissions to perform this action.")).toBe(true);
+    expect(isSubscriptionGated("Insufficient scope")).toBe(true);
+  });
+
+  it("isSubscriptionGated does NOT match generic 4xx errors", () => {
+    expect(isSubscriptionGated("Domain not found")).toBe(false);
+    expect(isSubscriptionGated("Validation failed: name is required")).toBe(false);
+    expect(isSubscriptionGated("Unauthorized")).toBe(false);
+    expect(isSubscriptionGated("Resource does not exist")).toBe(false);
+  });
+
+  // Live integration of the new tail through the inconclusive-baseline
+  // builder is exercised in tests that already drive `runMassAssignmentProbes`
+  // end-to-end (see "does NOT emit suites for INCONCLUSIVE-baseline
+  // verdicts" above). Here we pin only the classifier predicate — that's
+  // the load-bearing piece for ARV-104; the wiring is straight string
+  // concat in inconclusiveBaselineSummary.
+});

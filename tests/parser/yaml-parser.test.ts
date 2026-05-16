@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test";
-import { parseFile, parseDirectory, parse } from "../../src/core/parser/yaml-parser.ts";
+import { parseFile, parseDirectory, parse, parseSafe } from "../../src/core/parser/yaml-parser.ts";
 
 const fixturesDir = `${import.meta.dir}/../fixtures`;
 
@@ -45,18 +45,25 @@ describe("parseFile", () => {
 
 describe("parseDirectory", () => {
   test("parses valid yaml files in a clean directory", async () => {
-    const tmpDir = `${fixturesDir}/valid`;
-    const { mkdirSync, existsSync } = await import("node:fs");
-    if (!existsSync(tmpDir)) mkdirSync(tmpDir, { recursive: true });
-    await Bun.write(`${tmpDir}/a.yaml`, "name: A\ntests:\n  - name: A\n    GET: /a\n    expect: {}\n");
-    await Bun.write(`${tmpDir}/b.yml`, "name: B\ntests:\n  - name: B\n    POST: /b\n    expect: {}\n");
-    // .env.yaml should be excluded (dotfile, not scanned by default)
-    await Bun.write(`${tmpDir}/.env.yaml`, "base: http://localhost\n");
+    // TASK-208: write to a fresh mkdtempSync dir instead of tests/fixtures/valid/
+    // — the prior version left an artifact in the repo every time the test ran.
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const tmpDir = mkdtempSync(join(tmpdir(), "zond-parsedir-"));
+    try {
+      await Bun.write(`${tmpDir}/a.yaml`, "name: A\ntests:\n  - name: A\n    GET: /a\n    expect: {}\n");
+      await Bun.write(`${tmpDir}/b.yml`, "name: B\ntests:\n  - name: B\n    POST: /b\n    expect: {}\n");
+      // .env.yaml should be excluded (dotfile, not scanned by default)
+      await Bun.write(`${tmpDir}/.env.yaml`, "base: http://localhost\n");
 
-    const suites = await parseDirectory(tmpDir);
-    expect(suites).toHaveLength(2);
-    const names = suites.map((s) => s.name).sort();
-    expect(names).toEqual(["A", "B"]);
+      const suites = await parseDirectory(tmpDir);
+      expect(suites).toHaveLength(2);
+      const names = suites.map((s) => s.name).sort();
+      expect(names).toEqual(["A", "B"]);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -65,5 +72,42 @@ describe("parse", () => {
     const suites = await parse(`${fixturesDir}/simple.yaml`);
     expect(suites).toHaveLength(1);
     expect(suites[0]!.name).toBe("Health Check");
+  });
+});
+
+describe("parseSafe", () => {
+  test("returns parse errors instead of silently dropping bad files", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const tmpDir = mkdtempSync(join(tmpdir(), "zond-parsesafe-"));
+    try {
+      await Bun.write(`${tmpDir}/ok.yaml`, "name: OK\ntests:\n  - name: T\n    GET: /x\n    expect: {}\n");
+      await Bun.write(`${tmpDir}/broken.yaml`, "name: B\ntests:\n  - this is: { not valid yaml\n");
+
+      const result = await parseSafe(tmpDir);
+      expect(result.suites).toHaveLength(1);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]!.file).toContain("broken.yaml");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("single file: parse error surfaces in errors, suites empty", async () => {
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const tmpDir = mkdtempSync(join(tmpdir(), "zond-parsesafe-"));
+    try {
+      const broken = `${tmpDir}/bad.yaml`;
+      await Bun.write(broken, ":\n: invalid\n");
+
+      const result = await parseSafe(broken);
+      expect(result.suites).toHaveLength(0);
+      expect(result.errors).toHaveLength(1);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

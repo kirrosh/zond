@@ -1,0 +1,40 @@
+---
+id: TASK-249
+title: 'validate: zod-stack-trace вместо human-friendly error output'
+status: Done
+assignee: []
+created_date: '2026-05-08 13:00'
+updated_date: '2026-05-08 13:16'
+labels:
+  - feedback-loop
+  - api-sentry
+  - validate
+  - ux
+dependencies: []
+priority: medium
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Source: feedback-07#F4, re-confirmed feedback-10 (NOT fixed), class ux-papercut.
+
+При невалидном YAML `zond validate` печатает raw zod-issues stack (paths типа `tests.0.expect.status.0`, имена internal schema-узлов) вместо human-friendly сообщения.
+
+Expected: либо красивый pretty-printer (path → human-readable, e.g. `tests[0].expect.status: expected number, got string "abc"`), либо хотя бы пометить «expected/received» парами как top-level message + раскрыть stack под флагом `--verbose`.
+
+Actual: zod-trace as is, плохо читается.
+
+Re-confirmed feedback-13#F1 (priority bump low → medium). Конкретный кейс: `expect.status` принимает число или array (`[200, 404]`), но не `oneOf: [...]`. Тестер по привычке других тулзов написал `oneOf` — zond упал zod-stacktrace на ~50 строк, в котором надо вычитать `path: tests, 13, expect, status`. Пришлось `sed`'ом править 4 места без точечной подсказки. Минимальное улучшение для этого узла: одна строка с подсказкой `expect.status: use number, [200, 404] (array of numbers), or omit` рядом с zod-issue.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+<!-- SECTION:ACCEPTANCE:BEGIN -->
+- [x] #1 Default validate output — компактный human-friendly формат (1-2 строки на issue: path + expected/got).
+- [x] #2 `--verbose` сохраняет полный zod-stack для отладки.
+- [x] #3 Regression-fixture: invalid yaml → `validate` output содержит read-able path и краткое сообщение, без `_def`/`ZodIssue`.
+- [x] #4 Spot-message для `expect.status`: oneOf/anyOf/string/array-of-strings → одна строка с подсказкой `use a number (200), an array of numbers ([200, 404]), or omit`. (`src/core/parser/schema.ts`, тесты `tests/parser/schema.test.ts`.)
+- [ ] #5 Аналогичные spot-messages для `expect.body` / `capture` — следующая итерация.
+<!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->

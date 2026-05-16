@@ -1,0 +1,5 @@
+{
+  "comment": "ARV-128 baseline placeholder. Snapshotted after the m-18 stabilization round; until then this file represents the empty-baseline policy (no findings expected). Refresh it by running `zond audit --api sentry --with-mass-assignment --with-security --json > .github/baselines/sentry-baseline.json` after a clean audit and reviewing the diff.",
+  "schema_version": 1,
+  "findings": []
+}

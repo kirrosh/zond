@@ -1,6 +1,6 @@
 import type { EndpointInfo } from "./types.ts";
 
-export const CHUNK_THRESHOLD = 30;
+const CHUNK_THRESHOLD = 30;
 
 export interface ChunkPlan {
   totalEndpoints: number;
@@ -8,23 +8,38 @@ export interface ChunkPlan {
   chunks: Array<{ tag: string; count: number }>;
 }
 
-/** Group endpoints by their first tag, or "untagged" if none */
+/**
+ * Group endpoints by their first tag. TASK-36: untagged endpoints fall
+ * back to per-resource grouping (first path segment), so `/audiences` and
+ * `/audiences/{id}` land in the same `audiences` group instead of being
+ * piled into a single `untagged` bucket. Endpoints whose path has no
+ * usable first segment (e.g. `/`) keep the legacy `untagged` key.
+ */
 export function groupEndpointsByTag(endpoints: EndpointInfo[]): Map<string, EndpointInfo[]> {
   const groups = new Map<string, EndpointInfo[]>();
   for (const ep of endpoints) {
-    const tag = ep.tags[0] ?? "untagged";
-    const list = groups.get(tag);
-    if (list) {
-      list.push(ep);
-    } else {
-      groups.set(tag, [ep]);
-    }
+    const key = ep.tags[0] ?? resourceKeyFromPath(ep.path);
+    const list = groups.get(key);
+    if (list) list.push(ep);
+    else groups.set(key, [ep]);
   }
   return groups;
 }
 
+/** Extract the first non-templated path segment for tagless fallback. */
+function resourceKeyFromPath(path: string): string {
+  const segments = path.split("/").filter(Boolean);
+  for (const seg of segments) {
+    // Skip templated segments like {id} — they aren't resource names.
+    if (seg.startsWith("{") && seg.endsWith("}")) continue;
+    if (seg.length === 0) continue;
+    return seg;
+  }
+  return "untagged";
+}
+
 /** Decide whether to chunk, and return the tag breakdown */
-export function planChunks(endpoints: EndpointInfo[]): ChunkPlan {
+function planChunks(endpoints: EndpointInfo[]): ChunkPlan {
   const groups = groupEndpointsByTag(endpoints);
   const chunks = Array.from(groups.entries())
     .map(([tag, eps]) => ({ tag, count: eps.length }))
@@ -37,13 +52,24 @@ export function planChunks(endpoints: EndpointInfo[]): ChunkPlan {
   };
 }
 
-/** Filter endpoints that have the given tag (case-insensitive) */
+/**
+ * Filter endpoints by tag (case-insensitive). Accepts a single tag or a
+ * comma-separated list (TASK-239) so callers can run one generate pass for
+ * multiple tags instead of looping in the shell — looping prints
+ * "Next steps" N times and drowns real warnings.
+ */
 export function filterByTag(endpoints: EndpointInfo[], tag: string): EndpointInfo[] {
-  const lower = tag.trim().toLowerCase();
-  if (lower === "untagged") {
-    return endpoints.filter(ep => ep.tags.length === 0);
-  }
-  return endpoints.filter(ep => ep.tags.some(t => t.trim().toLowerCase() === lower));
+  const wanted = tag
+    .split(",")
+    .map(t => t.trim().toLowerCase())
+    .filter(t => t.length > 0);
+  if (wanted.length === 0) return [];
+  const includeUntagged = wanted.includes("untagged");
+  const explicit = wanted.filter(t => t !== "untagged");
+  return endpoints.filter(ep => {
+    if (includeUntagged && ep.tags.length === 0) return true;
+    return ep.tags.some(t => explicit.includes(t.trim().toLowerCase()));
+  });
 }
 
 /** Collect the unique set of tags across all endpoints (sorted, original casing). */

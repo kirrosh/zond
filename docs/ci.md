@@ -11,6 +11,31 @@ zond ci init --github   # GitHub Actions
 zond ci init --gitlab   # GitLab CI
 ```
 
+## CI mode: `zond run --all` (TASK-116)
+
+CI almost always wants **one stored run per build**, even when the
+workspace registers multiple APIs. `zond run --all` walks every registered
+API, executes its `tests/` directory, and folds the results into a single
+`runs.id` row. Combined with auto-detected CI context this gives a
+queryable, comparable history without per-API bookkeeping.
+
+```bash
+zond run --all --report junit --report-out test-results/junit.xml
+```
+
+Auto-detected env vars (no flags needed):
+
+| Variable | Effect |
+|---|---|
+| `ZOND_TRIGGER` | Stamps `runs.trigger` (`ci`, `manual`, …). `--all` defaults this to `ci` |
+| `ZOND_COMMIT_SHA` | Stamps `runs.commit_sha` for `db compare` regression diffs |
+| `ZOND_BRANCH` | Stamps `runs.branch` |
+| `ZOND_SESSION_ID` | Group multiple `zond run` calls (e.g. tests + probes) under one campaign for `coverage --union session` |
+
+`zond audit --api <name>` runs the full pipeline (prepare-fixtures →
+generate → probes → run → coverage → HTML) for nightly/scheduled CI jobs
+where breadth matters more than wall-clock time (TASK-262).
+
 ## GitHub Actions
 
 ```yaml
@@ -259,16 +284,55 @@ gh workflow run api-tests.yml --repo OWNER/zond-tests
 |------|---------|
 | 0    | All tests passed |
 | 1    | One or more tests failed |
-| 2    | Configuration or runtime error |
+| 2    | Configuration or runtime error (usage / spec / fixture / I/O) |
+| 3    | Internal zond error — uncaught throw (file an issue) |
+| ≥128 | Killed by signal — typically `137` (SIGKILL: OOM or Gatekeeper on macOS) or `143` (SIGTERM) |
+
+See `zond` exit-code taxonomy in [ZOND.md](../ZOND.md#exit-codes) for the
+full table.
 
 ## Key Flags for CI
 
 | Flag | Description |
 |------|-------------|
+| `--all` | Run every registered API in one stored run (CI canonical) |
 | `--report junit` | Output JUnit XML for CI integration |
-| `--no-db` | Skip writing to local SQLite database |
+| `--report-out <file>` | Write the report to a file instead of stdout |
+| `--no-db` | Skip writing to local SQLite database (or keep it for `db compare` history) |
 | `--env <name>` | Load `.env.<name>.yaml` from test path directory |
 | `--bail` | Stop on first suite failure |
 | `--safe` | Run only GET tests (read-only mode) |
-| `--tag <tag>` | Filter suites by tag |
+| `--tag <tag>` / `--exclude-tag <tag>` | Filter suites by tag |
 | `--auth-token <token>` | Inject bearer token as `{{auth_token}}` |
+| `--rate-limit auto` | Throttle from `Retry-After` / `X-RateLimit-*` headers (TASK-81) |
+| `--quiet` | Suppress per-step output, keep summary + report |
+
+## Building for distribution (macOS)
+
+`bun run build` compiles `./zond` and, on macOS, applies an **adhoc**
+codesign so Gatekeeper doesn't SIGKILL the freshly-built binary on first
+run (`code or signature have been modified`). Adhoc is enough for local
+development but **not for distribution**: users on other Macs will hit
+Gatekeeper rejection.
+
+For published release artefacts (Homebrew, install.sh tarballs, GitHub
+Releases) re-sign with a real Developer ID + notarisation:
+
+```bash
+codesign --force --options runtime --sign "Developer ID Application: <Team>" ./zond
+xcrun notarytool submit ./zond.zip --apple-id <id> --team-id <team> --wait
+xcrun stapler staple ./zond
+```
+
+CI release jobs that produce macOS binaries should run those steps
+after `bun run build`. The local adhoc step is a no-op on linux/windows
+and degrades gracefully (warn-only) when `codesign` isn't on PATH.
+
+> **Why install.sh re-signs after `cp`.** macOS attaches a
+> `com.apple.provenance` extended attribute to any file copied via `cp`
+> (and `com.apple.quarantine` to anything downloaded). Both invalidate
+> the adhoc signature baked into the build, and the kernel SIGKILL's the
+> binary on first execution with exit `137` and no diagnostic. `install.sh`
+> strips xattrs (`xattr -c`) and re-signs (`codesign --force --sign -`)
+> in place — without that, the binary works in the build directory but
+> dies as soon as it's installed.

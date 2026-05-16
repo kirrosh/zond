@@ -1,0 +1,312 @@
+import Ajv2020 from "ajv/dist/2020.js";
+import Ajv from "ajv";
+import addFormats from "ajv-formats";
+import type { ErrorObject, ValidateFunction, AnySchema } from "ajv";
+import type { OpenAPIV3 } from "openapi-types";
+import { specPathToRegex } from "../generator/coverage-scanner.ts";
+import type { AssertionResult } from "./types.ts";
+
+export interface SchemaValidator {
+  validate(method: string, path: string, status: number, body: unknown): AssertionResult[];
+  /** TASK-142: surface whether an endpoint and a response branch matched.
+   *  Lets ad-hoc callers (`zond request --validate-schema`) distinguish
+   *  "no spec entry for this URL" from "spec entry exists, body is valid". */
+  inspect(method: string, path: string, status: number): {
+    matchedEndpoint: { method: string; path: string } | null;
+    matchedResponseStatus: string | null;
+    hasJsonSchema: boolean;
+  };
+}
+
+interface EndpointEntry {
+  method: string;
+  path: string;
+  regex: RegExp;
+  responses: OpenAPIV3.ResponsesObject;
+}
+
+const HTTP_METHODS = ["get", "post", "put", "patch", "delete", "head", "options"] as const;
+
+export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator {
+  const isV31 = typeof doc.openapi === "string" && doc.openapi.startsWith("3.1");
+  // OpenAPI 3.1 → JSON Schema Draft 2020-12; 3.0 → Draft 4/7-ish.
+  // verbose:true exposes parentSchema on each error so humanize() can render
+  // the full required-set alongside the missing field name (TASK-277).
+  const ajv = isV31
+    ? new (Ajv2020 as unknown as typeof Ajv)({ strict: false, allErrors: true, verbose: true })
+    : new Ajv({ strict: false, allErrors: true, verbose: true });
+  addFormats(ajv);
+  applyStrictFormats(ajv);
+
+  const endpoints: EndpointEntry[] = [];
+  if (doc.paths) {
+    for (const [pathTpl, pathItem] of Object.entries(doc.paths)) {
+      if (!pathItem) continue;
+      const regex = specPathToRegex(pathTpl);
+      for (const m of HTTP_METHODS) {
+        const op = (pathItem as Record<string, unknown>)[m] as OpenAPIV3.OperationObject | undefined;
+        if (!op || !op.responses) continue;
+        endpoints.push({ method: m.toUpperCase(), path: pathTpl, regex, responses: op.responses });
+      }
+    }
+    // Sort by specificity so concrete paths (e.g. /users/me) win over templated
+    // ones (/users/{id}) regardless of spec declaration order. Tie-breaker is
+    // stable insertion order (Array.sort is stable in modern engines).
+    endpoints.sort((a, b) => paramCount(a.path) - paramCount(b.path));
+  }
+
+  // ARV-214: per-schema compile is the dominant cost of --validate-schema
+  // on big dereferenced specs (github 14 MiB → minutes per response).
+  // The cache below is keyed by schema *object reference*, so endpoints
+  // that share a $ref source after dereference hit it on the second
+  // access. The slow_compile budget warns the user the first time a
+  // schema crosses 1s — the same compile only happens once per schema
+  // anyway thanks to the cache, so the warning is per-source, not
+  // per-call.
+  const SLOW_COMPILE_MS = Number(process.env.ZOND_VALIDATE_SCHEMA_SLOW_COMPILE_MS ?? "1000");
+  // Hard byte cap stops the run from hanging minutes on a pathological
+  // single response schema (post-deref github Repository / kubernetes
+  // pod-spec). Returning a no-op validator + a single warning is much
+  // friendlier than blocking on `ajv.compile` for an unbounded time.
+  // Default chosen from the bench in /tmp/bench-convert.ts: a 572 KiB
+  // schema compiles in ~800 ms; 1 MiB ≈ 1.4 s; beyond that we'd rather
+  // skip and tell the user.
+  const MAX_SCHEMA_BYTES = Number(process.env.ZOND_VALIDATE_SCHEMA_MAX_BYTES ?? String(1_048_576));
+  const compiled = new Map<unknown, ValidateFunction | null>();
+  const warnedSlow = new WeakSet<object>();
+  const warnedTooLarge = new WeakSet<object>();
+
+  function tooLargeSentinel(): null {
+    return null;
+  }
+
+  function compile(schema: AnySchema): ValidateFunction | null {
+    if (compiled.has(schema)) return compiled.get(schema) ?? null;
+    // Cheap pre-check: a schema whose JSON serialisation exceeds
+    // MAX_SCHEMA_BYTES is almost certainly going to take seconds-to-
+    // minutes to compile and produce noisy mid-body errors that aren't
+    // worth the wait. Skip it with a warning. JSON.stringify itself is
+    // O(n) but at MiB-scale completes in tens of ms — orders of
+    // magnitude cheaper than ajv.compile on the same payload.
+    if (MAX_SCHEMA_BYTES > 0) {
+      try {
+        const sz = JSON.stringify(schema)?.length ?? 0;
+        if (sz > MAX_SCHEMA_BYTES) {
+          if (typeof schema === "object" && schema && !warnedTooLarge.has(schema as object)) {
+            warnedTooLarge.add(schema as object);
+            const kib = Math.round(sz / 1024);
+            process.stderr.write(
+              `[zond] schema too large for --validate-schema (${kib} KiB > ${Math.round(MAX_SCHEMA_BYTES / 1024)} KiB) — skipping; raise via ZOND_VALIDATE_SCHEMA_MAX_BYTES.\n`,
+            );
+          }
+          compiled.set(schema, tooLargeSentinel());
+          return null;
+        }
+      } catch { /* circular or non-serialisable — let ajv try */ }
+    }
+    const prepared = isV31 ? schema : convertOpenApi30(schema);
+    const t0 = performance.now();
+    const fn = ajv.compile(prepared as AnySchema);
+    const elapsed = performance.now() - t0;
+    if (elapsed >= SLOW_COMPILE_MS && typeof schema === "object" && schema && !warnedSlow.has(schema as object)) {
+      warnedSlow.add(schema as object);
+      process.stderr.write(
+        `[zond] schema validator compile took ${elapsed.toFixed(0)} ms (warn ≥ ${SLOW_COMPILE_MS} ms) — see ZOND_VALIDATE_SCHEMA_MAX_BYTES if --validate-schema runs feel slow.\n`,
+      );
+    }
+    compiled.set(schema, fn);
+    return fn;
+  }
+
+  function findResponseSchema(method: string, path: string, status: number): OpenAPIV3.SchemaObject | undefined {
+    const upper = method.toUpperCase();
+    // Endpoints are pre-sorted by specificity (concrete paths first), so the
+    // first regex match is the most specific — /users/me beats /users/{id}.
+    const match = endpoints.find(e => e.method === upper && e.regex.test(path));
+    if (!match) return undefined;
+    const responses = match.responses;
+    const exact = responses[String(status)] as OpenAPIV3.ResponseObject | undefined;
+    const wildcard = responses[`${Math.floor(status / 100)}XX`] as OpenAPIV3.ResponseObject | undefined;
+    const fallback = responses.default as OpenAPIV3.ResponseObject | undefined;
+    const response = exact ?? wildcard ?? fallback;
+    if (!response || !response.content) return undefined;
+    const json = response.content["application/json"];
+    return (json?.schema as OpenAPIV3.SchemaObject | undefined) ?? undefined;
+  }
+
+  function inspectMatch(method: string, path: string, status: number) {
+    const upper = method.toUpperCase();
+    const ep = endpoints.find(e => e.method === upper && e.regex.test(path));
+    if (!ep) {
+      return { matchedEndpoint: null, matchedResponseStatus: null, hasJsonSchema: false };
+    }
+    const exact = ep.responses[String(status)] as OpenAPIV3.ResponseObject | undefined;
+    const wildcard = ep.responses[`${Math.floor(status / 100)}XX`] as OpenAPIV3.ResponseObject | undefined;
+    const fallback = ep.responses.default as OpenAPIV3.ResponseObject | undefined;
+    const matchedKey = exact ? String(status) : wildcard ? `${Math.floor(status / 100)}XX` : fallback ? "default" : null;
+    const response = exact ?? wildcard ?? fallback;
+    const hasJsonSchema = !!(response?.content?.["application/json"]?.schema);
+    return {
+      matchedEndpoint: { method: ep.method, path: ep.path },
+      matchedResponseStatus: matchedKey,
+      hasJsonSchema,
+    };
+  }
+
+  return {
+    validate(method, path, status, body) {
+      const schema = findResponseSchema(method, path, status);
+      if (!schema) return [];
+      let validator: ValidateFunction | null;
+      try {
+        validator = compile(schema);
+      } catch (err) {
+        return [{
+          field: "body",
+          rule: "schema.compile_error",
+          passed: false,
+          actual: undefined,
+          expected: err instanceof Error ? err.message : String(err),
+        }];
+      }
+      // ARV-214: schema crossed ZOND_VALIDATE_SCHEMA_MAX_BYTES — surface
+      // the skip as a passing assertion so the run stays green and the
+      // user knows validation was bypassed for this body.
+      if (validator === null) {
+        return [{
+          field: "body",
+          rule: "schema.skipped_too_large",
+          passed: true,
+          actual: undefined,
+          expected: "schema exceeded ZOND_VALIDATE_SCHEMA_MAX_BYTES — see stderr warning",
+          kind: "schema",
+        }];
+      }
+      const ok = validator(body);
+      if (ok) return [];
+      const errors = validator.errors ?? [];
+      return errors.map(e => ajvErrorToAssertion(e, body));
+    },
+    inspect: inspectMatch,
+  };
+}
+
+function paramCount(path: string): number {
+  let n = 0;
+  for (const seg of path.split("/")) if (/^\{[^}]+\}$/.test(seg)) n++;
+  return n;
+}
+
+function ajvErrorToAssertion(err: ErrorObject, body: unknown): AssertionResult {
+  const ptr = err.instancePath || "";
+  // Field key like "body" or "body.user.email" for parity with checkAssertions.
+  const field = ptr ? `body${ptr.replace(/\//g, ".")}` : "body";
+  const actual = ptr ? getByJsonPointer(body, ptr) : body;
+  return {
+    field,
+    rule: `schema.${err.keyword}`,
+    passed: false,
+    actual,
+    expected: humanize(err),
+    kind: "schema",
+  };
+}
+
+function humanize(err: ErrorObject): string {
+  switch (err.keyword) {
+    case "required": {
+      const missing = (err.params as { missingProperty: string }).missingProperty;
+      // verbose:true gives us the parent schema; surface the full required-set
+      // so the user can see drift at a glance instead of decoding the message
+      // one missing-field-error at a time (TASK-277).
+      const parent = (err as ErrorObject & { parentSchema?: unknown }).parentSchema;
+      const required =
+        parent && typeof parent === "object" && Array.isArray((parent as { required?: unknown }).required)
+          ? ((parent as { required: string[] }).required)
+          : undefined;
+      const tail = required ? `; expected required: [${required.join(", ")}]` : "";
+      return `missing required field "${missing}"${tail}`;
+    }
+    case "type":
+      return `type ${(err.params as { type: string | string[] }).type}`;
+    case "enum":
+      return `one of ${JSON.stringify((err.params as { allowedValues: unknown[] }).allowedValues)}`;
+    case "format":
+      return `format "${(err.params as { format: string }).format}"`;
+    case "additionalProperties":
+      return `no additional property "${(err.params as { additionalProperty: string }).additionalProperty}"`;
+    case "const":
+      return `const ${JSON.stringify((err.params as { allowedValue: unknown }).allowedValue)}`;
+    case "minLength":
+    case "maxLength":
+    case "minimum":
+    case "maximum":
+    case "exclusiveMinimum":
+    case "exclusiveMaximum":
+    case "multipleOf":
+    case "pattern":
+      return `${err.keyword} ${JSON.stringify((err.params as Record<string, unknown>)[err.keyword] ?? "")}`.trim();
+    default:
+      return err.message ?? err.keyword;
+  }
+}
+
+function getByJsonPointer(obj: unknown, pointer: string): unknown {
+  if (!pointer) return obj;
+  const segments = pointer.split("/").slice(1).map(s => s.replace(/~1/g, "/").replace(/~0/g, "~"));
+  let cur: unknown = obj;
+  for (const seg of segments) {
+    if (cur && typeof cur === "object") {
+      cur = (cur as Record<string, unknown>)[seg];
+    } else {
+      return undefined;
+    }
+  }
+  return cur;
+}
+
+// RFC3339 §5.6: date-time = full-date "T" full-time. T (or t) is required as
+// separator; offset is "Z" or "[+-]HH:MM" with explicit colon. ajv-formats
+// accepts " " as separator and "+HH" without colon, which lets PostgreSQL-style
+// timestamps ("2026-04-29 07:10:44.674675+00") slip through.
+export const STRICT_RFC3339_DATE_TIME =
+  /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])[Tt](?:[01]\d|2[0-3]):[0-5]\d:(?:[0-5]\d|60)(?:\.\d+)?(?:[Zz]|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+
+function applyStrictFormats(ajv: Ajv): void {
+  // Override ajv-formats' lax date-time with strict RFC3339.
+  ajv.addFormat("date-time", { type: "string", validate: STRICT_RFC3339_DATE_TIME });
+}
+
+/**
+ * Convert OpenAPI 3.0 schema to JSON Schema Draft 7-compatible:
+ * - `nullable: true` → add "null" to `type`.
+ * - Drop unsupported `example`, `xml`, `discriminator` keywords (ajv tolerates with strict:false).
+ */
+function convertOpenApi30(schema: AnySchema): AnySchema {
+  if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) {
+    return schema.map(s => convertOpenApi30(s as AnySchema)) as unknown as AnySchema;
+  }
+  const src = schema as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (k === "nullable") continue;
+    if (k === "type" && src.nullable === true) {
+      if (Array.isArray(v)) {
+        out.type = [...v as unknown[], "null"];
+      } else if (typeof v === "string") {
+        out.type = [v, "null"];
+      } else {
+        out.type = v;
+      }
+      continue;
+    }
+    if (v && typeof v === "object") {
+      out[k] = convertOpenApi30(v as AnySchema);
+    } else {
+      out[k] = v;
+    }
+  }
+  // Standalone nullable: true with no explicit type → leave as-is (ajv accepts any).
+  return out as AnySchema;
+}

@@ -37,7 +37,13 @@ export async function describeCommand(options: DescribeOptions): Promise<number>
       return 0;
     }
 
-    if (options.compact) {
+    // No flags = compact listing. Erroring out (exit 2) on `zond describe`
+    // breaks scripts that pipe the listing; the listing IS the only useful
+    // default since the spec is the only required arg. Single-endpoint detail
+    // remains opt-in via --method/--path.
+    const useCompact = options.compact || (!options.method && !options.path);
+
+    if (useCompact) {
       const endpoints = await describeCompact(options.specPath);
 
       if (options.json) {
@@ -55,8 +61,10 @@ export async function describeCommand(options: DescribeOptions): Promise<number>
       return 0;
     }
 
+    // We get here only when one of --method/--path is set but not both —
+    // single-endpoint detail needs both halves of the address.
     if (!options.method || !options.path) {
-      const msg = "Missing --method and --path. Use --compact for all endpoints, or specify --method and --path for one.";
+      const msg = "--method and --path must be used together for single-endpoint detail. Drop both for the compact listing.";
       if (options.json) {
         printJson(jsonError("describe", [msg]));
       } else {
@@ -82,4 +90,31 @@ export async function describeCommand(options: DescribeOptions): Promise<number>
     }
     return 2;
   }
+}
+
+import type { Command } from "commander";
+import { globalJson, resolveSpecArg } from "../resolve.ts";
+
+export function registerDescribe(program: Command): void {
+  program
+    .command("describe [spec]")
+    .description("Describe endpoints from OpenAPI spec")
+    .option("--api <name>", "Use the registered API's spec (apis/<name>/spec.json)")
+    .option("--db <path>", "Path to SQLite database file")
+    .option("--compact", "List all endpoints briefly")
+    .option("--list-params", "List all unique parameters across all endpoints")
+    .option("--method <method>", "HTTP method for single endpoint detail")
+    .option("--path <path>", "Endpoint path for single endpoint detail")
+    .action(async (specPos: string | undefined, opts, cmd: Command) => {
+      const resolved = resolveSpecArg(specPos, opts.api, opts.db);
+      if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      process.exitCode = await describeCommand({
+        specPath: resolved.spec,
+        compact: opts.compact === true,
+        listParams: opts.listParams === true,
+        method: opts.method,
+        path: opts.path,
+        json: globalJson(cmd),
+      });
+    });
 }

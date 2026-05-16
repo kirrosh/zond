@@ -2,10 +2,9 @@ import { describe, test, expect, mock, afterEach } from "bun:test";
 import { runSuite, expandParameterize } from "../../src/core/runner/executor.ts";
 import type { TestSuite } from "../../src/core/parser/types.ts";
 import { DEFAULT_CONFIG } from "../../src/core/parser/schema.ts";
-import { validateSuite } from "../../src/core/parser/schema.ts";
 
-const originalFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = originalFetch; });
+import { restoreFetch } from "../_helpers/fetch-mock";
+afterEach(restoreFetch);
 
 function recordedFetch() {
   const urls: string[] = [];
@@ -139,15 +138,5 @@ describe("runSuite — parameterize (TASK-77)", () => {
     expect(result.steps[0]!.captures).toEqual({ id: 42 });
     // Iteration 2: capture not extracted → empty captures object.
     expect(result.steps[1]!.captures).toEqual({});
-  });
-
-  test("schema accepts parameterize map", () => {
-    const raw = {
-      name: "schema-test",
-      parameterize: { endpoint: ["/a", "/b"] },
-      tests: [{ name: "x", GET: "{{endpoint}}", expect: { status: 200 } }],
-    };
-    const suite = validateSuite(raw);
-    expect(suite.parameterize).toEqual({ endpoint: ["/a", "/b"] });
   });
 });

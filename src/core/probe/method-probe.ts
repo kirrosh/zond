@@ -18,19 +18,19 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
+import { pathWithByAliases, getAuthHeaders } from "./shared.ts";
+import {
+  ALL_METHODS,
+  ACCEPTABLE_UNSUPPORTED_STATUSES,
+  bucketEndpointsByPath,
+  pathWithMethodPlaceholders,
+  type Method,
+} from "./method-shared.ts";
 
-// ──────────────────────────────────────────────
-// Constants
-// ──────────────────────────────────────────────
-
-const ALL_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
-type Method = (typeof ALL_METHODS)[number];
-
-/** Statuses we accept on a *missing* method. 405 is canonical, 404 is a
- *  common fallback (path not registered for that method), 401/403 are
- *  acceptable when auth is checked before routing. Anything else — notably
- *  5xx (unhandled), 200/201 (silent acceptance) — is a probe failure. */
-const ACCEPTABLE_STATUSES = [401, 403, 404, 405];
+// 405-or-equivalent statuses for an *undeclared* method probe. ARV-2
+// (m-15) extracted this list to method-shared.ts so the live
+// `unsupported_method` check stays in lock-step with the offline probe.
+const ACCEPTABLE_STATUSES = [...ACCEPTABLE_UNSUPPORTED_STATUSES];
 
 // ──────────────────────────────────────────────
 // Types
@@ -67,75 +67,22 @@ function slugify(s: string): string {
 }
 
 function pathStem(path: string): string {
-  const cleaned = path
-    .replace(/\{[^}]+\}/g, "by-id")
+  // TASK-159 (m-9 P3): preserve placeholder name (`by-org`, `by-proj`)
+  // instead of collapsing every `{x}` to a generic `by-id`.
+  const cleaned = pathWithByAliases(path)
     .replace(/^\//, "")
     .replace(/\//g, "-");
   return slugify(cleaned) || "root";
 }
 
-/** Replace path params with valid-shape placeholders so the request can
- *  reach the routing layer without being rejected purely on path syntax. */
-function pathWithPlaceholders(
-  path: string,
-  parameters: OpenAPIV3.ParameterObject[],
-): string {
-  return path.replace(/\{([^}]+)\}/g, (_, name: string) => {
-    const param = parameters.find((p) => p.name === name && p.in === "path");
-    const schema = param?.schema as OpenAPIV3.SchemaObject | undefined;
-    if (schema?.format === "uuid") return "00000000-0000-0000-0000-000000000000";
-    if (schema?.type === "integer" || schema?.type === "number") return "999999999";
-    return "nonexistent-zzzzz";
-  });
-}
-
-function getAuthHeaders(
-  ep: EndpointInfo,
-  schemes: SecuritySchemeInfo[],
-): Record<string, string> | undefined {
-  if (ep.security.length === 0) return undefined;
-  for (const secName of ep.security) {
-    const scheme = schemes.find((s) => s.name === secName);
-    if (!scheme) continue;
-    if (scheme.type === "http") {
-      if (scheme.scheme === "bearer" || !scheme.scheme) {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      if (scheme.scheme === "basic") {
-        return { Authorization: "Basic {{auth_token}}" };
-      }
-    }
-    if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
-      if (scheme.apiKeyName === "Authorization") {
-        return { Authorization: "Bearer {{auth_token}}" };
-      }
-      return { [scheme.apiKeyName]: "{{api_key}}" };
-    }
-  }
-  return undefined;
-}
-
-interface PathBucket {
+// pathWithPlaceholders + bucketByPath moved to ./method-shared.ts for
+// reuse by the live `unsupported_method` check (m-15 ARV-2).
+const pathWithPlaceholders = pathWithMethodPlaceholders;
+const bucketByPath = (endpoints: EndpointInfo[]): Array<{
   path: string;
-  /** Methods declared on this path, normalized to upper-case. */
   declared: Set<string>;
-  /** A representative endpoint we can borrow auth/path-param shape from. */
   sample: EndpointInfo;
-}
-
-function bucketByPath(endpoints: EndpointInfo[]): PathBucket[] {
-  const map = new Map<string, PathBucket>();
-  for (const ep of endpoints) {
-    if (ep.deprecated) continue;
-    let bucket = map.get(ep.path);
-    if (!bucket) {
-      bucket = { path: ep.path, declared: new Set(), sample: ep };
-      map.set(ep.path, bucket);
-    }
-    bucket.declared.add(ep.method.toUpperCase());
-  }
-  return Array.from(map.values());
-}
+}> => Array.from(bucketEndpointsByPath(endpoints).values());
 
 // ──────────────────────────────────────────────
 // Public API
@@ -165,10 +112,25 @@ export function generateMethodProbes(opts: MethodProbeOptions): MethodProbeResul
     const headers = getAuthHeaders(bucket.sample, securitySchemes);
 
     const steps: RawStep[] = missing.map((method) => {
+      // ARV-179: OPTIONS on an undeclared path is legitimately handled
+      // by most stacks (CORS preflight, 200/204 with Allow header). Let
+      // the probe accept 2xx for OPTIONS only; everything else keeps
+      // the strict "no 2xx, no 5xx" expectation.
+      const acceptable = method === "OPTIONS"
+        ? [200, 204, ...ACCEPTABLE_STATUSES]
+        : ACCEPTABLE_STATUSES;
+      const expectLabel = method === "OPTIONS"
+        ? `${method} ${bucket.path} — undeclared method must not 5xx (OPTIONS may legitimately succeed)`
+        : `${method} ${bucket.path} — undeclared method must reject (no 5xx, no 2xx)`;
       const step: RawStep = {
-        name: `${method} ${bucket.path} — undeclared method must reject (no 5xx, no 2xx)`,
+        name: expectLabel,
+        source: {
+          generator: "method-probe",
+          endpoint: `${method} ${bucket.path}`,
+          response_branch: acceptable.map(String).join("|"),
+        },
         [method]: convertPath(concretePath),
-        expect: { status: ACCEPTABLE_STATUSES },
+        expect: { status: acceptable },
       };
       // Body-bearing methods on an undeclared route — send a minimal valid
       // JSON object to provoke any body-parsing path while the router is
@@ -186,6 +148,11 @@ export function generateMethodProbes(opts: MethodProbeOptions): MethodProbeResul
     suites.push({
       name: `probe methods ${bucket.path}`,
       tags: ["probe-methods", "negative-method", "no-5xx", "smoke"],
+      source: {
+        type: "probe-suite",
+        generator: "method-probe",
+        endpoint: bucket.path,
+      },
       fileStem: `probe-methods-${stem}`,
       base_url: "{{base_url}}",
       ...(headers ? { headers } : {}),

@@ -2,12 +2,20 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": [
     "src/cli/index.ts",
-    "src/web/server.ts"
+    "scripts/**/*.ts",
+    "tests/**/*.{ts,tsx}",
+    "benchmarks/**/*.ts"
   ],
-  "project": ["src/**/*.ts"],
+  "project": ["src/**/*.{ts,tsx}"],
   "ignore": [
-    "src/web/**",
-    "src/core/exporter/postman.ts",
-    "src/cli/commands/init/templates/**"
-  ]
+    "src/cli/commands/init/templates/**",
+    "src/db/queries/coverage.ts",
+    "src/db/queries/settings.ts"
+  ],
+  "ignoreBinaries": ["tsc", "benchmarks/api/server.ts"],
+  "ignoreExportsUsedInFile": true,
+  "rules": {
+    "exports": "warn",
+    "types": "off"
+  }
 }

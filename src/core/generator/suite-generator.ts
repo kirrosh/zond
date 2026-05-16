@@ -1,12 +1,52 @@
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo, CrudGroup } from "./types.ts";
 import type { RawSuite, RawStep } from "./serializer.ts";
+import type { SourceMetadata } from "../parser/types.ts";
 import { generateFromSchema, generateMultipartFromSchema } from "./data-factory.ts";
 import { groupEndpointsByTag } from "./chunker.ts";
+import { getAuthHeaders as sharedGetAuthHeaders } from "../probe/shared.ts";
+import { flattenToFormFields } from "../runner/form-encode.ts";
 
 // ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
+
+/**
+ * Singularize an English plural noun for use in suite names and capture
+ * variables. Handles the cases that matter for typical OpenAPI resource
+ * names — `properties → property`, `addresses → address`, `boxes → box`,
+ * `users → user`. Words that don't match any rule are returned unchanged
+ * (so already-singular `series`, `news`, `data`, etc. survive).
+ */
+export function singularizeResource(word: string): string {
+  if (word.length > 3 && /ies$/i.test(word)) return word.slice(0, -3) + "y";
+  // ARV-100 (F5): the inner alternative was `s` — but a single trailing `s`
+  // catches every regular plural whose stem ends in any vowel + `s` (e.g.
+  // `releases`, `phases`, `houses`), and `slice(-2)` then chops "es" instead
+  // of just "s". The result was `releas_id` / `phas_id` capture vars that
+  // matched nothing on the manifest side. Restrict the rule to the genuine
+  // sibilant double — `ss` — so `addresses → address` keeps working without
+  // dragging single-s plurals along.
+  if (word.length > 3 && /(ch|sh|x|ss|z)es$/i.test(word)) return word.slice(0, -2);
+  if (word.length > 1 && /[^s]s$/i.test(word)) return word.slice(0, -1);
+  return word;
+}
+
+/**
+ * Build a `<resource>_id` capture/var name. Strips dashes so the result is
+ * a safe template variable identifier — `contact-properties` becomes
+ * `contact_property_id` rather than `contact-propertie_id` (TASK-214).
+ *
+ * ARV-100 (F5): always lowercase. Path-params/headers in fixtures-builder
+ * are normalised to lowercase (line 157), so capture vars must match — a
+ * `Groups` resource would otherwise produce `Group_id` while path-params on
+ * the same endpoint produce `group_id`, splitting the `{{var}}` namespace
+ * and triggering "Undefined variables" in `zond run`.
+ */
+export function resourceVar(resource: string, suffix: string): string {
+  const singular = singularizeResource(resource);
+  return `${singular.replace(/[^a-zA-Z0-9]+/g, "_")}_${suffix}`.toLowerCase();
+}
 
 /** Convert OpenAPI path params {param} to test interpolation {{param}} */
 function convertPath(path: string): string {
@@ -73,11 +113,32 @@ function selectHealthcheckEndpoint(gets: EndpointInfo[]): EndpointInfo | undefin
   );
 }
 
+/**
+ * Pick the success status the test should assert.
+ *
+ * Order:
+ *   1. First 2xx declared in the spec (most authoritative).
+ *   2. Method-aware default when the spec lists only non-2xx responses or none
+ *      at all (many OpenAPI specs is silent for several mutating endpoints — the
+ *      actual runtime returns 201/204, while the old default of 200 caused
+ *      tests to fail at runtime). We never assert a 4xx/5xx as the success
+ *      status — that would generate guaranteed-failing tests.
+ */
 function getExpectedStatus(ep: EndpointInfo): number {
   const success = ep.responses.find(r => r.statusCode >= 200 && r.statusCode < 300);
   if (success) return success.statusCode;
-  if (ep.responses.length > 0) return ep.responses[0]!.statusCode;
-  return 200;
+  return defaultStatusByMethod(ep.method);
+}
+
+function defaultStatusByMethod(method: string): number {
+  switch (method.toUpperCase()) {
+    case "POST":
+      return 201;
+    case "DELETE":
+      return 204;
+    default:
+      return 200;
+  }
 }
 
 function getSuccessSchema(ep: EndpointInfo): OpenAPIV3.SchemaObject | undefined {
@@ -105,7 +166,7 @@ function getBodyAssertions(ep: EndpointInfo): Record<string, Record<string, stri
 }
 
 /** Derive a variable name for a security scheme's token */
-function schemeVarName(scheme: SecuritySchemeInfo, allSchemes: SecuritySchemeInfo[]): string {
+export function schemeVarName(scheme: SecuritySchemeInfo, allSchemes: SecuritySchemeInfo[]): string {
   // Count how many bearer-like schemes exist
   const bearerSchemes = allSchemes.filter(s =>
     (s.type === "http" && (s.scheme === "bearer" || !s.scheme)) ||
@@ -122,29 +183,7 @@ function getAuthHeaders(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],
 ): Record<string, string> | undefined {
-  if (ep.security.length === 0) return undefined;
-
-  for (const secName of ep.security) {
-    const scheme = schemes.find(s => s.name === secName);
-    if (!scheme) continue;
-
-    if (scheme.type === "http") {
-      if (scheme.scheme === "bearer" || !scheme.scheme) {
-        return { Authorization: `Bearer {{${schemeVarName(scheme, schemes)}}}` };
-      }
-      if (scheme.scheme === "basic") {
-        return { Authorization: `Basic {{${schemeVarName(scheme, schemes)}}}` };
-      }
-    }
-    if (scheme.type === "apiKey" && scheme.in === "header" && scheme.apiKeyName) {
-      if (scheme.apiKeyName === "Authorization") {
-        return { Authorization: `Bearer {{${schemeVarName(scheme, schemes)}}}` };
-      }
-      return { [scheme.apiKeyName]: "{{api_key}}" };
-    }
-  }
-
-  return undefined;
+  return sharedGetAuthHeaders(ep, schemes, s => schemeVarName(s, schemes));
 }
 
 function getRequiredQueryParams(ep: EndpointInfo): Record<string, string> | undefined {
@@ -172,23 +211,88 @@ function getSuiteHeaders(
 
   const headerSets = endpoints.map(ep => getAuthHeaders(ep, schemes));
   const first = headerSets[0];
-  if (!first) return undefined;
+  if (!first) {
+    // ARV-212 (R13/F16): spec has no securitySchemes (GitHub publishes its
+    // OpenAPI this way) so per-endpoint auth-header derivation returns
+    // undefined for every step. When the API workspace nonetheless wires
+    // `auth_token` end-to-end (ARV-201 seeds it in .env.yaml on bare specs,
+    // and zond request / runner auto-attach Authorization: Bearer when
+    // auth_token is present), generated suites should not silently go
+    // unauth — that bricks them on the first rate-limited 60 requests.
+    // Fall back to a generic Bearer header at the suite level. The header
+    // is harmless when .secrets.yaml.auth_token is empty (zond runner
+    // still substitutes `{{auth_token}}` to an empty string, just like
+    // before; the server then 401s — same outcome as today).
+    if (schemes.length === 0 && _suiteDefaultAuthVar !== null) {
+      return { Authorization: `Bearer {{${_suiteDefaultAuthVar}}}` };
+    }
+    return undefined;
+  }
 
   const firstJson = JSON.stringify(first);
   const allSame = headerSets.every(h => JSON.stringify(h) === firstJson);
   return allSame ? first : undefined;
 }
 
-/** Find the best field to capture from POST response (for CRUD chains) */
-function getCaptureField(ep: EndpointInfo): string {
+// ARV-212 (R13/F16): generator-level "the caller wired auth_token in
+// .env.yaml even though the spec has no securitySchemes" hint. Set at the
+// top of generateSuites and consulted by getSuiteHeaders / generateCrudSuite
+// / generateSanitySuite. Module-scoped to avoid threading through ~7 call
+// sites. Always reset to null at the end of generateSuites so the helper
+// stays stateless from the caller's perspective.
+let _suiteDefaultAuthVar: string | null = null;
+
+/** Common id-like field names looked up after `id` itself.
+ *  TASK-139: many real-world APIs return `slug`, `uuid`, `version`, `key`,
+ *  or `name` instead of an `id` field on create responses. Without these,
+ *  CRUD chains fall back to capturing `"id"` from a body that doesn't have
+ *  one, breaking the `{id}` substitution in follow-up reads. */
+const ID_LIKE_NAMES = ["slug", "uuid", "key", "version", "name"];
+
+/** Find the best field to capture from POST response (for CRUD chains).
+ *
+ *  Priority:
+ *    1. Field whose name matches the path-param (e.g. `{rule_id}` → `rule_id`
+ *       or `{slug}` → `slug`). The path-param name is the strongest hint —
+ *       whatever the response calls "the id of this resource" is what gets
+ *       interpolated back into the read/update/delete URLs.
+ *    2. `id` (most common case).
+ *    3. Conventional id-like names: `slug`, `uuid`, `key`, `version`, `name`
+ *       — but only if they are typed as a string (avoids capturing a `name`
+ *       object on resources that nest metadata).
+ *    4. Any field with `type: integer` or `format: uuid`.
+ *    5. Fallback: `"id"` (the YAML capture will simply be empty if absent —
+ *       the runner already handles this gracefully).
+ */
+function getCaptureField(ep: EndpointInfo, idParam?: string): string {
   const schema = getSuccessSchema(ep);
-  if (schema?.properties) {
-    if ("id" in schema.properties) return "id";
-    for (const [name, propSchema] of Object.entries(schema.properties)) {
-      const s = propSchema as OpenAPIV3.SchemaObject;
-      if (s.type === "integer" || s.format === "uuid") return name;
+  const props = schema?.properties;
+  if (!props) return "id";
+
+  // 1. Path-param name match.
+  if (idParam) {
+    if (idParam in props) return idParam;
+    // Also try the conventional `<resource>_id` ↔ `id` swap.
+    if (idParam.endsWith("_id") && "id" in props) return "id";
+  }
+
+  // 2. Plain `id`.
+  if ("id" in props) return "id";
+
+  // 3. Conventional id-like names (string-typed only).
+  for (const candidate of ID_LIKE_NAMES) {
+    if (candidate in props) {
+      const s = props[candidate] as OpenAPIV3.SchemaObject;
+      if (s.type === "string") return candidate;
     }
   }
+
+  // 4. Any integer or uuid-shaped field.
+  for (const [name, propSchema] of Object.entries(props)) {
+    const s = propSchema as OpenAPIV3.SchemaObject;
+    if (s.type === "integer" || s.format === "uuid") return name;
+  }
+
   return "id";
 }
 
@@ -198,6 +302,46 @@ function isAuthEndpoint(ep: EndpointInfo): boolean {
   if (AUTH_PATH_PATTERNS.test(ep.path)) return true;
   if (ep.tags?.some(t => /^auth/i.test(t))) return true;
   return false;
+}
+
+// ──────────────────────────────────────────────
+// Provenance helpers
+// ──────────────────────────────────────────────
+
+function escapeJsonPointerSegment(s: string): string {
+  return s.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+function pickPrimaryStatus(status: number | number[]): number {
+  return Array.isArray(status) ? (status[0] ?? 200) : status;
+}
+
+/** Build step-level provenance for an endpoint + chosen response status. */
+export function buildStepSource(
+  ep: EndpointInfo,
+  statusOverride?: number | number[],
+): SourceMetadata {
+  const method = ep.method.toUpperCase();
+  const status = statusOverride ?? getExpectedStatus(ep);
+  const primary = pickPrimaryStatus(status);
+  const responseBranch = Array.isArray(status) ? status.map(String).join("|") : String(status);
+  const escapedPath = escapeJsonPointerSegment(ep.path);
+  return {
+    endpoint: `${method} ${ep.path}`,
+    response_branch: responseBranch,
+    schema_pointer: `#/paths/${escapedPath}/${method.toLowerCase()}/responses/${primary}`,
+  };
+}
+
+/** Build suite-level provenance for an openapi-generated suite. */
+export function buildOpenApiSuiteSource(specPath?: string): SourceMetadata | undefined {
+  if (!specPath) return undefined;
+  return {
+    type: "openapi-generated",
+    spec: specPath,
+    generator: "zond-generate",
+    generated_at: new Date().toISOString(),
+  };
 }
 
 // ──────────────────────────────────────────────
@@ -215,6 +359,7 @@ export function generateStep(
 
   const step: RawStep = {
     name,
+    source: buildStepSource(ep),
     [method]: path,
     expect: {
       status: getExpectedStatus(ep),
@@ -229,6 +374,12 @@ export function generateStep(
   if (["POST", "PUT", "PATCH"].includes(method) && ep.requestBodySchema) {
     if (ep.requestBodyContentType === "multipart/form-data") {
       step.multipart = generateMultipartFromSchema(ep.requestBodySchema);
+    } else if (ep.requestBodyContentType === "application/x-www-form-urlencoded") {
+      // ARV-149: form-encoded endpoints (Stripe v1 et al.) — emit `form:` so
+      // the runner posts URL-encoded bodies with bracket notation. Without
+      // this, generate baked `json:` blocks and every POST 400'd with
+      // "wrong content type".
+      step.form = flattenToFormFields(generateFromSchema(ep.requestBodySchema));
     } else {
       step.json = generateFromSchema(ep.requestBodySchema);
     }
@@ -247,33 +398,163 @@ export function generateStep(
   return step;
 }
 
-/** Detect CRUD groups from a list of endpoints */
+/** Strip a single trailing slash for comparison purposes. We never rewrite
+ *  endpoint paths in the spec — we just normalise the matching regex so
+ *  `POST /alerts/` + `GET /alerts/{id}/` lines up the same as the no-slash
+ *  variant. */
+function stripTrailingSlash(p: string): string {
+  return p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p;
+}
+
+/** Per-resource diagnostic record used by `zond generate --explain`.
+ *  Captures every POST candidate the detector considered and the verdict
+ *  with a human reason — so users can see "I have a CRUD-looking pair, why
+ *  didn't generate emit a chain?" without grepping the spec. */
+export interface CrudDetectionDiagnostic {
+  resource: string;
+  basePath: string;
+  postPath: string;
+  hasGetById: boolean;
+  hasUpdate: boolean;
+  hasDelete: boolean;
+  hasList: boolean;
+  verdict: "chain" | "skipped";
+  reason: string;
+}
+
+export interface DetectCrudResult {
+  groups: CrudGroup[];
+  diagnostics: CrudDetectionDiagnostic[];
+}
+
+/** Detect CRUD groups from a list of endpoints.
+ *
+ *  Match logic (TASK-139):
+ *    - basePath = POST endpoint's path with any trailing slash trimmed.
+ *    - item path = `<basePath>/{param}` with optional trailing slash.
+ *  This catches common SaaS-style `POST /alert-rules/` + `GET /alert-rules/{id}/`
+ *  pairs that previously fell through because the regex required the same
+ *  slash form on both. */
 export function detectCrudGroups(endpoints: EndpointInfo[]): CrudGroup[] {
+  return detectCrudGroupsWithDiagnostics(endpoints).groups;
+}
+
+export function detectCrudGroupsWithDiagnostics(
+  endpoints: EndpointInfo[],
+): DetectCrudResult {
   const groups: CrudGroup[] = [];
-  const postEndpoints = endpoints.filter(ep => ep.method.toUpperCase() === "POST" && !ep.deprecated);
+  const diagnostics: CrudDetectionDiagnostic[] = [];
+  const postEndpoints = endpoints.filter(
+    ep => ep.method.toUpperCase() === "POST" && !ep.deprecated,
+  );
 
   for (const createEp of postEndpoints) {
-    const basePath = createEp.path;
+    const basePath = stripTrailingSlash(createEp.path);
+    const resource = basePath.split("/").filter(Boolean).pop() ?? "resource";
 
-    // Find item endpoints: basePath/{param}
-    const itemPattern = new RegExp(`^${escapeRegex(basePath)}/\\{([^}]+)\\}$`);
-    const itemEndpoints = endpoints.filter(ep => !ep.deprecated && itemPattern.test(ep.path));
+    // Match `<basePath>/{param}` with optional trailing slash. Tolerates
+    // both `POST /alerts/` + `GET /alerts/{id}` and `POST /alerts` +
+    // `GET /alerts/{id}/`, which some real-world specs mix.
+    const itemPattern = new RegExp(`^${escapeRegex(basePath)}/\\{([^}]+)\\}/?$`);
+    const itemEndpoints = endpoints.filter(
+      ep => !ep.deprecated && itemPattern.test(ep.path),
+    );
 
-    if (itemEndpoints.length === 0) continue;
+    // Fallback for "subdomain"/nested-item routing (common SaaS-style):
+    // create lives under one root (`/api/0/organizations/{org}/teams/`)
+    // but item-path lives under another (`/api/0/teams/{org}/{team}/`).
+    // The strict basePath/{id} regex misses these. Match instead by:
+    //   1. shared OpenAPI tag with the create operation,
+    //   2. terminal {param} matching the singular form of the resource
+    //      (`{team}` / `{team_id}` / `{team_id_or_slug}`).
+    let resolvedItemEndpoints = itemEndpoints;
+    if (resolvedItemEndpoints.length === 0) {
+      const singular = singularizeResource(resource).toLowerCase();
+      const itemTerminalRe = /\{([^}]+)\}\/?$/;
+      const matchesResourceParam = (p: string) => {
+        const m = p.match(itemTerminalRe);
+        if (!m) return false;
+        const param = m[1]!.toLowerCase();
+        return (
+          param === singular ||
+          param === `${singular}_id` ||
+          param === `${singular}_id_or_slug` ||
+          param === `${singular}_slug`
+        );
+      };
+      const createTags = new Set(createEp.tags ?? []);
+      const sharedTag = (ep: EndpointInfo) =>
+        (ep.tags ?? []).some(t => createTags.has(t));
 
-    const itemPath = itemEndpoints[0]!.path;
-    const idMatch = itemPath.match(/\{([^}]+)\}$/);
-    if (!idMatch) continue;
+      resolvedItemEndpoints = endpoints.filter(
+        ep =>
+          !ep.deprecated &&
+          ep.path !== createEp.path &&
+          matchesResourceParam(ep.path) &&
+          sharedTag(ep),
+      );
+    }
+
+    const read = resolvedItemEndpoints.find(ep => ep.method.toUpperCase() === "GET");
+    const update = resolvedItemEndpoints.find(
+      ep => ["PUT", "PATCH"].includes(ep.method.toUpperCase()),
+    );
+    const del = resolvedItemEndpoints.find(ep => ep.method.toUpperCase() === "DELETE");
+    // List endpoint matches with the same trailing-slash tolerance.
+    const list = endpoints.find(
+      ep =>
+        ep.method.toUpperCase() === "GET" &&
+        stripTrailingSlash(ep.path) === basePath &&
+        !ep.deprecated,
+    );
+
+    const diag: CrudDetectionDiagnostic = {
+      resource,
+      basePath,
+      postPath: createEp.path,
+      hasGetById: !!read,
+      hasUpdate: !!update,
+      hasDelete: !!del,
+      hasList: !!list,
+      verdict: "skipped",
+      reason: "",
+    };
+
+    if (resolvedItemEndpoints.length === 0) {
+      diag.reason = `no item endpoint matching ${basePath}/{...}`;
+      diagnostics.push(diag);
+      continue;
+    }
+    // TASK-260: accept headless chains — POST + (GET/PUT/PATCH/DELETE on /{id}).
+    // Resources with no GET-by-id (e.g. external-teams, some user-binding endpoints)
+    // were previously skipped entirely, even though POST captures the ID and PUT/DELETE
+    // can drive the chain on their own. The Read/Verify steps in the suite generator
+    // are already conditional on `group.read`, so headless chains generate cleanly.
+    if (!read && !update && !del) {
+      diag.reason = "item endpoint exists but no GET/PUT/PATCH/DELETE on /{id}";
+      diagnostics.push(diag);
+      continue;
+    }
+
+    const itemPath = resolvedItemEndpoints[0]!.path;
+    const idMatch = itemPath.match(/\{([^}]+)\}\/?$/);
+    if (!idMatch) {
+      diag.reason = "item path has no terminal {param}";
+      diagnostics.push(diag);
+      continue;
+    }
     const idParam = idMatch[1]!;
 
-    const read = itemEndpoints.find(ep => ep.method.toUpperCase() === "GET");
-    if (!read) continue; // Minimum: POST + GET/{id}
-
-    const update = itemEndpoints.find(ep => ["PUT", "PATCH"].includes(ep.method.toUpperCase()));
-    const del = itemEndpoints.find(ep => ep.method.toUpperCase() === "DELETE");
-    const list = endpoints.find(ep => ep.method.toUpperCase() === "GET" && ep.path === basePath && !ep.deprecated);
-
-    const resource = basePath.split("/").filter(Boolean).pop() ?? "resource";
+    diag.verdict = "chain";
+    if (read) {
+      diag.reason = "POST + GET/{id} matched";
+    } else {
+      // TASK-260: explicit headless reason so `--explain` differentiates the
+      // two chain shapes — useful for debugging fixture flow.
+      const partner = update ? `${update.method.toUpperCase()}/{id}` : `DELETE/{id}`;
+      diag.reason = `POST + ${partner} matched (headless: no GET-by-id)`;
+    }
+    diagnostics.push(diag);
 
     groups.push({
       resource,
@@ -288,7 +569,7 @@ export function detectCrudGroups(endpoints: EndpointInfo[]): CrudGroup[] {
     });
   }
 
-  return groups;
+  return { groups, diagnostics };
 }
 
 /** Generate a CRUD chain suite from a CrudGroup */
@@ -296,8 +577,16 @@ export function generateCrudSuite(
   group: CrudGroup,
   securitySchemes: SecuritySchemeInfo[],
 ): RawSuite {
-  const captureField = group.create ? getCaptureField(group.create) : "id";
-  const captureVar = `${group.resource.replace(/s$/, "")}_id`;
+  const captureField = group.create ? getCaptureField(group.create, group.idParam) : "id";
+  // ARV-137: use the spec's path-param name as the capture var. Previously
+  // we synthesised `<resource>_id` via `resourceVar(...)`, which produced
+  // phantom manifest dupes whenever the spec named the path-param anything
+  // other than `<resource>_id` (e.g. `monitor_id_or_slug`, `version`, or
+  // collection-stem mismatches like resource=`saved`/idParam=`query_id`).
+  // Aligning on `group.idParam` keeps tests, manifest, and spec consistent.
+  // Fallback to `resourceVar` only when the group has no idParam (defensive
+  // — shouldn't happen for any group with a read/update/delete endpoint).
+  const captureVar = group.idParam || resourceVar(group.resource, "id");
   const tests: RawStep[] = [];
 
   const allEps = [group.create, group.list, group.read, group.update, group.delete].filter(Boolean) as EndpointInfo[];
@@ -322,7 +611,8 @@ export function generateCrudSuite(
   // 2. Read created
   if (group.read) {
     const step: RawStep = {
-      name: group.read.operationId ?? `Read created ${group.resource.replace(/s$/, "")}`,
+      name: group.read.operationId ?? `Read created ${singularizeResource(group.resource)}`,
+      source: buildStepSource(group.read),
       GET: convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`),
       expect: {
         status: getExpectedStatus(group.read),
@@ -336,12 +626,13 @@ export function generateCrudSuite(
   if (group.update) {
     const method = group.update.method.toUpperCase();
     const itemPath = convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`);
-    const etagVar = `${group.resource.replace(/s$/, "")}_etag`;
+    const etagVar = resourceVar(group.resource, "etag");
 
     // If endpoint requires ETag (optimistic locking), capture it from a GET step first
     if (group.update.requiresEtag && group.read) {
       tests.push({
-        name: `Get ETag before update ${group.resource.replace(/s$/, "")}`,
+        name: `Get ETag before update ${singularizeResource(group.resource)}`,
+        source: buildStepSource(group.read),
         GET: itemPath,
         expect: {
           status: getExpectedStatus(group.read),
@@ -351,7 +642,8 @@ export function generateCrudSuite(
     }
 
     const step: RawStep = {
-      name: group.update.operationId ?? `Update ${group.resource.replace(/s$/, "")}`,
+      name: group.update.operationId ?? `Update ${singularizeResource(group.resource)}`,
+      source: buildStepSource(group.update),
       [method]: itemPath,
       expect: {
         status: getExpectedStatus(group.update),
@@ -369,13 +661,14 @@ export function generateCrudSuite(
   // 4. Delete
   if (group.delete) {
     const itemPath = convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`);
-    const etagVar = `${group.resource.replace(/s$/, "")}_etag`;
+    const etagVar = resourceVar(group.resource, "etag");
 
     // If delete requires ETag and update didn't already capture it, add a GET step
     const updateAlreadyCapturedEtag = group.update?.requiresEtag;
     if (group.delete.requiresEtag && group.read && !updateAlreadyCapturedEtag) {
       tests.push({
-        name: `Get ETag before delete ${group.resource.replace(/s$/, "")}`,
+        name: `Get ETag before delete ${singularizeResource(group.resource)}`,
+        source: buildStepSource(group.read),
         GET: itemPath,
         expect: {
           status: getExpectedStatus(group.read),
@@ -386,7 +679,8 @@ export function generateCrudSuite(
 
     // T44: cleanup must run even if earlier assertions failed (tainted captures)
     const step: RawStep = {
-      name: group.delete.operationId ?? `Delete ${group.resource.replace(/s$/, "")}`,
+      name: group.delete.operationId ?? `Delete ${singularizeResource(group.resource)}`,
+      source: buildStepSource(group.delete),
       DELETE: itemPath,
       always: true,
       expect: {
@@ -401,7 +695,8 @@ export function generateCrudSuite(
     // 5. Verify deleted — also always, so we confirm cleanup happened
     if (group.read) {
       tests.push({
-        name: `Verify ${group.resource.replace(/s$/, "")} deleted`,
+        name: `Verify ${singularizeResource(group.resource)} deleted`,
+        source: buildStepSource(group.read, 404),
         GET: convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`),
         always: true,
         expect: {
@@ -594,7 +889,7 @@ function generateConsistentAuthSuite(
 }
 
 /** Generate 1-2 minimal tests for quick connectivity and auth validation */
-export function generateSanitySuite(opts: {
+function generateSanitySuite(opts: {
   authEndpoints: EndpointInfo[];
   nonAuthGetEndpoints: EndpointInfo[];
   securitySchemes: SecuritySchemeInfo[];
@@ -631,11 +926,22 @@ export function generateSanitySuite(opts: {
 export function generateSuites(opts: {
   endpoints: EndpointInfo[];
   securitySchemes: SecuritySchemeInfo[];
+  /** Path to OpenAPI spec, recorded in suite-level provenance. */
+  specPath?: string;
+  /** When true, deprecated endpoints are included instead of filtered out. */
+  includeDeprecated?: boolean;
+  /** ARV-212 (R13/F16): inject `Authorization: Bearer {{<varName>}}` at the
+   *  suite level when the spec declares no securitySchemes but the workspace
+   *  .env.yaml carries this auth-token variable. Lets generated suites talk
+   *  to bare-spec APIs (GitHub) without going unauth. */
+  defaultAuthVar?: string;
 }): RawSuite[] {
-  const { endpoints, securitySchemes } = opts;
+  const { endpoints, securitySchemes, specPath, includeDeprecated, defaultAuthVar } = opts;
+  _suiteDefaultAuthVar = defaultAuthVar ?? null;
 
-  // Filter deprecated
-  const active = endpoints.filter(ep => !ep.deprecated);
+  // Filter deprecated unless caller opted in. The list of skipped paths is
+  // exposed separately via `getSkippedDeprecated` for stdout reporting.
+  const active = includeDeprecated ? endpoints : endpoints.filter(ep => !ep.deprecated);
 
   // Separate auth endpoints
   const authEndpoints = active.filter(isAuthEndpoint);
@@ -670,27 +976,52 @@ export function generateSuites(opts: {
     const paramlessGets = getEndpoints.filter(ep => !endpointHasPathParams(ep));
     const pathParamGets = getEndpoints.filter(ep => endpointHasPathParams(ep));
 
-    // Regular smoke: paramless GETs (e.g. list endpoints, health checks)
-    if (paramlessGets.length > 0) {
-      const tests = paramlessGets.map(ep => {
+    // Positive smoke: paramless GETs (no env needed) + path-param GETs
+    // (with skip_if guards). TASK-240 — unified naming convention:
+    // always emit `smoke-<tag>-positive.yaml`, never the bare
+    // `smoke-<tag>.yaml`, so file listings don't have to explain why a
+    // tag has only `-negative` (e.g. a vendor-specific tag) or why two
+    // siblings differ in suffix shape.
+    const positiveTests = [
+      ...paramlessGets.map(ep => {
         const step = generateStep(ep, securitySchemes);
         const seededPath = convertPathWithSeeds(ep.path, ep);
         (step as any)[ep.method.toUpperCase()] = seededPath;
         return step;
-      });
-      const headers = getSuiteHeaders(paramlessGets, securitySchemes);
+      }),
+      ...pathParamGets.map(ep => {
+        const step = generateStep(ep, securitySchemes);
+        // Path stays as {{param}} so user-provided env values flow in.
+        // skip_if guards an unset path-param without skipping paramless
+        // siblings that don't need a fixture.
+        const firstPathParam = ep.parameters.find(p => p.in === "path");
+        if (firstPathParam) {
+          step.skip_if = `{{${firstPathParam.name}}} ==`;
+        }
+        return step;
+      }),
+    ];
+
+    if (positiveTests.length > 0) {
+      const positiveEndpoints = [...paramlessGets, ...pathParamGets];
+      const headers = getSuiteHeaders(positiveEndpoints, securitySchemes);
+      // needs-id only when at least one test depends on a path-param
+      // fixture — coverage downgrades these suites when env is empty.
+      const tags = pathParamGets.length > 0
+        ? ["smoke", "positive", "needs-id"]
+        : ["smoke", "positive"];
 
       const suite: RawSuite = {
-        name: `${tagSlug}-smoke`,
-        tags: ["smoke"],
-        fileStem: `smoke-${tagSlug}`,
+        name: `${tagSlug}-smoke-positive`,
+        tags,
+        fileStem: `smoke-${tagSlug}-positive`,
         base_url: "{{base_url}}",
-        tests,
+        tests: positiveTests,
       };
 
       if (headers) {
         suite.headers = headers;
-        for (const t of tests) {
+        for (const t of positiveTests) {
           if (t.headers && JSON.stringify(t.headers) === JSON.stringify(headers)) {
             delete (t as any).headers;
           }
@@ -715,40 +1046,6 @@ export function generateSuites(opts: {
         name: `${tagSlug}-smoke-negative`,
         tags: ["smoke", "negative"],
         fileStem: `smoke-${tagSlug}-negative`,
-        base_url: "{{base_url}}",
-        tests,
-      };
-
-      if (headers) {
-        suite.headers = headers;
-        for (const t of tests) {
-          if (t.headers && JSON.stringify(t.headers) === JSON.stringify(headers)) {
-            delete (t as any).headers;
-          }
-        }
-      }
-
-      suites.push(suite);
-    }
-
-    // Positive smoke: path-param GETs with {{var}} placeholders + skip_if for unset env
-    if (pathParamGets.length > 0) {
-      const tests = pathParamGets.map(ep => {
-        const step = generateStep(ep, securitySchemes);
-        // Path stays as {{param}} so user-provided env values flow in
-        // Pick the first path param for skip_if guard (the resource ID)
-        const firstPathParam = ep.parameters.find(p => p.in === "path");
-        if (firstPathParam) {
-          step.skip_if = `{{${firstPathParam.name}}} ==`;
-        }
-        return step;
-      });
-      const headers = getSuiteHeaders(pathParamGets, securitySchemes);
-
-      const suite: RawSuite = {
-        name: `${tagSlug}-smoke-positive`,
-        tags: ["smoke", "positive", "needs-id"],
-        fileStem: `smoke-${tagSlug}-positive`,
         base_url: "{{base_url}}",
         tests,
       };
@@ -836,5 +1133,16 @@ export function generateSuites(opts: {
   const nonAuthGetEndpoints = nonAuth.filter(ep => ep.method.toUpperCase() === "GET");
   const sanitySuite = generateSanitySuite({ authEndpoints, nonAuthGetEndpoints, securitySchemes });
 
-  return sanitySuite ? [sanitySuite, ...suites] : suites;
+  const allSuites = sanitySuite ? [sanitySuite, ...suites] : suites;
+
+  // Stamp suite-level provenance when a spec path is known.
+  const suiteSrc = buildOpenApiSuiteSource(specPath);
+  if (suiteSrc) {
+    for (const s of allSuites) {
+      s.source = suiteSrc;
+    }
+  }
+
+  _suiteDefaultAuthVar = null;                                                                  // ARV-212
+  return allSuites;
 }

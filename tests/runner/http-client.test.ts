@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
-import { executeRequest } from "../../src/core/runner/http-client.ts";
+import { executeRequest, isTransientNetworkError, networkBackoffMs } from "../../src/core/runner/http-client.ts";
+import { createAdaptiveRateLimiter } from "../../src/core/runner/rate-limiter.ts";
 
 describe("executeRequest", () => {
   const originalFetch = globalThis.fetch;
@@ -213,5 +214,207 @@ describe("executeRequest", () => {
         { timeout: 50 },
       ),
     ).rejects.toThrow();
+  });
+
+  test("TASK-88: adaptive limiter survives window-based RateLimit-Policy without 429", async () => {
+    const originalFetch = globalThis.fetch;
+    // Window: max 5 requests per 1000ms. Server replies 429 if a 6th arrives
+    // before the window slides; otherwise 200 with RateLimit-Policy header.
+    const arrivals: number[] = [];
+    const WINDOW_MS = 1000;
+    const LIMIT = 5;
+    globalThis.fetch = (async () => {
+      const now = Date.now();
+      // Drop arrivals outside the trailing window
+      while (arrivals.length > 0 && now - arrivals[0]! >= WINDOW_MS) arrivals.shift();
+      if (arrivals.length >= LIMIT) {
+        return new Response(JSON.stringify({ error: "rate limited" }), {
+          status: 429,
+          headers: {
+            "content-type": "application/json",
+            "retry-after": "1",
+            "ratelimit-policy": `${LIMIT};w=${WINDOW_MS / 1000}`,
+            "ratelimit-limit": String(LIMIT),
+            "ratelimit-remaining": "0",
+            "ratelimit-reset": "1",
+          },
+        });
+      }
+      arrivals.push(now);
+      const remaining = LIMIT - arrivals.length;
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "ratelimit-policy": `${LIMIT};w=${WINDOW_MS / 1000}`,
+          "ratelimit-limit": String(LIMIT),
+          "ratelimit-remaining": String(remaining),
+          "ratelimit-reset": "1",
+        },
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      const limiter = createAdaptiveRateLimiter();
+      // 8 sequential requests: at policy spacing of 250ms each, total ~1.75s.
+      // Without spacing, first 5 burst then 429 storm.
+      const responses: number[] = [];
+      for (let i = 0; i < 8; i++) {
+        const resp = await executeRequest(
+          { method: "GET", url: "http://example.com/x", headers: {} },
+          { rate_limiter: limiter, retries: 0, rate_limit_retries: 0 },
+        );
+        responses.push(resp.status);
+      }
+      // Every request must be 200; no 429 should reach the caller.
+      expect(responses).toEqual([200, 200, 200, 200, 200, 200, 200, 200]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }, 10_000);
+
+  describe("TASK-144: --retry-on-network", () => {
+    test("retries on ECONNRESET and reports network_retry_count", async () => {
+      let callCount = 0;
+      globalThis.fetch = mock(async () => {
+        callCount++;
+        if (callCount === 1) {
+          const err = new Error("read ECONNRESET") as Error & { code?: string };
+          err.code = "ECONNRESET";
+          throw err;
+        }
+        return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+      }) as unknown as typeof fetch;
+
+      const response = await executeRequest(
+        { method: "GET", url: "http://example.com", headers: {} },
+        { network_retries: 1, network_retry_base_ms: 1, network_retry_max_delay_ms: 5 },
+      );
+      expect(response.status).toBe(200);
+      expect(callCount).toBe(2);
+      expect(response.network_retry_count).toBe(1);
+    });
+
+    test("retries on `socket hang up` message", async () => {
+      let callCount = 0;
+      globalThis.fetch = mock(async () => {
+        callCount++;
+        if (callCount < 2) throw new Error("socket hang up");
+        return new Response("{}", { status: 200, headers: {} });
+      }) as unknown as typeof fetch;
+      const response = await executeRequest(
+        { method: "GET", url: "http://example.com", headers: {} },
+        { network_retries: 2, network_retry_base_ms: 1, network_retry_max_delay_ms: 5 },
+      );
+      expect(response.status).toBe(200);
+      expect(callCount).toBe(2);
+      expect(response.network_retry_count).toBe(1);
+    });
+
+    test("does NOT retry on HTTP 502", async () => {
+      let callCount = 0;
+      globalThis.fetch = mock(async () => {
+        callCount++;
+        return new Response("Bad Gateway", { status: 502, headers: {} });
+      }) as unknown as typeof fetch;
+
+      const response = await executeRequest(
+        { method: "GET", url: "http://example.com", headers: {} },
+        { network_retries: 3, network_retry_base_ms: 1 },
+      );
+      expect(response.status).toBe(502);
+      expect(callCount).toBe(1);
+      expect(response.network_retry_count).toBe(0);
+    });
+
+    test("rethrows after exhausting network_retries budget", async () => {
+      let callCount = 0;
+      globalThis.fetch = mock(async () => {
+        callCount++;
+        const err = new Error("ECONNRESET") as Error & { code?: string };
+        err.code = "ECONNRESET";
+        throw err;
+      }) as unknown as typeof fetch;
+
+      await expect(
+        executeRequest(
+          { method: "GET", url: "http://example.com", headers: {} },
+          { network_retries: 2, network_retry_base_ms: 1, network_retry_max_delay_ms: 5 },
+        ),
+      ).rejects.toThrow(/ECONNRESET/);
+      expect(callCount).toBe(3); // initial + 2 retries
+    });
+
+    test("network_retries: 0 disables the retry path", async () => {
+      let callCount = 0;
+      globalThis.fetch = mock(async () => {
+        callCount++;
+        throw new Error("fetch failed");
+      }) as unknown as typeof fetch;
+
+      await expect(
+        executeRequest(
+          { method: "GET", url: "http://example.com", headers: {} },
+          { network_retries: 0 },
+        ),
+      ).rejects.toThrow(/fetch failed/);
+      expect(callCount).toBe(1);
+    });
+  });
+
+  describe("networkBackoffMs (full-jitter exponential)", () => {
+    const origRandom = Math.random;
+    afterEach(() => { Math.random = origRandom; });
+
+    test("attempt 0, random=0 → returns 0 (lower bound)", () => {
+      Math.random = () => 0;
+      expect(networkBackoffMs(0, 250, 8000)).toBe(0);
+    });
+
+    test("attempt 0, random→1 → returns base-1 (upper bound, integer)", () => {
+      Math.random = () => 0.999999;
+      // base * 2^0 = 250; floor(0.999999 * 250) = 249
+      expect(networkBackoffMs(0, 250, 8000)).toBe(249);
+    });
+
+    test("attempt 3 with random=0.5 → midpoint of [0, base*2^3)", () => {
+      Math.random = () => 0.5;
+      // base * 2^3 = 250 * 8 = 2000; floor(0.5 * 2000) = 1000
+      expect(networkBackoffMs(3, 250, 8000)).toBe(1000);
+    });
+
+    test("cap clamps the exp window — attempt 10 stays at floor(random*cap)", () => {
+      Math.random = () => 0.5;
+      // base*2^10 = 256_000, but cap=8000 → floor(0.5*8000)=4000
+      expect(networkBackoffMs(10, 250, 8000)).toBe(4000);
+    });
+
+    test("returned value is always an integer", () => {
+      Math.random = () => 0.7777;
+      const v = networkBackoffMs(5, 250, 8000);
+      expect(Number.isInteger(v)).toBe(true);
+    });
+  });
+
+  describe("isTransientNetworkError", () => {
+    test("matches typical network error codes", () => {
+      const e1 = Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+      expect(isTransientNetworkError(e1)).toBe(true);
+      const e2 = Object.assign(new Error("connect EPIPE"), { code: "EPIPE" });
+      expect(isTransientNetworkError(e2)).toBe(true);
+      expect(isTransientNetworkError(new Error("socket hang up"))).toBe(true);
+      expect(isTransientNetworkError(new Error("fetch failed"))).toBe(true);
+    });
+
+    test("does not match generic non-network errors", () => {
+      expect(isTransientNetworkError(new Error("Boom"))).toBe(false);
+      expect(isTransientNetworkError(new Error("Assertion failed"))).toBe(false);
+      expect(isTransientNetworkError(undefined)).toBe(false);
+    });
+
+    test("matches AbortError (timeout)", () => {
+      const e = Object.assign(new Error("operation aborted"), { name: "AbortError" });
+      expect(isTransientNetworkError(e)).toBe(true);
+    });
   });
 });

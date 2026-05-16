@@ -1,24 +1,13 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
 import { runSuite, runSuites } from "../../src/core/runner/executor.ts";
+import { createSchemaValidator } from "../../src/core/runner/schema-validator.ts";
 import type { TestSuite } from "../../src/core/parser/types.ts";
 import { DEFAULT_CONFIG } from "../../src/core/parser/schema.ts";
+import type { OpenAPIV3 } from "openapi-types";
+import { mockFetchSequence as mockFetchResponses, restoreFetch } from "../_helpers/fetch-mock";
 
 const originalFetch = globalThis.fetch;
-
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-});
-
-function mockFetchResponses(responses: Array<{ status: number; body: unknown; headers?: Record<string, string> }>) {
-  let callIndex = 0;
-  globalThis.fetch = mock(async () => {
-    const resp = responses[callIndex++] ?? { status: 500, body: { error: "unexpected call" } };
-    return new Response(JSON.stringify(resp.body), {
-      status: resp.status,
-      headers: { "Content-Type": "application/json", ...resp.headers },
-    });
-  }) as unknown as typeof fetch;
-}
+afterEach(restoreFetch);
 
 describe("runSuite", () => {
   test("runs single passing step", async () => {
@@ -273,6 +262,237 @@ describe("runSuite", () => {
     expect(capturedUrl).toContain("limit=10");
   });
 
+  // ───────────────────────────── TASK-203: branch-gap coverage
+
+  test("per-step timeout abort surfaces step as 'error', does not abort the suite", async () => {
+    let callIdx = 0;
+    globalThis.fetch = mock((_url, init?: RequestInit) => {
+      callIdx++;
+      if (callIdx === 1) {
+        // Hang the first request — timeout watchdog must trip.
+        return new Promise((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const err = new Error("aborted");
+            err.name = "AbortError";
+            reject(err);
+          }, { once: true });
+        });
+      }
+      return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "TimeoutSuite",
+      config: { ...DEFAULT_CONFIG, timeout: 50, retries: 0 },
+      tests: [
+        { name: "Slow", method: "GET", path: "http://example.com/slow", expect: { status: 200 } },
+        { name: "Fast", method: "GET", path: "http://example.com/fast", expect: { status: 200 } },
+      ],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps).toHaveLength(2);
+    expect(result.steps[0]!.status).toBe("error");
+    expect(result.steps[1]!.status).toBe("pass");
+  });
+
+  test("for_each iterates over a previously-captured list", async () => {
+    mockFetchResponses([
+      { status: 200, body: { ids: [1, 2, 3] } },
+      { status: 200, body: { id: 1 } },
+      { status: 200, body: { id: 2 } },
+      { status: 200, body: { id: 3 } },
+    ]);
+
+    const suite: TestSuite = {
+      name: "ForEachCapturedList",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "list",
+          method: "GET",
+          path: "/ids",
+          expect: { body: { ids: { capture: "ids" } } },
+        },
+        {
+          name: "get",
+          method: "GET",
+          path: "/items/{{id}}",
+          for_each: { var: "id", in: "{{ids}}" },
+          expect: { status: 200 },
+        },
+      ],
+    };
+    const result = await runSuite(suite);
+    // 1 list step + the for_each placeholder + 3 expanded children = 5 steps
+    expect(result.steps.length).toBeGreaterThanOrEqual(4);
+    const expandedUrls = result.steps
+      .map(s => s.request.url)
+      .filter(u => u.startsWith("http://example.com/items/"));
+    expect(expandedUrls).toEqual([
+      "http://example.com/items/1",
+      "http://example.com/items/2",
+      "http://example.com/items/3",
+    ]);
+  });
+
+  test("for_each × parameterize: cross-product N×M with isolated per-iteration state", async () => {
+    // 2 tiers × 2 items = 4 expanded HTTP calls
+    const calls: string[] = [];
+    globalThis.fetch = mock(async (url) => {
+      calls.push(typeof url === "string" ? url : (url as Request).url);
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "Cross",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      parameterize: { tier: ["a", "b"] },
+      tests: [{
+        name: "T",
+        method: "GET",
+        path: "/t/{{tier}}/{{item}}",
+        for_each: { var: "item", in: [1, 2] },
+        expect: { status: 200 },
+      }],
+    };
+    const result = await runSuite(suite);
+    expect(calls).toEqual([
+      "http://example.com/t/a/1",
+      "http://example.com/t/a/2",
+      "http://example.com/t/b/1",
+      "http://example.com/t/b/2",
+    ]);
+    // Per-iteration state isolation: each expanded HTTP step recorded a pass.
+    const passed = result.steps.filter(s => s.status === "pass" && s.request.url !== "");
+    expect(passed.length).toBe(4);
+  });
+
+  test("retry_until: body-condition triggers stop; delay_ms>0 actually waits between attempts", async () => {
+    let attempt = 0;
+    globalThis.fetch = mock(async () => {
+      attempt++;
+      // Body contains a counter the condition references — proving condition
+      // resolves against body, not just HTTP status.
+      const body = JSON.stringify({ progress: attempt });
+      return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "RetryUntil",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "poll",
+        method: "GET",
+        path: "/job",
+        retry_until: { condition: "{{progress}} >= 2", max_attempts: 4, delay_ms: 30 },
+        expect: { status: 200 },
+      }],
+    };
+    const t0 = Date.now();
+    const result = await runSuite(suite);
+    const elapsed = Date.now() - t0;
+    expect(result.steps[0]!.status).toBe("pass");
+    expect(attempt).toBe(2);
+    // One sleep between attempt 1 and 2 → ≥ ~30ms but < 4× delay
+    expect(elapsed).toBeGreaterThanOrEqual(25);
+    expect(elapsed).toBeLessThan(200);
+  });
+
+  test("multipart with file: '@path' reads fixture and posts a Blob in FormData", async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "zond-mp-"));
+    const yamlPath = join(dir, "suite.yaml");
+    const filePath = join(dir, "payload.bin");
+    writeFileSync(filePath, "hello-multipart-bytes");
+    writeFileSync(yamlPath, "# placeholder; suite is constructed in-memory");
+
+    let capturedInit: RequestInit | undefined;
+    let capturedUrl = "";
+    globalThis.fetch = mock(async (url, init?: RequestInit) => {
+      capturedUrl = typeof url === "string" ? url : (url as Request).url;
+      capturedInit = init;
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "Multipart",
+      filePath: yamlPath,
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "upload",
+        method: "POST",
+        path: "/upload",
+        multipart: {
+          token: "abc",
+          file: { file: "payload.bin", filename: "payload.bin", content_type: "application/octet-stream" },
+        },
+        expect: { status: 200 },
+      }],
+    };
+
+    try {
+      const result = await runSuite(suite);
+      expect(result.steps[0]!.status).toBe("pass");
+      expect(capturedUrl).toBe("http://example.com/upload");
+      const fd = capturedInit!.body as FormData;
+      expect(fd).toBeInstanceOf(FormData);
+      expect(fd.get("token")).toBe("abc");
+      const filePart = fd.get("file");
+      expect(filePart).toBeInstanceOf(Blob);
+      const text = await (filePart as Blob).text();
+      expect(text).toBe("hello-multipart-bytes");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("runSuites propagates schemaValidator + networkRetries; provenance merges suite/step", async () => {
+    let capturedHeaders: Record<string, string> = {};
+    globalThis.fetch = mock(async (_url, init?: RequestInit) => {
+      capturedHeaders = Object.fromEntries(new Headers(init?.headers as Record<string, string>).entries());
+      return new Response(JSON.stringify({ id: "x" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const validateMock = mock(() => []);
+    const validator = { validate: validateMock } as unknown as Parameters<typeof runSuites>[3] extends { schemaValidator?: infer V } ? NonNullable<V> : never;
+
+    const suite: TestSuite = {
+      name: "Provenance",
+      config: DEFAULT_CONFIG,
+      source: { type: "openapi-generated", spec: "spec.json", endpoint: "GET /x" },
+      tests: [{
+        name: "T",
+        method: "GET",
+        path: "http://example.com/x",
+        source: { endpoint: "GET /override", response_branch: "200" },
+        expect: { status: 200 },
+      }],
+    };
+    const results = await runSuites([suite], {}, false, {
+      schemaValidator: validator,
+      networkRetries: 7,
+    });
+    expect(capturedHeaders).toBeDefined();
+    expect(validateMock).toHaveBeenCalledTimes(1);
+    const step = results[0]!.steps[0]!;
+    // step-level overrides suite-level via shallow merge
+    expect(step.provenance).toBeDefined();
+    expect(step.provenance!.spec).toBe("spec.json");
+    expect(step.provenance!.endpoint).toBe("GET /override");
+    expect(step.provenance!.response_branch).toBe("200");
+    expect(step.provenance!.type).toBe("openapi-generated");
+  });
+
   test("provides timestamps in result", async () => {
     mockFetchResponses([{ status: 200, body: {} }]);
 
@@ -335,7 +555,10 @@ describe("flow control", () => {
 
     const result = await runSuite(suite);
     expect(result.steps[0]!.status).toBe("skip");
-    expect(result.steps[0]!.error).toContain("Skipped");
+    // step.error stores the bare reason; the reporter adds "skipped: " when
+    // it renders the line. For a literal-expression skip, the reason IS
+    // the expression so callers can tell why it triggered.
+    expect(result.steps[0]!.error).toBe("1 == 1");
     expect(result.steps[1]!.status).toBe("pass");
   });
 
@@ -375,6 +598,64 @@ describe("flow control", () => {
 
     const result = await runSuite(suite, { should_skip: "true" });
     expect(result.steps[0]!.status).toBe("skip");
+  });
+
+  // TASK-234 / TASK-237 / ARV-22: skip_if "{{var}} ==" with empty var must
+  // produce a friendly reason. The reporter adds "skipped: " when
+  // rendering, so step.error is the bare reason — no double "skipped:"
+  // prefix in the user-visible line.
+  test("skip_if '{{var}} ==' with empty fixture says 'required fixture'", async () => {
+    mockFetchResponses([]);
+    const suite: TestSuite = {
+      name: "Empty fixture",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Get org",
+        method: "GET",
+        path: "http://example.com/orgs/{{org_id}}/",
+        skip_if: "{{org_id}} ==",
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite, { org_id: "" });
+    expect(result.steps[0]!.status).toBe("skip");
+    expect(result.steps[0]!.error).toBe("required fixture {{org_id}} is empty");
+    expect(result.steps[0]!.error).not.toContain("skipped:");
+    expect(result.steps[0]!.error).not.toContain(" ==");
+  });
+
+  test("skip_if '{{var}} ==' with empty chain capture says 'chain capture'", async () => {
+    mockFetchResponses([]);
+    const suite: TestSuite = {
+      name: "Empty chain capture",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "Create org",
+          method: "POST",
+          path: "http://example.com/orgs",
+          expect: {
+            status: 201,
+            body: { id: { capture: "org_id" } },
+          },
+        },
+        {
+          name: "Read org",
+          method: "GET",
+          path: "http://example.com/orgs/{{org_id}}/",
+          skip_if: "{{org_id}} ==",
+          expect: { status: 200 },
+        },
+      ],
+    };
+    // Dry-run: POST does not execute, so org_id never gets captured. The
+    // empty-var skip should attribute that to the chain, NOT to fixtures.
+    const result = await runSuite(suite, {}, true);
+    const readStep = result.steps.find((s) => s.name === "Read org")!;
+    expect(readStep.status).toBe("skip");
+    expect(readStep.error).toContain("chain capture {{org_id}} unbound");
+    expect(readStep.error).not.toContain("required fixture");
   });
 
   test("set step writes variables without HTTP request", async () => {
@@ -640,10 +921,6 @@ describe("URL validation", () => {
 });
 
 describe("setup suite propagation", () => {
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-  });
-
   test("captures from setup suite propagate to regular suite via env merge", async () => {
     // Simulate the propagation pattern used in execute-run.ts and run.ts:
     //   setupCaptures collected from setup suite results
@@ -703,7 +980,9 @@ describe("setup suite propagation", () => {
     const sentHeader = regularResult.steps[0]!.request.headers["Authorization"];
     expect(sentHeader).toBe("Bearer setup-token-xyz");
   });
+});
 
+describe("multipart", () => {
   test("sends multipart/form-data with text fields", async () => {
     let capturedInit: RequestInit | undefined;
     globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
@@ -908,6 +1187,7 @@ describe("header captures", () => {
       expect(result.steps[0]!.status).toBe("fail");
       expect(result.steps[1]!.status).toBe("skip");
       expect(result.steps[1]!.error).toMatch(/missing capture: audience_id/);
+      expect(result.steps[1]!.failure_class).toBe("cascade");
     });
 
     test("always:true respects skip_if (explicit user skip still fires)", async () => {
@@ -958,5 +1238,97 @@ describe("header captures", () => {
     expect(result.steps[0]!.status).toBe("error");
     expect(result.steps[1]!.status).toBe("skip");
     expect(result.steps[1]!.error).toMatch(/missing capture: thing_id/);
+    expect(result.steps[1]!.failure_class).toBe("cascade");
+    expect(result.steps[1]!.failure_class_reason).toMatch(/Upstream capture not produced: thing_id/);
+  });
+});
+
+describe("schema validation integration", () => {
+  test("schemaValidator failures land in step.assertions and fail the step", async () => {
+    mockFetchResponses([{ status: 200, body: { data: [] } }]); // missing has_more
+
+    const doc: OpenAPIV3.Document = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/emails": {
+          get: {
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      required: ["data", "has_more"],
+                      properties: {
+                        data: { type: "array", items: {} },
+                        has_more: { type: "boolean" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const suite: TestSuite = {
+      name: "Resend B11",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "List emails",
+        method: "GET",
+        path: "/emails",
+        expect: { status: 200 },
+      }],
+    };
+
+    const result = await runSuite(suite, {}, false, { schemaValidator: createSchemaValidator(doc) });
+    expect(result.failed).toBe(1);
+    const failed = result.steps[0]!.assertions.filter(a => !a.passed);
+    expect(failed.some(a => a.rule === "schema.required")).toBe(true);
+  });
+
+  test("step passes when --validate-schema agrees", async () => {
+    mockFetchResponses([{ status: 200, body: { data: [], has_more: false } }]);
+
+    const doc: OpenAPIV3.Document = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/emails": {
+          get: {
+            responses: {
+              "200": {
+                description: "ok",
+                content: {
+                  "application/json": {
+                    schema: {
+                      type: "object",
+                      required: ["data", "has_more"],
+                      properties: { data: { type: "array", items: {} }, has_more: { type: "boolean" } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const suite: TestSuite = {
+      name: "ok",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{ name: "List", method: "GET", path: "/emails", expect: { status: 200 } }],
+    };
+
+    const result = await runSuite(suite, {}, false, { schemaValidator: createSchemaValidator(doc) });
+    expect(result.passed).toBe(1);
   });
 });
