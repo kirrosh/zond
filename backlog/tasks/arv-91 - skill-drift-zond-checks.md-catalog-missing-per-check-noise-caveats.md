@@ -4,12 +4,13 @@ title: 'skill drift: zond-checks.md catalog missing per-check noise caveats'
 status: To Do
 assignee: []
 created_date: '2026-05-11 07:50'
+updated_date: '2026-05-16 07:35'
 labels:
   - feedback-loop
   - skill-drift
   - m-16
 dependencies: []
-priority: medium
+priority: high
 ---
 
 ## Description

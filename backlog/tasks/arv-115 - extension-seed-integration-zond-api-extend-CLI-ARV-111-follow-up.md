@@ -4,6 +4,7 @@ title: extension --seed integration + zond api extend CLI (ARV-111 follow-up)
 status: To Do
 assignee: []
 created_date: '2026-05-11 09:38'
+updated_date: '2026-05-16 07:36'
 labels:
   - zond
   - cli
@@ -35,3 +36,9 @@ Follow-up of ARV-111 MVP (persistence + merge landed). Remaining scope:
 - [ ] #2 zond api extend add/list/remove CLI commands
 - [ ] #3 perTarget.sourceEndpoint annotated when value came via extension
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Merged ARV-231 (validation-sprint 2026-05-16): GET /user/<resource> fallback list — частный случай extension fallback_list mechanism.
+<!-- SECTION:NOTES:END -->

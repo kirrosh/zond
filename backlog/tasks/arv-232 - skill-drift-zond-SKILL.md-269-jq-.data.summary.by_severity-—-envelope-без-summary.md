@@ -6,14 +6,14 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-05-14 10:41'
-updated_date: '2026-05-14 10:42'
+updated_date: '2026-05-16 07:35'
 labels:
   - feedback-loop
   - api-github
   - m-16
   - skill-drift
 dependencies: []
-priority: medium
+priority: high
 ---
 
 ## Description
