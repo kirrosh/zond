@@ -1,10 +1,10 @@
 ---
 id: ARV-237
 title: 'zond init --update-skills: refresh workspace skills when binary upgraded'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 11:16'
-updated_date: '2026-05-16 08:11'
+updated_date: '2026-05-16 08:15'
 labels:
   - feedback-loop
   - m-16
@@ -27,11 +27,13 @@ Log: ~/Projects/zond-test/.fb-loop/rounds/raw-03.log
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Discovery: upsertSkills() in src/cli/commands/init/skills.ts ALREADY does hash-aware drift detection — it overwrites .claude/skills/<name>/SKILL.md when body differs from in-binary template, noop when equal. Re-running 'zond init' (no args) in a workspace already refreshes skills.
+Implementation: option 1 (zond doctor staleness warning).
 
-Actual gap is *discoverability*: nothing prompts the user (or feedback-loop bot) to re-run zond init after binary upgrade. Two options:
-1. (smaller) zond doctor: add skill-staleness comparison — when .claude/skills/<name>/SKILL.md hash != in-binary template, emit warning 'workspace skills outdated, run zond init'. ~30 LOC in src/cli/commands/doctor.ts + skills.ts (export computeSkillDrift).
-2. (bigger) zond init --update-skills explicit subcommand flag that skips zond.config.yml / AGENTS.md / apis/ checks and only runs upsertSkills with a verbose diff. Useful for CI / loop bots.
+Added detectSkillDrift(cwd) to src/cli/commands/init/skills.ts — compares each in-binary skill body against .claude/skills/<name>/SKILL.md, returns fresh|outdated|missing per template.
 
-Recommend option 1 first — it surfaces the problem; user runs zond init to fix. Add --update-skills only if option 1 is insufficient in practice.
+Wired into src/cli/commands/doctor.ts: after the staleArtifacts/fixture-manifest checks, doctor walks detectSkillDrift and pushes 'workspace skills outdated (X, Y) — run zond init to refresh .claude/skills/' into report.warnings when any skill is outdated. Missing is silent (user may have --no-skills'd intentionally).
+
+Test: tests/cli/init/bootstrap.test.ts adds 'ARV-237: detectSkillDrift reports missing/outdated/fresh' covering all three states.
+
+Verified manually in /tmp/zond237 — corrupting SKILL.md surfaces the warning under data.warnings; zond init clears it. Existing 22 tests in doctor/init still green.
 <!-- SECTION:NOTES:END -->
