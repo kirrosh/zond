@@ -15,6 +15,8 @@ import type { OpenAPIV3 } from "openapi-types";
 
 import { extractEndpoints, readOpenApiSpec } from "../generator/index.ts";
 import { detectCrudGroups } from "../generator/suite-generator.ts";
+import { buildApiResourceMap } from "../generator/resources-builder.ts";
+import type { CrudGroup } from "../generator/types.ts";
 import type { EndpointInfo } from "../generator/types.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
 import {
@@ -788,7 +790,9 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       // cap of N applies to the whole run, not per-phase.
       requestBudget,
     });
-    const crudGroups = activeStateful.some((c) => c.phase === "crud") ? detectCrudGroups(allOps) : [];
+    const crudGroups = activeStateful.some((c) => c.phase === "crud")
+      ? augmentWithListOnlyGroups(detectCrudGroups(allOps), allOps)
+      : [];
     summary.checks_run += activeStateful.length;
 
     // ARV-8: parallelize auth-phase ops and crud-phase groups via the
@@ -987,4 +991,56 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     selection,
     high_or_critical: highOrCritical,
   };
+}
+
+/**
+ * ARV-219 follow-up: `detectCrudGroups` only emits groups for resources
+ * with a POST endpoint, so list-only collections (workflow runs, search
+ * results, public lists) never reach the stateful CRUD phase. Several
+ * stateful checks operate on lists alone:
+ *   - `pagination_invariants` (page/cursor disjointness)
+ *   - `lifecycle_transitions` observation mode (observed ⊆ declared states)
+ *
+ * Synthesize minimal groups for list-only resources surfaced by the
+ * resource-map builder (which already knows how to identify
+ * implicit-list paths via `ownerListPaths`). The synthesized group
+ * carries just `list` + optional `read` — sufficient for the lookups
+ * each list-only check performs. Resources already covered by a real
+ * CRUD group (matched by name) are not duplicated.
+ */
+function augmentWithListOnlyGroups(crudGroups: CrudGroup[], allOps: EndpointInfo[]): CrudGroup[] {
+  let map;
+  try {
+    map = buildApiResourceMap({ endpoints: allOps, specHash: "transient" });
+  } catch {
+    // Defensive: never fail the run because the resource map couldn't
+    // be built (real CRUD groups still run).
+    return crudGroups;
+  }
+  const existing = new Set(crudGroups.map(g => g.resource));
+  const findEp = (label: string | undefined): EndpointInfo | undefined => {
+    if (!label) return undefined;
+    const idx = label.indexOf(" ");
+    if (idx === -1) return undefined;
+    const method = label.slice(0, idx).toUpperCase();
+    const path = label.slice(idx + 1);
+    return allOps.find(e => e.method.toUpperCase() === method && e.path === path);
+  };
+  const augmented: CrudGroup[] = [];
+  for (const r of map.resources) {
+    if (existing.has(r.resource)) continue;
+    if (!r.endpoints.list) continue;
+    const listEp = findEp(r.endpoints.list);
+    if (!listEp) continue;
+    const readEp = findEp(r.endpoints.read);
+    augmented.push({
+      resource: r.resource,
+      basePath: r.basePath,
+      itemPath: r.itemPath,
+      idParam: r.idParam,
+      list: listEp,
+      ...(readEp ? { read: readEp } : {}),
+    });
+  }
+  return augmented.length > 0 ? [...crudGroups, ...augmented] : crudGroups;
 }

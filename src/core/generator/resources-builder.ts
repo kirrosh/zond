@@ -321,6 +321,50 @@ function disambiguateResourceCollisions(groups: CrudGroup[]): CrudGroup[] {
   return groups.map(g => (renames.has(g) ? { ...g, resource: renames.get(g)! } : g));
 }
 
+/**
+ * ARV-134 follow-up: same rename strategy as `disambiguateResourceCollisions`,
+ * but operating on the final `ApiResourceEntry[]` so CRUD-vs-implicit
+ * name clashes also get resolved. Keeps the implementation parallel so
+ * the behaviour stays consistent (strictly-shortest basePath keeps the
+ * canonical name; ties get all-renamed; suffix-bumping on hash
+ * collision).
+ */
+function disambiguateEntryCollisions(entries: ApiResourceEntry[]): ApiResourceEntry[] {
+  const byName = new Map<string, ApiResourceEntry[]>();
+  for (const e of entries) {
+    const arr = byName.get(e.resource) ?? [];
+    arr.push(e);
+    byName.set(e.resource, arr);
+  }
+
+  const renames = new Map<ApiResourceEntry, string>();
+  const usedNames = new Set<string>(byName.keys());
+
+  for (const [name, members] of byName) {
+    if (members.length < 2) continue;
+    const sorted = [...members].sort((a, b) => a.basePath.length - b.basePath.length);
+    const shortest = sorted[0]!.basePath.length;
+    const tiedAtShortest = sorted.filter(e => e.basePath.length === shortest).length;
+    const startFromIndex = tiedAtShortest === 1 ? 1 : 0;
+
+    for (let i = startFromIndex; i < sorted.length; i++) {
+      const e = sorted[i]!;
+      const prefix = parentNounForBasePath(e.basePath);
+      const singularPrefix = prefix ? singularizeResource(prefix) : null;
+      let candidate = singularPrefix ? `${singularPrefix}_${name}` : `${name}_${i + 1}`;
+      let n = 2;
+      while (usedNames.has(candidate)) {
+        candidate = singularPrefix ? `${singularPrefix}_${name}_${n++}` : `${name}_${n++}`;
+      }
+      usedNames.add(candidate);
+      renames.set(e, candidate);
+    }
+  }
+
+  if (renames.size === 0) return entries;
+  return entries.map(e => (renames.has(e) ? { ...e, resource: renames.get(e)! } : e));
+}
+
 function parentNounForBasePath(basePath: string): string | null {
   const segs = pathStripSlash(basePath).split("/").filter(Boolean);
   // Skip the last segment (the resource itself); walk back to the nearest
@@ -647,7 +691,13 @@ export function buildApiResourceMap(params: BuildResourcesParams): ApiResourceMa
     r.fkDependencies = collectPathFkDeps(r.basePath, "", ownerListPaths, resourceByListPath);
   }
 
-  const resources = [...crudResources, ...implicitResources];
+  // ARV-134 (follow-up): the early disambiguation pass only operated on
+  // CRUD groups, but collisions also fire CRUD-vs-implicit (`/repos/
+  // {owner}/{repo}/check-runs` is CRUD, `/repos/{owner}/{repo}/commits/
+  // {ref}/check-runs` is implicit-list-only — both end up named
+  // `check-runs`). Run the same prefix-rename here on the combined list
+  // so the final yaml never carries duplicate `resource:` lines.
+  const resources = disambiguateEntryCollisions([...crudResources, ...implicitResources]);
 
   // Endpoints that aren't in any CRUD group — RPC-style actions, webhook
   // accept-only routes, etc. Implicit-list endpoints stay in orphans

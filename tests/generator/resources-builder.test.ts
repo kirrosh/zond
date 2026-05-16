@@ -558,6 +558,58 @@ describe("buildApiResourceMap — ARV-134 fixes", () => {
     expect(metrics!.idParam).toBe("metric_id");
   });
 
+  test("CRUD group vs implicit-list-only with the same name → both kept, implicit gets parent-prefix", () => {
+    // GitHub-shape: POST /repos/{owner}/{repo}/check-runs is CRUD,
+    // GET /repos/{owner}/{repo}/commits/{ref}/check-runs is GET-only.
+    // The implicit list-only resource only registers when SOMETHING in
+    // the spec depends on its idParam (otherwise ownerListPaths doesn't
+    // surface it). Synthesise that dependency via a child path so the
+    // implicit registration path actually fires.
+    // The implicit-resource pipeline only registers a listPath when some
+    // param structurally resolves to it (ownerListPaths). For the nested
+    // `/...check-runs` to surface as implicit we add a sub-resource whose
+    // path-FK forces Strategy-1 resolution at the nested check-runs path:
+    // `annotation_id` only appears under the nested path, so it resolves
+    // there — exactly the GitHub-shape we want to disambiguate.
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "gh-mini", version: "1" },
+      paths: {
+        "/repos/{owner}/{repo}/check-runs": {
+          get: { responses: { "200": {} } },
+          post: { responses: { "201": {} } },
+        },
+        "/repos/{owner}/{repo}/check-runs/{check_run_id}": {
+          get: { responses: { "200": {} } },
+        },
+        "/repos/{owner}/{repo}/commits/{ref}/check-runs": {
+          get: { responses: { "200": {} } },
+        },
+        // Sub-resource under the nested check-runs: forces the nested
+        // listPath into ownerListPaths so it lands in the implicit loop.
+        "/repos/{owner}/{repo}/commits/{ref}/check-runs/{nested_run_id}/annotations": {
+          get: { responses: { "200": {} } },
+        },
+        "/repos/{owner}/{repo}/commits": {
+          get: { responses: { "200": {} } },
+        },
+      },
+    };
+    const eps = extractEndpoints(spec as any);
+    const map = buildApiResourceMap({ endpoints: eps, specHash: "gh" });
+    const names = map.resources.map(r => r.resource);
+    expect(new Set(names).size).toBe(names.length); // no duplicates
+
+    const crudCheckRuns = map.resources.find(r => r.resource === "check-runs");
+    expect(crudCheckRuns).toBeDefined();
+    expect(crudCheckRuns!.basePath).toBe("/repos/{owner}/{repo}/check-runs");
+
+    // Nested implicit one is renamed via its parent noun (commits → commit).
+    const nestedCheckRuns = map.resources.find(r => r.resource === "commit_check-runs");
+    expect(nestedCheckRuns).toBeDefined();
+    expect(nestedCheckRuns!.basePath).toBe("/repos/{owner}/{repo}/commits/{ref}/check-runs");
+  });
+
   test("implicit resource with no signal anywhere → idParam stays empty (graceful fallback)", () => {
     const spec = {
       openapi: "3.0.0",
