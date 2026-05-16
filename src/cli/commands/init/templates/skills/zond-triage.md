@@ -139,6 +139,42 @@ Within each bucket, collapse by `(suite_name, response_status,
 request_method, root_cause)` and report a count + 1-2 examples. Do
 **not** dump every failure.
 
+### Shortcut: `by_recommended_action` envelope (ARV-101/ARV-228)
+
+`zond db diagnose --json` ships a pre-aggregated envelope keyed by the
+`recommended_action` enum so triage agents skip the `jq | group_by`
+step. Each bucket carries up to 5 examples with full request context
+(method, path, status, trimmed reason) — enough to render the output
+template below without re-fetching `failures[]`.
+
+Shape (extracted from `.data.by_recommended_action`):
+
+```jsonc
+{
+  "fix_auth_config": {
+    "count": 4,
+    "examples": [
+      {
+        "suite": "github-smoke",
+        "test": "GetNotifications",
+        "method": "GET",
+        "path": "/notifications",
+        "status": 401,
+        "reason": "expected 200, got 401"
+      }
+      // … up to 5 entries
+    ]
+  },
+  "report_backend_bug": { "count": 12, "examples": [ … ] }
+}
+```
+
+Iterate the priority order in the table above (`report_backend_bug` →
+`fix_test_logic`); for each present key, `count + examples` is enough
+to build the per-bucket section. Fall back to `failures[]` only when
+you need details outside the example slice (full response body, the
+6th example, etc).
+
 ## Phase 3 — reconcile spec / probe sources
 
 Run only what the user's question implies — don't fan out blindly.
