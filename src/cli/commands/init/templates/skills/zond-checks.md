@@ -422,11 +422,13 @@ resources:
       items_field: data             # omit if response is a bare array
 ```
 
-## Lifecycle transitions (m-20 ARV-172)
+## Lifecycle transitions (m-20 ARV-172, m-21 ARV-219)
 
-`lifecycle_transitions` — declare a state machine in
-`.api-resources.yaml`, the check creates a resource and walks the
-named actions, asserting:
+`lifecycle_transitions` runs in one of two modes based on the
+`actions:` field of the yaml manifest:
+
+**Action-driven mode** (preferred — needs create + read endpoints):
+The check creates a resource and walks the named actions, asserting:
 
 - **undeclared_state** — observed state isn't in declared `states[]`.
 - **wrong_expected_state** — action landed the resource in a state other
@@ -440,6 +442,28 @@ named actions, asserting:
 - **action_rejected** — first-call non-2xx (server-side gating). Not a
   contract bug per se, surfaced as INCONCLUSIVE-class info.
 
+**Observation mode** (ARV-219 — read-only state machines): when
+`actions: {}` (or omitted) AND the resource has a list endpoint, the
+check GETs the list once and asserts every observed `field` value is
+in `states[]`. Reports `undeclared_state` with sample item ids for
+each unexpected value.
+
+When to use observation mode:
+- The API exposes a status enum the agent enumerated from the spec,
+  but the auth scope is read-only and cannot drive mutations (GitHub
+  Issues with a read PAT, public-read endpoints).
+- You want to detect contract-doc drift (spec says `enum: [open,
+  closed]`, prod returns `archived`).
+
+Observation mode cannot verify the `transitions` graph (no time
+series in a single list call) — the transition arrows stay purely
+documentation. If write scope is available, prefer action mode for
+the full guarantee surface.
+
+Skip reasons unique to observation mode: `list returned <code>` (broken
+baseline), `list empty — no data to observe`, `state field "<x>"
+missing on all N observed items — yaml mismatch or nested field`.
+
 Manifest validation runs at yaml load (catches cycles, unreachable
 states, missing terminal, actions referencing undeclared states)
 before any HTTP call goes out.
@@ -447,12 +471,12 @@ before any HTTP call goes out.
 Author via Phase pre-0 `annotate dump --lifecycle` → agent → `apply`.
 The dump emits action-endpoint candidates (POST `/{resource}/{id}/cancel`,
 PATCH `/{resource}/{id}/status` etc.); agent decides the state machine
-graph.
+graph. For observation-only resources, return `actions: {}` and the
+check picks the observation path automatically.
 
 ```yaml
 resources:
-  - resource: subscription
-    # … existing fields …
+  - resource: subscription           # action-driven mode
     lifecycle:
       field: status
       states: [pending, active, cancelled]
@@ -467,6 +491,17 @@ resources:
         cancel:
           endpoint: POST /v1/subscriptions/{id}/cancel
           expected_state: cancelled
+
+  - resource: issue                  # observation mode
+    lifecycle:
+      field: state
+      states: [open, closed]
+      transitions:
+        - from: open
+          to: [closed]
+        - from: closed
+          to: []
+      actions: {}                    # no actions → check observes via GET /issues
 ```
 
 Action endpoints accept the `{id}` placeholder (replaced with the

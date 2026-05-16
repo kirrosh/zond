@@ -444,8 +444,23 @@ zond probe security ssrf,crlf --api <name> --dry-run         # first run: which 
 zond probe security ssrf,crlf,open-redirect,prompt-injection --api <name>
 ```
 
+**Targeting** (two filters; an endpoint must pass BOTH to be planned):
+
+1. **Has a JSON request body** — GET-only routes are skipped with
+   `no-body`. The probes work by mutating a body field, so read-only
+   endpoints have nothing to attack.
+2. **Has ≥1 field name matching the requested class detectors** — if
+   no field matches, the endpoint is skipped with `no-matched-field`.
+
 Field autodetection: SSRF (`*_url`/`webhook`/`callback`/`format: uri`),
-CRLF (`subject`/`*_prefix`/`name`), open-redirect (`redirect`/`next`).
+CRLF (`subject`/`*_prefix`/`name`), open-redirect (`redirect`/`next`),
+prompt-injection (`prompt`/`system`/`instruction`).
+
+If `--dry-run` reports `0 planned / 0 skipped / 0 total` with a narrow
+`--include`, the scope likely captured only GET routes — broaden the
+filter or drop `--include` to see the per-endpoint skip reasons. With
+no `--include`, the dry-run shows `no-body` / `no-matched-field` next
+to each skipped endpoint so the gap is obvious.
 
 Baseline-OK request first; if baseline ≠ 2xx → `INCONCLUSIVE-BASELINE`,
 attacks skipped (kills 5×404 noise on scope-locked endpoints).
