@@ -4,7 +4,7 @@ title: 'audit: --deep umbrella flag (mass-assignment + security live + checks ru
 status: To Do
 assignee: []
 created_date: '2026-05-11 02:45'
-updated_date: '2026-05-16 07:35'
+updated_date: '2026-05-16 08:25'
 labels:
   - audit
   - feedback-loop
@@ -40,3 +40,9 @@ Reference: feedback-18, F3/F4 (UX-инициаторы); existing tasks ARV-3 (i
 - [ ] #4 audit-report.html расширен Depth-checks summary блоком (findings by severity)
 - [ ] #5 --deep без --api дружелюбно фейлится (как и базовый audit)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Description correction (2026-05-16 strategy review): description mentions '12 depth-checks' — actual count is 18 (zond checks list). Update ratio accordingly: '8/18 depth-checks not run' rather than '8/12'. Strategy alignment: hygiene-scanner pivot (R18) makes --deep more valuable, not less — full coverage out-of-box is exactly the hygiene-scanner promise. Keep MEDIUM.
+<!-- SECTION:NOTES:END -->
