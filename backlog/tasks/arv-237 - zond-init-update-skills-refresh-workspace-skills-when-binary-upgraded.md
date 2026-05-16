@@ -4,12 +4,13 @@ title: 'zond init --update-skills: refresh workspace skills when binary upgraded
 status: To Do
 assignee: []
 created_date: '2026-05-14 11:16'
+updated_date: '2026-05-16 07:35'
 labels:
   - feedback-loop
   - m-16
   - skill-drift
 dependencies: []
-priority: medium
+priority: high
 ---
 
 ## Description

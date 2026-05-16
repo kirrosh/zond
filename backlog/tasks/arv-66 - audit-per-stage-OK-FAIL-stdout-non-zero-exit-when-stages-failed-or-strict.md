@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-11 06:50'
+updated_date: '2026-05-16 07:35'
 labels:
   - feedback-loop
   - api-resend
@@ -19,3 +20,9 @@ priority: medium
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Source: feedback round 01, finding F6, class likely_bug. Repro: zond audit --api resend → 'Warning: 3 failed: session-start, run-tests, run-probes' with exit_code=0. Expected: non-zero exit when stages failed; clear per-stage OK/FAIL lines in stdout next to 'Stage N/7'. Actual: exit 0, single-line summary, audit-report.html path not shown. session-start 'failed' is suspicious (relates to F5/ARV-65). Ask: per-stage status lines + non-zero exit or --strict flag. Log: ~/Projects/zond-test/.fb-loop/rounds/raw-01.log
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Merged ARV-136 (validation-sprint 2026-05-16): run --safe verify-skip cascade — часть UX-clarity audit pipeline (per-stage OK/FAIL + exit codes).
+<!-- SECTION:NOTES:END -->

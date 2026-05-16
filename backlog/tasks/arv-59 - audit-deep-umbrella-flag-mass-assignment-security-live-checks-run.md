@@ -4,13 +4,14 @@ title: 'audit: --deep umbrella flag (mass-assignment + security live + checks ru
 status: To Do
 assignee: []
 created_date: '2026-05-11 02:45'
+updated_date: '2026-05-16 07:35'
 labels:
   - audit
   - feedback-loop
   - m-16
   - depth
 dependencies: []
-priority: high
+priority: medium
 ---
 
 ## Description

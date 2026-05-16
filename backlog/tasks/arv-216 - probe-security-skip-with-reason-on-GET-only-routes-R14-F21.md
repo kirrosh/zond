@@ -4,13 +4,13 @@ title: 'probe security: skip-with-reason on GET-only routes (R14/F21)'
 status: To Do
 assignee: []
 created_date: '2026-05-14 10:05'
-updated_date: '2026-05-14 10:11'
+updated_date: '2026-05-16 07:35'
 labels:
   - feedback-loop
   - api-github
   - m-21
 dependencies: []
-priority: low
+priority: medium
 ---
 
 ## Description
