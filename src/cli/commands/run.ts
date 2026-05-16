@@ -447,9 +447,11 @@ export async function runCommand(options: RunOptions): Promise<number> {
   }
 
   // TASK-282: validate --learn flag combinations early (before run).
+  // ARV-199: --learn-apply implies --learn — cf. `git stash apply` (no
+  // explicit `git stash` toggle required). The earlier hard error here
+  // tripped up scripted callers that only thought to pass --learn-apply.
   if (options.learnApply && !options.learn) {
-    printError("--learn-apply requires --learn");
-    return 2;
+    options.learn = true;
   }
   if (options.learnApply && !options.learnTarget) {
     printError("--learn-apply requires --learn-target=test or --learn-target=drifts");
@@ -1000,7 +1002,7 @@ export function registerRun(program: Command): void {
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
     .option("--session-id <id>", "Group this run under a session. Resolution order: --session-id flag > ZOND_SESSION_ID env > .zond/current-session file (set by 'zond session start')")
     .option("--learn", "TASK-282: detect status-code drift (passing-test-but-wrong-status). Implies --validate-schema. Without --learn-apply prints the plan; combine with --learn-apply --learn-target=test|drifts to mutate.")
-    .option("--learn-apply", "Apply the drift plan instead of printing it. Requires --learn and --learn-target.")
+    .option("--learn-apply", "Apply the drift plan instead of printing it. Implies --learn; still requires --learn-target=test|drifts.")
     .addOption(
       new Option("--learn-target <where>", "What to mutate when --learn-apply is set: rewrite expect.status in YAML (test) or append to apis/<name>/tolerated-drifts.yaml (drifts)")
         .choices(["test", "drifts"]),

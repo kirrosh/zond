@@ -167,6 +167,12 @@ zond api annotate dump --api <name> --resources     > /tmp/orphans.json  # optio
 
 Restrict scope with `--only r1,r2,r3` on any dump.
 
+`annotate dump` emits **JSON** (a top-level array of per-resource
+slices). YAML is a JSON superset, so the file parses either way — when
+piping into a YAML-aware reader, treat it as a list of objects with the
+same shape documented below. The corresponding response file the agent
+writes back is **YAML** (more comments-friendly).
+
 Agent reads each dump and writes a YAML response file (top-level list
 of entries — see per-check schemas below for the block shape).
 Optional `rationale` and `confidence: high|medium|low` per entry help
