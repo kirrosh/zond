@@ -51,6 +51,16 @@
         "check": {
           "type": "string"
         },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
         "verdict": {
           "type": "string",
           "enum": [
@@ -102,6 +112,7 @@
         "type",
         "ts",
         "check",
+        "severity",
         "verdict",
         "operation",
         "request_signature",

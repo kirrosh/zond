@@ -691,6 +691,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
             type: "check_result",
             ts: nowIso(),
             check: check.id,
+            severity: check.severity,
             verdict: outcome.kind,
             operation: { path: op.path, method: op.method, operationId: op.operationId },
             request_signature: `${built.case.request.method} ${built.case.request.url}`,

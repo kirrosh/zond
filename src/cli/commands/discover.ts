@@ -648,7 +648,24 @@ export async function probeOne(
   }
   if (resp.status < 200 || resp.status >= 300) {
     item.status = "miss-status";
-    item.reason = `${parsed.method} ${parsed.path} → ${resp.status}`;
+    // ARV-99: bare `METHOD path → status` leaves the agent guessing what
+    // to do. Append a status-specific next-step hint so 404 / 401 / 403 /
+    // 5xx each get a routed action. Spec drift (404) and token scope
+    // (401/403) are the two common root causes — call them out.
+    let hint = "";
+    if (resp.status === 404) {
+      hint =
+        ` — list endpoint 404'd. Spec may have a stale path. Try \`zond refresh-api <name>\` to re-sync; ` +
+        `if the path is correct, the API likely doesn't expose this resource for your token — add the var to ` +
+        `.api-resources.local.yaml as a custom create endpoint (extension overlay) or fill .env.yaml by hand`;
+    } else if (resp.status === 401 || resp.status === 403) {
+      hint =
+        ` — auth/scope rejection on the list endpoint. Check token scope; if the token genuinely cannot list ${target.ownerResource}, ` +
+        `fill .env.yaml by hand or rerun with \`--no-seed\` to skip futile attempts`;
+    } else if (resp.status >= 500) {
+      hint = ` — server-side error; retry later or check provider status before treating this as a fixture gap`;
+    }
+    item.reason = `${parsed.method} ${parsed.path} → ${resp.status}${hint}`;
     return item;
   }
   const respBody = resp.body_parsed ?? resp.body;
