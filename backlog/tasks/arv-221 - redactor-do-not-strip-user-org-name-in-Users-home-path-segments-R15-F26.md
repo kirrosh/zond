@@ -4,11 +4,12 @@ title: 'redactor: do not strip user/org-name in /Users//home/ path segments (R15
 status: To Do
 assignee: []
 created_date: '2026-05-14 10:08'
-updated_date: '2026-05-16 07:36'
+updated_date: '2026-05-16 10:55'
 labels:
   - feedback-loop
   - api-github
   - m-21
+  - polish-m-22
 dependencies: []
 priority: low
 ---

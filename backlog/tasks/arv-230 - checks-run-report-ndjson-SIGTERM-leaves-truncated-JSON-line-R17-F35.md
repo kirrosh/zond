@@ -4,10 +4,12 @@ title: 'checks run --report ndjson: SIGTERM leaves truncated JSON line (R17/F35)
 status: To Do
 assignee: []
 created_date: '2026-05-14 10:12'
+updated_date: '2026-05-16 10:55'
 labels:
   - feedback-loop
   - api-github
   - m-21
+  - polish-m-22
 dependencies: []
 priority: low
 ---

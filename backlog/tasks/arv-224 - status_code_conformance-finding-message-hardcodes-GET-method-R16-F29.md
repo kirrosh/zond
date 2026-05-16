@@ -4,10 +4,12 @@ title: status_code_conformance finding message hardcodes GET method (R16/F29)
 status: To Do
 assignee: []
 created_date: '2026-05-14 10:11'
+updated_date: '2026-05-16 10:55'
 labels:
   - feedback-loop
   - api-github
   - m-21
+  - polish-m-22
 dependencies: []
 priority: low
 ---
