@@ -682,7 +682,8 @@ describe("zond bootstrap", () => {
   test("--seed prefers seed_body overlay over generator (ARV-269)", async () => {
     const ovDir = join(tmpDir, "apis", "arv269");
     await mkdir(ovDir, { recursive: true });
-    let lastBody: { display_name?: string; type?: string; amount?: number } | null = null;
+    type ShipBody = { display_name?: string; type?: string; amount?: number };
+    let lastBody: ShipBody | null = null;
     const srv = Bun.serve({
       port: 0,
       async fetch(req) {
@@ -691,10 +692,11 @@ describe("zond bootstrap", () => {
           return Response.json([]);
         }
         if (u.pathname === "/v1/shipping_rates" && req.method === "POST") {
-          lastBody = (await req.json()) as typeof lastBody;
+          const body = (await req.json()) as ShipBody;
+          lastBody = body;
           // Strict validator: accepts only the exact overlay shape, rejects
           // generator-random scalars with 400 — mirrors Stripe's behaviour.
-          if (lastBody?.display_name !== "zond" || lastBody?.type !== "fixed_amount") {
+          if (body.display_name !== "zond" || body.type !== "fixed_amount") {
             return Response.json({ error: "invalid params" }, { status: 400 });
           }
           return Response.json({ id: "shr_overlay_ok" }, { status: 201 });
@@ -806,8 +808,9 @@ describe("zond bootstrap", () => {
     expect(exit).toBe(0);
 
     // 1. The POST body matches the overlay exactly — generator did not win.
-    expect(lastBody?.display_name).toBe("zond");
-    expect(lastBody?.type).toBe("fixed_amount");
+    const captured1 = lastBody as ShipBody | null;
+    expect(captured1?.display_name).toBe("zond");
+    expect(captured1?.type).toBe("fixed_amount");
 
     // 2. Seed succeeded → shipping_rate_id captured from response.
     const out = JSON.parse(captured) as {
