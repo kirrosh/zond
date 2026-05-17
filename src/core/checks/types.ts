@@ -169,6 +169,12 @@ export interface CheckRunSummary {
    *  response branch ×2` tells the user why "0 findings" doesn't mean "all
    *  green" (probe got 4xx, response schema only declared on 2xx). */
   skipped_outcomes: Record<string, number>;
+  /** ARV-83: same data as `skipped_outcomes`, but split into `{check, reason,
+   *  count}` so consumers don't have to colon-tokenise a key whose reason
+   *  text may itself contain colons. Sorted by count descending. The legacy
+   *  `skipped_outcomes` field is kept for back-compat with existing parsers
+   *  / NDJSON readers. */
+  skipped_outcomes_grouped: Array<{ check: string; reason: string; count: number }>;
 }
 
 /** ARV-60: spec-level rollup of a systemic gap that manifests on N
@@ -230,5 +236,26 @@ export function emptySummary(): CheckRunSummary {
     by_severity: emptySeverityBuckets(),
     by_category: emptyCategoryBuckets(),
     skipped_outcomes: {},
+    skipped_outcomes_grouped: [],
   };
+}
+
+/** ARV-83: turn the legacy `<check>: <reason>` keys into a structured
+ *  array. The split parses the colon-separator at the first occurrence; if
+ *  the reason itself contains colons, only the LEADING `check_id:` is
+ *  stripped, preserving the rest verbatim. */
+export function groupSkippedOutcomes(
+  outcomes: Record<string, number>,
+): Array<{ check: string; reason: string; count: number }> {
+  const out: Array<{ check: string; reason: string; count: number }> = [];
+  for (const [key, count] of Object.entries(outcomes)) {
+    const idx = key.indexOf(": ");
+    if (idx > 0) {
+      out.push({ check: key.slice(0, idx), reason: key.slice(idx + 2), count });
+    } else {
+      out.push({ check: key, reason: "", count });
+    }
+  }
+  out.sort((a, b) => b.count - a.count);
+  return out;
 }

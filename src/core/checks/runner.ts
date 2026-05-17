@@ -46,6 +46,7 @@ import { recommendForCheck } from "./recommended-action.ts";
 import { endpointSkipsCheck, reasonForSkip } from "./zond-extensions.ts";
 import {
   emptySummary,
+  groupSkippedOutcomes,
   type CaseKind,
   type Check,
   type CheckCase,
@@ -971,6 +972,10 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     });
   }
   const spec_findings = computeSpecFindings(findings, perCheck);
+  // ARV-83: build the structured view of `skipped_outcomes` once, after
+  // all per-op/per-group writers have settled. Sorted by descending count
+  // so the most-impactful skip reason lands first.
+  summary.skipped_outcomes_grouped = groupSkippedOutcomes(summary.skipped_outcomes);
 
   // ARV-60: emit each spec finding as its own NDJSON event before the
   // terminal summary line, so a streaming consumer sees rollups in the

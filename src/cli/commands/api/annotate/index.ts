@@ -87,12 +87,33 @@ export async function dumpCommand(opts: DumpOptions): Promise<number> {
   }
 
   let resources = map.resources;
+  let unknownOnly: string[] = [];
   if (opts.only && opts.only.length > 0) {
     const wanted = new Set(opts.only);
+    const knownNames = new Set(map.resources.map((r) => r.resource));
+    unknownOnly = opts.only.filter((n) => !knownNames.has(n));
     resources = resources.filter((r) => wanted.has(r.resource));
   }
   const slices = buildResourceSlices(doc, resources);
   const bundles = buildDumpBundles(opts.kind, slices, doc, map.resources);
+
+  // ARV-226: when `--only` filtered to resources that have no applicable
+  // surface for this kind (no list endpoint for pagination/readback, no
+  // write surface for idempotency/seed-bodies, etc.), the dump silently
+  // returns []. Distinguish "no surface" from "unknown resource" so the
+  // user can tell whether they mistyped or hit a category-not-applicable.
+  if (!opts.json && opts.only && opts.only.length > 0 && opts.kind !== "resources") {
+    const emitted = new Set(bundles.map((b) => b.resource));
+    const filteredButNoSurface = opts.only.filter(
+      (n) => !emitted.has(n) && !unknownOnly.includes(n),
+    );
+    for (const n of unknownOnly) {
+      process.stderr.write(`zond: --only: resource '${n}' not in .api-resources.yaml (refresh-api or check spelling).\n`);
+    }
+    for (const n of filteredButNoSurface) {
+      process.stderr.write(`zond: --only: resource '${n}' has no applicable surface for --${opts.kind} (skipped).\n`);
+    }
+  }
 
   if (opts.json) {
     printJson(jsonOk("api annotate dump", { kind: opts.kind, bundles }));
@@ -381,8 +402,42 @@ export async function applyCommand(opts: ApplyOptions): Promise<number> {
   if (merge.conflicts.length > 0 && !opts.force && !opts.json) {
     printWarning(`${merge.conflicts.length} conflict(s) kept existing values. Re-run with --force to overwrite.`);
   }
+  // ARV-217: after a successful apply, surface the basePaths the agent
+  // should keep in `checks run --include` so a narrowed scope doesn't
+  // silently skip the freshly annotated resources. Without this hint, the
+  // next stateful run reports "no pagination config" for every endpoint
+  // outside the include filter and the apply looks like a no-op.
+  if (!opts.json && merge.changes.length > 0) {
+    const annotatedBasePaths = new Set<string>();
+    for (const patch of merge.patches) {
+      const slice = slicesByName.get(patch.resource);
+      if (slice?.basePath) annotatedBasePaths.add(slice.basePath);
+    }
+    if (annotatedBasePaths.size > 0) {
+      const checkName = opts.kind === "pagination"
+        ? "pagination_invariants"
+        : opts.kind === "lifecycle"
+          ? "lifecycle_transitions"
+          : opts.kind === "idempotency"
+            ? "idempotency_replay"
+            : opts.kind === "readback"
+              ? "cross_call_references"
+              : opts.kind === "seed-bodies"
+                ? "stateful"
+                : "stateful";
+      const includeAlt = [...annotatedBasePaths].map(escapeForPathRegex).join("|");
+      process.stdout.write(
+        `\nTip: to exercise these annotations, scope --include to cover the annotated basePath(s):\n` +
+        `  zond checks run --api ${opts.api} --check ${checkName} --include 'path:^(${includeAlt})(/.*)?$'\n`,
+      );
+    }
+  }
   if (opts.json) printJson(jsonOk("api annotate apply", { ...summary, written: true }));
   return 0;
+}
+
+function escapeForPathRegex(path: string): string {
+  return path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function parseByKind(kind: SubcommandKind, parsed: unknown, slice: ResourceSlice): { patch: ResourcePatch; audit: Record<string, unknown> } {

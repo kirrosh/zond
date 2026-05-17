@@ -385,7 +385,7 @@ import { globalJson, resolveApiCollection } from "../resolve.ts";
 import { parseInteger, parsePercentage } from "../argv.ts";
 import { getApi } from "../util/api-context.ts";
 import { readCurrentSession } from "../../core/context/session.ts";
-import { listRunsBySession, getLatestRunByCollection, getRunById, findCollectionByNameOrId } from "../../db/queries.ts";
+import { listRunsBySession, getLatestRunByCollection, getRunById, findCollectionByNameOrId, listSessions } from "../../db/queries.ts";
 
 /**
  * ARV-55: probe-run classification moved from path-regex heuristic into the
@@ -566,7 +566,20 @@ export function registerCoverage(program: Command): void {
           if (parsed.kind === "session") {
             const current = readCurrentSession();
             if (!current) {
-              printError("--union session requires an active session (run 'zond session start' first), or pass --session-id <id>.");
+              // ARV-234: when there's no active session, peek at the most
+              // recent one — agents typically hit this right after
+              // `session end`. Surface its id in the error so the recovery
+              // path is one copy-paste instead of `db sessions`-spelunking.
+              let hint = "";
+              try {
+                const recent = listSessions(1, 0);
+                if (recent.length > 0) {
+                  const r = recent[0]!;
+                  const endedAt = r.finished_at ? ` (ended ${r.finished_at})` : "";
+                  hint = ` Most recent session: --session-id ${r.session_id}${endedAt}.`;
+                }
+              } catch { /* best effort */ }
+              printError(`--union session requires an active session (run 'zond session start' first), or pass --session-id <id>.${hint}`);
               process.exitCode = 2;
               return;
             }
@@ -604,12 +617,14 @@ export function registerCoverage(program: Command): void {
       // (the percentage already looked like a regression). Explicit
       // selectors win, --json keeps the envelope untouched.
       const noSelector = !opts.runId && !sessionId && !runIds && !sinceIso && !tag;
+      let promotedToSession = false;
       if (apiName && noSelector) {
         const current = readCurrentSession();
         if (current) {
           const sessRuns = listRunsBySession(current.id);
           if (sessRuns.length > 1) {
             sessionId = current.id;
+            promotedToSession = true;
             if (!globalJson(cmd)) {
               process.stderr.write(
                 `zond: active session has ${sessRuns.length} runs — defaulting to --union session (pass --run-id <N> for a single run).\n`,
@@ -633,6 +648,18 @@ export function registerCoverage(program: Command): void {
               const hint = `Latest run #${latest.id} only executed probe suites — coverage falls back to the prior smoke/CRUD run. ` +
                 `For combined coverage, wrap your runs in 'zond session start/end' and pass '--union session' here.`;
               process.stderr.write(`zond: ${hint}\n`);
+            }
+            // ARV-81: parity with the session-promotion footer above —
+            // when we *don't* promote to --union session (no session, or
+            // session has 1 run), tell the user which run they're seeing
+            // so the single-run snapshot can't be mistaken for a regression.
+            if (!promotedToSession && !globalJson(cmd)) {
+              const regular = getLatestRunByCollection(collection.id, { runKind: "regular" });
+              if (regular) {
+                process.stderr.write(
+                  `zond: using latest run #${regular.id}. For union, pass '--union since:<dur>' or '--union runs:<a,b,...>'.\n`,
+                );
+              }
             }
           }
         } catch { /* DB inspection is best-effort, don't break coverage */ }

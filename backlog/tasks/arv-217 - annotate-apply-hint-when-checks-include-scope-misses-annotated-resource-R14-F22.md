@@ -3,10 +3,10 @@ id: ARV-217
 title: >-
   annotate apply: hint when checks --include scope misses annotated resource
   (R14/F22)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 10:05'
-updated_date: '2026-05-16 10:55'
+updated_date: '2026-05-17 05:44'
 labels:
   - feedback-loop
   - api-github
@@ -34,3 +34,9 @@ Actual: silent skip; user has no signal the annotation took effect or that the s
 
 Log: see feedback-14.md F22.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done 2026-05-17 (polish-m-22 batch-2 / annotate): apply prints a 'Tip: scope --include to ...' line listing escaped basePath alternation after a successful write, so narrowed checks scopes don't silently skip annotated resources.
+<!-- SECTION:NOTES:END -->

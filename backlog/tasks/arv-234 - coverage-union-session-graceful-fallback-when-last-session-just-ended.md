@@ -1,10 +1,10 @@
 ---
 id: ARV-234
 title: 'coverage --union session: graceful fallback when last session just ended'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 11:16'
-updated_date: '2026-05-16 10:55'
+updated_date: '2026-05-17 05:44'
 labels:
   - feedback-loop
   - api-github
@@ -23,3 +23,9 @@ Expected: использовать последнюю активную session_i
 Actual: 'Error: --union session requires an active session'
 Log: ~/Projects/zond-test/.fb-loop/rounds/raw-02.log
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done 2026-05-17 (polish-m-22 batch-2 / coverage): --union session without an active session now surfaces 'Most recent session: --session-id <id> (ended ...)' in the error message (coverage.ts) — agents stop hunting via 'db sessions' after session end.
+<!-- SECTION:NOTES:END -->

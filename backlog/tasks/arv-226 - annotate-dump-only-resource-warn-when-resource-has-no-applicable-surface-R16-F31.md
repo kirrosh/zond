@@ -3,10 +3,10 @@ id: ARV-226
 title: >-
   annotate dump --only <resource>: warn when resource has no applicable surface
   (R16/F31)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 10:11'
-updated_date: '2026-05-16 10:55'
+updated_date: '2026-05-17 05:44'
 labels:
   - feedback-loop
   - api-github
@@ -33,3 +33,9 @@ Actual: empty []; indistinguishable from 'unknown resource'.
 
 Log: see feedback-16.md F31.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done 2026-05-17 (polish-m-22 batch-2 / annotate): annotate dump --only emits per-resource stderr lines distinguishing 'not in .api-resources.yaml' from 'no applicable surface for --<kind>' so empty [] is no longer ambiguous.
+<!-- SECTION:NOTES:END -->
