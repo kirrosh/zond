@@ -319,6 +319,24 @@ gate-keeping in CI; use `coverage` once before sign-off.
 `--allow-x00` adds the NUL byte (`\x00`) to string boundaries during
 coverage — off by default (some HTTP/JSON stacks panic on it).
 
+## Contribution to audit-coverage (ARV-265)
+
+Every case `checks run` dispatches is now written to `runs`/`results`
+with `run_kind = 'check'`. This means `zond coverage` picks it up in
+its **audit-coverage** block — answering "did the scan touch endpoint
+X?" without requiring a separate `zond run`. The test-coverage block
+(pass/hit) is unaffected — `checks run` does not produce passing test
+suites, so it doesn't contribute to `pass-coverage`.
+
+```bash
+zond checks run --api myapi             # touches every endpoint at least once
+zond coverage --api myapi --scope audit # 100% audit-coverage on the GET surface
+zond coverage --api myapi               # default dual output: test + audit blocks
+```
+
+Opt-out: `ZOND_CHECKS_PERSIST=0 zond checks run …` skips the
+persistence step (matches pre-ARV-265 behaviour).
+
 ## Concurrency
 
 ```bash

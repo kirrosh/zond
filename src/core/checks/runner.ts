@@ -60,6 +60,37 @@ import {
   type PerCheckObservations,
 } from "./spec-findings.ts";
 
+/**
+ * ARV-265: per-HTTP-case audit envelope. One emitted per request the
+ * checks runner actually dispatches (or attempted to dispatch — the
+ * `error` field is set for transport-layer failures and skipped cases).
+ *
+ *   - `phase`: which sub-loop emitted the case. Lets the persistence
+ *              adapter group them under `suite_name = "checks/<phase>"`.
+ *   - `kind`:  per-response CaseKind ("positive" / "negative_data" / …)
+ *              when phase === "response". For stateful checks it is the
+ *              check id (e.g. "ignored_auth", "crud_lifecycle"), since
+ *              one stateful check owns the whole sub-chain.
+ *   - `verdict`: best-effort outcome — "pass"/"fail" mirror the per-check
+ *                verdict (passes are bucketed when ALL checks on the case
+ *                passed); "error" = network/transport failure; "skip" =
+ *                pre-cap skips (max-requests budget exhausted).
+ *   - `checkId`: the canonical check id for the case. For per-response
+ *                cases without a single owning check, this is the
+ *                first-fired check id; for stateful, it's the check itself.
+ */
+export interface ChecksCaseEvent {
+  phase: "response" | "stateful_auth" | "stateful_crud";
+  checkId: string;
+  kind: string;
+  operation: { method: string; path: string; operationId?: string };
+  request: HttpRequest;
+  response?: HttpResponse;
+  durationMs: number;
+  verdict: "pass" | "fail" | "error" | "skip";
+  error?: string;
+}
+
 export interface RunChecksOptions {
   specPath: string;
   baseUrl: string;
@@ -94,6 +125,12 @@ export interface RunChecksOptions {
    *  buffering until the run finishes). Must not throw — exceptions are
    *  the caller's responsibility (the runner doesn't catch). */
   onEvent?: (event: NdjsonEvent) => void;
+  /** ARV-265 — fires once per HTTP case actually dispatched (both
+   *  per-response and stateful phases). Lets the CLI surface every touch
+   *  into `runs`/`results` so `audit-coverage` can attribute it back.
+   *  Network-failure cases also fire (with `error` set) so the audit metric
+   *  counts attempts as well as successes. Must not throw. */
+  onCase?: (event: ChecksCaseEvent) => void;
   /** ARV-8 — bounded async-pool concurrency at the *operation* level.
    *  `1` (default) = sequential, identical to the pre-ARV-8 behaviour.
    *  Cases within an operation always run sequentially regardless of
@@ -636,6 +673,18 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       if (!reserveRequest(requestBudget)) {
         localSkipped[`max_requests: ${MAX_REQUESTS_SKIP_REASON}`] =
           (localSkipped[`max_requests: ${MAX_REQUESTS_SKIP_REASON}`] ?? 0) + 1;
+        if (opts.onCase) {
+          opts.onCase({
+            phase: "response",
+            checkId: built.case.kind,
+            kind: built.case.kind,
+            operation: { path: op.path, method: op.method, operationId: op.operationId },
+            request: built.req,
+            durationMs: 0,
+            verdict: "skip",
+            error: MAX_REQUESTS_SKIP_REASON,
+          });
+        }
         continue;
       }
       // ARV-8: gate the request through the rate-limiter (no-op when
@@ -658,6 +707,18 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
         };
         localFindings.push(finding);
         if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), check: "network_error", finding });
+        if (opts.onCase) {
+          opts.onCase({
+            phase: "response",
+            checkId: "network_error",
+            kind: built.case.kind,
+            operation: { path: op.path, method: op.method, operationId: op.operationId },
+            request: built.req,
+            durationMs: 0,
+            verdict: "error",
+            error: (err as Error).message,
+          });
+        }
         continue;
       }
 
@@ -668,6 +729,12 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
         body: httpResp.body_parsed ?? httpResp.body,
         duration_ms: httpResp.duration_ms,
       };
+      // ARV-265: accumulate per-case verdict. The case is "fail" if any
+      // applicable check on it failed, "pass" if at least one ran and all
+      // passed, "skip" if every check was skipped. Owning check id is the
+      // first one that returned a verdict — used as a hint for triage.
+      let caseVerdict: "pass" | "fail" | "skip" = "skip";
+      let caseCheckId: string = built.case.kind;
       for (const check of selection.selected) {
         if (!checkKinds(check).includes(built.case.kind)) continue;
         if (!check.applies(op)) continue;
@@ -711,6 +778,27 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
             response: summarizeResponse(httpResp),
           });
         }
+        // ARV-265: a case fails as soon as one check on it fails.
+        if (outcome.kind === "fail") {
+          caseVerdict = "fail";
+          if (caseCheckId === built.case.kind) caseCheckId = check.id;
+        } else if (outcome.kind === "pass" && caseVerdict !== "fail") {
+          caseVerdict = "pass";
+          if (caseCheckId === built.case.kind) caseCheckId = check.id;
+        }
+      }
+      // ARV-265: one audit row per case, regardless of how many checks ran.
+      if (opts.onCase) {
+        opts.onCase({
+          phase: "response",
+          checkId: caseCheckId,
+          kind: built.case.kind,
+          operation: { path: op.path, method: op.method, operationId: op.operationId },
+          request: built.req,
+          response: httpResp,
+          durationMs: httpResp.duration_ms,
+          verdict: caseVerdict,
+        });
       }
     }
     return {
@@ -775,7 +863,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   );
 
   if (activeStateful.length > 0) {
-    const harness = makeHarness(opts.baseUrl, doc, {
+    const baseHarness = makeHarness(opts.baseUrl, doc, {
       authHeaders: opts.authHeaders,
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed,
       timeoutMs: opts.timeoutMs,
@@ -791,6 +879,43 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       // cap of N applies to the whole run, not per-phase.
       requestBudget,
     });
+    // ARV-265: per-check harness wrapper that fires onCase for every
+    // HTTP call the stateful check performs. The phase tag distinguishes
+    // auth vs crud — used by the persistence adapter to bucket suite names.
+    function harnessFor(checkId: string, phase: "stateful_auth" | "stateful_crud"): typeof baseHarness {
+      if (!opts.onCase) return baseHarness;
+      return {
+        ...baseHarness,
+        send: async (req, sendOpts) => {
+          try {
+            const resp = await baseHarness.send(req, sendOpts);
+            opts.onCase!({
+              phase,
+              checkId,
+              kind: checkId,
+              operation: { method: req.method, path: req.url },
+              request: req,
+              response: resp,
+              durationMs: resp.duration_ms,
+              verdict: "pass",
+            });
+            return resp;
+          } catch (err) {
+            opts.onCase!({
+              phase,
+              checkId,
+              kind: checkId,
+              operation: { method: req.method, path: req.url },
+              request: req,
+              durationMs: 0,
+              verdict: "error",
+              error: (err as Error).message,
+            });
+            throw err;
+          }
+        },
+      };
+    }
     const crudGroups = activeStateful.some((c) => c.phase === "crud")
       ? augmentWithListOnlyGroups(detectCrudGroups(allOps), allOps)
       : [];
@@ -840,13 +965,14 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           | { kind: "fail"; finding: CheckFinding }
           | { kind: "skip"; reason: string }
           | { kind: "pass" };
+        const authHarness = harnessFor(check.id, "stateful_auth");
         const opReports = await runPool<typeof applicable[number], StatefulOutcome>(
           applicable,
           statefulWorkers,
           async (op): Promise<StatefulOutcome> => {
           let outcome;
           try {
-            outcome = await check.run(op, harness);
+            outcome = await check.run(op, authHarness);
           } catch (err) {
             outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
           }
@@ -902,13 +1028,14 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           | { kind: "fail"; finding: CheckFinding }
           | { kind: "skip"; reason: string }
           | { kind: "pass" };
+        const crudHarness = harnessFor(check.id, "stateful_crud");
         const groupReports = await runPool<typeof applicable[number], StatefulOutcome>(
           applicable,
           statefulWorkers,
           async (group): Promise<StatefulOutcome> => {
           let outcome;
           try {
-            outcome = await check.run(group, harness);
+            outcome = await check.run(group, crudHarness);
           } catch (err) {
             outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
           }

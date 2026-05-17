@@ -330,6 +330,7 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
       process.exitCode = await probeMassAssignmentCommand({
         specPath: resolved.spec,
         env: envFile.env,
+        apiName,
         output: rep.output,
         emitTests: opts.emitTests,
         tag: opts.tag,

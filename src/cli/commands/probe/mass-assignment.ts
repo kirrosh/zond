@@ -85,6 +85,10 @@ export interface ProbeMassAssignmentOptions {
    *  spec-extension support (x-zond-suspect-fields) is tracked in
    *  ARV-189. */
   suspectField?: string[];
+  /** ARV-265: collection name for audit-coverage attribution. Set by
+   *  the CLI when --api / current-api resolves; left undefined for
+   *  bare-spec invocations. */
+  apiName?: string;
 }
 
 export async function probeMassAssignmentCommand(
@@ -180,15 +184,49 @@ export async function probeMassAssignmentCommand(
     // is off — this banner is about the cleanup-pass, too.
     printMutationBanner("probe-mass-assignment", vars, { quiet: options.json === true });
 
-    const result = await runMassAssignmentProbes({
-      endpoints,
-      securitySchemes,
-      vars,
-      noCleanup: options.noCleanup,
-      timeoutMs: options.timeoutMs,
-      discover: !options.noDiscover,
-      extraSuspectFields: parseSuspectFieldFlags(options.suspectField),
-    });
+    // ARV-265: capture HTTP touches for audit-coverage. Dry-run never
+    // reaches this branch (early return above), so AC#5 holds.
+    const { withHttpAudit, beginAuditRun, finalizeAuditRun, auditRecordToCase, checksPersistEnabled } =
+      await import("../../../core/audit/persist.ts");
+    const auditEnabled = checksPersistEnabled();
+    const { value: result, records: auditRecords } = await withHttpAudit(async () =>
+      runMassAssignmentProbes({
+        endpoints,
+        securitySchemes,
+        vars,
+        noCleanup: options.noCleanup,
+        timeoutMs: options.timeoutMs,
+        discover: !options.noDiscover,
+        extraSuspectFields: parseSuspectFieldFlags(options.suspectField),
+      }),
+    );
+
+    if (auditEnabled && auditRecords.length > 0) {
+      try {
+        const { getDb } = await import("../../../db/schema.ts");
+        const { findCollectionByNameOrId } = await import("../../../db/queries.ts");
+        const { readCurrentSession } = await import("../../../core/context/session.ts");
+        getDb();
+        const collectionId = options.apiName ? findCollectionByNameOrId(options.apiName)?.id : undefined;
+        const session = readCurrentSession();
+        const runId = beginAuditRun({
+          runKind: "probe",
+          ...(collectionId != null ? { collectionId } : {}),
+          ...(session?.id ? { sessionId: session.id } : {}),
+          tags: ["probe", "mass-assignment"],
+        });
+        const suiteFile = `apis/${options.apiName ?? "_"}/probes/mass-assignment.yaml`;
+        finalizeAuditRun(runId, auditRecords.map((rec) =>
+          auditRecordToCase(rec, {
+            suiteName: "probe/mass-assignment",
+            suiteFile,
+            testName: `mass-assignment::${rec.request.method.toUpperCase()} ${rec.request.url}`,
+          }),
+        ));
+      } catch (err) {
+        process.stderr.write(`zond: audit persistence failed (${(err as Error).message}).\n`);
+      }
+    }
 
     // ARV-252: filter verdicts for display under the evidence-chain
     // principle. Silently-ignored (correct framework behaviour) never

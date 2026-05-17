@@ -29,7 +29,7 @@ export function getCollectionById(id: number): CollectionRecord | null {
 
 export function getLatestRunByCollection(
   collectionId: number,
-  opts: { runKind?: "regular" | "probe" | "check" | "any" } = {},
+  opts: { runKind?: import("../../core/runner/run-kind.ts").RunKind | "any" } = {},
 ): RunRecord | null {
   const db = getDb();
   // ARV-55: 'regular' is the default so coverage skips probe-only runs
@@ -58,7 +58,7 @@ export function getLatestRunByCollection(
   // ARV-55: normalise run_kind alongside tags so RunRecord stays consistent.
   const rk = row.run_kind;
   const run_kind: import("../../core/runner/run-kind.ts").RunKind =
-    rk === "probe" || rk === "check" ? rk : "regular";
+    rk === "probe" || rk === "check" || rk === "request" || rk === "fixture" ? rk : "regular";
   return { ...(row as unknown as RunRecord), tags, run_kind };
 }
 

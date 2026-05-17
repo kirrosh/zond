@@ -210,17 +210,52 @@ export async function probeSecurityCommand(
     // travel in the envelope instead).
     printMutationBanner("probe-security", vars, { quiet: options.json === true });
 
-    const result = await runSecurityProbes({
-      endpoints,
-      securitySchemes,
-      vars,
-      classes,
-      noCleanup: options.noCleanup,
-      timeoutMs: options.timeoutMs,
-      dryRun: options.dryRun,
-      isolated: options.isolated === true,
-      allowLeaks: options.allowLeaks === true,
-    });
+    // ARV-265: capture every HTTP request the probe sends so audit-coverage
+    // sees the touches. Dry-run never reaches this branch (early return
+    // above), so AC#5 holds — only live probes pollute the run table.
+    const { withHttpAudit, beginAuditRun, finalizeAuditRun, auditRecordToCase, checksPersistEnabled } =
+      await import("../../../core/audit/persist.ts");
+    const auditEnabled = checksPersistEnabled();
+    const { value: result, records: auditRecords } = await withHttpAudit(async () =>
+      runSecurityProbes({
+        endpoints,
+        securitySchemes,
+        vars,
+        classes,
+        noCleanup: options.noCleanup,
+        timeoutMs: options.timeoutMs,
+        dryRun: options.dryRun,
+        isolated: options.isolated === true,
+        allowLeaks: options.allowLeaks === true,
+      }),
+    );
+
+    if (auditEnabled && auditRecords.length > 0) {
+      try {
+        const { getDb } = await import("../../../db/schema.ts");
+        const { findCollectionByNameOrId } = await import("../../../db/queries.ts");
+        const { readCurrentSession } = await import("../../../core/context/session.ts");
+        getDb();
+        const collectionId = options.apiName ? findCollectionByNameOrId(options.apiName)?.id : undefined;
+        const session = readCurrentSession();
+        const runId = beginAuditRun({
+          runKind: "probe",
+          ...(collectionId != null ? { collectionId } : {}),
+          ...(session?.id ? { sessionId: session.id } : {}),
+          tags: ["probe", "security", ...classes],
+        });
+        const suiteFile = `apis/${options.apiName ?? "_"}/probes/security.yaml`;
+        finalizeAuditRun(runId, auditRecords.map((rec) =>
+          auditRecordToCase(rec, {
+            suiteName: "probe/security",
+            suiteFile,
+            testName: `security::${rec.request.method.toUpperCase()} ${rec.request.url}`,
+          }),
+        ));
+      } catch (err) {
+        process.stderr.write(`zond: audit persistence failed (${(err as Error).message}).\n`);
+      }
+    }
 
     // ARV-253: filter verdicts for display under the evidence-chain
     // principle. INFO-severity findings (CRLF accepted, no reflection

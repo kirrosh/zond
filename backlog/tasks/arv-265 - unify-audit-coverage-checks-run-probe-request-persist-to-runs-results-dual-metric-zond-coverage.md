@@ -3,10 +3,10 @@ id: ARV-265
 title: >-
   unify audit-coverage: checks run + probe + request persist to runs/results,
   dual-metric zond coverage
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17 11:05'
-updated_date: '2026-05-17 11:06'
+updated_date: '2026-05-17 11:36'
 labels:
   - coverage
   - db
@@ -159,3 +159,9 @@ In future scans, UX2 ("coverage 0% is misleading") references this task ID. Clos
 - [ ] #9 Performance: 1500-event scan completes in <2x pre-fix time (batched INSERT via saveResults).
 - [ ] #10 Skill templates (zond.md, zond-checks.md, /zond-scan) updated; re-running /zond-scan on github produces both metrics natively.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented: B1 checks run persists run_kind=check; B2 probe security/mass-assignment persist run_kind=probe; B3 zond request persists run_kind=request when in session; B4 prepare-fixtures --cascade persists run_kind=fixture; B5 migration 0002 widens CHECK enum via table rebuild; B6 coverage --scope test|audit|both with audit-coverage block + JSON data.audit_coverage.{reached,total,by_source,events,ratio}; S1-S3 skill templates + /zond-scan updated. Validated on github spec: audit-coverage 52% (619/1184) from checks run alone. 2287 tests pass.
+<!-- SECTION:NOTES:END -->

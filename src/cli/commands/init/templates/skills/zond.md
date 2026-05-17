@@ -527,16 +527,34 @@ seeded-fixture endpoints).
 ## Phase 8 — Coverage + spec drift
 
 ```bash
-zond coverage --api <name> --union session                  # default for an audit window
+zond coverage --api <name> --union session                  # default: dual-metric (test + audit)
 zond coverage --api <name> --union since:1h                 # last hour
 zond coverage --api <name> --union tag:smoke                # tag-filtered
-zond coverage --api <name> --fail-on-coverage 50            # CI gate (use hit-coverage)
+zond coverage --api <name> --scope audit --union session    # only "did zond touch the API"
+zond coverage --api <name> --scope test  --union session    # legacy single block
+zond coverage --api <name> --fail-on-coverage 50            # CI gate (gates pass-coverage)
 ```
 
-**Two metrics**: `pass-coverage` (covered2xx — strict, CI gate) vs
-`hit-coverage` (any stored result, breadth proxy). Three-bucket JSON:
-`covered2xx`, `coveredButNon2xx` (hit but failed — usually fixture gap,
-not API bug), `unhit`.
+**Dual-metric output (ARV-265).** `zond coverage` prints two blocks side-by-side by default:
+
+- **test-coverage** — runs produced by `zond run` only (`run_kind` ∈ {regular, probe}). Has two sub-metrics:
+  - `pass-coverage`: endpoint had a passing 2xx (strict; CI gate via `--fail-on-coverage`)
+  - `hit-coverage`: endpoint received any response (loose; breadth proxy)
+  Three-bucket JSON: `covered2xx`, `coveredButNon2xx`, `unhit`.
+- **audit-coverage** — any HTTP touch from any producer (`zond run` + `checks run` + `probe` + `request` + `prepare-fixtures --cascade`). Use this to answer "did the scan reach the API at all?" — typical safe-mode runs without `zond run` still report >50% on a 1k-endpoint spec from `checks run` alone.
+
+Source breakdown (`--scope audit` text or `data.audit_coverage.by_source` JSON):
+
+```
+audit-coverage: 619/1184 endpoints (52%, 1500 HTTP touches)
+  by source:
+    check     619 endpoints, 1500 events
+    regular     0 endpoints,    0 events
+    probe       0 endpoints,    0 events
+    request     3 endpoints,    3 events
+```
+
+Producers opt out via `ZOND_CHECKS_PERSIST=0`.
 
 **Quality signals to gate CI on** (not raw pass-coverage):
 

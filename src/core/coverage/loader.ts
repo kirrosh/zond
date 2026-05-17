@@ -24,6 +24,14 @@ import {
 
 export interface CoverageLoadOptions {
   apiName: string;
+  /** ARV-265: which `run_kind`s contribute to the matrix.
+   *   - 'test' (default, back-compat) — runs whose `run_kind` is
+   *     'regular' OR 'probe' (i.e. anything `zond run` produced). This
+   *     is what `pass-coverage` / `hit-coverage` have always measured.
+   *   - 'audit' — every kind (regular | probe | check | request |
+   *     fixture). Used by `audit-coverage` to answer "did this scan
+   *     reach the API?" regardless of producer. */
+  scope?: "test" | "audit";
   runId?: number;
   /** TASK-255: union across multiple runs (e.g. tests-run + probes-run from
    *  the same session). Loader concatenates results from each run before
@@ -66,6 +74,9 @@ export interface CoverageLoadResult {
   profile: "safe" | "full";
   tagFilter: string[];
   ephemeralCount: number;
+  /** ARV-265: scope this matrix was built under. Echoes `options.scope`
+   *  (default 'test') so dual-metric callers can sanity-check the result. */
+  scope: "test" | "audit";
 }
 
 async function readFixturesAffected(baseDir: string): Promise<BuildMatrixInput["fixturesAffected"]> {
@@ -112,6 +123,14 @@ export async function loadCoverage(options: CoverageLoadOptions): Promise<Covera
   // sessionId > sinceIso > tag > runIds > runId > latest. since:/tag: are
   // filtered to this collection only — the user has named an API, so they
   // want runs of that API, not every collection that happens to share a tag.
+  // ARV-265: `scope` toggles which run_kinds survive the post-resolution
+  // filter (see CoverageLoadOptions.scope). Default 'test' keeps the
+  // pre-ARV-265 semantics (regular + probe rows contribute) so existing
+  // CI consumers see no surprise.
+  const scope = options.scope ?? "test";
+  const allowedKinds: ReadonlySet<string> = scope === "audit"
+    ? new Set(["regular", "probe", "check", "request", "fixture"])
+    : new Set(["regular", "probe"]);
   let runs: RunRecord[] = [];
   let unionMode: "session" | "since" | "tag" | "runs" | null = null;
   if (options.sessionId) {
@@ -140,10 +159,21 @@ export async function loadCoverage(options: CoverageLoadOptions): Promise<Covera
   } else if (options.runId != null) {
     const r = getRunById(options.runId);
     if (r) runs = [r];
+  } else if (scope === "audit") {
+    // ARV-265 audit mode latest-fallback: pick the most recent run of any
+    // kind so a scan that only ran `checks run` (no `zond run`) still
+    // produces a meaningful audit metric.
+    const latest = getLatestRunByCollection(collection.id, { runKind: "any" });
+    if (latest) runs = [latest];
   } else {
     const latest = getLatestRunByCollection(collection.id);
     if (latest) runs = [latest];
   }
+  // ARV-265: post-resolution kind filter. Session/since/tag may have
+  // pulled in audit-only kinds (check/request/fixture); the test-scope
+  // filter strips them so `pass-coverage` keeps the "curated suites
+  // passed" semantics. Audit scope keeps everything.
+  runs = runs.filter((r) => allowedKinds.has(r.run_kind));
   const results = runs.flatMap((r) => getResultsByRunId(r.id));
   // `run` (singular) reflects the latest contributing run for back-compat
   // with consumers that only care about a single run label.
@@ -176,6 +206,7 @@ export async function loadCoverage(options: CoverageLoadOptions): Promise<Covera
     profile,
     tagFilter,
     ephemeralCount: ephemeralEndpoints.size,
+    scope,
   };
 }
 
