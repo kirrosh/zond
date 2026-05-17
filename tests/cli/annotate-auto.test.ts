@@ -640,3 +640,26 @@ describe("inferAll + confidence filter", () => {
     expect(meetsConfidence("low", "low")).toBe(true);
   });
 });
+
+// ─── ARV-277: createUrlLikePattern + gap-report glue ─────────────────
+
+describe("createUrlLikePattern (ARV-277)", () => {
+  test("plain path collapses to %prefix...suffix%", async () => {
+    const { createUrlLikePattern } = await import("../../src/cli/commands/api/annotate/index.ts");
+    expect(createUrlLikePattern("/v1/topups")).toBe("%/v1/topups%");
+  });
+
+  test("path-params collapse to %", async () => {
+    const { createUrlLikePattern } = await import("../../src/cli/commands/api/annotate/index.ts");
+    expect(createUrlLikePattern("/v1/customers/{customer}/sources")).toBe(
+      "%/v1/customers/%/sources%",
+    );
+  });
+
+  test("multiple path-params each become %", async () => {
+    const { createUrlLikePattern } = await import("../../src/cli/commands/api/annotate/index.ts");
+    expect(createUrlLikePattern("/v1/accounts/{account}/persons/{person}/relationship")).toBe(
+      "%/v1/accounts/%/persons/%/relationship%",
+    );
+  });
+});

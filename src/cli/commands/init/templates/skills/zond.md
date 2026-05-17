@@ -319,6 +319,30 @@ non-standard lifecycle field names, write-only fields in create body).
 **For Stripe-style form-encoded APIs**: `--seed-bodies` is the single
 biggest win — it fixes `--seed` 400s for the bulk of resources.
 
+### Annotate-auto + agent-loop fast path (ARV-262 / 270 / 277)
+
+```bash
+# 1. Heuristic baseline — fills pagination / seed-bodies / lifecycle /
+#    idempotency that zond can deterministically derive (no agent needed).
+zond api annotate auto --api <name> --aspect all --auto-apply
+
+# 2. Worklist — what's still incomplete, ranked by downstream impact.
+zond api annotate auto --api <name> --aspect seed-bodies --gap-report
+#   ↳ ARV-277: prints only resources where heuristic produced a partial
+#   answer (gaps / generic fallback), sorted by how many endpoints
+#   depend on this resource's FK var. The agent's TODO list.
+
+# 3. For each gap-row, pull full context including the last seed POST
+#    that zond tried + Stripe's response. Skips re-running by hand.
+zond api annotate dump --api <name> --seed-bodies --only <res> --with-last-attempt
+#   ↳ ARV-277: when run_kind='fixture' results exist in the DB for this
+#   resource's create endpoint, the bundle gains a `last_attempt:
+#   {request_body, response_status, response_body, attempted_at}` block.
+
+# 4. Agent edits .api-resources.local.yaml to fill the gap (or pipes
+#    through `annotate apply --seed-bodies --input` for validation).
+```
+
 ## Phase 3 — Generate tests
 
 ```bash
