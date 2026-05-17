@@ -209,14 +209,19 @@ const FK_SUFFIX_RE = /(_id|_uuid|_slug|_key|_token|_ref)$/;
  * default (format-aware → name-aware → type default) or with an
  * `{{var}}` template when `.env.yaml` already holds a matching FK.
  *
- * Returns null when the schema is too complex for safe heuristic:
- *   - nested objects with their own `required` keys
- *   - oneOf / anyOf unions (discriminator XORs)
- *   - required fields whose type we can't fabricate (e.g. binary)
+ * Recurses into nested objects and required-items arrays so that
+ * APIs declaring proper nested `required` arrays (Linear, GitHub
+ * Issues, Notion, GraphQL-style REST gateways) get full coverage.
+ * Stripe's form-urlencoded wire format is handled by `encodeFormBody`
+ * downstream — the inferred body stays as a nested JS object and the
+ * encoder flattens to `parent[child]=value` bracket notation.
  *
- * Those cases stay for the agent-loop (ARV-187 dump+apply) — the AC
- * gate is "covers the typical RESTful resource", not "covers every
- * exotic Stripe XOR".
+ * Still returns null when the schema is too ambiguous for safe
+ * heuristic — `oneOf`/`anyOf` discriminator XORs and required fields
+ * whose type we can't fabricate (binary, free-form objects). Those
+ * cases stay for the agent-loop (ARV-187 dump+apply). The inference
+ * surfaces remaining gaps through the `rationale` field so the calling
+ * agent knows what it still has to fill in.
  */
 export function inferSeedBody(
   slice: ResourceSlice,
@@ -226,54 +231,65 @@ export function inferSeedBody(
   if (!create) return null;
   const rb = create.requestBody;
   if (!rb || !rb.schema || typeof rb.schema !== "object") return null;
-  const schema = rb.schema as Record<string, unknown>;
-  // simplifySchema collapses oneOf/anyOf to *_first siblings; presence
-  // signals a discriminator union we can't disambiguate without the LLM.
-  if (schema.oneOf_first || schema.anyOf_first) return null;
-  const required = Array.isArray(schema.required)
-    ? (schema.required as unknown[]).filter((r): r is string => typeof r === "string")
-    : [];
+  const root = mergeAllOf(rb.schema as Record<string, unknown>);
+  // simplifySchema collapses oneOf/anyOf to *_first siblings; top-level
+  // unions can't be disambiguated without the LLM.
+  if (root.oneOf_first || root.anyOf_first) return null;
+  const required = collectRequired(root);
   if (required.length === 0) return null;
-  const props = schema.properties as Record<string, Record<string, unknown>> | undefined;
+  const props = (root.properties as Record<string, Record<string, unknown>> | undefined);
   if (!props) return null;
 
+  const stats: BuildStats = { envHits: 0, fallbacks: 0, gaps: [] };
   const body: Record<string, unknown> = {};
-  let envHits = 0;
   for (const field of required) {
     const fieldSchema = props[field];
-    if (!fieldSchema) return null;
-    // Drop nested objects whose own `required` set we'd have to fill.
-    // Top-level overlays don't recurse — leave to agent-loop.
-    if (
-      fieldSchema.type === "object"
-      && Array.isArray(fieldSchema.required as unknown[])
-      && (fieldSchema.required as unknown[]).length > 0
-    ) {
-      return null;
+    if (!fieldSchema) {
+      stats.gaps.push(`${field}: required but no schema in properties`);
+      continue;
     }
-    if (fieldSchema.oneOf_first || fieldSchema.anyOf_first) return null;
-    const picked = pickSeedValue(field, fieldSchema, env);
-    if (picked === undefined) return null;
+    const picked = pickSeedValue(field, fieldSchema, env, stats, 0);
+    if (picked === undefined) {
+      // Recursion failed for this field (e.g. nested oneOf union, binary
+      // upload, unfabricatable type). Record the gap so the agent that
+      // post-processes the overlay can fill it in via ARV-187 dump+apply.
+      stats.gaps.push(`${field}: ${describeGap(fieldSchema)}`);
+      continue;
+    }
     body[field] = picked.value;
-    if (picked.source === "env") envHits++;
+    if (picked.source === "env") stats.envHits++;
+    if (picked.source === "fallback") stats.fallbacks++;
   }
 
-  // `high` only when every required field hit either an enum/format
-  // signal or env-FK substitution. When we leaned on the generic
-  // `zond-probe-<name>` fallback (no format, no name hit) drop to
-  // `medium` so users can opt-in via `--confidence medium`.
-  const usedFallback = required.some((f) => {
-    const ps = props[f]!;
-    const v = pickSeedValue(f, ps, env);
-    return v?.source === "fallback";
-  });
-  const confidence: Confidence = usedFallback ? "medium" : "high";
+  // Nothing landed — the create endpoint is entirely gap. Don't pollute
+  // the overlay with an empty seed_body; let the agent author it from
+  // dump output.
+  if (Object.keys(body).length === 0) return null;
 
+  // Confidence ranking (calibrated post-Stripe ARV-270 dogfooding):
+  //   - any generic-fallback string (`zond-probe-<name>`) → low. These
+  //     are placeholders, not inferences — strict validators (Stripe,
+  //     Twilio) reject them, and including them at `medium` lulled
+  //     agents into trusting partial heuristic output as if it was a
+  //     working seed body. Marked `low` so default `--confidence high`
+  //     filters them, but `--confidence low` still surfaces the partial
+  //     skeleton for the agent-loop to top up.
+  //   - any unfilled gap (oneOf union, binary upload, free-form object)
+  //     → medium. The filled portion is real, just incomplete.
+  //   - otherwise → high.
+  const confidence: Confidence = stats.fallbacks > 0
+    ? "low"
+    : stats.gaps.length > 0
+      ? "medium"
+      : "high";
+
+  const gapNote = stats.gaps.length > 0 ? `; ${stats.gaps.length} gap(s): ${stats.gaps.slice(0, 3).join("; ")}${stats.gaps.length > 3 ? "; …" : ""}` : "";
+  const fillCount = Object.keys(body).length;
   return {
     resource: slice.resource,
     aspect: "seed-bodies",
     confidence,
-    rationale: `${required.length} required field(s) filled heuristically${envHits > 0 ? ` (${envHits} FK from env)` : ""}${usedFallback ? "; some via generic fallback" : ""}`,
+    rationale: `${fillCount}/${required.length} required field(s) filled heuristically${stats.envHits > 0 ? ` (${stats.envHits} FK from env)` : ""}${stats.fallbacks > 0 ? "; some via generic fallback" : ""}${gapNote}`,
     patch: {
       resource: slice.resource,
       seed_body: {
@@ -287,19 +303,45 @@ export function inferSeedBody(
 interface SeedValue {
   value: unknown;
   /** `enum`/`format`/`name`/`env`/`type` — drives confidence ranking. */
-  source: "enum" | "format" | "name" | "env" | "type" | "fallback";
+  source: "enum" | "format" | "name" | "env" | "type" | "fallback" | "object" | "array";
 }
+
+interface BuildStats {
+  envHits: number;
+  fallbacks: number;
+  /** Per-field reasons the heuristic skipped a required entry, in the
+   *  form `<path>: <why>`. Surfaced via `rationale` so the calling
+   *  agent (or human reading the overlay) sees what's missing. */
+  gaps: string[];
+}
+
+/**
+ * Max recursion depth when building a nested seed body. Cap exists so
+ * pathological self-referential schemas (e.g. comment.replies.replies…)
+ * can't stack-overflow the heuristic. Three is enough for the typical
+ * `resource → nested-config → list-of-filters` Stripe pattern; deeper
+ * is agent territory.
+ */
+const MAX_DEPTH = 3;
 
 function pickSeedValue(
   name: string,
   schema: Record<string, unknown>,
   env: Record<string, string>,
+  stats: BuildStats,
+  depth: number,
 ): SeedValue | undefined {
+  schema = mergeAllOf(schema);
+  // Bail on discriminator XORs — first-variant guesses miss too often
+  // to be safe at scale. Agent-loop knows how to pick.
+  if (schema.oneOf_first || schema.anyOf_first) return undefined;
+
   // 1. enum → first declared value. Strongest signal: the server has
   //    spelt out exactly what it will accept.
   if (Array.isArray(schema.enum) && schema.enum.length > 0) {
     return { value: schema.enum[0], source: "enum" };
   }
+
   // 2. FK lookup — exact field name in env, then `<field>_id`, then
   //    stem (`customer_id` → env["customer"]). Lets prepare-fixtures
   //    feed agent-bootstrapped ids into the seed POST instead of
@@ -307,10 +349,56 @@ function pickSeedValue(
   const fkVar = pickEnvVar(name, env);
   if (fkVar) return { value: `{{${fkVar}}}`, source: "env" };
 
-  const type = (schema.type as string | undefined) ?? "string";
+  const type = (schema.type as string | undefined) ?? inferTypeFromShape(schema);
   const format = schema.format as string | undefined;
 
-  // 3. Format-aware string defaults (AC #2).
+  // 3. Object — recurse into required sub-fields.
+  if (type === "object") {
+    if (depth >= MAX_DEPTH) return undefined;
+    const subProps = schema.properties as Record<string, Record<string, unknown>> | undefined;
+    const subReq = collectRequired(schema);
+    if (!subProps || subReq.length === 0) {
+      // Object with no declared shape — caller has to free-form it via
+      // agent. Note: empty object `{}` would be tempting but it
+      // typically violates strict validators ("at least one of …").
+      return undefined;
+    }
+    const nested: Record<string, unknown> = {};
+    for (const sub of subReq) {
+      const subSchema = subProps[sub];
+      if (!subSchema) {
+        stats.gaps.push(`${name}.${sub}: missing in properties`);
+        continue;
+      }
+      const picked = pickSeedValue(sub, subSchema, env, stats, depth + 1);
+      if (picked === undefined) {
+        stats.gaps.push(`${name}.${sub}: ${describeGap(subSchema)}`);
+        continue;
+      }
+      nested[sub] = picked.value;
+      if (picked.source === "env") stats.envHits++;
+      if (picked.source === "fallback") stats.fallbacks++;
+    }
+    if (Object.keys(nested).length === 0) return undefined;
+    return { value: nested, source: "object" };
+  }
+
+  // 4. Array — emit one element if items are required-bearing objects;
+  //    empty array otherwise (lets `[]` pass minItems=0 schemas).
+  if (type === "array") {
+    if (depth >= MAX_DEPTH) return { value: [], source: "type" };
+    const items = schema.items as Record<string, unknown> | undefined;
+    const minItems = typeof schema.minItems === "number" ? (schema.minItems as number) : 0;
+    if (!items) return { value: [], source: "type" };
+    const itemReq = collectRequired(items);
+    if (minItems === 0 && itemReq.length === 0) return { value: [], source: "type" };
+    // Build one representative item.
+    const picked = pickSeedValue(`${name}[0]`, items, env, stats, depth + 1);
+    if (picked === undefined) return { value: [], source: "type" };
+    return { value: [picked.value], source: "array" };
+  }
+
+  // 5. Format-aware string defaults (AC #2).
   if (type === "string") {
     if (format === "email" || /^email$|_email$/i.test(name)) {
       return { value: "zond-probe@example.com", source: format ? "format" : "name" };
@@ -321,6 +409,8 @@ function pickSeedValue(
     if (format === "date-time") return { value: "2025-01-01T00:00:00Z", source: "format" };
     if (format === "date") return { value: "2025-01-01", source: "format" };
     if (format === "uuid") return { value: "00000000-0000-0000-0000-000000000000", source: "format" };
+    // Binary/file uploads can't be heuristically fabricated.
+    if (format === "binary" || format === "byte") return undefined;
     // ARV-165 cascade: name-based hints for ISO literals strict
     // validators check (Stripe's currency, country, locale).
     if (/^currency$/i.test(name)) return { value: "usd", source: "name" };
@@ -333,15 +423,86 @@ function pickSeedValue(
     return { value: `zond-probe-${name}`.slice(0, 64), source: "fallback" };
   }
   if (type === "integer" || type === "number") {
+    // Unix-timestamp heuristic for fields named `*_at`, `*_time`,
+    // `frozen_time`, `epoch`. Strict APIs (Stripe `test_clocks`,
+    // GitHub workflow times) reject `100` for these and accept a
+    // realistic past-epoch.
+    if (/_(at|time|epoch)$|^(frozen_time|epoch|timestamp)$/i.test(name)) {
+      return { value: 1735689600, source: "name" }; // 2025-01-01T00:00:00Z
+    }
     if (/amount|price|quantity|count|size|fee/i.test(name)) {
       return { value: 1000, source: "name" };
     }
     return { value: 100, source: "type" };
   }
   if (type === "boolean") return { value: false, source: "type" };
-  if (type === "array") return { value: [], source: "type" };
-  // object / null / unknown → can't safely fabricate.
+  // null / unknown → can't safely fabricate.
   return undefined;
+}
+
+/**
+ * One-line description of why a sub-schema can't be heuristically
+ * filled. Surfaced in `rationale.gaps` so the agent that calls zond
+ * sees actionable hints (e.g. `lines: array<oneOf>` → "needs agent to
+ * pick a discriminator variant") without having to re-read the spec.
+ */
+function describeGap(schema: Record<string, unknown>): string {
+  const s = mergeAllOf(schema);
+  if (s.oneOf_first) return "oneOf union (needs agent to pick variant)";
+  if (s.anyOf_first) return "anyOf union (needs agent to pick variant)";
+  const type = (s.type as string | undefined) ?? inferTypeFromShape(s);
+  if (type === "object") {
+    if (!s.properties) return "free-form object (no declared shape)";
+    const sub = collectRequired(s);
+    return sub.length > 0
+      ? `nested object with required [${sub.slice(0, 3).join(", ")}${sub.length > 3 ? ", …" : ""}]`
+      : "nested object";
+  }
+  if (s.format === "binary" || s.format === "byte") return "binary/file upload";
+  return `type=${type ?? "unknown"} not fabricatable`;
+}
+
+/** Infer `type` when the schema omits it but declares shape-signals. */
+function inferTypeFromShape(schema: Record<string, unknown>): string | undefined {
+  if (schema.properties) return "object";
+  if (schema.items) return "array";
+  return undefined;
+}
+
+/**
+ * `allOf` flattener: merge sibling schemas' `required` and `properties`.
+ * Common in Stripe / GitHub specs where a base type is extended.
+ * Conservative — drops nested allOf inside allOf branches; that's a
+ * second-pass agent concern.
+ */
+function mergeAllOf(schema: Record<string, unknown>): Record<string, unknown> {
+  const allOf = schema.allOf as Record<string, unknown>[] | undefined;
+  if (!allOf || allOf.length === 0) return schema;
+  const required = new Set<string>();
+  const properties: Record<string, unknown> = {};
+  // Seed with the parent's own fields so they aren't lost.
+  if (Array.isArray(schema.required)) for (const r of schema.required) if (typeof r === "string") required.add(r);
+  if (schema.properties && typeof schema.properties === "object") {
+    Object.assign(properties, schema.properties as Record<string, unknown>);
+  }
+  for (const branch of allOf) {
+    if (!branch || typeof branch !== "object") continue;
+    if (Array.isArray(branch.required)) for (const r of branch.required) if (typeof r === "string") required.add(r);
+    if (branch.properties && typeof branch.properties === "object") {
+      Object.assign(properties, branch.properties);
+    }
+  }
+  const out: Record<string, unknown> = { ...schema };
+  delete out.allOf;
+  out.required = Array.from(required);
+  out.properties = properties;
+  return out;
+}
+
+function collectRequired(schema: Record<string, unknown>): string[] {
+  const merged = mergeAllOf(schema);
+  const r = merged.required;
+  return Array.isArray(r) ? (r as unknown[]).filter((x): x is string => typeof x === "string") : [];
 }
 
 function pickEnvVar(name: string, env: Record<string, string>): string | undefined {

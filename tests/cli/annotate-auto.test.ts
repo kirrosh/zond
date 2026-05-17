@@ -367,14 +367,18 @@ describe("inferSeedBody (ARV-270)", () => {
     expect(body.customer).toMatch(/^zond-probe/);
   });
 
-  test("generic string fallback drops confidence to medium", () => {
+  test("generic string fallback drops confidence to low (post-ARV-270 calibration)", () => {
+    // Generic `zond-probe-<field>` strings are placeholders, not real
+    // inferences — strict validators reject them. Demoted to `low` so
+    // the default `--confidence high` filters them out; `--confidence
+    // low` still surfaces the partial skeleton for an agent to top up.
     const s = seedSlice({
       type: "object",
       required: ["some_field"],
       properties: { some_field: { type: "string" } },
     });
     const inf = inferSeedBody(s);
-    expect(inf!.confidence).toBe("medium");
+    expect(inf!.confidence).toBe("low");
     expect((inf!.patch.seed_body!.body as Record<string, unknown>).some_field)
       .toMatch(/^zond-probe-some_field/);
   });
@@ -388,7 +392,13 @@ describe("inferSeedBody (ARV-270)", () => {
     expect(inf!.patch.seed_body!.content_type).toBe("application/x-www-form-urlencoded");
   });
 
-  test("nested required object → null (defer to agent-loop)", () => {
+  test("nested required object → recurses and emits nested body (ARV-270 refactor)", () => {
+    // Refactored: instead of returning null, the heuristic now recurses
+    // into nested objects so that APIs with proper required-arrays
+    // (Stripe `usage_threshold`, GitHub Issues `assignees`, …) get
+    // coverage. `encodeFormBody` flattens to bracket-notation for
+    // form-urlencoded wire format, so `{billing: {…}}` here becomes
+    // `billing[address]=…&billing[card]=…` on the wire.
     const s = seedSlice({
       type: "object",
       required: ["billing"],
@@ -400,7 +410,88 @@ describe("inferSeedBody (ARV-270)", () => {
         },
       },
     });
-    expect(inferSeedBody(s)).toBeNull();
+    const inf = inferSeedBody(s);
+    expect(inf).not.toBeNull();
+    const body = inf!.patch.seed_body!.body as Record<string, unknown>;
+    expect(body.billing).toEqual({
+      address: "zond-probe-address",
+      card: "zond-probe-card",
+    });
+    // Both sub-fields used the generic fallback → confidence drops to low
+    // (post-ARV-270 calibration — generic placeholders aren't inferences).
+    expect(inf!.confidence).toBe("low");
+  });
+
+  test("nested object with FK + format hints → high confidence", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["usage_threshold"],
+      properties: {
+        usage_threshold: {
+          type: "object",
+          required: ["gte", "meter"],
+          properties: {
+            gte: { type: "integer" },
+            meter: { type: "string" },
+          },
+        },
+      },
+    });
+    const inf = inferSeedBody(s, { meter: "mtr_abc" });
+    expect(inf).not.toBeNull();
+    const body = inf!.patch.seed_body!.body as Record<string, unknown>;
+    expect(body.usage_threshold).toEqual({ gte: 100, meter: "{{meter}}" });
+    expect(inf!.confidence).toBe("high");
+    expect(inf!.rationale).toMatch(/1 FK from env/);
+  });
+
+  test("array of required-bearing items → emits one representative element", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["lines"],
+      properties: {
+        lines: {
+          type: "array",
+          minItems: 1,
+          items: {
+            type: "object",
+            required: ["amount", "currency"],
+            properties: {
+              amount: { type: "integer" },
+              currency: { type: "string" },
+            },
+          },
+        },
+      },
+    });
+    const inf = inferSeedBody(s);
+    expect(inf).not.toBeNull();
+    const body = inf!.patch.seed_body!.body as Record<string, unknown>;
+    expect(body.lines).toEqual([{ amount: 1000, currency: "usd" }]);
+    expect(inf!.confidence).toBe("high");
+  });
+
+  test("allOf merges required and properties from all branches", () => {
+    const s = seedSlice({
+      allOf: [
+        {
+          type: "object",
+          required: ["email"],
+          properties: { email: { type: "string", format: "email" } },
+        },
+        {
+          type: "object",
+          required: ["currency"],
+          properties: { currency: { type: "string" } },
+        },
+      ],
+    });
+    const inf = inferSeedBody(s);
+    expect(inf).not.toBeNull();
+    const body = inf!.patch.seed_body!.body as Record<string, unknown>;
+    expect(body.email).toBe("zond-probe@example.com");
+    expect(body.currency).toBe("usd");
+    expect(inf!.confidence).toBe("high");
   });
 
   test("oneOf union → null (discriminator XOR is agent-territory)", () => {
@@ -411,6 +502,65 @@ describe("inferSeedBody (ARV-270)", () => {
       properties: { amount: { type: "integer" } },
     });
     expect(inferSeedBody(s)).toBeNull();
+  });
+
+  test("nested oneOf → field skipped + recorded in rationale gaps", () => {
+    // Top-level is fine (single required field), but the nested branch
+    // is a discriminator union. The heuristic must emit a partial body
+    // and surface the unfilled field via `rationale` so the agent that
+    // calls zond knows what to top up.
+    const s = seedSlice({
+      type: "object",
+      required: ["name", "config"],
+      properties: {
+        name: { type: "string" },
+        config: {
+          type: "object",
+          required: ["mode"],
+          oneOf_first: { properties: { stripe: { type: "object" } } },
+          properties: { mode: { type: "string" } },
+        },
+      },
+    });
+    const inf = inferSeedBody(s);
+    expect(inf).not.toBeNull();
+    const body = inf!.patch.seed_body!.body as Record<string, unknown>;
+    expect(body.name).toBe("zond-probe");
+    expect(body.config).toBeUndefined();
+    expect(inf!.confidence).toBe("medium");
+    expect(inf!.rationale).toMatch(/oneOf union/);
+  });
+
+  test("binary upload → recorded as gap (file fields stay for agent)", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["file", "purpose"],
+      properties: {
+        file: { type: "string", format: "binary" },
+        purpose: { type: "string" },
+      },
+    });
+    const inf = inferSeedBody(s);
+    expect(inf).not.toBeNull();
+    const body = inf!.patch.seed_body!.body as Record<string, unknown>;
+    // `purpose` filled, `file` skipped.
+    expect(body.purpose).toBeDefined();
+    expect(body.file).toBeUndefined();
+    expect(inf!.rationale).toMatch(/file: binary\/file upload|file:/);
+  });
+
+  test("integer field ending in `_time` gets epoch timestamp, not 100", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["frozen_time"],
+      properties: { frozen_time: { type: "integer" } },
+    });
+    const inf = inferSeedBody(s);
+    expect(inf).not.toBeNull();
+    const body = inf!.patch.seed_body!.body as Record<string, unknown>;
+    // Strict validators (Stripe test_clocks) reject `100` for time fields.
+    expect(typeof body.frozen_time).toBe("number");
+    expect(body.frozen_time as number).toBeGreaterThan(1_000_000_000);
   });
 
   test("no create endpoint → null", () => {
@@ -439,7 +589,9 @@ describe("inferSeedBody (ARV-270)", () => {
       required: ["metadata"],
       properties: { metadata: { type: "object" } },
     });
-    // `object` without `required` falls through pickSeedValue → undefined → null.
+    // `object` without declared required is recorded as a gap; with no
+    // other required field to anchor a partial body, the whole inference
+    // collapses to null.
     expect(inferSeedBody(s)).toBeNull();
   });
 });
