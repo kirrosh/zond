@@ -133,8 +133,11 @@ const SCHEMA = `
     tags          TEXT,
     -- ARV-55: classify a run once at INSERT time so coverage / diagnose
     -- queries don't have to re-derive "is this a probe-only run?" from
-    -- the results' suite_file paths.
-    run_kind      TEXT NOT NULL DEFAULT 'regular' CHECK (run_kind IN ('regular','probe','check'))
+    -- the results' suite_file paths. ARV-265 extends the CHECK list with
+    -- 'request' (zond request in-session) and 'fixture' (prepare-fixtures
+    -- cascade list-calls) so audit-coverage can attribute HTTP touches
+    -- back to the producer.
+    run_kind      TEXT NOT NULL DEFAULT 'regular' CHECK (run_kind IN ('regular','probe','check','request','fixture'))
   );
 
   CREATE TABLE IF NOT EXISTS results (

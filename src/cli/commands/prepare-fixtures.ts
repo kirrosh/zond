@@ -101,21 +101,68 @@ export function registerPrepareFixtures(program: Command): void {
       const timeoutMs = resolveTimeoutMs(opts.timeout, envTimeout);
 
       if (cascade) {
-        process.exitCode = await bootstrapCommand({
-          specPath: resolved.spec,
-          apiDir,
-          envPath: opts.env,
-          apply: opts.apply === true,
-          seed: opts.seed === true,
-          force: opts.force === true,
-          timeoutMs,
-          maxPasses: opts.maxPasses,
-          json: globalJson(cmd),
-          // ARV-205 (R10/F6, R13/F19): surface the user-facing command name
-          // in the JSON envelope. Without this the user sees command="bootstrap"
-          // even though they typed `zond prepare-fixtures …`.
-          commandName: "prepare-fixtures",
-        });
+        // ARV-265 (B4): audit-coverage attribution for `prepare-fixtures
+        // --cascade`. Every list-call the cascade issues to discover
+        // path-param values flows through executeRequest, so wrapping
+        // the whole bootstrapCommand in `withHttpAudit` captures them
+        // without surgery on the cascade internals. Persisted with
+        // run_kind='fixture' so they're visible only to `coverage --scope
+        // audit`, not to the test-coverage metric.
+        const { withHttpAudit, beginAuditRun, finalizeAuditRun, auditRecordToCase, checksPersistEnabled } =
+          await import("../../core/audit/persist.ts");
+        const auditEnabled = checksPersistEnabled();
+        const { value: code, records } = auditEnabled
+          ? await withHttpAudit(() => bootstrapCommand({
+              specPath: resolved.spec,
+              apiDir,
+              envPath: opts.env,
+              apply: opts.apply === true,
+              seed: opts.seed === true,
+              force: opts.force === true,
+              timeoutMs,
+              maxPasses: opts.maxPasses,
+              json: globalJson(cmd),
+              commandName: "prepare-fixtures",
+            }))
+          : { value: await bootstrapCommand({
+              specPath: resolved.spec,
+              apiDir,
+              envPath: opts.env,
+              apply: opts.apply === true,
+              seed: opts.seed === true,
+              force: opts.force === true,
+              timeoutMs,
+              maxPasses: opts.maxPasses,
+              json: globalJson(cmd),
+              commandName: "prepare-fixtures",
+            }), records: [] };
+        if (auditEnabled && records.length > 0) {
+          try {
+            const { getDb } = await import("../../db/schema.ts");
+            const { findCollectionByNameOrId } = await import("../../db/queries.ts");
+            const { readCurrentSession } = await import("../../core/context/session.ts");
+            getDb();
+            const collectionId = apiName ? findCollectionByNameOrId(apiName)?.id : undefined;
+            const session = readCurrentSession();
+            const runId = beginAuditRun({
+              runKind: "fixture",
+              ...(collectionId != null ? { collectionId } : {}),
+              ...(session?.id ? { sessionId: session.id } : {}),
+              tags: ["prepare-fixtures", "cascade"],
+            });
+            const suiteFile = `apis/${apiName ?? "_"}/prepare-fixtures.yaml`;
+            finalizeAuditRun(runId, records.map((rec) =>
+              auditRecordToCase(rec, {
+                suiteName: "fixture/cascade",
+                suiteFile,
+                testName: `cascade::${rec.request.method.toUpperCase()} ${rec.request.url}`,
+              }),
+            ));
+          } catch (err) {
+            process.stderr.write(`zond: audit persistence failed (${(err as Error).message}).\n`);
+          }
+        }
+        process.exitCode = code;
         return;
       }
 

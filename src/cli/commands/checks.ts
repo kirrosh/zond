@@ -31,6 +31,10 @@ import { getApi } from "../util/api-context.ts";
 import { VERSION } from "../version.ts";
 import { resolveOutput, OutputSpecError, type OutputSpec, type ResolvedOutput } from "../../core/output/index.ts";
 import type { RunChecksResult } from "../../core/checks/index.ts";
+import type { ChecksCaseEvent } from "../../core/checks/runner.ts";
+import { beginAuditRun, finalizeAuditRun, checksPersistEnabled, type AuditCaseRecord } from "../../core/audit/persist.ts";
+import { readCurrentSession } from "../../core/context/session.ts";
+import { getDb } from "../../db/schema.ts";
 
 /**
  * ARV-118 (m-19): typed declaration of every `--report` / `--output` /
@@ -517,6 +521,35 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
         : emitToStdout)
     : undefined;
 
+  // ARV-265: accumulate every HTTP case `runChecks` dispatches so we can
+  // persist them into the run/results tables after the run completes. The
+  // adapter maps ChecksCaseEvent → AuditCaseRecord (1:1) and groups by
+  // synthetic suite path (`apis/<api>/checks/<phase>`) so `detectRunKind`
+  // would still classify these rows as `check`-kind on legacy queries.
+  const auditPersist = checksPersistEnabled();
+  const auditCases: AuditCaseRecord[] = [];
+  const auditSuiteRoot = `apis/${apiName ?? "_"}/checks`;
+  const onCase = auditPersist
+    ? (ev: ChecksCaseEvent) => {
+        const phaseLabel = ev.phase === "response" ? "response" : ev.phase.replace("stateful_", "stateful/");
+        const suiteFile = `${auditSuiteRoot}/${phaseLabel}.yaml`;
+        const status = ev.verdict === "pass" ? "pass"
+          : ev.verdict === "fail" ? "fail"
+          : ev.verdict === "skip" ? "skip"
+          : "error";
+        auditCases.push({
+          suiteName: `checks/${phaseLabel}`,
+          suiteFile,
+          testName: `${ev.checkId}::${ev.operation.method.toUpperCase()} ${ev.operation.path}`,
+          status,
+          request: ev.request,
+          ...(ev.response ? { response: ev.response } : {}),
+          durationMs: ev.durationMs,
+          ...(ev.error ? { error: ev.error } : {}),
+        });
+      }
+    : undefined;
+
   try {
     const result = await runChecks({
       specPath: specRes.spec,
@@ -535,6 +568,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       mode: modeRaw as "positive" | "negative" | "all",
       operationFilter,
       onEvent: ndjsonOnEvent,
+      onCase,
       // ARV-8: bounded concurrency at op-level + optional rate-limiter
       // gating. workers=1 (default) preserves the pre-ARV-8 sequential
       // path inside runPool — same observable behaviour.
@@ -542,6 +576,31 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       rateLimiter,
       maxRequests: typeof opts.maxRequests === "number" && opts.maxRequests > 0 ? opts.maxRequests : undefined,
     });
+
+    // ARV-265: persist the accumulated cases as a `run_kind='check'` run
+    // so `zond coverage --scope audit` can count them. Failures here
+    // degrade to a warning — the user's primary command already succeeded.
+    if (auditPersist && auditCases.length > 0) {
+      try {
+        getDb(opts.db);
+        const { findCollectionByNameOrId } = await import("../../db/queries.ts");
+        const collectionId = apiName ? findCollectionByNameOrId(apiName)?.id : undefined;
+        const session = readCurrentSession();
+        const runId = beginAuditRun({
+          runKind: "check",
+          ...(collectionId != null ? { collectionId } : {}),
+          ...(session?.id ? { sessionId: session.id } : {}),
+          tags: ["checks", `phase:${phaseRaw}`, `mode:${modeRaw}`],
+        });
+        finalizeAuditRun(runId, auditCases);
+      } catch (err) {
+        // Audit persistence is best-effort. Surface the failure on stderr
+        // so an agent can detect it (the missing audit-coverage downstream
+        // will already point them here) without breaking the run.
+        const msg = (err as Error).message;
+        process.stderr.write(`zond: audit persistence failed (${msg}). Re-run with ZOND_CHECKS_PERSIST=0 to silence.\n`);
+      }
+    }
     const warnings: string[] = [];
     for (const id of result.selection.unknown) {
       warnings.push(`Unknown check: "${id}" — ignored. Run \`zond checks list\` to see registered ids.`);
