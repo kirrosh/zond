@@ -1,9 +1,10 @@
 ---
 id: ARV-277
 title: 'agent-loop UX: gap-report + last_attempt в annotate-dump'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17 17:38'
+updated_date: '2026-05-17 17:56'
 labels:
   - annotate-auto
   - arv-270-followup
