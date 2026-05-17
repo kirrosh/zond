@@ -124,6 +124,12 @@ function mergePrivileged(
   return merged;
 }
 
+/** ARV-198: declared content type signals whether the create step needs
+ *  `form:` (Stripe v1, Rails/PHP-style APIs) or the default `json:` body. */
+function isFormEndpoint(ep: EndpointInfo): boolean {
+  return ep.requestBodyContentType === "application/x-www-form-urlencoded";
+}
+
 function buildFullChain(
   create: EndpointInfo,
   read: EndpointInfo,
@@ -134,12 +140,24 @@ function buildFullChain(
   const idVar = captureFieldFor(create) || "created_id";
   const tests: RawStep[] = [];
 
-  tests.push({
+  // ARV-198: when the spec declares only application/x-www-form-urlencoded
+  // for this mutating endpoint, emit a `form:` block + Content-Type header.
+  // The serializer force-quotes form values (ARV-162) so booleans/numbers
+  // round-trip as strings on the wire; the template is paste-ready against
+  // Stripe-style APIs without any post-processing.
+  const createIsForm = isFormEndpoint(create);
+  const createStep: Record<string, unknown> = {
     name: "create with privileged fields",
     [create.method.toUpperCase()]: create.path,
-    json: privilegedBody,
     expect: { status: [200, 201], body: { id: { capture: idVar } } },
-  } as unknown as RawStep);
+  };
+  if (createIsForm) {
+    createStep.headers = { "Content-Type": "application/x-www-form-urlencoded" };
+    createStep.form = privilegedBody;
+  } else {
+    createStep.json = privilegedBody;
+  }
+  tests.push(createStep as unknown as RawStep);
 
   // Canonical assertion vocabulary: only `not_equals` is supported (no `not`,
   // no `not_starts_with`). For protected fields we assert the exact attacker
@@ -187,7 +205,17 @@ function buildSingleStep(
     [method]: ep.path,
     expect: { status: [400, 422] },
   };
-  if (method !== "GET" && method !== "DELETE") step.json = privilegedBody;
+  if (method !== "GET" && method !== "DELETE") {
+    // ARV-198: same form/json branching as the full-chain create — see
+    // buildFullChain for rationale (Stripe-style mutators declare only
+    // application/x-www-form-urlencoded).
+    if (isFormEndpoint(ep)) {
+      step.headers = { "Content-Type": "application/x-www-form-urlencoded" };
+      step.form = privilegedBody;
+    } else {
+      step.json = privilegedBody;
+    }
+  }
   tests.push(step as unknown as RawStep);
   return {
     name: `ma ${slugFromPath(ep.path)}`,
