@@ -20,6 +20,7 @@ import { persistVerdictsAsOrphans } from "../../../core/probe/orphan-tracker.ts"
 import { SecurityProbe } from "../../../core/probe/security-probe-class.ts";
 import { summarizeDryRun } from "../../../core/probe/dry-run-envelope.ts";
 import { compileOperationFilter } from "../../../core/selectors/operation-filter.ts";
+import { loadSeedBodyOverlays } from "./_seed-bodies.ts";
 
 interface Buckets {
   high: number;
@@ -216,6 +217,8 @@ export async function probeSecurityCommand(
     const { withHttpAudit, beginAuditRun, finalizeAuditRun, auditRecordToCase, checksPersistEnabled } =
       await import("../../../core/audit/persist.ts");
     const auditEnabled = checksPersistEnabled();
+    // ARV-269: same overlay-lift as probe-mass-assignment.
+    const seedBodies = await loadSeedBodyOverlays(options.apiName);
     const { value: result, records: auditRecords } = await withHttpAudit(async () =>
       runSecurityProbes({
         endpoints,
@@ -227,6 +230,7 @@ export async function probeSecurityCommand(
         dryRun: options.dryRun,
         isolated: options.isolated === true,
         allowLeaks: options.allowLeaks === true,
+        seedBodies,
       }),
     );
 

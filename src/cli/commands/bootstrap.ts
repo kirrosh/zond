@@ -87,6 +87,9 @@ interface SeedAttempt {
    *  user (or downstream agent) can reproduce the exact request without
    *  poking through structured envelopes. */
   repro?: string;
+  /** ARV-269: true when the POST body came from `seed_body` overlay in
+   *  `.api-resources.local.yaml` rather than the schema generator. */
+  bodySource?: "overlay" | "generator";
 }
 
 interface Pass {
@@ -241,7 +244,14 @@ async function trySeed(
   if (!ep) {
     return { varName, resource: owner.resource, createPath: parsed.path, status: "skip-no-create", reason: `${parsed.method} ${parsed.path} not in spec` };
   }
-  if (!ep.requestBodySchema) {
+  // ARV-269: prefer agent-authored seed_body overlay over the generator
+  // when one is present in `.api-resources.local.yaml`. The overlay is
+  // exactly the kind of fixture POST that the API actually accepts
+  // (Stripe's required field XORs, expand[] arrays, …) — the generator
+  // gives us random scalars that strict validators reject. We still
+  // need a requestBodySchema-or-overlay to have *something* to send.
+  const hasOverlay = owner.seed_body && typeof owner.seed_body.body === "object";
+  if (!hasOverlay && !ep.requestBodySchema) {
     return { varName, resource: owner.resource, createPath: parsed.path, status: "skip-no-schema", reason: `no requestBodySchema on ${parsed.method} ${parsed.path}` };
   }
   const { resolved: pathResolved, missing } = resolvePath(parsed.path, vars);
@@ -260,12 +270,17 @@ async function trySeed(
   // POST 422s on a real API because randomly-generated parent ids don't
   // exist in the target tenant.
   const known = nonEmptyVars(vars);
-  const generated = buildCreateRequestBody(ep.requestBodySchema, { knownFixtures: known });
+  const generated: Record<string, unknown> | unknown = hasOverlay
+    ? owner.seed_body!.body
+    : buildCreateRequestBody(ep.requestBodySchema!, { knownFixtures: known });
+  const bodySource: "overlay" | "generator" = hasOverlay ? "overlay" : "generator";
   // Resolve `{{$randomSlug}}` etc. into concrete values for the live POST.
   const concreteBody = substituteDeep(generated, vars);
 
   const url = `${baseUrl.replace(/\/+$/, "")}${pathResolved}`;
-  const contentType = ep.requestBodyContentType ?? "application/json";
+  // ARV-269: overlay may override content-type when the create endpoint's
+  // spec declares a wrong / generic content-type that the live API rejects.
+  const contentType = owner.seed_body?.content_type ?? ep.requestBodyContentType ?? "application/json";
   const headers: Record<string, string> = {
     accept: "application/json",
     "content-type": contentType,
@@ -295,6 +310,7 @@ async function trySeed(
       createPath: parsed.path,
       status: "miss-network",
       reason: err instanceof Error ? err.message : String(err),
+      bodySource,
     };
   }
   if (resp.status < 200 || resp.status >= 300) {
@@ -313,6 +329,7 @@ async function trySeed(
       status: isSeed422 ? "miss-seed-422" : "miss-status",
       reason: `${parsed.method} ${pathResolved} → ${resp.status}${detailHint ? ` (${detailHint})` : ""}`,
       repro,
+      bodySource,
     };
   }
   const captured = captureFromResponse(
@@ -326,6 +343,7 @@ async function trySeed(
       createPath: parsed.path,
       status: "miss-no-id",
       reason: `response had no extractable ${owner.captureField || "id"}`,
+      bodySource,
     };
   }
   return {
@@ -334,6 +352,7 @@ async function trySeed(
     createPath: parsed.path,
     status: "seeded",
     capturedId: captured,
+    bodySource,
   };
 }
 
@@ -502,6 +521,15 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     const totalFkVars = targets.length;
     const filledFkVars = targets.filter(t => !isPlaceholder(env[t.varName])).length;
     const fillRate = totalFkVars === 0 ? 1 : filledFkVars / totalFkVars;
+    // ARV-269: count distinct resources whose seed_body overlay was actually
+    // consumed during this seed loop (one resource × N vars still counts
+    // once). Surfaced in summary so the user can confirm the agent-authored
+    // overlay reached prepare-fixtures (and isn't being silently ignored as
+    // it was pre-ARV-269 — the original Stripe live-scan regression).
+    const seedBodyResources = new Set(
+      seeds.filter(s => s.bodySource === "overlay").map(s => s.resource),
+    );
+    const seedBodyOverlayCount = seedBodyResources.size;
 
     // TASK-271: per-target classification — `already` (was filled at start),
     // `discovered` (cascade list-endpoint pulled an id), `seeded` (POST-create
@@ -612,6 +640,7 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
           writes: writes.size,
           seedsAttempted: seeds.length,
           seedsSucceeded: seeds.filter(s => s.status === "seeded").length,
+          seedBodyOverlayResources: seedBodyOverlayCount,
           passes: passes.length,
           cascadeStop: lastCascadeStop,
           ...(options.seed ? { seedStop } : {}),
@@ -649,10 +678,14 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
         }
         if (seeds.length > 0) {
           console.log("");
+          if (seedBodyOverlayCount > 0) {
+            console.log(`loaded seed_body for ${seedBodyOverlayCount} resource(s) from overlay`);
+          }
           console.log("Seed attempts:");
           for (const s of seeds) {
             const tail = s.status === "seeded" ? `→ ${s.capturedId}` : `(${s.reason ?? ""})`;
-            console.log(`  ${s.status.padEnd(18)} ${s.varName.padEnd(28)} ${s.resource.padEnd(20)} ${tail}`);
+            const src = s.bodySource === "overlay" ? " [overlay]" : "";
+            console.log(`  ${s.status.padEnd(18)} ${s.varName.padEnd(28)} ${s.resource.padEnd(20)} ${tail}${src}`);
           }
           // ARV-47 AC#4: print curl-style repro for every 422 to stderr so the
           // user can copy-paste-debug without inspecting the JSON envelope.

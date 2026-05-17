@@ -17,6 +17,7 @@ import { printMutationBanner, countCleanupFailures } from "../../../core/probe/s
 import { MassAssignmentProbe } from "../../../core/probe/mass-assignment-probe-class.ts";
 import { summarizeDryRun, formatDryRunDigest } from "../../../core/probe/dry-run-envelope.ts";
 import { compileOperationFilter } from "../../../core/selectors/operation-filter.ts";
+import { loadSeedBodyOverlays } from "./_seed-bodies.ts";
 import type { EndpointVerdict, MassAssignmentResult } from "../../../core/probe/mass-assignment-probe.ts";
 import type { ProbeEndpointResult, ProbeEndpointStatus, ProbeFindingSeverity } from "../../../core/probe/types.ts";
 
@@ -189,6 +190,10 @@ export async function probeMassAssignmentCommand(
     const { withHttpAudit, beginAuditRun, finalizeAuditRun, auditRecordToCase, checksPersistEnabled } =
       await import("../../../core/audit/persist.ts");
     const auditEnabled = checksPersistEnabled();
+    // ARV-269: lift agent-authored `seed_body` overlays out of
+    // `.api-resources.local.yaml` so create-endpoint baselines win against
+    // strict validators. No-op when --api isn't set (raw --spec invocation).
+    const seedBodies = await loadSeedBodyOverlays(options.apiName);
     const { value: result, records: auditRecords } = await withHttpAudit(async () =>
       runMassAssignmentProbes({
         endpoints,
@@ -198,6 +203,7 @@ export async function probeMassAssignmentCommand(
         timeoutMs: options.timeoutMs,
         discover: !options.noDiscover,
         extraSuspectFields: parseSuspectFieldFlags(options.suspectField),
+        seedBodies,
       }),
     );
 

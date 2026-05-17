@@ -1,10 +1,11 @@
 ---
 id: ARV-269
 title: 'seed_body overlay читается ВЕЗДЕ, не только в core/checks/checks/ (MF6)'
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-05-17 13:26'
-updated_date: '2026-05-17 14:44'
+updated_date: '2026-05-17 15:15'
 labels:
   - annotate
   - prepare-fixtures
@@ -82,9 +83,14 @@ seed_body overlay из `.api-resources.local.yaml` учитывается в:
 - Phase-2 report MF6: ~/Projects/zond-scans/reports/stripe/20260517-150957-live/report-zond.md
 <!-- SECTION:DESCRIPTION:END -->
 
-- [ ] #1 prepare-fixtures --seed читает seed_body из .api-resources.local.yaml
-- [ ] #2 probe mass-assignment использует overlay body для baseline-create
-- [ ] #3 probe security использует overlay body для baseline
-- [ ] #4 summary log упоминает loaded seed_body for N resources
+- [x] #1 prepare-fixtures --seed читает seed_body из .api-resources.local.yaml
+- [x] #2 probe mass-assignment использует overlay body для baseline-create
+- [x] #3 probe security использует overlay body для baseline
+- [x] #4 summary log упоминает loaded seed_body for N resources
 <!-- AC:END -->
-<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+ARV-269: seed_body overlay (.api-resources.local.yaml) wired into prepare-fixtures (bootstrap.ts trySeed prefers overlay over generator) and both probes (mass-assignment + security pass seedBodies map down through buildBaselineFromSpec). New CLI helper src/cli/commands/probe/_seed-bodies.ts loads/maps METHOD path -> SeedBodyConfig. Summary now reports 'loaded seed_body for N resources from overlay' + JSON envelope seedBodyOverlayResources counter. Bootstrap SeedAttempt carries bodySource: overlay|generator. Tests: bootstrap.test.ts adds ARV-269 case; probe-harness-baseline.test.ts adds 3 cases. Full probe+cli suite green (1 pre-existing flaky unrelated).
+<!-- SECTION:NOTES:END -->
