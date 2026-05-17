@@ -319,7 +319,7 @@ non-standard lifecycle field names, write-only fields in create body).
 **For Stripe-style form-encoded APIs**: `--seed-bodies` is the single
 biggest win — it fixes `--seed` 400s for the bulk of resources.
 
-### Annotate-auto + agent-loop fast path (ARV-262 / 270 / 277)
+### Annotate-auto + agent-loop fast path (ARV-262 / 270 / 277 / 278-282)
 
 ```bash
 # 1. Heuristic baseline — fills pagination / seed-bodies / lifecycle /
@@ -327,20 +327,33 @@ biggest win — it fixes `--seed` 400s for the bulk of resources.
 zond api annotate auto --api <name> --aspect all --auto-apply
 
 # 2. Worklist — what's still incomplete, ranked by downstream impact.
+#    Resources where recent seed POSTs all hit capability-style errors
+#    are tagged `account_capability_missing` (ARV-280).
 zond api annotate auto --api <name> --aspect seed-bodies --gap-report
-#   ↳ ARV-277: prints only resources where heuristic produced a partial
-#   answer (gaps / generic fallback), sorted by how many endpoints
-#   depend on this resource's FK var. The agent's TODO list.
+zond api annotate auto --api <name> --aspect seed-bodies --gap-report \
+  --exclude-hard-blocked        # hide the account-capability rows
 
-# 3. For each gap-row, pull full context including the last seed POST
-#    that zond tried + Stripe's response. Skips re-running by hand.
-zond api annotate dump --api <name> --seed-bodies --only <res> --with-last-attempt
-#   ↳ ARV-277: when run_kind='fixture' results exist in the DB for this
-#   resource's create endpoint, the bundle gains a `last_attempt:
-#   {request_body, response_status, response_body, attempted_at}` block.
+# 3a. One-shot context for a single resource — joins spec slice + last
+#     5 attempts + heuristic suggestion + next_steps hints (ARV-279).
+zond api annotate auto --api <name> --gap-report --explain <resource>
 
-# 4. Agent edits .api-resources.local.yaml to fill the gap (or pipes
-#    through `annotate apply --seed-bodies --input` for validation).
+# 3b. Raw DB shape: full bundle + last N attempts of seed POST history
+#     so the agent sees error progression (ARV-277/278).
+zond api annotate dump --api <name> --seed-bodies --only <res> \
+  --with-last-attempt --history 5
+
+# 4. Agent edits .api-resources.local.yaml directly OR pipes its YAML
+#    through apply. With --gap-fill-only (ARV-281) the agent's response
+#    can ONLY add missing fields — already-set blocks are protected from
+#    accidental overwrite.
+zond api annotate apply --api <name> --seed-bodies --input agent-out.yaml --gap-fill-only
+
+# 5. Pre-cascade staleness check (ARV-282) — pings each pre-filled FK
+#    against its owner's read endpoint. Clears stale (404) values so
+#    cascade re-discovers them. One extra GET per pre-filled FK at
+#    session start; pays for itself the first time a stale `customer`
+#    would have broken 10+ downstream seeds.
+zond prepare-fixtures --api <name> --apply --cascade --seed --check-staleness
 ```
 
 ## Phase 3 — Generate tests

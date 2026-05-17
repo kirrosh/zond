@@ -53,6 +53,7 @@ export function registerPrepareFixtures(program: Command): void {
     .option("--refresh", "Shortcut for --verify --apply (single-pass only). (TASK-281)")
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--max-passes <n>", "Cap on cascade passes (default 8; cascade only)", parsePositiveInt("--max-passes"))
+    .option("--check-staleness", "ARV-282: before cascade/seed, GET each pre-filled FK against its owner's read endpoint and clear values that 404. Catches stale FKs from prior sessions (test data wiped, throwaway account rotated) that would otherwise silently break every downstream seed. Adds 1 GET per pre-filled FK at session start.")
     .action(async (opts, cmd: Command) => {
       // ARV-53: --api resolution lives in cli/util/api-context.ts —
       // local opt > ancestor opt > ZOND_API_GLOBAL/ZOND_API/.zond/current-api.
@@ -111,31 +112,22 @@ export function registerPrepareFixtures(program: Command): void {
         const { withHttpAudit, beginAuditRun, finalizeAuditRun, auditRecordToCase, checksPersistEnabled } =
           await import("../../core/audit/persist.ts");
         const auditEnabled = checksPersistEnabled();
+        const bootstrapArgs = {
+          specPath: resolved.spec,
+          apiDir,
+          envPath: opts.env,
+          apply: opts.apply === true,
+          seed: opts.seed === true,
+          force: opts.force === true,
+          checkStaleness: opts.checkStaleness === true,
+          timeoutMs,
+          maxPasses: opts.maxPasses,
+          json: globalJson(cmd),
+          commandName: "prepare-fixtures",
+        };
         const { value: code, records } = auditEnabled
-          ? await withHttpAudit(() => bootstrapCommand({
-              specPath: resolved.spec,
-              apiDir,
-              envPath: opts.env,
-              apply: opts.apply === true,
-              seed: opts.seed === true,
-              force: opts.force === true,
-              timeoutMs,
-              maxPasses: opts.maxPasses,
-              json: globalJson(cmd),
-              commandName: "prepare-fixtures",
-            }))
-          : { value: await bootstrapCommand({
-              specPath: resolved.spec,
-              apiDir,
-              envPath: opts.env,
-              apply: opts.apply === true,
-              seed: opts.seed === true,
-              force: opts.force === true,
-              timeoutMs,
-              maxPasses: opts.maxPasses,
-              json: globalJson(cmd),
-              commandName: "prepare-fixtures",
-            }), records: [] };
+          ? await withHttpAudit(() => bootstrapCommand(bootstrapArgs))
+          : { value: await bootstrapCommand(bootstrapArgs), records: [] };
         if (auditEnabled && records.length > 0) {
           try {
             const { getDb } = await import("../../db/schema.ts");
