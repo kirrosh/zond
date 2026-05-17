@@ -683,6 +683,12 @@ zond db run <id> --status 500 --json
 zond db compare <idA> <idB> --json            # regression diff
 ```
 
+> **db --json envelope shape** (consistent across siblings): the array
+> always lives under `data.<plural>`, not directly under `data`.
+> `db runs` → `.data.runs[]`, `db collections` → `.data.collections[]`,
+> `db run <id> --status …` → `.data.results[]`. Top-level totals on runs
+> are at `runs[].total/passed/failed`, not under a `.summary` wrapper.
+
 `recommended_action` enum (closed):
 - `report_backend_bug` — STOP, surface to user
 - `fix_test_logic` — edit the YAML

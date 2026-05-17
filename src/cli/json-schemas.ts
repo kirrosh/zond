@@ -128,6 +128,14 @@ export const CheckRunSummarySchema = z.object({
   // never produced a checkable response (e.g. probe got 4xx, schema only on
   // 200) so "0 findings" doesn't read as "all green".
   skipped_outcomes: z.record(z.string(), z.number().int().nonnegative()),
+  // ARV-83: structured counterpart to skipped_outcomes — split into
+  // {check, reason, count} so consumers don't have to colon-tokenise a
+  // reason that may itself contain colons. Sorted by count desc.
+  skipped_outcomes_grouped: z.array(z.object({
+    check: z.string(),
+    reason: z.string(),
+    count: z.number().int().nonnegative(),
+  })),
 });
 
 /** ARV-60: spec-level rollup row. Emitted when ≥80% of a check's

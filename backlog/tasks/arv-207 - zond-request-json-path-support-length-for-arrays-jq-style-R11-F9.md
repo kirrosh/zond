@@ -1,10 +1,10 @@
 ---
 id: ARV-207
 title: 'zond request --json-path: support ''length'' for arrays (jq-style) (R11/F9)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 08:22'
-updated_date: '2026-05-16 10:55'
+updated_date: '2026-05-17 05:44'
 labels:
   - feedback-loop
   - api-github
@@ -31,3 +31,9 @@ Impact: in one zond request call cannot tell 'is the list non-empty?', making ha
 
 Log: see feedback-11.md F9.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done 2026-05-17 (polish-m-22 batch-2 / request): extractByPathWithDiagnostic supports the jq-style 'length' segment on arrays (send-request.ts). New unit tests cover top-level, nested, and empty cases; error message points users at 'length' when a non-numeric segment hits an array.
+<!-- SECTION:NOTES:END -->
