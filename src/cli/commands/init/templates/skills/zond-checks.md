@@ -208,6 +208,28 @@ zond api annotate apply --api <name> --idempotency --input /tmp/idem.yaml --yes
 
 Each block's YAML format is documented under the per-check section below.
 
+**Heuristic shortcut (large APIs):** `zond api annotate auto` skips the
+agent loop and applies pure spec-pattern heuristics for `pagination`,
+`lifecycle`, and `idempotency`. Useful when a 1000+-endpoint spec makes
+hand-authoring per-resource YAML impractical. Only emits
+`confidence: high` inferences — ambiguous cases stay null and still
+need the agent overlay path (`dump` → `apply`).
+
+```bash
+zond api annotate auto --api <name> --aspect all                # dry-run + diff (all 3 aspects)
+zond api annotate auto --api <name> --aspect pagination          # one aspect only
+zond api annotate auto --api <name> --aspect all --auto-apply    # write to overlay
+zond api annotate auto --api <name> --aspect all --only issues,repos  # scope to N resources
+```
+
+Heuristics (each ⇒ `confidence: high`):
+- **pagination**: list endpoint has `page` + `per_page`/`page_size`/`limit` → `type: page`;
+  or `cursor`/`starting_after`/`after`/`page_token` → `type: cursor`.
+- **lifecycle**: read/list/create response has a `state` or `status` enum
+  with ≥2 values → observation-mode `{ field, states, transitions: [], actions: {} }`.
+- **idempotency**: create endpoint declares a header with `idempotency`
+  in its name → `{ header: <name> }`.
+
 ## Reading findings
 
 Every finding carries a closed-enum `recommended_action` so the agent
