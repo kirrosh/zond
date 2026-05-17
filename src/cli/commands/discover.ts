@@ -679,9 +679,13 @@ export async function probeOne(
     // of guessing for 30 minutes whether zond is broken.
     if (isEmptyListBody(respBody)) {
       item.status = "miss-empty";
+      // ARV-261: surface the destructive nature of --seed in the hint so
+      // users don't run it against a production API without considering
+      // that it POST-creates real resources on the target.
       item.reason =
         `no ${target.ownerResource} in target API — re-run with \`zond prepare-fixtures --api <name> --seed --apply\` ` +
-        `to POST-create one automatically, or create the resource yourself (in the product UI or via API) and re-run discover`;
+        `to POST-create one automatically (⚠ creates real resources on the target API — use only against a throwaway/test environment), ` +
+        `or create the resource yourself (in the product UI or via API) and re-run discover`;
     } else {
       item.status = "miss-no-id";
       item.reason = `response shape has no extractable first id (no array/data/items/results/records field)`;
@@ -1094,10 +1098,20 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     // ARV-46: env keys without a manifest entry are noise — the user (or a
     // legacy hand-edit) put them there; the API doesn't actually need them.
     // Surface as warning so they can be removed; do not act on them.
+    // ARV-260: exclude auto-managed auth keys (auth_token, api_key) — zond
+    // itself writes them at `add api` time and uses them to inject the
+    // Authorization/X-API-Key header even when the spec lacks
+    // securitySchemes. They are not in the fixtures manifest by design.
+    // Without this filter, prepare-fixtures tells users to "drop them from
+    // .env.yaml or run refresh-api" — both wrong actions that would break
+    // auth.
+    const AUTO_MANAGED_KEYS = new Set(["auth_token", "api_key"]);
     let unknownEnvKeys: string[] = [];
     if (manifest) {
       const manifestNames = new Set(manifest.fixtures.map(f => f.name));
-      unknownEnvKeys = Object.keys(env).filter(k => !manifestNames.has(k));
+      unknownEnvKeys = Object.keys(env).filter(
+        k => !manifestNames.has(k) && !AUTO_MANAGED_KEYS.has(k),
+      );
     }
 
     const requiredManifestCount = manifest
