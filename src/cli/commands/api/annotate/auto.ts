@@ -126,38 +126,80 @@ function ok200Schema(ep: EndpointDump): unknown {
 // ─── Lifecycle (observation mode) ────────────────────────────────────
 
 const STATE_FIELD_NAMES = ["status", "state"];
+// List-filter literals that appear in `?status=` query enums but are not
+// actual resource states (Stripe: `all`; some APIs: `any`, `none`).
+const LIST_FILTER_LITERALS = new Set(["all", "any", "none"]);
 
 export function inferLifecycle(slice: ResourceSlice): AutoInference | null {
   const ep = slice.endpoints.read ?? slice.endpoints.list ?? slice.endpoints.create;
   if (!ep) return null;
   const schema = ok200Schema(ep);
-  if (!schema) return null;
-  const props = (schema as { properties?: Record<string, unknown> }).properties;
-  if (!props) return null;
+  const props = schema
+    ? (schema as { properties?: Record<string, unknown> }).properties
+    : undefined;
 
-  for (const candidate of STATE_FIELD_NAMES) {
-    const found = findCaseInsensitive(props, candidate);
-    if (!found) continue;
-    const fieldSchema = found.value as { type?: string; enum?: unknown[] };
-    if (!fieldSchema || !Array.isArray(fieldSchema.enum)) continue;
-    const states = fieldSchema.enum.filter((s): s is string => typeof s === "string");
-    if (states.length < 2) continue;
-    return {
-      resource: slice.resource,
-      aspect: "lifecycle",
-      confidence: "high",
-      rationale: `response schema has ${found.name} enum with ${states.length} states (observation mode)`,
-      patch: {
+  if (props) {
+    for (const candidate of STATE_FIELD_NAMES) {
+      const found = findCaseInsensitive(props, candidate);
+      if (!found) continue;
+      const fieldSchema = found.value as { type?: string; enum?: unknown[] };
+      if (!fieldSchema || !Array.isArray(fieldSchema.enum)) continue;
+      const states = fieldSchema.enum.filter((s): s is string => typeof s === "string");
+      if (states.length < 2) continue;
+      return {
         resource: slice.resource,
-        lifecycle: {
-          field: found.name,
-          states,
-          transitions: [],
-          actions: {},
+        aspect: "lifecycle",
+        confidence: "high",
+        rationale: `response schema has ${found.name} enum with ${states.length} states (observation mode)`,
+        patch: {
+          resource: slice.resource,
+          lifecycle: {
+            field: found.name,
+            states,
+            transitions: [],
+            actions: {},
+          },
         },
-      },
-    };
+      };
+    }
   }
+
+  // Fallback: when the response schema is x-circular / missing properties
+  // (decycleSchema collapses second-visit refs on dense graphs like Stripe),
+  // look at the list endpoint's `?status=`/`?state=` query enum. Stripe
+  // declares the full state enum on these list-filters, so this fallback
+  // lifts ~8 classic state machines (subscriptions/invoices/payouts/etc)
+  // on Stripe that would otherwise be 0.
+  const list = slice.endpoints.list;
+  if (list && list.parameters) {
+    for (const candidate of STATE_FIELD_NAMES) {
+      const param = list.parameters.find(
+        (p) => p.in === "query" && p.name.toLowerCase() === candidate,
+      );
+      if (!param) continue;
+      const paramSchema = param.schema as { type?: string; enum?: unknown[] } | undefined;
+      if (!paramSchema || !Array.isArray(paramSchema.enum)) continue;
+      const raw = paramSchema.enum.filter((s): s is string => typeof s === "string");
+      const states = raw.filter((s) => !LIST_FILTER_LITERALS.has(s.toLowerCase()));
+      if (states.length < 2) continue;
+      return {
+        resource: slice.resource,
+        aspect: "lifecycle",
+        confidence: "medium",
+        rationale: `list endpoint query param ${param.name} enum has ${states.length} states (response schema unavailable — fallback)`,
+        patch: {
+          resource: slice.resource,
+          lifecycle: {
+            field: param.name,
+            states,
+            transitions: [],
+            actions: {},
+          },
+        },
+      };
+    }
+  }
+
   return null;
 }
 

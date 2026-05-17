@@ -172,11 +172,27 @@ export function generateFromSchema(
 /** Fields the client must not send in a request body: explicit `readOnly: true`,
  *  or the literal name `id`. The latter is a heuristic for under-specified specs
  *  (common in in-house APIs) that don't mark the server-assigned id readOnly
- *  but still 4xx on it being present. */
+ *  but still 4xx on it being present.
+ *
+ *  Also strips Stripe-style `expand` meta-param when it's declared as a string
+ *  array — Stripe doesn't mark it `readOnly` but rejects synthetic random
+ *  values with 400 "This property cannot be expanded (<random>)", which kills
+ *  50+ baseline POSTs in mass-assignment / stateful checks on Stripe specs.
+ *  The shape check (array of strings on a request body) keeps false-positives
+ *  low: APIs using `expand` for real payload fields would normally use an
+ *  object/enum, not a free-string array. */
 function shouldSkipForRequest(name: string, schema: OpenAPIV3.SchemaObject): boolean {
   if (schema.readOnly === true) return true;
   if (name === "id") return true;
+  if (name === "expand" && isStringArray(schema)) return true;
   return false;
+}
+
+function isStringArray(schema: OpenAPIV3.SchemaObject): boolean {
+  if (schema.type !== "array") return false;
+  const items = schema.items as OpenAPIV3.SchemaObject | undefined;
+  if (!items) return false;
+  return items.type === "string";
 }
 
 /** When recursion hits the depth cap, return a type-appropriate placeholder
