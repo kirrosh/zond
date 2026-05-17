@@ -32,6 +32,7 @@ import {
   classifyPostSemantics,
 } from "./shared.ts";
 import { hasProbeBody, buildBodyAuthHeaders, serializeProbeBody } from "./probe-harness.ts";
+import { flattenToFormFields } from "../runner/form-encode.ts";
 import {
   buildProbeUrl,
   buildJsonAuthHeaders,
@@ -1409,6 +1410,15 @@ export function emitSecurityRegressionSuites(
       if (typeof body === "object" && body !== null && !Array.isArray(body)) {
         (body as Record<string, unknown>)[f.field] = f.payload;
       }
+      // ARV-161: mirror mass-assignment-probe — emit `form:` instead of
+      // `json:` for form-urlencoded endpoints (Stripe v1), otherwise the
+      // regression suite gets rejected with 400 "check that your POST
+      // content type is application/x-www-form-urlencoded" and never
+      // exercises the actual attack vector.
+      const bodyField =
+        ep.requestBodyContentType === "application/x-www-form-urlencoded"
+          ? { form: flattenToFormFields(body) }
+          : { json: body };
       const step: RawStep = {
         name: `${f.class}: ${f.field}=${shortPayload(f.payload)} must ${f.severity === "ok" ? "be rejected" : "not echo"}`,
         source: {
@@ -1417,7 +1427,7 @@ export function emitSecurityRegressionSuites(
           response_branch: expected.map(String).join("|"),
         },
         [v.method]: convertPath(ep.path),
-        json: body,
+        ...bodyField,
         expect: { status: expected },
       };
       tests.push(step);

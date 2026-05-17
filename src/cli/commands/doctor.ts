@@ -121,6 +121,10 @@ interface DoctorReport {
     exists: boolean;
     sha: string | null;
   };
+  endpoints: {
+    total: number;
+    by_method: Record<string, number>;
+  } | null;
   fixtures: {
     required: FixtureMetaRow[];
     optional: FixtureMetaRow[];
@@ -364,6 +368,32 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
     );
   }
 
+  // Endpoint counts from .api-catalog.yaml — read what `zond add api` already
+  // computed, so `--json` consumers (e.g. /zond-scan PF2 budget estimate)
+  // don't have to walk raw spec.json themselves (which would violate the
+  // "never read raw OpenAPI" iron rule in the zond skill).
+  let endpoints: DoctorReport["endpoints"] = null;
+  const catalogPath = join(baseDir, ".api-catalog.yaml");
+  if (existsSync(catalogPath)) {
+    const catalog = readYamlIfExists<{
+      endpointCount?: number;
+      endpoints?: Array<{ method?: string }>;
+    }>(catalogPath);
+    if (catalog) {
+      const list = Array.isArray(catalog.endpoints) ? catalog.endpoints : [];
+      const byMethod: Record<string, number> = {};
+      for (const ep of list) {
+        const m = (ep.method ?? "").toUpperCase();
+        if (!m) continue;
+        byMethod[m] = (byMethod[m] ?? 0) + 1;
+      }
+      endpoints = {
+        total: typeof catalog.endpointCount === "number" ? catalog.endpointCount : list.length,
+        by_method: byMethod,
+      };
+    }
+  }
+
   const report: DoctorReport = {
     api: apiName,
     mode: "spec",
@@ -373,6 +403,7 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
       exists: specExists,
       sha: specSha,
     },
+    endpoints,
     fixtures: {
       required: requiredOut,
       optional: optionalOut,
@@ -394,7 +425,7 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   if (opts.query) {
     const resolved = resolveDotPath(presented, opts.query);
     if (resolved === undefined) {
-      const message = `--query path '${opts.query}' did not resolve in the doctor report (canonical paths: api, spec, fixtures.required, fixtures.optional, fixtures.extraInEnv, staleArtifacts, warnings)`;
+      const message = `--query path '${opts.query}' did not resolve in the doctor report (canonical paths: api, spec, endpoints, fixtures.required, fixtures.optional, fixtures.extraInEnv, staleArtifacts, warnings)`;
       if (opts.json) printJson(jsonError("doctor", [message]));
       else printError(message);
       return 2;
