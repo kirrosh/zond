@@ -11,6 +11,7 @@ import {
   inferPagination,
   inferLifecycle,
   inferIdempotency,
+  inferSeedBody,
   inferAll,
   meetsConfidence,
 } from "../../src/cli/commands/api/annotate/auto.ts";
@@ -251,6 +252,195 @@ describe("inferIdempotency", () => {
       },
     });
     expect(inferIdempotency(s)).toBeNull();
+  });
+});
+
+describe("inferSeedBody (ARV-270)", () => {
+  function seedSlice(
+    requestSchema: Record<string, unknown>,
+    contentType = "application/json",
+  ): ResourceSlice {
+    return {
+      resource: "customers",
+      basePath: "/v1/customers",
+      itemPath: "/v1/customers/{id}",
+      endpoints: {
+        create: {
+          method: "POST",
+          path: "/v1/customers",
+          requestBody: { contentType, schema: requestSchema },
+        },
+      },
+    };
+  }
+
+  test("format-aware string defaults: email/url/date-time/uuid", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["email", "homepage", "created_at", "ref"],
+      properties: {
+        email: { type: "string", format: "email" },
+        homepage: { type: "string", format: "uri" },
+        created_at: { type: "string", format: "date-time" },
+        ref: { type: "string", format: "uuid" },
+      },
+    });
+    const inf = inferSeedBody(s);
+    expect(inf).not.toBeNull();
+    expect(inf!.confidence).toBe("high");
+    const body = inf!.patch.seed_body!.body as Record<string, unknown>;
+    expect(body.email).toBe("zond-probe@example.com");
+    expect(body.homepage).toBe("https://example.com/zond-probe");
+    expect(body.created_at).toBe("2025-01-01T00:00:00Z");
+    expect(body.ref).toBe("00000000-0000-0000-0000-000000000000");
+  });
+
+  test("name-based ISO literals: currency/country, integer amount", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["currency", "country", "amount", "active"],
+      properties: {
+        currency: { type: "string" },
+        country: { type: "string" },
+        amount: { type: "integer" },
+        active: { type: "boolean" },
+      },
+    });
+    const inf = inferSeedBody(s);
+    expect(inf!.confidence).toBe("high");
+    const body = inf!.patch.seed_body!.body as Record<string, unknown>;
+    expect(body.currency).toBe("usd");
+    expect(body.country).toBe("US");
+    expect(body.amount).toBe(1000);
+    expect(body.active).toBe(false);
+  });
+
+  test("enum first-value wins over format/type defaults", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["type"],
+      properties: { type: { type: "string", enum: ["fixed_amount", "percentage"] } },
+    });
+    const inf = inferSeedBody(s);
+    expect((inf!.patch.seed_body!.body as Record<string, unknown>).type).toBe("fixed_amount");
+    expect(inf!.confidence).toBe("high");
+  });
+
+  test("FK lookup: required field name found in env → {{var}} template (AC #3)", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["customer", "audience_id", "display_name"],
+      properties: {
+        customer: { type: "string" },
+        audience_id: { type: "string" },
+        display_name: { type: "string" },
+      },
+    });
+    const env = { customer: "cus_xyz", audience_id: "aud_42" };
+    const inf = inferSeedBody(s, env);
+    const body = inf!.patch.seed_body!.body as Record<string, unknown>;
+    expect(body.customer).toBe("{{customer}}");
+    expect(body.audience_id).toBe("{{audience_id}}");
+    expect(body.display_name).toBe("zond-probe");
+    expect(inf!.rationale).toMatch(/2 FK from env/);
+  });
+
+  test("FK lookup: <name>_id-stripped stem also matches env (customer_id → env.customer)", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["customer_id"],
+      properties: { customer_id: { type: "string" } },
+    });
+    const inf = inferSeedBody(s, { customer: "cus_xyz" });
+    expect((inf!.patch.seed_body!.body as Record<string, unknown>).customer_id).toBe("{{customer}}");
+  });
+
+  test("placeholder env values (TODO, 'string') do not count as FK hits", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["customer"],
+      properties: { customer: { type: "string" } },
+    });
+    const inf = inferSeedBody(s, { customer: "TODO" });
+    // FK lookup falls through to name-based fallback (`zond-probe-customer`).
+    const body = inf!.patch.seed_body!.body as Record<string, unknown>;
+    expect(body.customer).toMatch(/^zond-probe/);
+  });
+
+  test("generic string fallback drops confidence to medium", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["some_field"],
+      properties: { some_field: { type: "string" } },
+    });
+    const inf = inferSeedBody(s);
+    expect(inf!.confidence).toBe("medium");
+    expect((inf!.patch.seed_body!.body as Record<string, unknown>).some_field)
+      .toMatch(/^zond-probe-some_field/);
+  });
+
+  test("content_type from spec is propagated into the patch", () => {
+    const s = seedSlice(
+      { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+      "application/x-www-form-urlencoded",
+    );
+    const inf = inferSeedBody(s);
+    expect(inf!.patch.seed_body!.content_type).toBe("application/x-www-form-urlencoded");
+  });
+
+  test("nested required object → null (defer to agent-loop)", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["billing"],
+      properties: {
+        billing: {
+          type: "object",
+          required: ["address", "card"],
+          properties: { address: { type: "string" }, card: { type: "string" } },
+        },
+      },
+    });
+    expect(inferSeedBody(s)).toBeNull();
+  });
+
+  test("oneOf union → null (discriminator XOR is agent-territory)", () => {
+    const s = seedSlice({
+      type: "object",
+      required: ["amount"],
+      oneOf_first: { properties: { percent_off: { type: "integer" } } },
+      properties: { amount: { type: "integer" } },
+    });
+    expect(inferSeedBody(s)).toBeNull();
+  });
+
+  test("no create endpoint → null", () => {
+    const s: ResourceSlice = {
+      resource: "x",
+      basePath: "/x",
+      itemPath: "/x/{id}",
+      endpoints: {},
+    };
+    expect(inferSeedBody(s)).toBeNull();
+  });
+
+  test("no required → null (don't pollute overlay with empty bodies)", () => {
+    const s = seedSlice({
+      type: "object",
+      properties: { name: { type: "string" } },
+    });
+    expect(inferSeedBody(s)).toBeNull();
+  });
+
+  test("required field with un-fabricable type (object w/o required) → null", () => {
+    // top-level required points at an opaque object; we can't guess
+    // its shape and shouldn't ship `{}` because validators reject it.
+    const s = seedSlice({
+      type: "object",
+      required: ["metadata"],
+      properties: { metadata: { type: "object" } },
+    });
+    // `object` without `required` falls through pickSeedValue → undefined → null.
+    expect(inferSeedBody(s)).toBeNull();
   });
 });
 

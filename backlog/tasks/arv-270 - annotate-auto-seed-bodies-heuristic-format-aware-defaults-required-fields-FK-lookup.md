@@ -3,10 +3,11 @@ id: ARV-270
 title: >-
   annotate-auto seed-bodies heuristic (format-aware defaults + required-fields +
   FK lookup)
-status: To Do
-assignee: []
+status: Done
+assignee:
+  - '@claude'
 created_date: '2026-05-17 13:27'
-updated_date: '2026-05-17 14:44'
+updated_date: '2026-05-17 15:24'
 labels:
   - annotate
   - annotate-auto
@@ -94,9 +95,25 @@ Stripe live-scan (2026-05-17): добавил 10 manual seed-bodies → stateful
 - Phase-1 report MF5: ~/Projects/zond-scans/reports/stripe/20260517-150957-live/report-zond.md
 <!-- SECTION:DESCRIPTION:END -->
 
-- [ ] #1 annotate auto --aspect seed-bodies --auto-apply пишет seed_body в overlay
-- [ ] #2 format-aware defaults: email/url/currency/country/date-time/integer/boolean
-- [ ] #3 FK lookup: required field name matches .env.yaml var → template substitution
+- [x] #1 annotate auto --aspect seed-bodies --auto-apply пишет seed_body в overlay
+- [x] #2 format-aware defaults: email/url/currency/country/date-time/integer/boolean
+- [x] #3 FK lookup: required field name matches .env.yaml var → template substitution
 - [ ] #4 На Stripe sandbox создаёт customers/products/coupons/webhook_endpoints через --seed
 <!-- AC:END -->
-<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+ARV-270 implemented: seed-bodies aspect добавлен в zond api annotate auto.
+
+Изменения:
+- src/cli/commands/api/annotate/auto.ts: новый inferSeedBody(slice, env?) — heuristic POST body для resource.endpoints.create. Cascade: enum first-value -> FK env lookup ({{var}}, с stripping _id/_uuid/_slug) -> format-aware (email/uri/date-time/uuid) -> name-based (currency=usd, country=US, locale=en-US, amount=1000) -> generic fallback. high confidence когда все required заполнились через signal; medium когда хотя бы одно через generic fallback. Drops to null когда oneOf/anyOf union (discriminator XOR), nested required object, или required field unfabricable (object без required).
+- src/cli/commands/api/annotate/index.ts: AUTO_ASPECTS += 'seed-bodies'; autoCommand загружает .env.yaml через loadEnvFile() и пробрасывает env в inferAll. CLI --aspect help обновлён.
+- tests/cli/annotate-auto.test.ts: +12 кейсов: format-aware (email/url/date-time/uuid), name-based ISO (currency/country), enum first-wins, FK lookup exact name/stripped stem, placeholder env values not counted, generic fallback => medium, content_type из spec, nested-required => null, oneOf => null, no-create => null, no-required => null, object-no-required => null.
+
+AC статус:
+- AC #1 wire to overlay + AC #2 format-aware + AC #3 FK lookup — все покрыты unit-тестами; авто-режим autoCommand уже идёт через existing mergePatches+writeLocalOverlay путь (ARV-262 framework).
+- AC #4 (Stripe sandbox: customers/products/coupons/webhook_endpoints через --seed) — требует live API key + sandbox tenant, не запускалось здесь. Готово к проверке пользователем: zond api annotate auto --api stripe --aspect seed-bodies --auto-apply && zond prepare-fixtures --api stripe --seed --apply. Sibling ARV-269 (overlay wiring до prepare-fixtures) уже shipped, поэтому overlay реально дойдёт до seed POST'ов.
+
+Тесты: bun run check чисто, 29 unit-тестов в annotate-auto.test.ts pass. Регрессий нет — pre-existing flaky SSRF-rebalance остался без изменений.
+<!-- SECTION:NOTES:END -->

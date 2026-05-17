@@ -26,6 +26,7 @@ import type { OpenAPIV3 } from "openapi-types";
 import { resolveApiCollection } from "../../../resolve.ts";
 import { readOpenApiSpec } from "../../../../core/generator/openapi-reader.ts";
 import { readResourceMap, type ResourceYaml } from "../../discover.ts";
+import { loadEnvFile } from "../../../../core/parser/variables.ts";
 import { buildResourceSlices, type ResourceSlice, type EndpointDump } from "./prompts.ts";
 import { readLocalOverlay, writeLocalOverlay, mergePatches, renderChangesDiff, type ResourcePatch } from "./overlay.ts";
 import * as seedBodies from "./seed-bodies.ts";
@@ -499,7 +500,7 @@ async function applyResources(apiDir: string, documents: unknown[], opts: ApplyO
 
 // ─── Auto phase (ARV-262) ────────────────────────────────────────────
 
-const AUTO_ASPECTS = ["pagination", "lifecycle", "idempotency"] as const;
+const AUTO_ASPECTS = ["pagination", "lifecycle", "idempotency", "seed-bodies"] as const;
 
 export interface AutoOptions {
   api: string;
@@ -534,7 +535,13 @@ export async function autoCommand(opts: AutoOptions): Promise<number> {
   }
   const slices = buildResourceSlices(doc, resources);
 
-  const inferences = auto.inferAll(slices, opts.aspects)
+  // ARV-270: load .env.yaml so seed-body inference can substitute
+  // `{{customer}}` / `{{audience_id}}` templates for FK-shaped required
+  // fields. Missing/unreadable file → empty env, heuristic still runs
+  // but skips the FK lookup branch.
+  const env = (await loadEnvFile(join(col.baseDir, ".env.yaml"))) ?? {};
+
+  const inferences = auto.inferAll(slices, opts.aspects, env)
     .filter((i) => auto.meetsConfidence(i.confidence, opts.confidence));
 
   const patches = inferences.map((i) => i.patch);
@@ -670,9 +677,9 @@ export function registerApiAnnotate(program: Command): void {
 
   annotate
     .command("auto")
-    .description("ARV-262: heuristic inference (pagination/lifecycle/idempotency) without an agent. Scales to large APIs where hand-written overlays per resource are impractical.")
+    .description("ARV-262/270: heuristic inference (pagination/lifecycle/idempotency/seed-bodies) without an agent. Scales to large APIs where hand-written overlays per resource are impractical.")
     .option("--api <name>", "Target API (else falls back to global --api)")
-    .option("--aspect <name>", "pagination | lifecycle | idempotency | all", "all")
+    .option("--aspect <name>", "pagination | lifecycle | idempotency | seed-bodies | all", "all")
     .option("--confidence <level>", "Minimum confidence: high (default), medium, low", "high")
     .option("--only <list>", "Comma-separated resource names — restrict scope", csv)
     .option("--auto-apply", "Write the inferred patches to disk (default: dry-run + diff)")
