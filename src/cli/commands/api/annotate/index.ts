@@ -34,6 +34,7 @@ import * as idempotency from "./idempotency.ts";
 import * as pagination from "./pagination.ts";
 import * as readback from "./readback.ts";
 import * as resourcesModule from "./resources.ts";
+import * as auto from "./auto.ts";
 import { printError, printSuccess, printWarning } from "../../../output.ts";
 import { jsonOk, jsonError, printJson } from "../../../json-envelope.ts";
 import { globalJson } from "../../../resolve.ts";
@@ -496,6 +497,107 @@ async function applyResources(apiDir: string, documents: unknown[], opts: ApplyO
   return 0;
 }
 
+// ─── Auto phase (ARV-262) ────────────────────────────────────────────
+
+const AUTO_ASPECTS = ["pagination", "lifecycle", "idempotency"] as const;
+
+export interface AutoOptions {
+  api: string;
+  aspects: auto.Aspect[];
+  confidence: auto.Confidence;
+  only?: string[];
+  autoApply?: boolean;
+  force?: boolean;
+  json?: boolean;
+  dbPath?: string;
+}
+
+export async function autoCommand(opts: AutoOptions): Promise<number> {
+  const col = resolveApiCollection(opts.api, opts.dbPath);
+  if ("error" in col) { printError(col.error); return 2; }
+  if (!col.baseDir || !col.spec) {
+    printError(`API '${opts.api}' has no spec/base_dir registered.`);
+    return 2;
+  }
+
+  const doc = await readOpenApiSpec(col.spec);
+  const map = await readResourceMap(col.baseDir);
+  if (!map) {
+    printError(`API '${opts.api}' has no .api-resources.yaml. Run \`zond refresh-api ${opts.api}\` first.`);
+    return 2;
+  }
+
+  let resources = map.resources;
+  if (opts.only && opts.only.length > 0) {
+    const wanted = new Set(opts.only);
+    resources = resources.filter((r) => wanted.has(r.resource));
+  }
+  const slices = buildResourceSlices(doc, resources);
+
+  const inferences = auto.inferAll(slices, opts.aspects)
+    .filter((i) => auto.meetsConfidence(i.confidence, opts.confidence));
+
+  const patches = inferences.map((i) => i.patch);
+  const overlay = await readLocalOverlay(col.baseDir);
+  const existing = (overlay.patches ?? []) as ResourcePatch[];
+  const merge = mergePatches(existing, patches, { force: opts.force === true });
+
+  const perAspectCount: Record<string, number> = {};
+  for (const i of inferences) perAspectCount[i.aspect] = (perAspectCount[i.aspect] ?? 0) + 1;
+
+  const summary = {
+    api: opts.api,
+    aspects: opts.aspects,
+    confidence: opts.confidence,
+    resourcesScanned: slices.length,
+    inferences: inferences.length,
+    perAspect: perAspectCount,
+    changes: merge.changes.length,
+    conflicts: merge.conflicts.length,
+  };
+
+  const diff = renderChangesDiff(merge);
+  if (!opts.json) {
+    process.stdout.write(`Scanned ${slices.length} resource(s); produced ${inferences.length} ${opts.confidence}-confidence inference(s).\n`);
+    for (const [aspect, count] of Object.entries(perAspectCount)) {
+      process.stdout.write(`  ${aspect}: ${count}\n`);
+    }
+    if (diff) {
+      process.stdout.write("\nProposed changes (and conflicts):\n");
+      process.stdout.write(diff + "\n\n");
+    } else if (inferences.length > 0) {
+      process.stdout.write("No changes proposed — overlay already matches inferences.\n");
+    }
+  }
+
+  if (!opts.autoApply) {
+    if (!opts.json) process.stdout.write(`Dry-run. Re-run with --auto-apply to write ${col.baseDir}/.api-resources.local.yaml.\n`);
+    if (opts.json) printJson(jsonOk("api annotate auto", { ...summary, written: false }));
+    return 0;
+  }
+
+  if (merge.changes.length === 0 && merge.conflicts.length === 0) {
+    if (opts.json) printJson(jsonOk("api annotate auto", { ...summary, written: false }));
+    return 0;
+  }
+
+  overlay.patches = merge.patches;
+  await writeLocalOverlay(col.baseDir, overlay);
+  await appendAuditLog(col.baseDir, {
+    timestamp: new Date().toISOString(),
+    kind: "auto",
+    aspects: opts.aspects,
+    confidence: opts.confidence,
+    inferences: inferences.map((i) => ({ resource: i.resource, aspect: i.aspect, confidence: i.confidence, rationale: i.rationale })),
+  });
+  if (!opts.json) printSuccess(`Wrote ${merge.changes.length} change(s) to ${col.baseDir}/.api-resources.local.yaml`);
+  if (merge.conflicts.length > 0 && !opts.force && !opts.json) {
+    printWarning(`${merge.conflicts.length} conflict(s) kept existing values. Re-run with --force to overwrite.`);
+  }
+  if (opts.json) printJson(jsonOk("api annotate auto", { ...summary, written: true }));
+  return 0;
+}
+
 // ─── I/O helpers ─────────────────────────────────────────────────────
 
 async function readInput(source: string): Promise<string> {
@@ -538,7 +640,7 @@ export function registerApiAnnotate(program: Command): void {
 
   const annotate = api
     .command("annotate")
-    .description("Agent-augmented overlay authoring. zond emits raw spec slices → agent generates YAML → zond validates+applies. Two subcommands: `dump` and `apply`.");
+    .description("Overlay authoring for .api-resources.local.yaml. Three subcommands: `dump` + `apply` (agent-in-the-loop, ARV-187) and `auto` (zond-only heuristic inference, ARV-262).");
 
   annotate
     .command("dump")
@@ -563,6 +665,43 @@ export function registerApiAnnotate(program: Command): void {
       if (!apiName) { printError("No API selected."); process.exitCode = 2; return; }
       process.exitCode = await dumpCommand({
         api: apiName, kind, only: rawOpts.only, dbPath: rawOpts.db, json: globalJson(cmd),
+      });
+    });
+
+  annotate
+    .command("auto")
+    .description("ARV-262: heuristic inference (pagination/lifecycle/idempotency) without an agent. Scales to large APIs where hand-written overlays per resource are impractical.")
+    .option("--api <name>", "Target API (else falls back to global --api)")
+    .option("--aspect <name>", "pagination | lifecycle | idempotency | all", "all")
+    .option("--confidence <level>", "Minimum confidence: high (default), medium, low", "high")
+    .option("--only <list>", "Comma-separated resource names — restrict scope", csv)
+    .option("--auto-apply", "Write the inferred patches to disk (default: dry-run + diff)")
+    .option("--force", "Overwrite existing field-level conflicts")
+    .option("--db <path>", "SQLite db path override")
+    .action(async (rawOpts, cmd: Command) => {
+      const apiName = resolveApiArg(rawOpts, cmd);
+      if (!apiName) { printError("No API selected."); process.exitCode = 2; return; }
+      const aspects = parseAspects(rawOpts.aspect);
+      if (aspects.length === 0) {
+        printError(`--aspect must be one of: ${[...AUTO_ASPECTS, "all"].join(", ")}`);
+        process.exitCode = 2;
+        return;
+      }
+      const confidence = rawOpts.confidence as auto.Confidence;
+      if (!["high", "medium", "low"].includes(confidence)) {
+        printError(`--confidence must be high|medium|low`);
+        process.exitCode = 2;
+        return;
+      }
+      process.exitCode = await autoCommand({
+        api: apiName,
+        aspects,
+        confidence,
+        only: rawOpts.only,
+        autoApply: rawOpts.autoApply === true,
+        force: rawOpts.force === true,
+        dbPath: rawOpts.db,
+        json: globalJson(cmd),
       });
     });
 
@@ -617,6 +756,18 @@ function pickKind(opts: Record<string, unknown>): SubcommandKind | null {
 
 function csv(v: string): string[] {
   return v.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+function parseAspects(raw: unknown): auto.Aspect[] {
+  if (typeof raw !== "string" || raw.length === 0) return [];
+  if (raw === "all") return [...AUTO_ASPECTS];
+  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const valid: auto.Aspect[] = [];
+  for (const p of parts) {
+    if ((AUTO_ASPECTS as readonly string[]).includes(p)) valid.push(p as auto.Aspect);
+    else return [];
+  }
+  return valid;
 }
 
 function resolveApiArg(rawOpts: Record<string, unknown>, cmd: Command): string | null {

@@ -89,6 +89,7 @@ const LEGACY_ALLOW_LIST: Record<string, string> = {
   "use": "pre-m-19: --json envelope via printJson.",
   "api annotate dump": "ARV-187: emits per-resource spec slices for the agent (no prompts inside zond); --json wraps in envelope. OutputSpec migration not scheduled.",
   "api annotate apply": "ARV-187: applies the agent's YAML responses to .api-resources.local.yaml; --json wraps the merge summary. OutputSpec migration not scheduled.",
+  "api annotate auto": "ARV-262: heuristic inference (pagination/lifecycle/idempotency) writes the overlay without an agent; --json wraps the inference summary. OutputSpec migration not scheduled.",
   "fixtures add": "ARV-195: --json envelope via printJson. OutputSpec migration not scheduled — single-shape command (writes + validations).",
   "fixtures import": "ARV-195: --json envelope via printJson. OutputSpec migration not scheduled — single-shape command (writes + source).",
 };

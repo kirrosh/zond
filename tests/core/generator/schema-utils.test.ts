@@ -111,6 +111,19 @@ describe("decycleSchema", () => {
     expect(result.children[0].parent).toEqual({ "x-circular": true });
   });
 
+  test("ARV-262: parameter-shaped objects preserve name+in on revisit", () => {
+    const shared: any = { name: "per_page", in: "query", schema: { type: "integer" } };
+    const doc: any = {
+      paths: {
+        "/a": { get: { parameters: [shared] } },
+        "/b": { get: { parameters: [shared] } },
+      },
+    };
+    const result = decycleSchema(doc) as any;
+    expect(result.paths["/a"].get.parameters[0].name).toBe("per_page");
+    expect(result.paths["/b"].get.parameters[0]).toEqual({ name: "per_page", in: "query" });
+  });
+
   test("handles arrays with circular refs", () => {
     const arr: any[] = [1, 2];
     const obj: any = { arr };
@@ -120,6 +133,7 @@ describe("decycleSchema", () => {
     expect(result.arr[1]).toBe(2);
     expect(result.arr[2]).toEqual({ "x-circular": true });
   });
+
 });
 
 describe("formatParam", () => {
