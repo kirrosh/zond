@@ -108,8 +108,25 @@ export interface LastFixtureAttempt {
 }
 
 export function getLastFixturePost(urlLikePattern: string): LastFixtureAttempt | null {
+  const rows = getRecentFixturePosts(urlLikePattern, 1);
+  return rows[0] ?? null;
+}
+
+/**
+ * ARV-278: return the most recent N fixture-POST attempts (most recent
+ * first). Powers `dump --with-last-attempt --history N` so the agent
+ * sees the progression of errors as the overlay was iterated — e.g.
+ * "first 400 said missing X, after fixing the body the next 400 said
+ * resource_missing customer" surfaces the cascade-staleness issue (see
+ * ARV-282) one level earlier than a single-snapshot view.
+ */
+export function getRecentFixturePosts(
+  urlLikePattern: string,
+  limit: number,
+): LastFixtureAttempt[] {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
   const db = getDb();
-  const row = db.query(`
+  const rows = db.query(`
     SELECT
       r.request_method  AS request_method,
       r.request_url     AS request_url,
@@ -123,9 +140,9 @@ export function getLastFixturePost(urlLikePattern: string): LastFixtureAttempt |
       AND r.request_method = 'POST'
       AND r.request_url LIKE ?
     ORDER BY ru.started_at DESC, r.id DESC
-    LIMIT 1
-  `).get(urlLikePattern) as LastFixtureAttempt | undefined;
-  return row ?? null;
+    LIMIT ?
+  `).all(urlLikePattern, Math.floor(limit)) as LastFixtureAttempt[];
+  return rows;
 }
 
 export function getFilteredResults(

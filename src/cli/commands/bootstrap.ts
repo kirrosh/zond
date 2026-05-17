@@ -66,6 +66,14 @@ export interface BootstrapOptions {
    *  command. Caller passes the human-facing name; defaults to "bootstrap"
    *  for back-compat with direct invocations. */
   commandName?: string;
+  /** ARV-282: ping the owner's read endpoint for each pre-filled FK var
+   *  before cascade/seed; if GET returns 404, clear the var so cascade
+   *  re-discovers it. Catches stale FKs from previous sessions (test
+   *  data wiped, throwaway account rotated, …) that would otherwise
+   *  silently break every downstream seed POST until the user noticed
+   *  the resource_missing chain in the logs. Opt-in because it costs
+   *  one GET per pre-filled FK at session start. */
+  checkStaleness?: boolean;
 }
 
 interface SeedAttempt {
@@ -368,6 +376,88 @@ interface BootstrapResult {
  *  budget`. */
 export type CascadeStopReason = "stable" | "max-passes" | "no-targets";
 
+/**
+ * ARV-282: validate each pre-filled FK var is still alive by GET'ing
+ * the owner's read endpoint. Stale (404) values are cleared so the
+ * cascade re-discovers them; 200 / 401 / 403 / network errors keep the
+ * value (we'd rather a stale value than burn through the cascade
+ * budget on transient errors).
+ *
+ * Cost: one GET per pre-filled FK at session start. With test data on
+ * a sandbox account that gets cleared periodically this pays for
+ * itself the first time it catches a missing `customer` that would
+ * otherwise have failed 10+ downstream seed POSTs with
+ * `resource_missing` errors.
+ */
+interface StalenessOutcome {
+  varName: string;
+  status: "alive" | "stale-404" | "skip-no-read" | "transient";
+  detail?: string;
+}
+
+async function verifyEnvFreshness(
+  targets: FkTarget[],
+  resources: ResourceYaml[],
+  endpoints: EndpointInfo[],
+  schemes: SecuritySchemeInfo[],
+  env: Record<string, string>,
+  baseUrl: string,
+  timeoutMs: number,
+): Promise<StalenessOutcome[]> {
+  const out: StalenessOutcome[] = [];
+  for (const t of targets) {
+    const value = env[t.varName];
+    if (isPlaceholder(value)) continue;
+    const owner = findOwnerResourceForSeed(t.varName, resources);
+    if (!owner || !owner.endpoints?.read) {
+      out.push({ varName: t.varName, status: "skip-no-read" });
+      continue;
+    }
+    const parsed = parseEndpointLabel(owner.endpoints.read);
+    if (!parsed) {
+      out.push({ varName: t.varName, status: "skip-no-read", detail: "unparseable read label" });
+      continue;
+    }
+    const ep = endpoints.find(
+      (e) => e.method.toUpperCase() === parsed.method && e.path === parsed.path && !e.deprecated,
+    );
+    if (!ep) {
+      out.push({ varName: t.varName, status: "skip-no-read", detail: `${parsed.method} ${parsed.path} not in spec` });
+      continue;
+    }
+    const { resolved, missing } = resolvePath(parsed.path, env);
+    if (missing.length > 0) {
+      out.push({ varName: t.varName, status: "skip-no-read", detail: `parent fixture missing: ${missing.join(",")}` });
+      continue;
+    }
+    const url = `${baseUrl.replace(/\/+$/, "")}${resolved}`;
+    const headers: Record<string, string> = {
+      accept: "application/json",
+      ...liveAuthHeaders(ep, schemes, env),
+    };
+    try {
+      const resp = await executeRequest(
+        { method: parsed.method, url, headers },
+        { timeout: timeoutMs, retries: 0, network_retries: 1 },
+      );
+      if (resp.status === 404) {
+        out.push({ varName: t.varName, status: "stale-404", detail: `${value} no longer exists` });
+        env[t.varName] = "";
+      } else if (resp.status >= 200 && resp.status < 300) {
+        out.push({ varName: t.varName, status: "alive" });
+      } else {
+        // 401 / 403 / 5xx — could be auth scope (token can write but
+        // not read a specific resource) or backend hiccup. Keep value;
+        // the seed loop will surface real failures.
+        out.push({ varName: t.varName, status: "transient", detail: `${resp.status}` });
+      }
+    } catch (err) {
+      out.push({ varName: t.varName, status: "transient", detail: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return out;
+}
+
 async function runCascade(
   targets: FkTarget[],
   endpoints: EndpointInfo[],
@@ -452,6 +542,20 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     // Snapshot which vars were already filled before any discover/seed. We
     // need this for per-target classification (`already` vs `discovered`).
     const preFilled = new Set(targets.filter(t => !isPlaceholder(env[t.varName])).map(t => t.varName));
+
+    // ARV-282: optional pre-cascade staleness check. Ping each pre-filled
+    // FK against its owner's read endpoint and clear values that 404.
+    // Cleared vars drop out of `preFilled` so they're treated as
+    // "discovered" rather than "already" in the per-target table.
+    let stalenessOutcomes: StalenessOutcome[] = [];
+    if (options.checkStaleness && preFilled.size > 0) {
+      stalenessOutcomes = await verifyEnvFreshness(
+        targets, resourceMap.resources, endpoints, schemes, env, baseUrl, timeout,
+      );
+      for (const o of stalenessOutcomes) {
+        if (o.status === "stale-404") preFilled.delete(o.varName);
+      }
+    }
 
     const writes = new Map<string, string>();
     const passes: Pass[] = [];
@@ -651,6 +755,18 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
       const tag = mode === "exec" ? "[exec]" : "[plan]";
       console.log(`${tag} Bootstrap against ${baseUrl} (${envPath})`);
       console.log("");
+
+      // ARV-282: surface staleness verdicts before the regular per-target
+      // table so the user understands why a var moved from "already" to
+      // "discovered" in this run.
+      if (stalenessOutcomes.length > 0) {
+        const stale = stalenessOutcomes.filter((o) => o.status === "stale-404");
+        if (stale.length > 0) {
+          console.log(`Staleness check: ${stale.length} fixture(s) cleared (404 from owner's read endpoint):`);
+          for (const o of stale) console.log(`  refresh ${o.varName.padEnd(28)} ${o.detail ?? ""}`);
+          console.log("");
+        }
+      }
 
       if (noOp) {
         console.log(`bootstrap: nothing to do — ${filledFkVars}/${totalFkVars} fixtures already present.`);

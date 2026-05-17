@@ -9,7 +9,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { getDb, closeDb } from "../../src/db/schema.ts";
 import { tmpDb, unlinkDb as tryUnlink } from "../_helpers/tmp-db";
 import { createRun, saveResults } from "../../src/db/queries.ts";
-import { getLastFixturePost } from "../../src/db/queries/results.ts";
+import { getLastFixturePost, getRecentFixturePosts } from "../../src/db/queries/results.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
 
 let dbPath: string;
@@ -92,6 +92,29 @@ describe("getLastFixturePost (ARV-277)", () => {
       status: 200, body: '{"id":"tu_ok"}',
     })]);
     expect(getLastFixturePost("%/v1/topups%")).toBeNull();
+  });
+
+  test("getRecentFixturePosts returns last N in newest-first order (ARV-278)", () => {
+    const runs = [
+      { ts: "2026-05-17T08:00:00.000Z", body: "amount=100" },
+      { ts: "2026-05-17T09:00:00.000Z", body: "amount=500" },
+      { ts: "2026-05-17T10:00:00.000Z", body: "amount=1000" },
+    ];
+    for (const r of runs) {
+      const id = createRun({ started_at: r.ts, run_kind: "fixture" });
+      saveResults(id, [postStep("https://api.stripe.com/v1/topups", { status: 400, reqBody: r.body })]);
+    }
+    const recent = getRecentFixturePosts("%/v1/topups%", 2);
+    expect(recent).toHaveLength(2);
+    expect(recent[0]?.request_body).toBe("amount=1000");
+    expect(recent[1]?.request_body).toBe("amount=500");
+  });
+
+  test("getRecentFixturePosts with limit 0 returns empty array", () => {
+    const runId = createRun({ started_at: "2026-05-17T00:00:00.000Z", run_kind: "fixture" });
+    saveResults(runId, [postStep("https://api.stripe.com/v1/topups", { status: 400 })]);
+    expect(getRecentFixturePosts("%/v1/topups%", 0)).toEqual([]);
+    expect(getRecentFixturePosts("%/v1/topups%", -1)).toEqual([]);
   });
 
   test("ignores GET requests (only POSTs count as seed attempts)", () => {

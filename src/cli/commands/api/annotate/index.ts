@@ -76,6 +76,13 @@ export interface DumpOptions {
    *  agent sees exactly what zond tried last + how the server replied
    *  (avoids the "agent re-discovers each 400 by hand" loop). */
   withLastAttempt?: boolean;
+  /** ARV-278: when `withLastAttempt` is true, return the most recent N
+   *  attempts (most recent first) instead of just the last one. Surfaces
+   *  the *progression* of errors as the overlay was iterated — first 400
+   *  was "missing X", after fixing the body the next 400 is "stale FK"
+   *  pulls cascade-staleness (ARV-282) onto the agent's screen one
+   *  iteration earlier. `1` keeps the old single-snapshot behaviour. */
+  historyLimit?: number;
 }
 
 export async function dumpCommand(opts: DumpOptions): Promise<number> {
@@ -110,15 +117,21 @@ export async function dumpCommand(opts: DumpOptions): Promise<number> {
   // by hand to reproduce the failure mode.
   if (opts.withLastAttempt && opts.kind === "seed-bodies") {
     try {
-      const { getLastFixturePost } = await import("../../../../db/queries/results.ts");
+      const { getRecentFixturePosts } = await import("../../../../db/queries/results.ts");
+      const limit = Math.max(1, Math.floor(opts.historyLimit ?? 1));
       for (const b of bundles) {
         const data = b.data as Record<string, unknown> | null;
         const endpoints = data?.endpoints as Record<string, EndpointDump | undefined> | undefined;
         const create = endpoints?.create;
         if (!create) continue;
         const pattern = createUrlLikePattern(create.path);
-        const last = getLastFixturePost(pattern);
-        if (last) (b.data as Record<string, unknown>).last_attempt = last;
+        const recent = getRecentFixturePosts(pattern, limit);
+        if (recent.length === 0) continue;
+        // ARV-278: keep `last_attempt` as the most-recent entry (back-compat
+        // with single-snapshot consumers) and add `attempt_history` when
+        // the caller asked for >1.
+        (b.data as Record<string, unknown>).last_attempt = recent[0];
+        if (limit > 1) (b.data as Record<string, unknown>).attempt_history = recent;
       }
     } catch (err) {
       // DB lookup is best-effort — degraded dump (no `last_attempt`) is
@@ -344,6 +357,13 @@ export interface ApplyOptions {
   force?: boolean;
   json?: boolean;
   dbPath?: string;
+  /** ARV-281: agent-loop regression protection. When set, apply drops
+   *  any aspect-level field on a proposed patch when the existing
+   *  overlay already has that field set (regardless of value). The
+   *  agent's response can only ADD missing pieces — it can't overwrite
+   *  a previously curated `seed_body` even by accident. `--force`
+   *  ignores this flag (explicit override stays explicit). */
+  gapFillOnly?: boolean;
 }
 
 export async function applyCommand(opts: ApplyOptions): Promise<number> {
@@ -399,7 +419,19 @@ export async function applyCommand(opts: ApplyOptions): Promise<number> {
 
   const overlay = await readLocalOverlay(col.baseDir);
   const existing = (overlay.patches ?? []) as ResourcePatch[];
-  const merge = mergePatches(existing, nonEmpty.map((d) => d.patch), { force: opts.force === true });
+
+  // ARV-281: gap-fill-only — drop aspect-level fields where the existing
+  // overlay already has a value set. Keeps the agent's response strictly
+  // additive vs. previous (heuristic + curated) edits. `--force` opts out
+  // of this guard, mirroring the existing conflict semantics.
+  const filteredPatches = opts.gapFillOnly && opts.force !== true
+    ? nonEmpty.map((d) => filterToGaps(d.patch, existing))
+    : nonEmpty.map((d) => d.patch);
+  const gapDroppedFields = opts.gapFillOnly && opts.force !== true
+    ? countGapDroppedFields(nonEmpty.map((d) => d.patch), filteredPatches)
+    : 0;
+
+  const merge = mergePatches(existing, filteredPatches, { force: opts.force === true });
 
   const summary = {
     api: opts.api,
@@ -410,6 +442,11 @@ export async function applyCommand(opts: ApplyOptions): Promise<number> {
     failures: errors,
     changes: merge.changes.length,
     conflicts: merge.conflicts.length,
+    /** ARV-281: aspect-level fields the agent proposed that gap-fill-only
+     *  silently dropped because the existing overlay already had them
+     *  set. Distinct from `conflicts` which is mergePatches's concept of
+     *  field-level disagreement. */
+    gap_fill_dropped: gapDroppedFields,
   };
 
   const diff = renderChangesDiff(merge);
@@ -417,6 +454,9 @@ export async function applyCommand(opts: ApplyOptions): Promise<number> {
     if (errors.length > 0) {
       printWarning(`Failed to parse ${errors.length} document(s):`);
       for (const e of errors) process.stdout.write(`  ✗ ${e.resource}: ${e.error}\n`);
+    }
+    if (gapDroppedFields > 0) {
+      printWarning(`--gap-fill-only dropped ${gapDroppedFields} aspect-field(s) the agent proposed for resources that already had them set. Re-run with --force to overwrite anyway.`);
     }
     if (diff) {
       process.stdout.write("\nProposed changes (and conflicts):\n");
@@ -568,6 +608,18 @@ export interface AutoOptions {
    *   Mutually exclusive with `--auto-apply` — gap-report is read-only.
    */
   gapReport?: boolean;
+  /** ARV-280: when gap-report classifies a resource as
+   *  `account_capability_missing` (recent fixture POSTs all matched the
+   *  HARD_BLOCKED regex catalogue), skip it from the worklist. Default
+   *  is to surface them tagged so the agent can see what's filtered. */
+  excludeHardBlocked?: boolean;
+  /** ARV-279: when set, gap-report runs in single-resource verbose mode
+   *  joining the dump bundle (spec slice with `required`/properties) +
+   *  recent fixture-POST history + heuristic-suggested overlay diff in
+   *  one output. Picks one resource and prints everything the agent
+   *  needs to write the curated `seed_body` block, no second command
+   *  required. Mutually exclusive with no-arg gap-report. */
+  explainResource?: string;
 }
 
 export async function autoCommand(opts: AutoOptions): Promise<number> {
@@ -605,6 +657,9 @@ export async function autoCommand(opts: AutoOptions): Promise<number> {
     .filter((i) => auto.meetsConfidence(i.confidence, effectiveConfidence));
 
   if (opts.gapReport) {
+    if (opts.explainResource) {
+      return renderGapExplain(opts, col.baseDir, doc, map.resources, inferences);
+    }
     return renderGapReport(opts, col.baseDir, inferences, slices.length);
   }
 
@@ -689,7 +744,37 @@ interface GapReportRow {
    *  var being seedable (from `.api-fixtures.yaml`
    *  `affectedEndpoints[].length`). */
   downstream_endpoints_blocked: number;
+  /** ARV-280: when zond's recent fixture-POST attempts to this resource
+   *  all failed with a "not enabled / capability missing" shaped error
+   *  message, we tag it so the agent knows further overlay edits won't
+   *  help — only an account-level change unblocks the resource.
+   *  `null` when the heuristic can't tell (no DB attempts, mixed errors,
+   *  capabilities-style regex didn't match). */
+  block_class: "account_capability_missing" | "data_dependency" | null;
 }
+
+/**
+ * ARV-280: error-message shapes Stripe/etc emit when an account-level
+ * capability is missing rather than an overlay-level data issue.
+ * Conservative — we only tag a resource as `account_capability_missing`
+ * when the most recent attempts ALL match, because Stripe's
+ * order-of-validation can surface a transient data error first and
+ * then a capability error after the overlay is fixed.
+ */
+const HARD_BLOCKED_PATTERNS = [
+  /not\s+supported\s+for\s+country/i,
+  /not\s+available\s+in\s+your\s+account/i,
+  /capability/i,
+  /not\s+enabled/i,
+  /\bnot\s+onboarded\b/i,
+  /raw[- ]card[- ]data\s+(api|access)/i,
+  /you do not have access/i,
+];
+
+/** Minimum recent attempts that must all match before we tag the
+ *  resource as hard-blocked. Below this, last_attempt could still be a
+ *  transient first-validation-order error (see dogfooding edge case). */
+const HARD_BLOCKED_MIN_ATTEMPTS = 2;
 
 async function renderGapReport(
   opts: AutoOptions,
@@ -703,11 +788,19 @@ async function renderGapReport(
   }
   const manifest = await readFixtureManifest(baseDir);
   const downstream = buildResourceDownstreamMap(manifest);
+  // ARV-280: load recent fixture-POSTs once per gap row so the
+  // hard-blocked classifier runs against the same DB snapshot used
+  // by --with-last-attempt downstream. Best-effort — DB missing or
+  // corrupt yields `block_class: null` for every row.
+  const blockClasses = await classifyHardBlocked(
+    baseDir,
+    inferences.filter((i) => i.confidence !== "high"),
+  );
   // Keep only resources where the heuristic produced a partial answer
   // (gaps or generic fallback) — these are the ones the agent needs.
   // High-confidence inferences are already complete; emitting them in a
   // "worklist" would just be noise.
-  const rows: GapReportRow[] = inferences
+  let rows: GapReportRow[] = inferences
     .filter((i) => i.confidence !== "high")
     .map((i) => ({
       resource: i.resource,
@@ -715,11 +808,18 @@ async function renderGapReport(
       confidence: i.confidence,
       rationale: i.rationale,
       downstream_endpoints_blocked: downstream.get(i.resource) ?? 0,
+      block_class: blockClasses.get(i.resource) ?? null,
     }))
     .sort((a, b) =>
       b.downstream_endpoints_blocked - a.downstream_endpoints_blocked
       || a.resource.localeCompare(b.resource),
     );
+
+  const totalRows = rows.length;
+  const hardBlockedCount = rows.filter((r) => r.block_class === "account_capability_missing").length;
+  if (opts.excludeHardBlocked) {
+    rows = rows.filter((r) => r.block_class !== "account_capability_missing");
+  }
 
   if (opts.json) {
     printJson(jsonOk("api annotate auto --gap-report", {
@@ -727,13 +827,18 @@ async function renderGapReport(
       aspects: opts.aspects,
       scanned,
       total_inferences: inferences.length,
-      gap_rows: rows.length,
+      gap_rows: totalRows,
+      hard_blocked: hardBlockedCount,
+      excluded: opts.excludeHardBlocked === true,
       worklist: rows,
     }));
     return 0;
   }
 
-  process.stdout.write(`Scanned ${scanned} resource(s); ${inferences.length} inference(s); ${rows.length} need agent attention.\n\n`);
+  const filterNote = opts.excludeHardBlocked
+    ? ` (${hardBlockedCount} hard-blocked excluded; drop --exclude-hard-blocked to see them)`
+    : (hardBlockedCount > 0 ? ` (${hardBlockedCount} flagged hard-blocked)` : "");
+  process.stdout.write(`Scanned ${scanned} resource(s); ${inferences.length} inference(s); ${rows.length} need agent attention${filterNote}.\n\n`);
   if (rows.length === 0) {
     process.stdout.write("No gaps — heuristic produced high-confidence inferences for every applicable resource.\n");
     return 0;
@@ -743,20 +848,69 @@ async function renderGapReport(
     aspect: Math.max(6, ...rows.map((r) => r.aspect.length)),
     conf: 6,
     blocked: 9,
+    tag: Math.max(5, ...rows.map((r) => (r.block_class ?? "").length)),
   };
   process.stdout.write(
-    `${pad("resource", w.resource)}  ${pad("aspect", w.aspect)}  ${pad("conf", w.conf)}  ${pad("blocked", w.blocked)}  rationale\n`,
+    `${pad("resource", w.resource)}  ${pad("aspect", w.aspect)}  ${pad("conf", w.conf)}  ${pad("blocked", w.blocked)}  ${pad("class", w.tag)}  rationale\n`,
   );
   process.stdout.write(
-    `${"-".repeat(w.resource)}  ${"-".repeat(w.aspect)}  ${"-".repeat(w.conf)}  ${"-".repeat(w.blocked)}  ---------\n`,
+    `${"-".repeat(w.resource)}  ${"-".repeat(w.aspect)}  ${"-".repeat(w.conf)}  ${"-".repeat(w.blocked)}  ${"-".repeat(w.tag)}  ---------\n`,
   );
   for (const r of rows) {
     process.stdout.write(
-      `${pad(r.resource, w.resource)}  ${pad(r.aspect, w.aspect)}  ${pad(r.confidence, w.conf)}  ${pad(String(r.downstream_endpoints_blocked), w.blocked)}  ${r.rationale}\n`,
+      `${pad(r.resource, w.resource)}  ${pad(r.aspect, w.aspect)}  ${pad(r.confidence, w.conf)}  ${pad(String(r.downstream_endpoints_blocked), w.blocked)}  ${pad(r.block_class ?? "-", w.tag)}  ${r.rationale}\n`,
     );
   }
-  process.stdout.write(`\nNext: pipe each resource through \`zond api annotate dump --seed-bodies --only <name> --with-last-attempt\` for full context.\n`);
+  process.stdout.write(`\nNext: \`zond api annotate auto --gap-report --explain <resource>\` for one-shot context, or \`zond api annotate dump --seed-bodies --only <name> --with-last-attempt --history 5\` for raw DB.\n`);
   return 0;
+}
+
+async function classifyHardBlocked(
+  baseDir: string,
+  rows: auto.AutoInference[],
+): Promise<Map<string, "account_capability_missing" | "data_dependency" | null>> {
+  const out = new Map<string, "account_capability_missing" | "data_dependency" | null>();
+  if (rows.length === 0) return out;
+  let getRecentFixturePosts: (pat: string, limit: number) => Array<{ response_body: string | null }>;
+  try {
+    const mod = await import("../../../../db/queries/results.ts");
+    getRecentFixturePosts = mod.getRecentFixturePosts;
+  } catch {
+    return out;
+  }
+  const doc = await readOpenApiSpec(`${baseDir}/spec.json`).catch(() => null);
+  const map = await readResourceMap(baseDir);
+  if (!doc || !map) return out;
+  const slices = buildResourceSlices(doc, map.resources);
+  const byResource = new Map(slices.map((s) => [s.resource, s] as const));
+  for (const inf of rows) {
+    const slice = byResource.get(inf.resource);
+    const createPath = slice?.endpoints.create?.path;
+    if (!createPath) continue;
+    let attempts: Array<{ response_body: string | null }>;
+    try {
+      attempts = getRecentFixturePosts(createUrlLikePattern(createPath), 5);
+    } catch {
+      continue;
+    }
+    if (attempts.length < HARD_BLOCKED_MIN_ATTEMPTS) continue;
+    const matched = attempts.filter((a) => extractMessage(a.response_body) !== null && HARD_BLOCKED_PATTERNS.some((re) => re.test(extractMessage(a.response_body)!)));
+    if (matched.length === attempts.length) {
+      out.set(inf.resource, "account_capability_missing");
+    }
+  }
+  return out;
+}
+
+function extractMessage(body: string | null): string | null {
+  if (!body) return null;
+  try {
+    const parsed = JSON.parse(body);
+    const m = parsed?.error?.message;
+    return typeof m === "string" ? m : null;
+  } catch {
+    return null;
+  }
 }
 
 function buildResourceDownstreamMap(manifest: FixtureManifestYaml | null): Map<string, number> {
@@ -795,6 +949,159 @@ function resourceCandidates(varName: string): string[] {
 
 function pad(s: string, w: number): string {
   return s.length >= w ? s : s + " ".repeat(w - s.length);
+}
+
+/**
+ * ARV-279: one-shot context for a single resource. Joins:
+ *   - the dump bundle (spec slice, required, properties, descriptions)
+ *   - recent fixture-POST history (last 5 attempts, newest first)
+ *   - heuristic-inferred seed_body (what auto came up with)
+ *   - block_class tag from ARV-280 when applicable
+ * Output is a single JSON blob (or pretty-print when --json absent) the
+ * agent can paste straight into an LLM prompt — no second command run.
+ */
+async function renderGapExplain(
+  opts: AutoOptions,
+  baseDir: string,
+  doc: OpenAPIV3.Document,
+  resources: ResourceYaml[],
+  inferences: auto.AutoInference[],
+): Promise<number> {
+  const resource = opts.explainResource!;
+  const matched = resources.find((r) => r.resource === resource);
+  if (!matched) {
+    printError(`--explain: resource '${resource}' not in .api-resources.yaml. Run \`zond refresh-api ${opts.api}\` or check spelling.`);
+    return 2;
+  }
+  const slice = buildResourceSlices(doc, [matched])[0]!;
+  const inference = inferences.find((i) => i.resource === resource && i.aspect === "seed-bodies") ?? null;
+  const manifest = await readFixtureManifest(baseDir);
+  const downstream = buildResourceDownstreamMap(manifest).get(resource) ?? 0;
+
+  // Pull recent attempts so the agent sees error progression + can spot
+  // cascade-staleness vs first-validation-order shadowing.
+  let attempts: Array<{
+    request_url: string;
+    request_body: string | null;
+    response_status: number | null;
+    response_body: string | null;
+    attempted_at: string;
+  }> = [];
+  try {
+    const { getRecentFixturePosts } = await import("../../../../db/queries/results.ts");
+    const createPath = slice.endpoints.create?.path;
+    if (createPath) attempts = getRecentFixturePosts(createUrlLikePattern(createPath), 5);
+  } catch {
+    // best-effort
+  }
+  const blockClass = attempts.length >= HARD_BLOCKED_MIN_ATTEMPTS
+    && attempts.every((a) => {
+      const msg = extractMessage(a.response_body);
+      return msg !== null && HARD_BLOCKED_PATTERNS.some((re) => re.test(msg));
+    })
+    ? "account_capability_missing" as const
+    : null;
+
+  const explain = {
+    resource,
+    aspect: "seed-bodies" as const,
+    downstream_endpoints_blocked: downstream,
+    block_class: blockClass,
+    heuristic_inference: inference
+      ? {
+        confidence: inference.confidence,
+        rationale: inference.rationale,
+        proposed_seed_body: inference.patch.seed_body ?? null,
+      }
+      : null,
+    spec_slice: slice,
+    attempt_history: attempts,
+    next_steps: buildNextSteps(blockClass, inference, attempts.length),
+  };
+
+  if (opts.json) {
+    printJson(jsonOk("api annotate auto --gap-report --explain", explain));
+    return 0;
+  }
+  process.stdout.write(JSON.stringify(explain, null, 2) + "\n");
+  return 0;
+}
+
+function buildNextSteps(
+  blockClass: "account_capability_missing" | null,
+  inference: auto.AutoInference | null,
+  attemptCount: number,
+): string[] {
+  const steps: string[] = [];
+  if (blockClass === "account_capability_missing") {
+    steps.push("All recent fixture POSTs returned capability-style errors — no overlay edit will unblock this. Skip or change account.");
+    return steps;
+  }
+  if (attemptCount === 0) {
+    steps.push("No fixture POST attempts in DB yet — run `zond prepare-fixtures --api <name> --apply --cascade --seed` once to populate, then re-run --explain.");
+  } else {
+    steps.push("Read `attempt_history[0].response_body.error.{message,param,type}` for the most recent failure cause.");
+    if (attemptCount > 1) {
+      steps.push("Check `attempt_history[1..N].response_body` — if the cause changed between attempts the earlier overlay edit landed but uncovered a deeper gap (likely cascade-staleness; see ARV-282 staleness check).");
+    }
+  }
+  if (inference) {
+    if (inference.confidence === "high") {
+      steps.push("Heuristic already produced a high-confidence body — check why the live POST still fails. Likely a runtime-only validation rule not in the schema.");
+    } else {
+      steps.push(`Edit \`.api-resources.local.yaml\` patch for resource '${inference.resource}'. Heuristic says: ${inference.rationale}`);
+    }
+  } else {
+    steps.push("No heuristic inference for this resource — write a fresh `seed_body` block in `.api-resources.local.yaml` from the spec_slice.");
+  }
+  return steps;
+}
+
+// ─── ARV-281: gap-fill filtering ─────────────────────────────────────
+
+/**
+ * Drop aspect-level fields on a proposed patch when the existing
+ * overlay (matched by resource name) already has that field set to a
+ * non-empty value. Returns a new patch object — never mutates input.
+ */
+export function filterToGaps(
+  proposed: ResourcePatch,
+  existing: ResourcePatch[],
+): ResourcePatch {
+  const prior = existing.find((p) => p.resource === proposed.resource);
+  if (!prior) return proposed;
+  const out: ResourcePatch = { resource: proposed.resource };
+  for (const [key, value] of Object.entries(proposed) as Array<[string, unknown]>) {
+    if (key === "resource") continue;
+    const existingVal = (prior as unknown as Record<string, unknown>)[key];
+    if (isPresent(existingVal)) continue; // already-set field → skip
+    (out as Record<string, unknown>)[key] = value;
+  }
+  return out;
+}
+
+function isPresent(v: unknown): boolean {
+  if (v === undefined || v === null) return false;
+  if (typeof v === "string") return v.length > 0;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "object") return Object.keys(v as Record<string, unknown>).length > 0;
+  return true;
+}
+
+function countGapDroppedFields(
+  before: ResourcePatch[],
+  after: ResourcePatch[],
+): number {
+  let n = 0;
+  for (let i = 0; i < before.length; i++) {
+    const b = before[i]!;
+    const a = after[i]!;
+    for (const k of Object.keys(b)) {
+      if (k === "resource") continue;
+      if (!(k in a)) n++;
+    }
+  }
+  return n;
 }
 
 // ─── I/O helpers ─────────────────────────────────────────────────────
@@ -853,6 +1160,7 @@ export function registerApiAnnotate(program: Command): void {
     .option("--resources", "Orphan-endpoint list for resource-graph extensions")
     .option("--only <list>", "Comma-separated resource names — restrict scope", csv)
     .option("--with-last-attempt", "ARV-277: enrich seed-bodies bundles with the most recent fixture-kind POST attempt (`request_body`/`response_status`/`response_body`/`attempted_at`) so the agent sees what zond tried last without re-running prepare-fixtures.")
+    .option("--history <N>", "ARV-278: with --with-last-attempt, return the most recent N attempts (newest first) under `attempt_history`. Surfaces error progression as the overlay was iterated.", (v) => Number.parseInt(v, 10))
     .option("--db <path>", "SQLite db path override")
     .action(async (rawOpts, cmd: Command) => {
       const kind = pickKind(rawOpts);
@@ -873,6 +1181,7 @@ export function registerApiAnnotate(program: Command): void {
         dbPath: rawOpts.db,
         json: globalJson(cmd),
         withLastAttempt: rawOpts.withLastAttempt === true,
+        historyLimit: Number.isFinite(rawOpts.history) ? rawOpts.history : undefined,
       });
     });
 
@@ -886,6 +1195,8 @@ export function registerApiAnnotate(program: Command): void {
     .option("--auto-apply", "Write the inferred patches to disk (default: dry-run + diff)")
     .option("--force", "Overwrite existing field-level conflicts")
     .option("--gap-report", "ARV-277: read-only worklist mode. Lists resources where the heuristic couldn't finish (gaps / generic fallback), ranked by downstream endpoints blocked. For agent-loop callers picking what to flesh out by hand.")
+    .option("--exclude-hard-blocked", "ARV-280: hide resources tagged `account_capability_missing` (recent fixture POSTs all matched the hard-blocked regex catalogue — treasury/capability/raw-card-data shapes). Off by default so the agent can see what's filtered.")
+    .option("--explain <resource>", "ARV-279: with --gap-report, switch to single-resource verbose mode. Joins dump + last 5 attempts + heuristic-suggested overlay diff + next_steps hints in one JSON output. Replaces 'gap-report → dump --with-last-attempt → repeat for each row' loop.")
     .option("--db <path>", "SQLite db path override")
     .action(async (rawOpts, cmd: Command) => {
       const apiName = resolveApiArg(rawOpts, cmd);
@@ -910,6 +1221,8 @@ export function registerApiAnnotate(program: Command): void {
         autoApply: rawOpts.autoApply === true,
         force: rawOpts.force === true,
         gapReport: rawOpts.gapReport === true,
+        excludeHardBlocked: rawOpts.excludeHardBlocked === true,
+        explainResource: typeof rawOpts.explain === "string" ? rawOpts.explain : undefined,
         dbPath: rawOpts.db,
         json: globalJson(cmd),
       });
@@ -928,6 +1241,7 @@ export function registerApiAnnotate(program: Command): void {
     .option("--input <file>", "Path to the YAML responses file, or `-` for stdin", "-")
     .option("--yes", "Write the proposed patches to disk (default: dry-run + diff)")
     .option("--force", "Overwrite the existing value on field-level conflict")
+    .option("--gap-fill-only", "ARV-281: drop aspect-level fields the agent proposed for resources that already have that field set in the overlay. Keeps the agent's response strictly additive — protects curated `seed_body` blocks from accidental regression. Bypassed by --force.")
     .option("--db <path>", "SQLite db path override")
     .action(async (rawOpts, cmd: Command) => {
       const kind = pickKind(rawOpts);
@@ -944,6 +1258,7 @@ export function registerApiAnnotate(program: Command): void {
         input: rawOpts.input ?? "-",
         yes: rawOpts.yes === true,
         force: rawOpts.force === true,
+        gapFillOnly: rawOpts.gapFillOnly === true,
         dbPath: rawOpts.db,
         json: globalJson(cmd),
       });
