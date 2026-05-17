@@ -3,10 +3,10 @@ id: ARV-198
 title: >-
   probe mass-assignment --emit-template: auto form-encoded body for form-only
   APIs (F15)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 08:09'
-updated_date: '2026-05-16 10:55'
+updated_date: '2026-05-17 05:54'
 labels:
   - feedback-loop
   - api-stripe
@@ -32,3 +32,9 @@ Workaround (proven): /tmp/convert-ma-templates-v3.js with 3 patches. Manual conv
 
 Log: $HANDOFF/rounds/raw-07.log
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done 2026-05-17 (polish-m-22 batch-3 / Tier 3): mass-assignment-template detects requestBodyContentType=application/x-www-form-urlencoded and emits form: block + Content-Type header instead of json:. Both buildFullChain (POST→GET→DELETE) and buildSingleStep (orphan PUT) paths covered. Stripe v1 / Rails / PHP-style mutators no longer need the node post-processing patch on 15+ endpoints. Serializer's ARV-162 force-quote keeps booleans/numbers as wire-strings.
+<!-- SECTION:NOTES:END -->

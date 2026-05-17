@@ -52,9 +52,16 @@ export const statusCodeConformance: Check = {
     if (hasDefault) return { kind: "pass" };
     if (codes.has(response.status)) return { kind: "pass" };
     if (hasWildcard.get(Math.floor(response.status / 100))) return { kind: "pass" };
+    // ARV-224: use the actual request method (c.request.method) instead
+    // of the operation's declared method. For unsupported_method probes
+    // the request fires POST/PUT/PATCH against a GET-only endpoint and the
+    // legacy `c.operation.method` would print "for GET" while the
+    // request_signature (downstream SARIF / triage) shows POST — sending
+    // operators in the wrong direction.
+    const reqMethod = c.request.method.toUpperCase();
     return {
       kind: "fail",
-      message: `Status ${response.status} not declared in OpenAPI responses for ${c.operation.method} ${c.operation.path}`,
+      message: `Status ${response.status} not declared in OpenAPI responses for ${reqMethod} ${c.operation.path}`,
       evidence: { actual: response.status, declared: [...codes].sort((a, b) => a - b) },
     };
   },
