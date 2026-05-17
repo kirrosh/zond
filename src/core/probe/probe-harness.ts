@@ -16,6 +16,7 @@ import { generateFromSchema } from "../generator/data-factory.ts";
 import { substituteDeep, substituteString } from "../parser/variables.ts";
 import { convertPath, liveAuthHeaders } from "./shared.ts";
 import { encodeFormBody } from "../runner/form-encode.ts";
+import type { SeedBodyConfig } from "../generator/resources-builder.ts";
 
 /** ARV-150: form-encoded mutating endpoint (Stripe v1 pattern).
  *  Stripe and other Rails/PHP APIs declare requestBody.content with ONLY
@@ -108,12 +109,23 @@ export function buildBodyAuthHeaders(
  * substitute live vars. Returns null when the result isn't a JSON
  * object (array / scalar / null) — both probes treat that as a skip
  * reason ("request body not a JSON object").
+ *
+ * ARV-269: when `seedBody` is provided (agent-authored overlay from
+ * `.api-resources.local.yaml`), it wins over `generateFromSchema`.
+ * Strict-validating APIs (Stripe required-field XORs, `expand[]` arrays)
+ * reject random scalars from the generator and the whole verdict becomes
+ * INCONCLUSIVE-baseline; the overlay carries a payload the API actually
+ * accepts. Mirrors the path stateful checks took via `resolveCreateBody`
+ * (`core/checks/checks/_crud-helpers.ts`).
  */
 export function buildBaselineFromSpec(
   ep: EndpointInfo,
   vars: Record<string, string>,
+  seedBody?: SeedBodyConfig,
 ): Record<string, unknown> | null {
-  const raw = ep.requestBodySchema ? generateFromSchema(ep.requestBodySchema) : {};
+  const raw = seedBody && seedBody.body && typeof seedBody.body === "object"
+    ? seedBody.body
+    : (ep.requestBodySchema ? generateFromSchema(ep.requestBodySchema) : {});
   const sub = substituteDeep(raw, vars);
   if (typeof sub !== "object" || sub === null || Array.isArray(sub)) return null;
   return sub as Record<string, unknown>;

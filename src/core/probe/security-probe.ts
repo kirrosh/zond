@@ -13,6 +13,7 @@
  */
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
+import type { SeedBodyConfig } from "../generator/resources-builder.ts";
 import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
 import { classify as classifyRecommendedAction } from "../classifier/recommended-action.ts";
 import type { RawSuite, RawStep } from "../generator/serializer.ts";
@@ -143,6 +144,11 @@ export interface SecurityProbeOptions {
    *  has no DELETE. The pre-flight feasibility map drops these unless the
    *  caller explicitly accepts the leak. */
   allowLeaks?: boolean;
+  /** ARV-269: agent-authored `seed_body` overlays from `.api-resources.local.yaml`,
+   *  keyed by `"METHOD /path"`. Wins over `generateFromSchema` when the
+   *  endpoint matches — see `MassAssignmentOptions.seedBodies` for the
+   *  rationale (strict APIs reject random-scalar baselines). */
+  seedBodies?: Map<string, SeedBodyConfig>;
 }
 
 /** ARV-140: cleanup-feasibility map. Built once before the live loop so
@@ -248,6 +254,8 @@ interface ProbeStepOpts {
   noCleanup: boolean;
   timeoutMs?: number;
   cleanupRetryDelaysMs?: number[];
+  /** ARV-269: optional `seed_body` overlay for this endpoint. */
+  seedBody?: SeedBodyConfig;
 }
 
 export async function runSecurityProbes(
@@ -353,6 +361,7 @@ export async function runSecurityProbes(
         noCleanup: opts.noCleanup === true,
         timeoutMs: opts.timeoutMs,
         cleanupRetryDelaysMs: opts.cleanupRetryDelaysMs,
+        seedBody: opts.seedBodies?.get(`${ep.method.toUpperCase()} ${ep.path}`),
       },
     );
     verdicts.push(verdict);
@@ -394,7 +403,8 @@ async function probeOneEndpoint(
   };
 
   // Build baseline body. Same recipe as mass-assignment: spec → generators → vars.
-  const baseline = buildBaselineFromSpec(ep, vars);
+  // ARV-269: agent-authored `seed_body` overlay wins when present.
+  const baseline = buildBaselineFromSpec(ep, vars, opts.seedBody);
   if (baseline === null) {
     return skipped(ep, "request body not a JSON object");
   }

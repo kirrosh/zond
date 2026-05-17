@@ -24,6 +24,7 @@
  */
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
+import type { SeedBodyConfig } from "../generator/resources-builder.ts";
 import type { RecommendedAction } from "../diagnostics/failure-hints.ts";
 import { classify } from "../classifier/recommended-action.ts";
 import { applyAntiFp } from "../anti-fp/index.ts";
@@ -189,6 +190,14 @@ export interface MassAssignmentOptions {
    *  `--suspect-field name=value`. Full per-api spec-extension support
    *  (x-zond-suspect-fields) is tracked in ARV-189. */
   extraSuspectFields?: Record<string, unknown>;
+  /** ARV-269: agent-authored `seed_body` overlays from `.api-resources.local.yaml`,
+   *  keyed by `"METHOD /path"` of the endpoint they apply to (typically the
+   *  resource's create endpoint). When present for a probed endpoint, it
+   *  replaces `generateFromSchema` as the baseline body source — same
+   *  promotion stateful checks took via `resolveCreateBody`. Mass-assignment
+   *  before ARV-269 ignored this overlay; on strict-validating APIs (Stripe)
+   *  every baseline 400'd and the verdict collapsed to INCONCLUSIVE. */
+  seedBodies?: Map<string, SeedBodyConfig>;
 }
 
 export interface MassAssignmentResult {
@@ -381,6 +390,7 @@ export async function runMassAssignmentProbes(
       bodyFkMisses,
       bodyFkOverlay,
       extraSuspectFields: opts.extraSuspectFields,
+      seedBody: opts.seedBodies?.get(`${ep.method.toUpperCase()} ${ep.path}`),
     });
     stampRecommendedAction(verdict);
     verdicts.push(verdict);
@@ -421,13 +431,16 @@ async function probeEndpoint(
     bodyFkOverlay?: Record<string, string>;
     /** ARV-252: per-run extras for the suspect-fields list. */
     extraSuspectFields?: Record<string, unknown>;
+    /** ARV-269: optional agent-authored body overlay for this endpoint
+     *  (usually the resource's create endpoint). Wins over generator. */
+    seedBody?: SeedBodyConfig;
   },
 ): Promise<EndpointVerdict> {
   const m = ep.method.toUpperCase();
   const strict = isStrictContract(ep.requestBodySchema);
 
   // Build baseline payload from spec then substitute generators ({{$uuid}}, …).
-  const baseline = buildBaselineFromSpec(ep, vars);
+  const baseline = buildBaselineFromSpec(ep, vars, opts.seedBody);
   if (baseline === null) {
     return skipped(ep, "request body not a JSON object");
   }
