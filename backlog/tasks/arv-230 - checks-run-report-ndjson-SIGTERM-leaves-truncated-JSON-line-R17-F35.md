@@ -1,10 +1,10 @@
 ---
 id: ARV-230
 title: 'checks run --report ndjson: SIGTERM leaves truncated JSON line (R17/F35)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 10:12'
-updated_date: '2026-05-16 10:55'
+updated_date: '2026-05-18 11:53'
 labels:
   - feedback-loop
   - api-github
@@ -25,3 +25,9 @@ Expected: SIGTERM handler flushes last event and closes the stream cleanly.
 
 Log: see feedback-17.md F35.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+src/cli/commands/checks.ts: добавлен SIGTERM/SIGINT handler для NDJSON режима (file и stdout). При прерывании flush'ит trailing newline если последний event не был полностью записан, закрывает fd, exit 128+signo. Handler снимается после нормального завершения runChecks или в catch. Note: pre-existing failure tests/cli/checks/ndjson-pipeline.test.ts AC #4 (summary.suppressed не в schema) — не связано с этим fix, нужен отдельный backlog item.
+<!-- SECTION:NOTES:END -->

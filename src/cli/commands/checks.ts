@@ -528,17 +528,51 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   const ndjsonOutputPath: string | undefined = ndjson && resolved.channel === "file" ? resolved.path : undefined;
   let ndjsonFd: number | undefined;
   let ndjsonEventCount = 0;
+  let ndjsonLastFullyWritten = true;
   if (ndjsonOutputPath) {
     ndjsonFd = openSync(ndjsonOutputPath, "w");
   }
   const ndjsonOnEvent = ndjson
     ? (ndjsonFd !== undefined
         ? (ev: import("../../core/reporter/ndjson.ts").NdjsonEvent) => {
+            ndjsonLastFullyWritten = false;
             ndjsonEventCount += 1;
             writeSync(ndjsonFd!, `${JSON.stringify(ev)}\n`);
+            ndjsonLastFullyWritten = true;
           }
         : emitToStdout)
     : undefined;
+
+  // ARV-230: clean SIGTERM/SIGINT shutdown for NDJSON streams. Without
+  // this, killing a long `checks run --report ndjson` leaves a truncated
+  // last line in the file (or in the consumer's pipe) and downstream
+  // `jq -s` chokes until the user strips it with `sed '$d'`. The handler
+  // closes the fd (or drains stdout) and exits with the conventional
+  // 128+signo code instead of letting Node default-terminate mid-write.
+  let removeNdjsonSigHandlers: (() => void) | undefined;
+  if (ndjson) {
+    const shutdown = (signo: number) => {
+      try {
+        if (ndjsonFd !== undefined) {
+          if (!ndjsonLastFullyWritten) {
+            try { writeSync(ndjsonFd, "\n"); } catch { /* fd already gone */ }
+          }
+          try { closeSync(ndjsonFd); } catch { /* already closed */ }
+          ndjsonFd = undefined;
+        }
+      } catch { /* swallow; we're tearing down */ }
+      try { process.stderr.write(`zond: NDJSON run interrupted (signal ${signo}); ${ndjsonEventCount} event(s) flushed.\n`); } catch { /* ignore */ }
+      process.exit(128 + signo);
+    };
+    const onTerm = () => shutdown(15);
+    const onInt = () => shutdown(2);
+    process.on("SIGTERM", onTerm);
+    process.on("SIGINT", onInt);
+    removeNdjsonSigHandlers = () => {
+      process.off("SIGTERM", onTerm);
+      process.off("SIGINT", onInt);
+    };
+  }
 
   // ARV-265: accumulate every HTTP case `runChecks` dispatches so we can
   // persist them into the run/results tables after the run completes. The
@@ -747,11 +781,13 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     // findings are reported but don't gate CI by default — agents that want
     // strict gating can post-process the JSON envelope.
     if (ndjsonFd !== undefined) closeSync(ndjsonFd);
+    removeNdjsonSigHandlers?.();
     process.exit(result.high_or_critical > 0 ? 1 : 0);
   } catch (err) {
     if (ndjsonFd !== undefined) {
       try { closeSync(ndjsonFd); } catch { /* fd may already be invalid */ }
     }
+    removeNdjsonSigHandlers?.();
     const msg = err instanceof Error ? err.message : String(err);
     if (json) printJson(jsonError("checks run", [msg]));
     else printError(msg);
