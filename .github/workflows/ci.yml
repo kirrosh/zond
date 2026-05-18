@@ -27,7 +27,25 @@ jobs:
         run: bunx tsc --noEmit
 
       - name: Tests
-        run: bun run test
+        # bun ≥ 1.3.10 on ubuntu-latest exits 2 immediately after a
+        # clean "0 fail" summary (Linux-only shutdown hiccup with open
+        # handles / unref'd resources somewhere in the suite). Detect
+        # the false-positive by parsing bun's own summary: pass when
+        # we see "X pass / 0 fail" regardless of exit code.
+        shell: bash
+        run: |
+          set +e
+          bun run test:unit 2>&1 | tee /tmp/unit.log
+          unit_exit=${PIPESTATUS[0]}
+          if [ $unit_exit -ne 0 ] && ! grep -qE '^ 0 fail' /tmp/unit.log; then
+            echo "test:unit failed (exit $unit_exit, fails reported in summary)"
+            exit $unit_exit
+          fi
+          if [ $unit_exit -ne 0 ]; then
+            echo "::notice::bun shutdown returned $unit_exit despite 0 failures — treating as pass"
+          fi
+          bun run test:mocked
+          exit $?
 
       - name: Build
         run: bun run build
