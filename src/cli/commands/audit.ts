@@ -92,6 +92,21 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
   const budgetResolved = resolveBudget(opts.budget, undefined);
   const runMaxRequestsArgs: string[] = budgetResolved.maxRequests !== undefined
     ? ["--max-requests", String(budgetResolved.maxRequests)]
+    // placeholder to keep the binding shape stable
+    : [];
+  // ARV-302: probes don't share `zond run`'s --max-requests vocabulary
+  // (probes scan endpoint-by-endpoint, not request-by-request). Map the
+  // budget tier to a coarse `--max-endpoints` cap so probe stages stay
+  // inside the same wall-clock budget. `full` keeps the legacy
+  // uncapped behaviour.
+  const probeMaxEndpointsByTier: Record<string, number | undefined> = {
+    quick: 10,
+    standard: 50,
+    full: undefined,
+  };
+  const probeMaxEndpoints = opts.budget ? probeMaxEndpointsByTier[opts.budget] : undefined;
+  const probeMaxEndpointsArgs: string[] = probeMaxEndpoints !== undefined
+    ? ["--max-endpoints", String(probeMaxEndpoints)]
     : [];
 
   // ARV-264: in safe mode (default) `--seed` is ignored — seed POSTs
@@ -153,6 +168,7 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
         "--output", join(apiDir, "probes", "mass-assignment-digest.md"),
         "--emit-tests", join(apiDir, "probes", "mass-assignment"),
         "--overwrite",
+        ...probeMaxEndpointsArgs,
       ],
     });
   }
@@ -165,6 +181,7 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
         "--output", join(apiDir, "probes", "security-digest.md"),
         "--emit-tests", join(apiDir, "probes", "security"),
         "--overwrite",
+        ...probeMaxEndpointsArgs,
       ],
     });
   }
@@ -239,10 +256,21 @@ interface CoverageCapture {
   durationMs: number;
 }
 
-async function captureCoverage(api: string): Promise<CoverageCapture> {
+/**
+ * ARV-301: build the coverage-stage CLI args. Exported so unit tests
+ * can assert that audit pins `--session-id <id>` rather than
+ * `--union session` whenever a session id was captured ahead of
+ * `session end` (the latter selector rejects closed sessions).
+ */
+export function buildCoverageStageArgs(api: string, sessionId?: string): string[] {
+  const sel = sessionId ? ["--session-id", sessionId] : ["--union", "session"];
+  return ["coverage", "--api", api, ...sel, "--json"];
+}
+
+async function captureCoverage(api: string, sessionId?: string): Promise<CoverageCapture> {
   const t0 = Date.now();
   try {
-    const cmd = [...zondInvoker(), "coverage", "--api", api, "--union", "session", "--json"];
+    const cmd = [...zondInvoker(), ...buildCoverageStageArgs(api, sessionId)];
     const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
     const stdout = await new Response(proc.stdout).text();
     const code = await proc.exited;
@@ -311,12 +339,19 @@ export async function auditCommand(options: AuditOptions): Promise<number> {
   const results: StageResult[] = [];
   let coverageJson: unknown = null;
   let coverageCapture: CoverageCapture | null = null;
+  // ARV-301: capture the active session id BEFORE session-end runs, so
+  // coverage can target it explicitly (--session-id) instead of via
+  // --union session, which would reject the now-closed session.
+  let pinnedSessionId: string | undefined;
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]!;
+    if (stage.key === "session-end" && !pinnedSessionId) {
+      pinnedSessionId = readCurrentSession()?.id;
+    }
     if (stage.key === "coverage") {
       // ARV-108: coverage runs via captureCoverage so we keep stdout JSON.
       if (!options.json) console.log(`==> Stage ${i + 1}/${stages.length}: ${stage.name}`);
-      coverageCapture = await captureCoverage(options.api);
+      coverageCapture = await captureCoverage(options.api, pinnedSessionId);
       coverageJson = coverageCapture.data;
       const status: StageResult["status"] = coverageCapture.data
         ? "ok"

@@ -90,6 +90,13 @@ export interface ProbeMassAssignmentOptions {
    *  the CLI when --api / current-api resolves; left undefined for
    *  bare-spec invocations. */
   apiName?: string;
+  /** ARV-302: cap the number of endpoints probed in this run (after
+   *  --include / --exclude / --tag filters). Used by `zond audit
+   *  --budget` so probe stages stay inside a wall-clock budget instead
+   *  of unbounded scanning (Stripe: 587 endpoints, 3.6k probes — silent
+   *  10+ min). When the cap trims the set, a warning is emitted so the
+   *  user knows the run was partial. */
+  maxEndpoints?: number;
 }
 
 export async function probeMassAssignmentCommand(
@@ -135,6 +142,23 @@ export async function probeMassAssignmentCommand(
         return 2;
       }
       endpoints = endpoints.filter(compiled.filter);
+    }
+    // ARV-302: --max-endpoints cap — applied after include/exclude/tag
+    // filters so the user-visible filter intent is preserved. The cap
+    // is a coarse time-budget knob (`zond audit --budget standard` →
+    // 50 endpoints), not a sampling strategy: take the first N from
+    // the filtered list. A warning fires so partial output is obvious.
+    let cappedEndpoints = false;
+    if (typeof options.maxEndpoints === "number" && options.maxEndpoints > 0
+        && endpoints.length > options.maxEndpoints) {
+      const total = endpoints.length;
+      endpoints = endpoints.slice(0, options.maxEndpoints);
+      cappedEndpoints = true;
+      if (!options.json) {
+        process.stderr.write(
+          `zond: probe mass-assignment capped at ${options.maxEndpoints}/${total} endpoints (--max-endpoints) — pass --max-endpoints <N> or --budget full to widen.\n`,
+        );
+      }
     }
 
     // Load env vars (base_url, auth_token, api_key, path-param overrides).
@@ -290,7 +314,12 @@ export async function probeMassAssignmentCommand(
             by_status: maByStatus(structuredEndpoints),
           },
           orphans,
-          warnings: result.warnings,
+          warnings: cappedEndpoints
+            ? [
+                ...result.warnings,
+                `--max-endpoints capped this run at ${options.maxEndpoints}; pass --max-endpoints <N> or --budget full to widen.`,
+              ]
+            : result.warnings,
           emittedTests: emittedSuites,
         }),
       );

@@ -96,6 +96,11 @@ export interface ProbeSecurityOptions {
    *  reflection — sanitization signal only). Hidden by default since
    *  they carry single_signal proof with no exploit pathway. */
   verbose?: boolean;
+  /** ARV-302: cap the number of endpoints probed in this run (after
+   *  --include / --exclude / --tag filters). Used by `zond audit
+   *  --budget` to keep the security stage inside a wall-clock budget
+   *  on big specs (Stripe: 587 endpoints) instead of unbounded scanning. */
+  maxEndpoints?: number;
 }
 
 function parseClasses(input: string): SecurityClass[] | string {
@@ -157,6 +162,21 @@ export async function probeSecurityCommand(
         return 2;
       }
       endpoints = endpoints.filter(compiled.filter);
+    }
+    // ARV-302: --max-endpoints cap — see probe/mass-assignment.ts for the
+    // rationale. Applied after user-visible filters; a warning fires so
+    // partial output is obvious.
+    let cappedEndpoints = false;
+    if (typeof options.maxEndpoints === "number" && options.maxEndpoints > 0
+        && endpoints.length > options.maxEndpoints) {
+      const total = endpoints.length;
+      endpoints = endpoints.slice(0, options.maxEndpoints);
+      cappedEndpoints = true;
+      if (!options.json) {
+        process.stderr.write(
+          `zond: probe security capped at ${options.maxEndpoints}/${total} endpoints (--max-endpoints) — pass --max-endpoints <N> or --budget full to widen.\n`,
+        );
+      }
     }
 
     let vars: Record<string, string> = {};
@@ -367,6 +387,14 @@ export async function probeSecurityCommand(
           },
           orphans,
           emittedTests: emittedSuites,
+          // ARV-302: surface the partial-run warning so JSON consumers
+          // see that --max-endpoints trimmed the set (otherwise the cap
+          // is invisible in machine-readable output).
+          ...(cappedEndpoints ? {
+            warnings: [
+              `--max-endpoints capped this run at ${options.maxEndpoints}; pass --max-endpoints <N> or --budget full to widen.`,
+            ],
+          } : {}),
         }),
       );
     } else {
