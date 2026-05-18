@@ -111,7 +111,20 @@ export interface CheckContext {
 export type CheckOutcome =
   | { kind: "pass" }
   | { kind: "skip"; reason: string }
-  | { kind: "fail"; message: string; evidence?: Record<string, unknown> };
+  | {
+      kind: "fail";
+      message: string;
+      evidence?: Record<string, unknown>;
+      /** ARV-284: per-finding severity override. When set, runner uses
+       *  this in place of `Check.severity` — lets a check emit different
+       *  severities based on context (e.g. `negative_data_rejection`
+       *  with `additionalProperties-violation` evidence → LOW, with
+       *  `pattern-violation` → MEDIUM, with 5xx response → HIGH). The
+       *  declared `Check.severity` stays as the natural fallback /
+       *  documentation tier. Subject to severity-config calibration
+       *  overlay (ARV-283) downstream. */
+      severity?: Severity;
+    };
 
 export interface Check {
   /** Stable identifier — must match schemathesis name where possible. */
