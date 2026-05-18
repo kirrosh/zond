@@ -4,7 +4,7 @@ title: 'code: unify report/output channel (reporter slot)'
 status: To Do
 assignee: []
 created_date: '2026-05-16 07:28'
-updated_date: '2026-05-16 08:25'
+updated_date: '2026-05-18 13:02'
 labels:
   - refactor
 dependencies: []

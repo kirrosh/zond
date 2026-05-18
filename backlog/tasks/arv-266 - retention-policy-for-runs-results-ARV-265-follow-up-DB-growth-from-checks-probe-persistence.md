@@ -6,9 +6,11 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-17 11:44'
+updated_date: '2026-05-18 13:02'
 labels:
   - db
   - coverage
+  - defer-post-m-23
 dependencies: []
 priority: low
 ---
@@ -34,14 +36,15 @@ A built-in way to bound DB growth without forcing users to remember `zond db cle
 - **VACUUM cadence**: SQLite reclaim after large deletes.
 
 ## Acceptance Criteria
-
-- [ ] Some retention knob exists (CLI `zond db prune --older-than 30d` and/or config `db.retention_days`)
-- [ ] Default behavior unchanged (no silent data loss for users on current zond)
-- [ ] Per-kind defaults documented (e.g. checks/probe/fixture retained 7d, regular forever)
-- [ ] `zond db stats` (or equivalent) surfaces row counts per run_kind so users see growth
+<!-- AC:BEGIN -->
+- [ ] #1 Some retention knob exists (CLI `zond db prune --older-than 30d` and/or config `db.retention_days`)
+- [ ] #2 Default behavior unchanged (no silent data loss for users on current zond)
+- [ ] #3 Per-kind defaults documented (e.g. checks/probe/fixture retained 7d, regular forever)
+- [ ] #4 `zond db stats` (or equivalent) surfaces row counts per run_kind so users see growth
 
 ## Out of scope
 
 - Cross-DB sharding / archival
 - Encrypted backups
 <!-- SECTION:DESCRIPTION:END -->
+<!-- AC:END -->

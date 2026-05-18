@@ -6,9 +6,11 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-17 11:45'
+updated_date: '2026-05-18 13:02'
 labels:
   - http-client
   - refactor
+  - defer-post-m-23
 dependencies: []
 priority: low
 ---
@@ -46,13 +48,14 @@ Thread the recorder through `executeRequest` as a regular call option, not via m
 - Trickier path: probe internals (security-probe.ts, mass-assignment-probe.ts) call `executeRequest` from many places. Either thread options through every call (~8 sites), or wrap `executeRequest` once at the probe-command boundary into a closure that pre-binds the recorder.
 
 ## Acceptance Criteria
-
-- [ ] No module-level mutable state in http-client.ts
-- [ ] All four ARV-265 producers still persist correctly
-- [ ] Smoke test: two concurrent `probe security` invocations in one process don't clobber each other
-- [ ] withHttpAudit() helper retained for ergonomics (it's a nice API)
+<!-- AC:BEGIN -->
+- [ ] #1 No module-level mutable state in http-client.ts
+- [ ] #2 All four ARV-265 producers still persist correctly
+- [ ] #3 Smoke test: two concurrent `probe security` invocations in one process don't clobber each other
+- [ ] #4 withHttpAudit() helper retained for ergonomics (it's a nice API)
 
 ## Out of scope
 
 - Refactoring probe internals to take an HTTP-context object (separate cleanup)
 <!-- SECTION:DESCRIPTION:END -->
+<!-- AC:END -->
