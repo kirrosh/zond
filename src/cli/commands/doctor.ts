@@ -431,6 +431,12 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
       return 2;
     }
     process.stdout.write(JSON.stringify(resolved, null, 2) + "\n");
+    // ARV-274: --json (incl. --query) returns 0 on successful emit.
+    // Fixture/staleness state is *data*, not command failure — non-zero is
+    // reserved for command failure (missing api, parse error). Text mode
+    // still surfaces state via exit code so `if zond doctor; then ...`
+    // remains a useful gate.
+    if (opts.json) return 0;
     if (blockedRequired > 0) return 1;
     if (staleArtifacts.some(s => !s.fresh) || !specExists || !manifest) return 2;
     return 0;
@@ -439,9 +445,10 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   // ── Output ──
   if (opts.json) {
     printJson(jsonOk("doctor", presented));
-  } else {
-    printHuman(presented, envVars, { missingOnly: opts.missingOnly === true });
+    return 0; // ARV-274: JSON envelope emit success → exit 0
   }
+
+  printHuman(presented, envVars, { missingOnly: opts.missingOnly === true });
 
   if (blockedRequired > 0) return 1;
   if (staleArtifacts.some(s => !s.fresh) || !specExists || !manifest) return 2;
