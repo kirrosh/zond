@@ -267,6 +267,42 @@ export function buildCoverageStageArgs(api: string, sessionId?: string): string[
   return ["coverage", "--api", api, ...sel, "--json"];
 }
 
+/**
+ * ARV-301 follow-up: judge audit's coverage stage on the JSON envelope's
+ * `ok` field, not the subprocess exit code.
+ *
+ * `zond coverage` exits 1 when there are uncovered endpoints (legacy
+ * CI-gate behaviour) — that is a normal report state for audit's
+ * purposes, the envelope is well-formed and carries valid coverage
+ * data. Only exit 2 / non-JSON output / `ok:false` envelopes mean a
+ * real coverage failure.
+ *
+ * Exported pure function so unit tests can lock the contract without
+ * spawning a subprocess.
+ */
+export function interpretCoverageOutput(
+  stdout: string,
+  exitCode: number | null,
+): { data: unknown | null; parseError: string | null } {
+  let parsed: unknown = null;
+  let parseError: string | null = null;
+  try {
+    parsed = stdout.trim() ? JSON.parse(stdout) : null;
+  } catch (e) {
+    parseError = (e as Error).message;
+  }
+  if (parsed && typeof parsed === "object" && (parsed as { ok?: boolean }).ok === true) {
+    // Envelope says everything is fine; treat coverage as captured
+    // even if exit was 1 due to "has uncovered endpoints".
+    return { data: parsed, parseError: null };
+  }
+  // ok:false, or no envelope at all — propagate the failure signal.
+  // exitCode is intentionally not consulted here; callers attach it
+  // to the stage result for the user.
+  void exitCode;
+  return { data: null, parseError };
+}
+
 async function captureCoverage(api: string, sessionId?: string): Promise<CoverageCapture> {
   const t0 = Date.now();
   try {
@@ -275,14 +311,8 @@ async function captureCoverage(api: string, sessionId?: string): Promise<Coverag
     const stdout = await new Response(proc.stdout).text();
     const code = await proc.exited;
     const ms = Date.now() - t0;
-    if (code !== 0) {
-      return { data: null, exitCode: code, parseError: null, durationMs: ms };
-    }
-    try {
-      return { data: JSON.parse(stdout), exitCode: code, parseError: null, durationMs: ms };
-    } catch (e) {
-      return { data: null, exitCode: code, parseError: (e as Error).message, durationMs: ms };
-    }
+    const { data, parseError } = interpretCoverageOutput(stdout, code);
+    return { data, exitCode: code, parseError, durationMs: ms };
   } catch (e) {
     return { data: null, exitCode: null, parseError: (e as Error).message, durationMs: Date.now() - t0 };
   }
