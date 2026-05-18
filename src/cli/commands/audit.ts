@@ -35,6 +35,7 @@ import { jsonOk, printJson } from "../json-envelope.ts";
 import { VERSION } from "../version.ts";
 import { diagnoseRun, type DiagnoseResult } from "../../core/diagnostics/db-analysis.ts";
 import { readCurrentSession } from "../../core/context/session.ts";
+import { resolveBudget, isBudget, BUDGETS, type Budget } from "../../core/checks/budget.ts";
 
 interface Stage {
   key: string;
@@ -67,6 +68,9 @@ export interface AuditOptions {
    *  When false (default), audit runs in safe mode — no --seed POSTs,
    *  no mass-assignment / security probes, no destructive probes. */
   live?: boolean;
+  /** ARV-292: adaptive cap and stateful gating tier. Translates to
+   *  `--max-requests N` on every spawned `run` stage. */
+  budget?: Budget;
 }
 
 /**
@@ -85,6 +89,10 @@ function zondInvoker(): string[] {
 function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null): Stage[] {
   const api = opts.api;
   const stages: Stage[] = [];
+  const budgetResolved = resolveBudget(opts.budget, undefined);
+  const runMaxRequestsArgs: string[] = budgetResolved.maxRequests !== undefined
+    ? ["--max-requests", String(budgetResolved.maxRequests)]
+    : [];
 
   // ARV-264: in safe mode (default) `--seed` is ignored — seed POSTs
   // create real resources on the target API and have unacceptable blast
@@ -175,8 +183,8 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
       args: ["session", "start", "--label", sessionLabel],
       skip: () => reuseReason,
     });
-    stages.push({ key: "run-tests", name: "run tests", args: ["run", join(apiDir, "tests"), "--api", api] });
-    stages.push({ key: "run-probes", name: "run probes", args: ["run", join(apiDir, "probes"), "--api", api] });
+    stages.push({ key: "run-tests", name: "run tests", args: ["run", join(apiDir, "tests"), "--api", api, ...runMaxRequestsArgs] });
+    stages.push({ key: "run-probes", name: "run probes", args: ["run", join(apiDir, "probes"), "--api", api, ...runMaxRequestsArgs] });
     stages.push({
       key: "session-end",
       name: "session end (reused — kept active)",
@@ -185,8 +193,8 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
     });
   } else {
     stages.push({ key: "session-start", name: `session start (${sessionLabel})`, args: ["session", "start", "--label", sessionLabel] });
-    stages.push({ key: "run-tests", name: "run tests", args: ["run", join(apiDir, "tests"), "--api", api] });
-    stages.push({ key: "run-probes", name: "run probes", args: ["run", join(apiDir, "probes"), "--api", api] });
+    stages.push({ key: "run-tests", name: "run tests", args: ["run", join(apiDir, "tests"), "--api", api, ...runMaxRequestsArgs] });
+    stages.push({ key: "run-probes", name: "run probes", args: ["run", join(apiDir, "probes"), "--api", api, ...runMaxRequestsArgs] });
     stages.push({ key: "session-end", name: "session end", args: ["session", "end"] });
   }
   // ARV-108: surface the post-stage coverage capture in the plan so the
@@ -699,6 +707,10 @@ export function registerAudit(program: Command): void {
     .option("--out <path>", "HTML report output path (default: audit-report.html)")
     .option("--dry-run", "Print the stage plan without executing anything")
     .option("--force", "Disable mtime-based skip (always regenerate, even if tests/ newer than spec)")
+    .option(
+      "--budget <tier>",
+      "ARV-292: adaptive request cap for spawned `run` stages. `quick` (50 req, ~60-sec gate), `standard` (500 req), `full` (uncapped). Omitted ⇒ legacy uncapped pipeline.",
+    )
     .action(async (opts, cmd: Command) => {
       // ARV-53.
       const apiName = getApi(cmd, opts);
@@ -708,6 +720,15 @@ export function registerAudit(program: Command): void {
         return;
       }
       opts.api = apiName;
+      let budget: Budget | undefined;
+      if (opts.budget !== undefined) {
+        if (!isBudget(opts.budget)) {
+          printError(`--budget must be one of: ${BUDGETS.join(", ")}; got '${opts.budget}'`);
+          process.exitCode = 2;
+          return;
+        }
+        budget = opts.budget;
+      }
       process.exitCode = await auditCommand({
         api: opts.api,
         dbPath: opts.db,
@@ -719,6 +740,7 @@ export function registerAudit(program: Command): void {
         force: opts.force === true,
         json: globalJson(cmd),
         live: opts.live === true,
+        budget,
       });
     });
 }

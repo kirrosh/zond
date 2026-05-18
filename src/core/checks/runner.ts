@@ -176,6 +176,10 @@ export interface RunChecksOptions {
    *  the same budget so a cap of 100 means 100 requests total across
    *  per-response + stateful, not per-phase. Undefined ⇒ uncapped. */
   maxRequests?: number;
+  /** ARV-292: skip the stateful (CRUD + auth) phase entirely. Driven by
+   *  `--budget quick` from the CLI. Skipped stateful ids are surfaced
+   *  in `summary.skipped_outcomes` so the user sees what was dropped. */
+  skipStateful?: boolean;
   /** ARV-283: severity calibration overlay loaded from
    *  `.zond/severity.yaml` and/or `apis/<api>/.zond-severity.yaml`.
    *  Optional — undefined ⇒ findings emit at the built-in severity.
@@ -941,7 +945,12 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     mode,
   );
 
-  if (activeStateful.length > 0) {
+  if (opts.skipStateful && activeStateful.length > 0) {
+    const key = `stateful-skipped:budget`;
+    summary.skipped_outcomes[key] = (summary.skipped_outcomes[key] ?? 0) + activeStateful.length;
+  }
+
+  if (!opts.skipStateful && activeStateful.length > 0) {
     const baseHarness = makeHarness(opts.baseUrl, doc, {
       authHeaders: opts.authHeaders,
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed,
