@@ -33,6 +33,7 @@ import type { OpenAPIV3 } from "openapi-types";
 import type { CrudStatefulCheck } from "../stateful.ts";
 import type { CheckOutcome, Severity } from "../types.ts";
 import { fillPathParams } from "./_crud-helpers.ts";
+import { buildUrl as buildUrlBase } from "../../util/url.ts";
 
 const CURSOR_PARAM_NAME_RE = /^(cursor|starting_after|ending_before|after|before|page_token|next_token|continuation)$/i;
 
@@ -68,10 +69,7 @@ function buildUrl(
   cursorParam: string,
   cursorValue: string,
 ): string {
-  const url = `${base.replace(/\/+$/, "")}${fillPathParams(path, pathVars)}`;
-  const qs = new URLSearchParams();
-  qs.append(cursorParam, cursorValue);
-  return `${url}?${qs.toString()}`;
+  return buildUrlBase(base, fillPathParams(path, pathVars), { [cursorParam]: cursorValue });
 }
 
 interface VectorOutcome {

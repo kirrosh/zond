@@ -6,6 +6,7 @@ import {
   liveAuthHeaders,
 } from "../shared.ts";
 import type { ProbeStepOpts, SecurityVerdict } from "./types.ts";
+import { joinBaseAndPath } from "../../util/url.ts";
 
 /**
  * Best-effort DELETE on stateful endpoints after a successful baseline /
@@ -39,7 +40,7 @@ export async function tryCleanup(
   }
   // DELETE path has one path-param at the end; replace it with the captured id.
   const concretePath = delEp.path.replace(/\{[^}]+\}/, encodeURIComponent(String(id)));
-  const url = `${(vars["base_url"] ?? "").replace(/\/+$/, "")}${concretePath}`;
+  const url = joinBaseAndPath(vars["base_url"], concretePath);
   const headers = liveAuthHeaders(delEp, schemes, vars);
 
   // TASK-278: stash id + deletePath on the verdict so the orphan tracker
