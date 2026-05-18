@@ -320,6 +320,8 @@ export interface ResourceYaml {
     limit_param?: string;
     default_limit?: number;
     items_field?: string;
+    page_param?: string;
+    start_page?: number;
   };
   /** ARV-172: per-resource state machine + action endpoints. */
   lifecycle?: {
@@ -648,7 +650,24 @@ export async function probeOne(
   }
   if (resp.status < 200 || resp.status >= 300) {
     item.status = "miss-status";
-    item.reason = `${parsed.method} ${parsed.path} → ${resp.status}`;
+    // ARV-99: bare `METHOD path → status` leaves the agent guessing what
+    // to do. Append a status-specific next-step hint so 404 / 401 / 403 /
+    // 5xx each get a routed action. Spec drift (404) and token scope
+    // (401/403) are the two common root causes — call them out.
+    let hint = "";
+    if (resp.status === 404) {
+      hint =
+        ` — list endpoint 404'd. Spec may have a stale path. Try \`zond refresh-api <name>\` to re-sync; ` +
+        `if the path is correct, the API likely doesn't expose this resource for your token — add the var to ` +
+        `.api-resources.local.yaml as a custom create endpoint (extension overlay) or fill .env.yaml by hand`;
+    } else if (resp.status === 401 || resp.status === 403) {
+      hint =
+        ` — auth/scope rejection on the list endpoint. Check token scope; if the token genuinely cannot list ${target.ownerResource}, ` +
+        `fill .env.yaml by hand or rerun with \`--no-seed\` to skip futile attempts`;
+    } else if (resp.status >= 500) {
+      hint = ` — server-side error; retry later or check provider status before treating this as a fixture gap`;
+    }
+    item.reason = `${parsed.method} ${parsed.path} → ${resp.status}${hint}`;
     return item;
   }
   const respBody = resp.body_parsed ?? resp.body;
@@ -660,9 +679,13 @@ export async function probeOne(
     // of guessing for 30 minutes whether zond is broken.
     if (isEmptyListBody(respBody)) {
       item.status = "miss-empty";
+      // ARV-261: surface the destructive nature of --seed in the hint so
+      // users don't run it against a production API without considering
+      // that it POST-creates real resources on the target.
       item.reason =
         `no ${target.ownerResource} in target API — re-run with \`zond prepare-fixtures --api <name> --seed --apply\` ` +
-        `to POST-create one automatically, or create the resource yourself (in the product UI or via API) and re-run discover`;
+        `to POST-create one automatically (⚠ creates real resources on the target API — use only against a throwaway/test environment), ` +
+        `or create the resource yourself (in the product UI or via API) and re-run discover`;
     } else {
       item.status = "miss-no-id";
       item.reason = `response shape has no extractable first id (no array/data/items/results/records field)`;
@@ -1075,10 +1098,20 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     // ARV-46: env keys without a manifest entry are noise — the user (or a
     // legacy hand-edit) put them there; the API doesn't actually need them.
     // Surface as warning so they can be removed; do not act on them.
+    // ARV-260: exclude auto-managed auth keys (auth_token, api_key) — zond
+    // itself writes them at `add api` time and uses them to inject the
+    // Authorization/X-API-Key header even when the spec lacks
+    // securitySchemes. They are not in the fixtures manifest by design.
+    // Without this filter, prepare-fixtures tells users to "drop them from
+    // .env.yaml or run refresh-api" — both wrong actions that would break
+    // auth.
+    const AUTO_MANAGED_KEYS = new Set(["auth_token", "api_key"]);
     let unknownEnvKeys: string[] = [];
     if (manifest) {
       const manifestNames = new Set(manifest.fixtures.map(f => f.name));
-      unknownEnvKeys = Object.keys(env).filter(k => !manifestNames.has(k));
+      unknownEnvKeys = Object.keys(env).filter(
+        k => !manifestNames.has(k) && !AUTO_MANAGED_KEYS.has(k),
+      );
     }
 
     const requiredManifestCount = manifest

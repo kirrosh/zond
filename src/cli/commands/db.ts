@@ -151,7 +151,7 @@ export async function dbCommand(options: DbOptions): Promise<number> {
               printJson(jsonOk("db diagnose", { ...result, resolution: "latest-no-failures", run_id: fallback }, [warning]));
             } else {
               process.stderr.write(`zond: ${warning}\n`);
-              console.log(JSON.stringify(result, null, 2));
+              console.log(JSON.stringify({ ...result, resolution: "latest-no-failures", run_id: fallback }, null, 2));
             }
             return 0;
           }
@@ -166,6 +166,10 @@ export async function dbCommand(options: DbOptions): Promise<number> {
         if (json) {
           printJson(jsonOk("db diagnose", { ...result, resolution, run_id: id }));
         } else {
+          // ARV-208: in human mode, embed resolution + run_id in the stdout
+          // JSON so users (and the zond-triage skill) don't need --json just
+          // to discover which run was auto-selected by `zond db diagnose --api`.
+          // The stderr hint stays as a quick visual cue when running interactively.
           if (resolution !== "explicit") {
             const label = resolution === "latest-failing"
               ? `last failing run #${id}`
@@ -174,7 +178,7 @@ export async function dbCommand(options: DbOptions): Promise<number> {
                 : `run #${id}`;
             process.stderr.write(`zond: diagnosing ${label}\n`);
           }
-          console.log(JSON.stringify(result, null, 2));
+          console.log(JSON.stringify({ ...result, resolution, run_id: id }, null, 2));
         }
         return 0;
       }

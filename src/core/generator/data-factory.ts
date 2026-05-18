@@ -70,17 +70,15 @@ export function generateFromSchema(
   // the API 422s with "Missing <required-by-other-variant>".
   if (schema.oneOf) {
     const variants = schema.oneOf as OpenAPIV3.SchemaObject[];
-    const picked = pickDiscriminatorVariant(variants, schema.discriminator?.propertyName)
-      ?? pickPreferredVariant(variants);
+    const picked = pickBestVariant(variants, schema.discriminator);
     const result = recurse(picked, propertyName);
-    return stampDiscriminator(result, picked, schema.discriminator?.propertyName);
+    return stampDiscriminator(result, picked, schema.discriminator);
   }
   if (schema.anyOf) {
     const variants = schema.anyOf as OpenAPIV3.SchemaObject[];
-    const picked = pickDiscriminatorVariant(variants, schema.discriminator?.propertyName)
-      ?? pickPreferredVariant(variants);
+    const picked = pickBestVariant(variants, schema.discriminator);
     const result = recurse(picked, propertyName);
-    return stampDiscriminator(result, picked, schema.discriminator?.propertyName);
+    return stampDiscriminator(result, picked, schema.discriminator);
   }
 
   // enum: first value (always valid for the API contract)
@@ -174,11 +172,27 @@ export function generateFromSchema(
 /** Fields the client must not send in a request body: explicit `readOnly: true`,
  *  or the literal name `id`. The latter is a heuristic for under-specified specs
  *  (common in in-house APIs) that don't mark the server-assigned id readOnly
- *  but still 4xx on it being present. */
+ *  but still 4xx on it being present.
+ *
+ *  Also strips Stripe-style `expand` meta-param when it's declared as a string
+ *  array — Stripe doesn't mark it `readOnly` but rejects synthetic random
+ *  values with 400 "This property cannot be expanded (<random>)", which kills
+ *  50+ baseline POSTs in mass-assignment / stateful checks on Stripe specs.
+ *  The shape check (array of strings on a request body) keeps false-positives
+ *  low: APIs using `expand` for real payload fields would normally use an
+ *  object/enum, not a free-string array. */
 function shouldSkipForRequest(name: string, schema: OpenAPIV3.SchemaObject): boolean {
   if (schema.readOnly === true) return true;
   if (name === "id") return true;
+  if (name === "expand" && isStringArray(schema)) return true;
   return false;
+}
+
+function isStringArray(schema: OpenAPIV3.SchemaObject): boolean {
+  if (schema.type !== "array") return false;
+  const items = schema.items as OpenAPIV3.SchemaObject | undefined;
+  if (!items) return false;
+  return items.type === "string";
 }
 
 /** When recursion hits the depth cap, return a type-appropriate placeholder
@@ -199,65 +213,111 @@ function depthLimitDefault(schema: OpenAPIV3.SchemaObject, name?: string): unkno
   }
 }
 
-/** ARV-78 (F25): when a parent oneOf/anyOf carries `discriminator.propertyName`,
- *  pick the variant whose discriminator property has a single-value enum or
- *  const so its identity is unambiguous. Returns undefined when nothing
- *  qualifies — caller falls back to pickPreferredVariant. */
-function pickDiscriminatorVariant(
+/** ARV-135 (m-21): score-based oneOf/anyOf variant selection.
+ *
+ * Picks the variant most likely to produce a body the server accepts:
+ *
+ *   1. Drop `type: "null"` shorthands unless they're the only choice
+ *      (OpenAPI 3.1 nullable spelling).
+ *   2. Prefer the variant with the fewest UNRESOLVABLE required fields
+ *      — i.e. required keys that have no entry in `properties`, which
+ *      the generator can't synthesise. The historical bug was picking
+ *      the FIRST variant matching the discriminator filter even when a
+ *      sibling variant was demonstrably more complete; this leaves
+ *      `required: [config, event_name]` partially-filled and the API
+ *      422s with "Missing config, event_name" (F24/Resend automations).
+ *   3. Among ties, prefer object-typed variants over primitives
+ *      (TASK-222: `Array<{id}>|Array<string>` should pick the object).
+ *   4. Prefer the variant with more declared properties (richer surface
+ *      is closer to what real callers send).
+ *   5. When a `discriminator.propertyName` is present, treat variants
+ *      that carry a single-value enum/const for that property as more
+ *      authoritative — they tie-break ahead of variants without one.
+ *
+ * The discriminator's `mapping` is used to derive the stamped value
+ * even when the picked variant lacks an inline enum/const: typical
+ * specs (Stripe, Linear) declare mapping centrally and omit the value
+ * on each variant.
+ */
+function pickBestVariant(
   variants: OpenAPIV3.SchemaObject[],
-  propertyName: string | undefined,
-): OpenAPIV3.SchemaObject | undefined {
-  if (!propertyName) return undefined;
-  for (const v of variants) {
-    const prop = v.properties?.[propertyName] as OpenAPIV3.SchemaObject | undefined;
-    if (!prop) continue;
+  discriminator: OpenAPIV3.DiscriminatorObject | undefined,
+): OpenAPIV3.SchemaObject {
+  const isNull = (s: OpenAPIV3.SchemaObject) => (s as { type?: unknown }).type === "null";
+  const nonNull = variants.filter(v => !isNull(v));
+  const pool = nonNull.length > 0 ? nonNull : variants;
+
+  const discriminatorKey = discriminator?.propertyName;
+  const hasDiscriminatorEnum = (v: OpenAPIV3.SchemaObject): boolean => {
+    if (!discriminatorKey) return false;
+    const prop = v.properties?.[discriminatorKey] as OpenAPIV3.SchemaObject | undefined;
+    if (!prop) return false;
     const en = (prop as { enum?: unknown[] }).enum;
     const cn = (prop as { const?: unknown }).const;
-    if (Array.isArray(en) && en.length === 1) return v;
-    if (cn !== undefined && cn !== null) return v;
-  }
-  return undefined;
+    return (Array.isArray(en) && en.length === 1) || (cn !== undefined && cn !== null);
+  };
+
+  const score = (v: OpenAPIV3.SchemaObject) => {
+    const req = (v.required ?? []) as string[];
+    const props = v.properties ?? {};
+    const unresolvable = req.filter(r => !(r in props)).length;
+    const propCount = Object.keys(props).length;
+    const isObjectWithProps = v.type === "object" && propCount > 0;
+    return {
+      unresolvable,
+      hasDiscriminator: hasDiscriminatorEnum(v) ? 1 : 0,
+      isObjectWithProps: isObjectWithProps ? 1 : 0,
+      propCount,
+    };
+  };
+
+  // Sort: fewer unresolvable → has discriminator → object-with-props → more props.
+  // Sort is stable, so original spec order breaks remaining ties.
+  const ranked = [...pool].sort((a, b) => {
+    const sa = score(a);
+    const sb = score(b);
+    if (sa.unresolvable !== sb.unresolvable) return sa.unresolvable - sb.unresolvable;
+    if (sa.hasDiscriminator !== sb.hasDiscriminator) return sb.hasDiscriminator - sa.hasDiscriminator;
+    if (sa.isObjectWithProps !== sb.isObjectWithProps) return sb.isObjectWithProps - sa.isObjectWithProps;
+    return sb.propCount - sa.propCount;
+  });
+
+  return ranked[0]!;
 }
 
 /** Stamp the discriminator key onto a generated object. Without this the
  *  variant choice is "anonymous" from the body's point of view — APIs that
  *  switch on `type` reject the request even when every other field is
- *  perfect. No-op when the propertyName is missing or the variant lacks an
- *  enum/const for that property. */
+ *  perfect.
+ *
+ *  ARV-135: now also honours `discriminator.mapping` — when the picked
+ *  variant has no inline enum/const for the discriminator property, fall
+ *  back to the first mapping key. Specs that declare polymorphism via
+ *  central mapping (rather than inline `enum: ["x"]` on each variant)
+ *  previously left the body un-stamped. */
 function stampDiscriminator(
   result: unknown,
   variant: OpenAPIV3.SchemaObject,
-  propertyName: string | undefined,
+  discriminator: OpenAPIV3.DiscriminatorObject | undefined,
 ): unknown {
+  const propertyName = discriminator?.propertyName;
   if (!propertyName) return result;
   if (!result || typeof result !== "object" || Array.isArray(result)) return result;
-  const prop = variant.properties?.[propertyName] as OpenAPIV3.SchemaObject | undefined;
-  if (!prop) return result;
-  const en = (prop as { enum?: unknown[] }).enum;
-  const cn = (prop as { const?: unknown }).const;
   let stamp: unknown;
-  if (Array.isArray(en) && en.length === 1) stamp = en[0];
-  else if (cn !== undefined && cn !== null) stamp = cn;
-  else return result;
+  const prop = variant.properties?.[propertyName] as OpenAPIV3.SchemaObject | undefined;
+  if (prop) {
+    const en = (prop as { enum?: unknown[] }).enum;
+    const cn = (prop as { const?: unknown }).const;
+    if (Array.isArray(en) && en.length === 1) stamp = en[0];
+    else if (cn !== undefined && cn !== null) stamp = cn;
+  }
+  if (stamp === undefined && discriminator?.mapping) {
+    const keys = Object.keys(discriminator.mapping);
+    if (keys.length > 0) stamp = keys[0];
+  }
+  if (stamp === undefined) return result;
   (result as Record<string, unknown>)[propertyName] = stamp;
   return result;
-}
-
-/** Prefer the most data-shape-informative variant from a oneOf/anyOf list:
- *  object-with-properties > non-null > first. Skips `type: "null"` entries
- *  introduced by 3.1 nullable shorthand. */
-function pickPreferredVariant(variants: OpenAPIV3.SchemaObject[]): OpenAPIV3.SchemaObject {
-  const isNull = (s: OpenAPIV3.SchemaObject) =>
-    (s as { type?: unknown }).type === "null";
-  const nonNull = variants.filter(v => !isNull(v));
-  const pool = nonNull.length > 0 ? nonNull : variants;
-
-  const objectWithProps = pool.find(
-    v => v.type === "object" && v.properties && Object.keys(v.properties).length > 0,
-  );
-  if (objectWithProps) return objectWithProps;
-
-  return pool[0]!;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -29,6 +29,12 @@ For triage of a failing run — see `zond-triage`.
 - **NEVER `curl` or `wget`** — use `zond request <method> <url> --api <name>`
   for ad-hoc HTTP so it lands in the run DB and respects auth. Never
   shell-substitute the token by hand (`$(yq …)` is blocked by the sandbox).
+  `--body '{…}'` always sends `application/json`. For form-encoded APIs
+  (Stripe v1, classic webforms) pass `--form` — zond URL-encodes the
+  JSON body. Auto-detect from spec: if `requestBody.content` in
+  `.api-catalog.yaml` declares only `application/x-www-form-urlencoded`,
+  use `--form`; mixed content-types → pick by `Content-Type` header you
+  want to test.
 - **NEVER hardcode tokens** — put them in `apis/<name>/.secrets.yaml`
   (auto-gitignored), reference from `.env.yaml` as `@secret:auth_token`.
   Plain `${SHELL_VAR}` references also work. Tests read the resolved
@@ -153,7 +159,9 @@ accept `--json` — use `--report json`.
 
 | User asked… | Start at |
 |---|---|
-| "audit this API", "test the whole API", "raise coverage" | Phase 0 → `zond audit --api <name>` (one-shot) OR walk Phase 0–8 |
+| "smoke this API", "quick first pass", "demo / CI gate" | `zond audit --api <name>` (safe-mode breadth pass — no live mutations) |
+| "audit this API", "test the whole API", "raise coverage", "deep pass" | walk Phase 0–9 — audit covers smoke; depth (stateful, security, learn-apply) needs phase-level decisions |
+| "full live audit against sandbox", "include seed/mass-assignment/security probes" | `zond audit --api <name> --live --seed --with-mass-assignment --with-security` (REQUIRES throwaway/sandbox account) |
 | "find bugs", "test for 5xx", "probe sweep" | Phase 0 → Phase 7 (Probes) |
 | "security only / SSRF / CRLF" | Phase 7.2 directly with `--dry-run` first |
 | "deep depth-checks", "SARIF", "stateful invariants" | Hand off → `zond-checks` |
@@ -198,6 +206,26 @@ schema-derived body. Bracket-notation nested params (Stripe's
 some APIs will 400 here; **don't ask the user to fill missing ids
 manually first**, jump to Phase 2 (annotate seed_body) instead.
 
+`--seed` handles most schema shapes including top-level required fields
+(ARV-67), discriminator-aware `oneOf` (ARV-78), and — since ARV-135 in
+m-21 — nested `oneOf`/`anyOf` with `discriminator.mapping`-only refs and
+multi-level discriminator chains. The variant picker now scores each
+candidate by how many of its required fields are resolvable from
+`properties` and prefers the most complete branch, so cases like the
+Resend `POST /automations` triggers stop 422-ing on missing
+`config`/`event_name`.
+
+Rare edge cases that still warrant `annotate seed_body` (Phase 2):
+- Required fields whose values are server-validated against external
+  state (a `webhook_url` that must resolve to a live HTTPS endpoint, a
+  `dns_record` that must already be verified).
+- Schemas that omit `required` AND `properties` for fields the API
+  silently enforces — the builder has no signal to synthesise them.
+
+If `--seed --cascade` reports `miss-seed-422` two passes in a row,
+escape to `annotate seed_body` or `zond fixtures add <var>=<value>`
+rather than looping.
+
 If `--seed` converges but vars stay UNSET, the reason is outside the
 API path (email verify / paid plan / SCIM / TOS limits). Document the
 gap; don't loop further.
@@ -206,6 +234,36 @@ Editing `.env.yaml` by hand is the sanctioned fallback when the CLI
 cannot harvest a value (write-only ingest endpoints, SDK-only ids,
 slugs that live in user's project config). Touch values only — never
 add keys not in `.api-fixtures.yaml`.
+
+### Dynamic value functions in `.env.yaml` (ARV-190, m-21)
+
+Stale hardcoded UUIDs / dates / idempotency keys pin existing rows or
+expire mid-run. Use `#(funcName)` / `#(funcName(args))` references —
+evaluated at load time, stable within one run:
+
+| Token | Resolves to | Use for |
+|---|---|---|
+| `#(uuid)` | fresh UUID v4 (same value across all references in this run) | Idempotency-Key, request id |
+| `#(uuidStable(<seed>))` | deterministic UUID from seed (sha-256 shaped as v4) | reproducible tests |
+| `#(today)` | `YYYY-MM-DD` (UTC) | expiry-from dates |
+| `#(todayPlus(N))` | today + N days (N may be negative) | expires_at, valid_until |
+| `#(now)` | ISO 8601 timestamp | created_at hints |
+| `#(unix)` | seconds since epoch | epoch timestamps |
+| `#(alphanumeric(N))` | N random `[a-z0-9]` chars (default 8) | one-shot tokens |
+| `#(env:VAR)` | `process.env.VAR` (alias for `${VAR}`) | secrets passed through |
+
+```yaml
+# apis/foo/.env.yaml
+idempotency_key: "#(uuid)"          # same uuid across every step in this run
+trial_expires:   "#(todayPlus(30))"  # 30 days from now
+request_id:      "req-#(uuid)"       # embedded; shares uuid with above
+```
+
+Resolution order: `${ENV}` → `#(...)` → `@secret:` → `@identity:`. Dynamic
+functions run BEFORE secret/identity refs so a secret value that happens to
+contain `#(...)` stays opaque (no double-expansion). Per-run cache means
+`#(uuid)` referenced twice in the same `.env.yaml` returns the same value
+— critical for idempotency-replay flows.
 
 ## Phase 2 — Annotate (NEW, m-20 / ARV-187)
 
@@ -262,6 +320,43 @@ non-standard lifecycle field names, write-only fields in create body).
 **For Stripe-style form-encoded APIs**: `--seed-bodies` is the single
 biggest win — it fixes `--seed` 400s for the bulk of resources.
 
+### Annotate-auto + agent-loop fast path (ARV-262 / 270 / 277 / 278-282)
+
+```bash
+# 1. Heuristic baseline — fills pagination / seed-bodies / lifecycle /
+#    idempotency that zond can deterministically derive (no agent needed).
+zond api annotate auto --api <name> --aspect all --auto-apply
+
+# 2. Worklist — what's still incomplete, ranked by downstream impact.
+#    Resources where recent seed POSTs all hit capability-style errors
+#    are tagged `account_capability_missing` (ARV-280).
+zond api annotate auto --api <name> --aspect seed-bodies --gap-report
+zond api annotate auto --api <name> --aspect seed-bodies --gap-report \
+  --exclude-hard-blocked        # hide the account-capability rows
+
+# 3a. One-shot context for a single resource — joins spec slice + last
+#     5 attempts + heuristic suggestion + next_steps hints (ARV-279).
+zond api annotate auto --api <name> --gap-report --explain <resource>
+
+# 3b. Raw DB shape: full bundle + last N attempts of seed POST history
+#     so the agent sees error progression (ARV-277/278).
+zond api annotate dump --api <name> --seed-bodies --only <res> \
+  --with-last-attempt --history 5
+
+# 4. Agent edits .api-resources.local.yaml directly OR pipes its YAML
+#    through apply. With --gap-fill-only (ARV-281) the agent's response
+#    can ONLY add missing fields — already-set blocks are protected from
+#    accidental overwrite.
+zond api annotate apply --api <name> --seed-bodies --input agent-out.yaml --gap-fill-only
+
+# 5. Pre-cascade staleness check (ARV-282) — pings each pre-filled FK
+#    against its owner's read endpoint. Clears stale (404) values so
+#    cascade re-discovers them. One extra GET per pre-filled FK at
+#    session start; pays for itself the first time a stale `customer`
+#    would have broken 10+ downstream seeds.
+zond prepare-fixtures --api <name> --apply --cascade --seed --check-staleness
+```
+
 ## Phase 3 — Generate tests
 
 ```bash
@@ -317,6 +412,13 @@ zond session end
 **Always pass `--validate-schema` for CRUD** — contract drift is
 invisible without it. `schema_violation` failures are real backend bugs;
 treat them like 5xx.
+
+**After any `zond run` with failures → delegate to `zond-triage`.** Do
+NOT parse `runs/run-NN.json` with `jq` by hand. The triage skill reads
+`zond db diagnose --json` (which already buckets by `recommended_action`
+in `data.by_recommended_action`, ARV-228) and routes by closed enum —
+re-implementing that logic with prose heuristics drifts. Only fall back
+to manual CLI queries when the failure is outside the example slice.
 
 Rate limit: `zond run` defaults to an adaptive limiter (no-op until
 `RateLimit-*` headers appear). Pass `--rate-limit <N>` for a hard cap;
@@ -420,8 +522,23 @@ zond probe security ssrf,crlf --api <name> --dry-run         # first run: which 
 zond probe security ssrf,crlf,open-redirect,prompt-injection --api <name>
 ```
 
+**Targeting** (two filters; an endpoint must pass BOTH to be planned):
+
+1. **Has a JSON request body** — GET-only routes are skipped with
+   `no-body`. The probes work by mutating a body field, so read-only
+   endpoints have nothing to attack.
+2. **Has ≥1 field name matching the requested class detectors** — if
+   no field matches, the endpoint is skipped with `no-matched-field`.
+
 Field autodetection: SSRF (`*_url`/`webhook`/`callback`/`format: uri`),
-CRLF (`subject`/`*_prefix`/`name`), open-redirect (`redirect`/`next`).
+CRLF (`subject`/`*_prefix`/`name`), open-redirect (`redirect`/`next`),
+prompt-injection (`prompt`/`system`/`instruction`).
+
+If `--dry-run` reports `0 planned / 0 skipped / 0 total` with a narrow
+`--include`, the scope likely captured only GET routes — broaden the
+filter or drop `--include` to see the per-endpoint skip reasons. With
+no `--include`, the dry-run shows `no-body` / `no-matched-field` next
+to each skipped endpoint so the gap is obvious.
 
 Baseline-OK request first; if baseline ≠ 2xx → `INCONCLUSIVE-BASELINE`,
 attacks skipped (kills 5×404 noise on scope-locked endpoints).
@@ -448,16 +565,34 @@ seeded-fixture endpoints).
 ## Phase 8 — Coverage + spec drift
 
 ```bash
-zond coverage --api <name> --union session                  # default for an audit window
+zond coverage --api <name> --union session                  # default: dual-metric (test + audit)
 zond coverage --api <name> --union since:1h                 # last hour
 zond coverage --api <name> --union tag:smoke                # tag-filtered
-zond coverage --api <name> --fail-on-coverage 50            # CI gate (use hit-coverage)
+zond coverage --api <name> --scope audit --union session    # only "did zond touch the API"
+zond coverage --api <name> --scope test  --union session    # legacy single block
+zond coverage --api <name> --fail-on-coverage 50            # CI gate (gates pass-coverage)
 ```
 
-**Two metrics**: `pass-coverage` (covered2xx — strict, CI gate) vs
-`hit-coverage` (any stored result, breadth proxy). Three-bucket JSON:
-`covered2xx`, `coveredButNon2xx` (hit but failed — usually fixture gap,
-not API bug), `unhit`.
+**Dual-metric output (ARV-265).** `zond coverage` prints two blocks side-by-side by default:
+
+- **test-coverage** — runs produced by `zond run` only (`run_kind` ∈ {regular, probe}). Has two sub-metrics:
+  - `pass-coverage`: endpoint had a passing 2xx (strict; CI gate via `--fail-on-coverage`)
+  - `hit-coverage`: endpoint received any response (loose; breadth proxy)
+  Three-bucket JSON: `covered2xx`, `coveredButNon2xx`, `unhit`.
+- **audit-coverage** — any HTTP touch from any producer (`zond run` + `checks run` + `probe` + `request` + `prepare-fixtures --cascade`). Use this to answer "did the scan reach the API at all?" — typical safe-mode runs without `zond run` still report >50% on a 1k-endpoint spec from `checks run` alone.
+
+Source breakdown (`--scope audit` text or `data.audit_coverage.by_source` JSON):
+
+```
+audit-coverage: 619/1184 endpoints (52%, 1500 HTTP touches)
+  by source:
+    check     619 endpoints, 1500 events
+    regular     0 endpoints,    0 events
+    probe       0 endpoints,    0 events
+    request     3 endpoints,    3 events
+```
+
+Producers opt out via `ZOND_CHECKS_PERSIST=0`.
 
 **Quality signals to gate CI on** (not raw pass-coverage):
 
@@ -489,29 +624,70 @@ Offer this proactively after a run surfaces `definitely_bug`
 (5xx / schema violation / mass-assignment 2xx). Skip for `env_issue` /
 `quirk`.
 
-## One-shot full audit
+## One-shot smoke audit — `zond audit`
 
-`zond audit --api <name>` runs the whole pipeline in one shot:
-prepare-fixtures → generate → probe static → session-wrapped run on
-tests+probes → coverage → `audit-report.html`. Each stage prints
-`==> Stage N/M: <name>`; stage failure doesn't stop the rest; final
-exit 1 if any stage failed.
+**`zond audit` is the breadth pass, not "full audit".** It covers the
+*smoke + coverage* slice — prepare-fixtures → generate → probe static
+→ session-wrapped run on tests+probes → coverage → `audit-report.html`.
+Depth (stateful checks, security probes against R18 evidence-gates,
+m-20 annotate, `--learn-apply` iteration) is the **skill's job, not
+audit's**: those stages need decisions audit can't make
+(annotate-before-stateful, scoping after auth-cluster, evidence
+preconditions). Use audit for: CI smoke, demo, "first 5 minutes on a
+new API". For a real depth campaign, walk Phase 0–9 from this skill.
 
 ```bash
-zond audit --api <name> --dry-run                       # plan
-zond audit --api <name>                                  # minimal pipeline
-zond audit --api <name> --seed                           # add prepare-fixtures --cascade --seed
-zond audit --api <name> --with-mass-assignment --with-security
+zond audit --api <name> --dry-run                       # print stage plan
+zond audit --api <name>                                  # safe mode (default) — no seed POSTs, no live probes
+zond audit --api <name> --live --seed                    # add prepare-fixtures --cascade --seed (throwaway/sandbox only)
+zond audit --api <name> --live --with-mass-assignment --with-security   # full live pipeline (throwaway/sandbox only)
 zond audit --api <name> --out reports/audit-<name>.html
 ```
+
+**ARV-264 safe vs live decision matrix.** Default is `--safe` (implicit;
+no flag needed). `--live` is the opt-in for traffic that mutates the
+target API.
+
+| Concern | `--safe` (default) | `--live` |
+|---|---|---|
+| `prepare-fixtures` mode | path-FK discovery only (GET) | adds `--cascade --seed` when `--seed` passed |
+| `probe mass-assignment` | skipped even if `--with-mass-assignment` set, with a warning | runs when `--with-mass-assignment` set |
+| `probe security` (SSRF/CRLF/redirect) | skipped even if `--with-security` set, with a warning | runs when `--with-security` set |
+| `probe static` (validation+methods) | always runs — pure spec walk, no live traffic | same |
+| `run tests / probes` | runs against the live API but only generated GET-shape suites by default | same plus seeded resources from `--seed` |
+
+**Pre-flight warnings (printed before any subprocess fires):** missing
+`auth_token` when the spec declares securitySchemes (probes will skip
+with 401 and the report will read misleadingly green); no
+securitySchemes declared in the spec (open API or incomplete spec —
+auth-related checks will skip).
+
+**Rule of thumb.** Unknown-scope PAT against a production API → `--safe`
+(default). Throwaway account / sandbox tenant → `--live` is fine. Never
+run `--live` against shared/production data on first contact.
+
+Each stage prints `==> Stage N/M: <name>` and a completion line
+`└─ OK · Ns` / `FAIL (exit K) · Ns` / `SKIPPED (reason)`. Exit 1 if
+any non-coverage stage failed.
 
 `generate` skipped via mtime when `tests/` is fresher than `spec.json`
 (pass `--force` to override).
 
-**Gotchas**:
-- Wraps its own session — closes any prior `session start` silently.
-- Can exit 0 on failed stages (parse stdout `Warning: N failed`).
-- `audit-report.html` path not echoed by default — pass `--out`.
+**Session reuse (ARV-65)**: if `.zond/current-session` is already set
+when audit starts (i.e. user ran `zond session start` first), audit
+reuses that session — `session-start` and `session-end` stages skip
+with reason `reusing active session <id>`. The user's session stays
+active after audit returns; runs inside audit are stamped with the
+outer `session_id` and roll up under the user's `coverage --union
+session` later.
+
+ARV-158: when any run inside the audit session has failures, the
+generated `audit-report.html` embeds a "Failures by run" section with
+collapsible `<details>` per run — `by_recommended_action` buckets +
+first example (method, path, status, reason) + concrete drill-down
+commands (`zond db diagnose --run-id N --json`, `zond report export
+N`). Triage starts from the rendered HTML; you only fall back to CLI
+queries when you need fields outside the example slice.
 
 When NOT to use audit: narrow asks ("fix run X", "why this endpoint
 500s") — walk phases.
@@ -584,6 +760,12 @@ zond db diagnose <run-id> --json              # grouped by root_cause
 zond db run <id> --status 500 --json
 zond db compare <idA> <idB> --json            # regression diff
 ```
+
+> **db --json envelope shape** (consistent across siblings): the array
+> always lives under `data.<plural>`, not directly under `data`.
+> `db runs` → `.data.runs[]`, `db collections` → `.data.collections[]`,
+> `db run <id> --status …` → `.data.results[]`. Top-level totals on runs
+> are at `runs[].total/passed/failed`, not under a `.summary` wrapper.
 
 `recommended_action` enum (closed):
 - `report_backend_bug` — STOP, surface to user

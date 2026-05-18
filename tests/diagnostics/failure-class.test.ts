@@ -94,6 +94,45 @@ describe("classifyFailure (FailureClassDescriptor, from failure-class)", () => {
     expect(c?.failure_class_reason).toContain("400");
   });
 
+  test("ARV-236: 401 where test expected 200 → env_issue (token_scope)", () => {
+    const r = baseResult({
+      response: { status: 401, headers: {}, body: "{}", duration_ms: 5 },
+      assertions: [
+        { field: "status", rule: "equals 200", passed: false, actual: 401, expected: 200 },
+      ],
+    });
+    const c = classifyFailure(r);
+    expect(c?.failure_class).toBe("env_issue");
+    expect(c?.failure_class_reason).toContain("token_scope");
+    expect(c?.failure_class_reason).toContain("401");
+  });
+
+  test("ARV-236: 403 where test expected 200 → env_issue (token_scope)", () => {
+    const r = baseResult({
+      response: { status: 403, headers: {}, body: "{}", duration_ms: 5 },
+      assertions: [
+        { field: "status", rule: "equals 200", passed: false, actual: 403, expected: 200 },
+      ],
+    });
+    const c = classifyFailure(r);
+    expect(c?.failure_class).toBe("env_issue");
+    expect(c?.failure_class_reason).toContain("token_scope");
+  });
+
+  test("ARV-236: 403 where test deliberately expected 403 → still classifies normally (no override)", () => {
+    // A negative-probe expecting 403 shouldn't be touched by the
+    // token_scope rule — only fires when expected was 2xx.
+    const r = baseResult({
+      response: { status: 403, headers: {}, body: "{}", duration_ms: 5 },
+      provenance: { generator: "negative-probe", endpoint: "GET /admin" },
+      assertions: [
+        { field: "status", rule: "equals 401", passed: false, actual: 403, expected: 401 },
+      ],
+    });
+    const c = classifyFailure(r);
+    expect(c?.failure_class).toBe("quirk");
+  });
+
   test("plain assertion failure without generator → null (unclassified)", () => {
     const r = baseResult({
       response: { status: 200, headers: {}, body: '{"name":"X"}', duration_ms: 5 },

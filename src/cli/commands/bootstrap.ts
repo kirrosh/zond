@@ -66,6 +66,14 @@ export interface BootstrapOptions {
    *  command. Caller passes the human-facing name; defaults to "bootstrap"
    *  for back-compat with direct invocations. */
   commandName?: string;
+  /** ARV-282: ping the owner's read endpoint for each pre-filled FK var
+   *  before cascade/seed; if GET returns 404, clear the var so cascade
+   *  re-discovers it. Catches stale FKs from previous sessions (test
+   *  data wiped, throwaway account rotated, …) that would otherwise
+   *  silently break every downstream seed POST until the user noticed
+   *  the resource_missing chain in the logs. Opt-in because it costs
+   *  one GET per pre-filled FK at session start. */
+  checkStaleness?: boolean;
 }
 
 interface SeedAttempt {
@@ -87,6 +95,9 @@ interface SeedAttempt {
    *  user (or downstream agent) can reproduce the exact request without
    *  poking through structured envelopes. */
   repro?: string;
+  /** ARV-269: true when the POST body came from `seed_body` overlay in
+   *  `.api-resources.local.yaml` rather than the schema generator. */
+  bodySource?: "overlay" | "generator";
 }
 
 interface Pass {
@@ -241,7 +252,14 @@ async function trySeed(
   if (!ep) {
     return { varName, resource: owner.resource, createPath: parsed.path, status: "skip-no-create", reason: `${parsed.method} ${parsed.path} not in spec` };
   }
-  if (!ep.requestBodySchema) {
+  // ARV-269: prefer agent-authored seed_body overlay over the generator
+  // when one is present in `.api-resources.local.yaml`. The overlay is
+  // exactly the kind of fixture POST that the API actually accepts
+  // (Stripe's required field XORs, expand[] arrays, …) — the generator
+  // gives us random scalars that strict validators reject. We still
+  // need a requestBodySchema-or-overlay to have *something* to send.
+  const hasOverlay = owner.seed_body && typeof owner.seed_body.body === "object";
+  if (!hasOverlay && !ep.requestBodySchema) {
     return { varName, resource: owner.resource, createPath: parsed.path, status: "skip-no-schema", reason: `no requestBodySchema on ${parsed.method} ${parsed.path}` };
   }
   const { resolved: pathResolved, missing } = resolvePath(parsed.path, vars);
@@ -260,12 +278,17 @@ async function trySeed(
   // POST 422s on a real API because randomly-generated parent ids don't
   // exist in the target tenant.
   const known = nonEmptyVars(vars);
-  const generated = buildCreateRequestBody(ep.requestBodySchema, { knownFixtures: known });
+  const generated: Record<string, unknown> | unknown = hasOverlay
+    ? owner.seed_body!.body
+    : buildCreateRequestBody(ep.requestBodySchema!, { knownFixtures: known });
+  const bodySource: "overlay" | "generator" = hasOverlay ? "overlay" : "generator";
   // Resolve `{{$randomSlug}}` etc. into concrete values for the live POST.
   const concreteBody = substituteDeep(generated, vars);
 
   const url = `${baseUrl.replace(/\/+$/, "")}${pathResolved}`;
-  const contentType = ep.requestBodyContentType ?? "application/json";
+  // ARV-269: overlay may override content-type when the create endpoint's
+  // spec declares a wrong / generic content-type that the live API rejects.
+  const contentType = owner.seed_body?.content_type ?? ep.requestBodyContentType ?? "application/json";
   const headers: Record<string, string> = {
     accept: "application/json",
     "content-type": contentType,
@@ -295,6 +318,7 @@ async function trySeed(
       createPath: parsed.path,
       status: "miss-network",
       reason: err instanceof Error ? err.message : String(err),
+      bodySource,
     };
   }
   if (resp.status < 200 || resp.status >= 300) {
@@ -313,6 +337,7 @@ async function trySeed(
       status: isSeed422 ? "miss-seed-422" : "miss-status",
       reason: `${parsed.method} ${pathResolved} → ${resp.status}${detailHint ? ` (${detailHint})` : ""}`,
       repro,
+      bodySource,
     };
   }
   const captured = captureFromResponse(
@@ -326,6 +351,7 @@ async function trySeed(
       createPath: parsed.path,
       status: "miss-no-id",
       reason: `response had no extractable ${owner.captureField || "id"}`,
+      bodySource,
     };
   }
   return {
@@ -334,6 +360,7 @@ async function trySeed(
     createPath: parsed.path,
     status: "seeded",
     capturedId: captured,
+    bodySource,
   };
 }
 
@@ -348,6 +375,88 @@ interface BootstrapResult {
  *  summary so users can tell `nothing-to-do` apart from `we ran out of
  *  budget`. */
 export type CascadeStopReason = "stable" | "max-passes" | "no-targets";
+
+/**
+ * ARV-282: validate each pre-filled FK var is still alive by GET'ing
+ * the owner's read endpoint. Stale (404) values are cleared so the
+ * cascade re-discovers them; 200 / 401 / 403 / network errors keep the
+ * value (we'd rather a stale value than burn through the cascade
+ * budget on transient errors).
+ *
+ * Cost: one GET per pre-filled FK at session start. With test data on
+ * a sandbox account that gets cleared periodically this pays for
+ * itself the first time it catches a missing `customer` that would
+ * otherwise have failed 10+ downstream seed POSTs with
+ * `resource_missing` errors.
+ */
+interface StalenessOutcome {
+  varName: string;
+  status: "alive" | "stale-404" | "skip-no-read" | "transient";
+  detail?: string;
+}
+
+async function verifyEnvFreshness(
+  targets: FkTarget[],
+  resources: ResourceYaml[],
+  endpoints: EndpointInfo[],
+  schemes: SecuritySchemeInfo[],
+  env: Record<string, string>,
+  baseUrl: string,
+  timeoutMs: number,
+): Promise<StalenessOutcome[]> {
+  const out: StalenessOutcome[] = [];
+  for (const t of targets) {
+    const value = env[t.varName];
+    if (isPlaceholder(value)) continue;
+    const owner = findOwnerResourceForSeed(t.varName, resources);
+    if (!owner || !owner.endpoints?.read) {
+      out.push({ varName: t.varName, status: "skip-no-read" });
+      continue;
+    }
+    const parsed = parseEndpointLabel(owner.endpoints.read);
+    if (!parsed) {
+      out.push({ varName: t.varName, status: "skip-no-read", detail: "unparseable read label" });
+      continue;
+    }
+    const ep = endpoints.find(
+      (e) => e.method.toUpperCase() === parsed.method && e.path === parsed.path && !e.deprecated,
+    );
+    if (!ep) {
+      out.push({ varName: t.varName, status: "skip-no-read", detail: `${parsed.method} ${parsed.path} not in spec` });
+      continue;
+    }
+    const { resolved, missing } = resolvePath(parsed.path, env);
+    if (missing.length > 0) {
+      out.push({ varName: t.varName, status: "skip-no-read", detail: `parent fixture missing: ${missing.join(",")}` });
+      continue;
+    }
+    const url = `${baseUrl.replace(/\/+$/, "")}${resolved}`;
+    const headers: Record<string, string> = {
+      accept: "application/json",
+      ...liveAuthHeaders(ep, schemes, env),
+    };
+    try {
+      const resp = await executeRequest(
+        { method: parsed.method, url, headers },
+        { timeout: timeoutMs, retries: 0, network_retries: 1 },
+      );
+      if (resp.status === 404) {
+        out.push({ varName: t.varName, status: "stale-404", detail: `${value} no longer exists` });
+        env[t.varName] = "";
+      } else if (resp.status >= 200 && resp.status < 300) {
+        out.push({ varName: t.varName, status: "alive" });
+      } else {
+        // 401 / 403 / 5xx — could be auth scope (token can write but
+        // not read a specific resource) or backend hiccup. Keep value;
+        // the seed loop will surface real failures.
+        out.push({ varName: t.varName, status: "transient", detail: `${resp.status}` });
+      }
+    } catch (err) {
+      out.push({ varName: t.varName, status: "transient", detail: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return out;
+}
 
 async function runCascade(
   targets: FkTarget[],
@@ -434,6 +543,20 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     // need this for per-target classification (`already` vs `discovered`).
     const preFilled = new Set(targets.filter(t => !isPlaceholder(env[t.varName])).map(t => t.varName));
 
+    // ARV-282: optional pre-cascade staleness check. Ping each pre-filled
+    // FK against its owner's read endpoint and clear values that 404.
+    // Cleared vars drop out of `preFilled` so they're treated as
+    // "discovered" rather than "already" in the per-target table.
+    let stalenessOutcomes: StalenessOutcome[] = [];
+    if (options.checkStaleness && preFilled.size > 0) {
+      stalenessOutcomes = await verifyEnvFreshness(
+        targets, resourceMap.resources, endpoints, schemes, env, baseUrl, timeout,
+      );
+      for (const o of stalenessOutcomes) {
+        if (o.status === "stale-404") preFilled.delete(o.varName);
+      }
+    }
+
     const writes = new Map<string, string>();
     const passes: Pass[] = [];
     let lastCascadeStop: CascadeStopReason = "no-targets";
@@ -502,6 +625,15 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
     const totalFkVars = targets.length;
     const filledFkVars = targets.filter(t => !isPlaceholder(env[t.varName])).length;
     const fillRate = totalFkVars === 0 ? 1 : filledFkVars / totalFkVars;
+    // ARV-269: count distinct resources whose seed_body overlay was actually
+    // consumed during this seed loop (one resource × N vars still counts
+    // once). Surfaced in summary so the user can confirm the agent-authored
+    // overlay reached prepare-fixtures (and isn't being silently ignored as
+    // it was pre-ARV-269 — the original Stripe live-scan regression).
+    const seedBodyResources = new Set(
+      seeds.filter(s => s.bodySource === "overlay").map(s => s.resource),
+    );
+    const seedBodyOverlayCount = seedBodyResources.size;
 
     // TASK-271: per-target classification — `already` (was filled at start),
     // `discovered` (cascade list-endpoint pulled an id), `seeded` (POST-create
@@ -612,6 +744,7 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
           writes: writes.size,
           seedsAttempted: seeds.length,
           seedsSucceeded: seeds.filter(s => s.status === "seeded").length,
+          seedBodyOverlayResources: seedBodyOverlayCount,
           passes: passes.length,
           cascadeStop: lastCascadeStop,
           ...(options.seed ? { seedStop } : {}),
@@ -622,6 +755,18 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
       const tag = mode === "exec" ? "[exec]" : "[plan]";
       console.log(`${tag} Bootstrap against ${baseUrl} (${envPath})`);
       console.log("");
+
+      // ARV-282: surface staleness verdicts before the regular per-target
+      // table so the user understands why a var moved from "already" to
+      // "discovered" in this run.
+      if (stalenessOutcomes.length > 0) {
+        const stale = stalenessOutcomes.filter((o) => o.status === "stale-404");
+        if (stale.length > 0) {
+          console.log(`Staleness check: ${stale.length} fixture(s) cleared (404 from owner's read endpoint):`);
+          for (const o of stale) console.log(`  refresh ${o.varName.padEnd(28)} ${o.detail ?? ""}`);
+          console.log("");
+        }
+      }
 
       if (noOp) {
         console.log(`bootstrap: nothing to do — ${filledFkVars}/${totalFkVars} fixtures already present.`);
@@ -649,10 +794,14 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
         }
         if (seeds.length > 0) {
           console.log("");
+          if (seedBodyOverlayCount > 0) {
+            console.log(`loaded seed_body for ${seedBodyOverlayCount} resource(s) from overlay`);
+          }
           console.log("Seed attempts:");
           for (const s of seeds) {
             const tail = s.status === "seeded" ? `→ ${s.capturedId}` : `(${s.reason ?? ""})`;
-            console.log(`  ${s.status.padEnd(18)} ${s.varName.padEnd(28)} ${s.resource.padEnd(20)} ${tail}`);
+            const src = s.bodySource === "overlay" ? " [overlay]" : "";
+            console.log(`  ${s.status.padEnd(18)} ${s.varName.padEnd(28)} ${s.resource.padEnd(20)} ${tail}${src}`);
           }
           // ARV-47 AC#4: print curl-style repro for every 422 to stderr so the
           // user can copy-paste-debug without inspecting the JSON envelope.
@@ -683,6 +832,29 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
         }
         console.log("");
         console.log(`Filled ${filledFkVars}/${totalFkVars} path-FK vars (${Math.round(fillRate * 100)}%).`);
+        // ARV-275: split Discovery vs Seed in the human summary. Without
+        // this, a run where `Filled 27/92` came entirely from discovery
+        // and every one of 26 seed POSTs failed reads as a partial
+        // success; the user has no signal that overlays are missing.
+        const seedsTotal = seeds.length;
+        const seedsOk = seeds.filter(s => s.status === "seeded").length;
+        const discoveryWrites = Math.max(0, writes.size - seedsOk);
+        if (seedsTotal > 0) {
+          const pct = Math.round((seedsOk / seedsTotal) * 100);
+          console.log(`  Discovery: ${discoveryWrites} value(s) from list-endpoints (cascade ${passes.length} pass(es))`);
+          console.log(`  Seed POST attempts: ${seedsTotal} total, ${seedsOk} succeeded (${pct}%)`);
+          if (seedsOk === 0) {
+            printWarning(
+              `0/${seedsTotal} seed POSTs succeeded — likely missing seed_body overlay ` +
+              `(see ARV-187 / ARV-269 / ARV-270) or the token can't create resources.`,
+            );
+          } else if (pct < 50) {
+            printWarning(
+              `seed success rate ${pct}% (${seedsOk}/${seedsTotal}) — review failing bodies; ` +
+              `consider adding seed_body overlay (ARV-187 / ARV-269 / ARV-270).`,
+            );
+          }
+        }
       }
 
       if (applied) {
@@ -692,6 +864,13 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
       } else {
         printWarning(`[plan] ${writes.size} value(s) ready. Re-run with --apply to write ${envPath}.`);
       }
+    }
+    // ARV-275: signal 0% seed-success via exit 2 (warning). Discovery-only
+    // runs and runs with no seed attempts keep exit 0; runs where every
+    // seed failed get a non-zero so CI / fb-loop drivers don't treat them
+    // as healthy.
+    if (seeds.length > 0 && seeds.every(s => s.status !== "seeded")) {
+      return 2;
     }
     return 0;
   } catch (err) {

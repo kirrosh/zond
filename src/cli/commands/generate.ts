@@ -505,7 +505,9 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
     if (options.json) {
       printJson(jsonError("generate", [message]));
     } else {
-      printError(message);
+      // ARV-203: pass err so ZOND_DEBUG=1 dumps the stack and the user
+      // gets a hint about the env var when running without it.
+      printError(message, err);
     }
     return 2;
   }

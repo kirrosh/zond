@@ -57,6 +57,7 @@ export type FindingClass =
   | "check:pagination_invariants"
   | "check:lifecycle_transitions"
   | "check:open_cors_on_sensitive"
+  | "check:cursor_boundary_fuzzing"
   | "check:rate_limit_headers_absent"
   | "check:network_error"
 
@@ -160,6 +161,7 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
     case "check:idempotency_replay":
     case "check:pagination_invariants":
     case "check:lifecycle_transitions":
+    case "check:cursor_boundary_fuzzing":
       return "report_backend_bug";
 
     case "check:negative_data_rejection":

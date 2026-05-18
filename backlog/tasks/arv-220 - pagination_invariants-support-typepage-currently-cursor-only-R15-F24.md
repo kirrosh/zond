@@ -1,9 +1,10 @@
 ---
 id: ARV-220
 title: 'pagination_invariants: support type=page (currently cursor-only) (R15/F24)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 10:08'
+updated_date: '2026-05-16 08:58'
 labels:
   - feedback-loop
   - api-github
@@ -32,3 +33,25 @@ Or, until implemented, the annotate-apply validator should warn 'type=page not y
 
 Log: see feedback-15.md F24.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented page-style support in pagination_invariants (m-21).
+
+Added: PaginationConfig.pageParam + startPage, yaml fields page_param/start_page (discover.ts, checks.ts, resources-builder.ts), annotate skill schema + EXPECTED_OUTPUT_SHAPE (pagination.ts).
+
+Check logic split into runCursorStyle/runPageStyle (pagination_invariants.ts). Page-style invariants:
+- duplicate_items: A∩B disjoint by cursor_field (same data-loss signal as cursor)
+- per_page_exceeded: server cannot return > per_page items on either page
+- empty page B = natural end-of-list (pass, not skip)
+has_more NOT enforced for page-style (most APIs use Link headers / total_pages).
+
+Auto-detect: `page` / `page_number` / `pagenumber` query params trigger page-style when no yaml. Defaults: page_param=page, start_page=1, limit_param=per_page, default_limit=2.
+
+offset/token still short-circuit with 'not implemented'.
+
+Tests: 7 new page-style cases (pagination-invariants.test.ts) — disjoint pass, duplicates fail, per_page exceeded, empty B = pass, start_page=0, auto-detect, custom params. All 17 tests green; 2198/2198 unit tests pass.
+
+Skill template (zond-checks.md): updated heads-up + page-style yaml example.
+<!-- SECTION:NOTES:END -->

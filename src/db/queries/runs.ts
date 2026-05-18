@@ -77,10 +77,10 @@ function decodeTags(raw: unknown): string[] | null {
   }
 }
 
-function decodeRunKind(raw: unknown): "regular" | "probe" | "check" {
+function decodeRunKind(raw: unknown): import("../../core/runner/run-kind.ts").RunKind {
   // Migration v10 backfills legacy rows; this is a belt-and-suspenders
   // normaliser for any value SQLite returns from `run_kind`.
-  if (raw === "probe" || raw === "check") return raw;
+  if (raw === "probe" || raw === "check" || raw === "request" || raw === "fixture") return raw;
   return "regular";
 }
 

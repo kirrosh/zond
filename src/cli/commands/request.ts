@@ -141,6 +141,20 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
       form: useForm,
     });
 
+    // ARV-265 (B3): persist this ad-hoc call into runs/results when a
+    // session is active, so `zond coverage --scope audit` attributes it.
+    // No session → no DB write (mirrors `curl`-replacement intent).
+    await maybePersistAuditedRequest({
+      options,
+      method: options.method.toUpperCase(),
+      url: options.url,
+      headers,
+      body: options.body,
+      result,
+    }).catch((err) => {
+      process.stderr.write(`zond: audit persistence failed (${(err as Error).message}).\n`);
+    });
+
     let validation: SchemaValidationOutcome | null = null;
     if (options.validateSchema || options.validateAgainst) {
       validation = await runSchemaValidation(options, result);
@@ -209,6 +223,56 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
     }
     return 1;
   }
+}
+
+// ──────────────────────────────────────────────
+// ARV-265 (B3): persist an ad-hoc `zond request` call into runs/results
+// so `zond coverage --scope audit` sees the HTTP touch. Only fires when
+// a session is active — outside a session, the command stays a pure
+// curl-replacement and the DB doesn't grow with one-off requests.
+// ──────────────────────────────────────────────
+
+async function maybePersistAuditedRequest(args: {
+  options: RequestOptions;
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body: string | undefined;
+  result: { status: number; headers: Record<string, string>; body: unknown; duration_ms: number };
+}): Promise<void> {
+  const { readCurrentSession } = await import("../../core/context/session.ts");
+  const session = readCurrentSession();
+  if (!session) return; // B3: outside-session calls leave no trace.
+
+  const { checksPersistEnabled, beginAuditRun, finalizeAuditRun } =
+    await import("../../core/audit/persist.ts");
+  if (!checksPersistEnabled()) return;
+
+  getDb(args.options.dbPath);
+  const collectionId = args.options.api ? findCollectionByNameOrId(args.options.api)?.id : undefined;
+  const runId = beginAuditRun({
+    runKind: "request",
+    ...(collectionId != null ? { collectionId } : {}),
+    sessionId: session.id,
+    tags: ["request", "ad-hoc"],
+  });
+  const status = args.result.status >= 200 && args.result.status < 400 ? "pass" : "fail";
+  finalizeAuditRun(runId, [
+    {
+      suiteName: "request/ad-hoc",
+      suiteFile: `apis/${args.options.api ?? "_"}/request.yaml`,
+      testName: `request::${args.method} ${args.url}`,
+      status,
+      request: { method: args.method, url: args.url, headers: args.headers, body: args.body },
+      response: {
+        status: args.result.status,
+        headers: args.result.headers,
+        body: typeof args.result.body === "string" ? args.result.body : JSON.stringify(args.result.body ?? ""),
+        duration_ms: args.result.duration_ms,
+      },
+      durationMs: args.result.duration_ms,
+    },
+  ]);
 }
 
 // ──────────────────────────────────────────────

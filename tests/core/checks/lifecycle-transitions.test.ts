@@ -279,4 +279,163 @@ describe("lifecycle_transitions — stateful check", () => {
     // 2nd call (action POST) should hit /subs/sub_xyz/cancel
     expect(h.calls[1]!.req.url).toContain("/subs/sub_xyz/cancel");
   });
+
+  // ── ARV-219: pure-observation mode (no `actions` block) ────────
+
+  function makeList(over: Partial<EndpointInfo> = {}): EndpointInfo {
+    return {
+      path: "/subs",
+      method: "GET",
+      operationId: "list_subs",
+      tags: [],
+      parameters: [],
+      responseContentTypes: ["application/json"],
+      responses: [{ statusCode: 200, description: "ok" }],
+      security: [],
+      ...over,
+    };
+  }
+  const LIFECYCLE_NO_ACTIONS: LifecycleConfig = {
+    field: "status",
+    states: ["pending", "active", "cancelled"],
+    transitions: [
+      { from: "pending", to: ["active", "cancelled"] },
+      { from: "active", to: ["cancelled"] },
+      { from: "cancelled", to: [] },
+    ],
+    actions: {},
+  };
+
+  test("observation: all observed states declared → pass", async () => {
+    const cfg = new Map([["subscription", { lifecycle: LIFECYCLE_NO_ACTIONS }]]);
+    const g: CrudGroup = { ...makeGroup(), list: makeList() };
+    const h = stubHarness([
+      r2xx([
+        { id: "sub_1", status: "active" },
+        { id: "sub_2", status: "pending" },
+        { id: "sub_3", status: "cancelled" },
+      ]),
+    ], cfg);
+    const out = await lifecycleTransitions.run(g, h);
+    expect(out.kind).toBe("pass");
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0]!.req.method).toBe("GET");
+    expect(h.calls[0]!.req.url).toContain("/subs");
+  });
+
+  test("observation: undeclared state in list → fail undeclared_state", async () => {
+    const cfg = new Map([["subscription", { lifecycle: LIFECYCLE_NO_ACTIONS }]]);
+    const g: CrudGroup = { ...makeGroup(), list: makeList() };
+    const h = stubHarness([
+      r2xx({ data: [
+        { id: "sub_1", status: "active" },
+        { id: "sub_2", status: "ghost" },     // undeclared
+        { id: "sub_3", status: "zombie" },    // undeclared, different value
+        { id: "sub_4", status: "ghost" },     // same undeclared state, second sample id
+      ] }),
+    ], cfg);
+    const out = await lifecycleTransitions.run(g, h);
+    expect(out.kind).toBe("fail");
+    if (out.kind === "fail") {
+      expect(out.evidence?.kind).toBe("undeclared_state");
+      expect(out.evidence?.mode).toBe("observation");
+      const observed = out.evidence?.observed_undeclared as Array<{ state: string; sample_ids: string[] }>;
+      expect(observed.map((o) => o.state).sort()).toEqual(["ghost", "zombie"]);
+      const ghost = observed.find((o) => o.state === "ghost")!;
+      expect(ghost.sample_ids).toEqual(["sub_2", "sub_4"]);
+      expect(out.evidence?.items_examined).toBe(4);
+    }
+  });
+
+  test("observation: empty list → skip", async () => {
+    const cfg = new Map([["subscription", { lifecycle: LIFECYCLE_NO_ACTIONS }]]);
+    const g: CrudGroup = { ...makeGroup(), list: makeList() };
+    const h = stubHarness([r2xx([])], cfg);
+    const out = await lifecycleTransitions.run(g, h);
+    expect(out.kind).toBe("skip");
+    if (out.kind === "skip") expect(out.reason).toMatch(/empty/);
+  });
+
+  test("observation: list 5xx → skip broken-baseline", async () => {
+    const cfg = new Map([["subscription", { lifecycle: LIFECYCLE_NO_ACTIONS }]]);
+    const g: CrudGroup = { ...makeGroup(), list: makeList() };
+    const h = stubHarness([rStatus(503)], cfg);
+    const out = await lifecycleTransitions.run(g, h);
+    expect(out.kind).toBe("skip");
+    if (out.kind === "skip") expect(out.reason).toMatch(/observation mode/);
+  });
+
+  test("observation: state field missing on EVERY item → skip with yaml-mismatch hint", async () => {
+    const cfg = new Map([["subscription", { lifecycle: LIFECYCLE_NO_ACTIONS }]]);
+    const g: CrudGroup = { ...makeGroup(), list: makeList() };
+    const h = stubHarness([r2xx([
+      { id: "sub_1", state: "active" },   // wrong field name
+      { id: "sub_2", state: "pending" },
+    ])], cfg);
+    const out = await lifecycleTransitions.run(g, h);
+    expect(out.kind).toBe("skip");
+    if (out.kind === "skip") expect(out.reason).toMatch(/state field "status" missing/);
+  });
+
+  test("observation: GitHub-shape body picks the longest array (e.g. {workflow_runs:[...], total_count:42})", async () => {
+    const cfg = new Map([["subscription", { lifecycle: LIFECYCLE_NO_ACTIONS }]]);
+    const g: CrudGroup = { ...makeGroup(), list: makeList() };
+    const h = stubHarness([
+      r2xx({
+        total_count: 3,
+        workflow_runs: [
+          { id: 1, status: "active" },
+          { id: 2, status: "pending" },
+        ],
+      }),
+    ], cfg);
+    const out = await lifecycleTransitions.run(g, h);
+    expect(out.kind).toBe("pass");
+  });
+
+  test("observation: unrecognised list body shape → skip", async () => {
+    const cfg = new Map([["subscription", { lifecycle: LIFECYCLE_NO_ACTIONS }]]);
+    const g: CrudGroup = { ...makeGroup(), list: makeList() };
+    const h = stubHarness([r2xx({ unexpected_root: "no array here" })], cfg);
+    const out = await lifecycleTransitions.run(g, h);
+    expect(out.kind).toBe("skip");
+    if (out.kind === "skip") expect(out.reason).toMatch(/shape not recognised/);
+  });
+
+  test("observation: no list endpoint + no actions → skip with explicit reason", async () => {
+    const cfg = new Map([["subscription", { lifecycle: LIFECYCLE_NO_ACTIONS }]]);
+    const out = await lifecycleTransitions.run(makeGroup(), stubHarness([], cfg));
+    expect(out.kind).toBe("skip");
+    if (out.kind === "skip") expect(out.reason).toMatch(/no actions and no list endpoint/);
+  });
+
+  test("observation: sample id falls back to `number` when idParam-field missing (GitHub Issues shape)", async () => {
+    const cfg = new Map([["subscription", { lifecycle: LIFECYCLE_NO_ACTIONS }]]);
+    const g: CrudGroup = { ...makeGroup(), list: makeList() };
+    const h = stubHarness([
+      r2xx([
+        { number: 42, status: "ghost" },    // no `sub_id` or `id`
+      ]),
+    ], cfg);
+    const out = await lifecycleTransitions.run(g, h);
+    expect(out.kind).toBe("fail");
+    if (out.kind === "fail") {
+      const observed = out.evidence?.observed_undeclared as Array<{ state: string; sample_ids: string[] }>;
+      expect(observed[0]!.sample_ids).toEqual(["42"]);
+    }
+  });
+
+  test("action-mode declared but resource lacks create+read → explicit skip", async () => {
+    const cfg = new Map([["subscription", { lifecycle: SUBSCRIPTION_LIFECYCLE }]]);
+    const g: CrudGroup = {
+      resource: "subscription",
+      basePath: "/subs",
+      itemPath: "/subs/{sub_id}",
+      idParam: "sub_id",
+      list: makeList(),
+    };
+    const out = await lifecycleTransitions.run(g, stubHarness([], cfg));
+    expect(out.kind).toBe("skip");
+    if (out.kind === "skip") expect(out.reason).toMatch(/lacks create\+read/);
+  });
 });

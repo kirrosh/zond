@@ -3,9 +3,10 @@ id: ARV-219
 title: >-
   lifecycle_transitions: support pure-observation (no 'actions' annotation)
   (R15/F23)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 10:08'
+updated_date: '2026-05-16 09:06'
 labels:
   - feedback-loop
   - api-github
@@ -33,3 +34,24 @@ Skill .claude/skills/zond-checks/SKILL.md should also explicitly note that actio
 
 Log: see feedback-15.md F23.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented pure-observation mode in lifecycle_transitions (m-21).
+
+When cfg.actions is empty AND g.list exists, the check switches modes:
+- GET list once, walk items, assert each observed cfg.field value ∈ cfg.states
+- Reports single finding 'undeclared_state' per resource with per-state sample ids (up to 5), mode='observation', items_examined count
+- Cannot verify transitions[] (no time series in single list call) — documented as a limitation
+
+Skip paths: list non-2xx (broken-baseline), empty list, unrecognised body shape, field missing on every item (yaml mismatch hint).
+
+Wiring: applies(g) loosened to (create+read) OR list; run() branches before action-mode begins. Action-mode path now also skips with explicit reason when actions declared but create+read missing.
+
+annotate skill (lifecycle.ts EXPECTED_OUTPUT_SHAPE) now tells agent that actions:{} triggers observation mode (was silently skipped before — this was the F23 papercut).
+
+Tests: 9 new observation cases (lifecycle-transitions.test.ts) — pass, undeclared_state with dedup+sample_id_cap, empty list skip, 5xx skip, all-items-missing-field skip, bad-shape skip, no-list-no-actions skip, sample_id fallback to 'number' (GitHub Issues shape), action-mode without create+read skip. All 26 tests green; 2207/2207 unit tests pass; tsc --noEmit clean.
+
+Skill template (zond-checks.md): documented two modes with when-to-use, observation limitations, and a new yaml example.
+<!-- SECTION:NOTES:END -->

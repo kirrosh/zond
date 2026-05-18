@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { bootstrapWorkspace } from "../../../src/cli/commands/init/bootstrap.ts";
+import { detectSkillDrift } from "../../../src/cli/commands/init/skills.ts";
 
 describe("bootstrapWorkspace", () => {
   let cwd: string;
@@ -96,6 +97,25 @@ describe("bootstrapWorkspace", () => {
     expect(r.warnings).not.toContain(expect.stringContaining("stale skill detected"));
     expect(existsSync(join(cwd, ".claude", "skills", "zond-base"))).toBe(false);
     expect(existsSync(join(cwd, ".claude", "skills", "zond-scenarios"))).toBe(false);
+  });
+
+  test("ARV-237: detectSkillDrift reports missing/outdated/fresh per template", () => {
+    // Fresh workspace, no skills written yet — every template is missing.
+    let drift = detectSkillDrift(cwd);
+    expect(drift.every(d => d.status === "missing")).toBe(true);
+
+    // After bootstrap — all fresh.
+    bootstrapWorkspace({ cwd, home, writeAgents: false });
+    drift = detectSkillDrift(cwd);
+    expect(drift.every(d => d.status === "fresh")).toBe(true);
+
+    // Corrupt one — flips to outdated.
+    writeFileSync(join(cwd, ".claude", "skills", "zond", "SKILL.md"), "stale\n");
+    drift = detectSkillDrift(cwd);
+    const zondEntry = drift.find(d => d.name === "zond")!;
+    expect(zondEntry.status).toBe("outdated");
+    // Other skills unaffected.
+    expect(drift.find(d => d.name === "zond-checks")!.status).toBe("fresh");
   });
 
   test("user-authored skill dirs are NOT pruned even with --prune-stale-skills", () => {

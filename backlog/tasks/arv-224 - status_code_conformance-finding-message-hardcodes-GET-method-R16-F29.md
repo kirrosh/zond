@@ -1,13 +1,15 @@
 ---
 id: ARV-224
 title: status_code_conformance finding message hardcodes GET method (R16/F29)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 10:11'
+updated_date: '2026-05-17 05:54'
 labels:
   - feedback-loop
   - api-github
   - m-21
+  - polish-m-22
 dependencies: []
 priority: low
 ---
@@ -29,3 +31,9 @@ Impact: SARIF + agent triage + db diagnose surface the wrong method, false-direc
 
 Log: see feedback-16.md F29.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done 2026-05-17 (polish-m-22 batch-3 / Tier 3): status_code_conformance finding message now echoes c.request.method (the actual probe-fired method) instead of c.operation.method (the spec-declared one). Aligns the message with request_signature so unsupported_method probe findings stop pointing operators at the wrong method.
+<!-- SECTION:NOTES:END -->
