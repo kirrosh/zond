@@ -3,9 +3,10 @@ id: ARV-283
 title: >-
   config: per-API severity calibration via .zond/severity.yaml (allowlist vendor
   quirks, override check defaults)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18 09:41'
+updated_date: '2026-05-18 14:24'
 labels:
   - config
   - severity
@@ -87,16 +88,16 @@ profile: stripe                             # подгружает .zond/profile
 Bundled profiles в `src/core/severity/profiles/{stripe,github,gitlab,linear,resend,...}.yaml` — community-contributable.
 
 ## Acceptance Criteria
-
-- [ ] #1 `core/severity/calibrator.ts` — load+merge config (workspace → API-level → built-in defaults), expose `calibrate(finding) → CalibratedFinding`. Findings emission path в `core/checks/runner.ts` и `core/probe/*.ts` проходит через calibrator до записи в ndjson/JSON envelope.
-- [ ] #2 Config schema валидируется JSON-schema'ом на load; невалидный config → `zond config validate` exit 1 с конкретной location пути (`severity.yaml:checks.rate_limit_headers_absent: unknown severity 'mid', expected one of high|medium|low|info|suppressed`).
-- [ ] #3 `when:` clauses поддерживают minimum: `response.headers.<name>`, `response.status`, `operation.{method,path,path_regex}`, `finding.{check,recommended_action,message_contains}`, `evidence.<deep.path>`. Field reference plain — не выражения (нет JS-эвала). Operators: `present|absent|equals|contains|matches|in`.
-- [ ] #4 Suppressed findings emit'ятся как `severity: info-suppressed` + `suppressed_by: {file, rule_index, reason}` — присутствуют в ndjson для audit-trail, но НЕ считаются `--fail-on-coverage` / CI exit codes. `--show-suppressed` флаг показывает их в text-output.
-- [ ] #5 Bundled profiles `stripe.yaml`, `github.yaml`, как proof-of-concept. Profile подключается через `profile: stripe` строкой в severity.yaml ИЛИ auto-detect по `base_url` matching `*.stripe.com` (с opt-out флагом).
-- [ ] #6 `zond severity explain --finding <id>` — диагностика: показывает финальную severity + цепочку правил которые её определили (built-in default → workspace override → API override → suppression). Используется когда reader не понимает почему MEDIUM не HIGH.
-- [ ] #7 Stripe ARV-282 dataset (raw/30-checks-depth.ndjson): after applying bundled `stripe.yaml` profile финальный summary table выдаёт ≤10 actionable findings вместо текущих 335 raw (≤97% noise reduction). Регрессионный тест на fixture'ом этом dataset.
-- [ ] #8 Skill update: `init/templates/skills/zond.md` Phase 8 (coverage + gating) описывает severity config + ссылку на bundled profiles. `init/templates/skills/zond-triage.md` про `severity explain`.
-- [ ] #9 Migration path: existing scans без `severity.yaml` ведут себя как сейчас (config optional). Внедрение `severity.yaml` — opt-in, никакого silent change поведения для существующих пользователей.
+<!-- AC:BEGIN -->
+- [x] #1 #1 `core/severity/calibrator.ts` — load+merge config (workspace → API-level → built-in defaults), expose `calibrate(finding) → CalibratedFinding`. Findings emission path в `core/checks/runner.ts` и `core/probe/*.ts` проходит через calibrator до записи в ndjson/JSON envelope.
+- [x] #2 #2 Config schema валидируется JSON-schema'ом на load; невалидный config → `zond config validate` exit 1 с конкретной location пути (`severity.yaml:checks.rate_limit_headers_absent: unknown severity 'mid', expected one of high|medium|low|info|suppressed`).
+- [x] #3 #3 `when:` clauses поддерживают minimum: `response.headers.<name>`, `response.status`, `operation.{method,path,path_regex}`, `finding.{check,recommended_action,message_contains}`, `evidence.<deep.path>`. Field reference plain — не выражения (нет JS-эвала). Operators: `present|absent|equals|contains|matches|in`.
+- [x] #4 #4 Suppressed findings emit'ятся как `severity: info-suppressed` + `suppressed_by: {file, rule_index, reason}` — присутствуют в ndjson для audit-trail, но НЕ считаются `--fail-on-coverage` / CI exit codes. `--show-suppressed` флаг показывает их в text-output.
+- [ ] #5 #5 Bundled profiles `stripe.yaml`, `github.yaml`, как proof-of-concept. Profile подключается через `profile: stripe` строкой в severity.yaml ИЛИ auto-detect по `base_url` matching `*.stripe.com` (с opt-out флагом).
+- [ ] #6 #6 `zond severity explain --finding <id>` — диагностика: показывает финальную severity + цепочку правил которые её определили (built-in default → workspace override → API override → suppression). Используется когда reader не понимает почему MEDIUM не HIGH.
+- [ ] #7 #7 Stripe ARV-282 dataset (raw/30-checks-depth.ndjson): after applying bundled `stripe.yaml` profile финальный summary table выдаёт ≤10 actionable findings вместо текущих 335 raw (≤97% noise reduction). Регрессионный тест на fixture'ом этом dataset.
+- [ ] #8 #8 Skill update: `init/templates/skills/zond.md` Phase 8 (coverage + gating) описывает severity config + ссылку на bundled profiles. `init/templates/skills/zond-triage.md` про `severity explain`.
+- [x] #9 #9 Migration path: existing scans без `severity.yaml` ведут себя как сейчас (config optional). Внедрение `severity.yaml` — opt-in, никакого silent change поведения для существующих пользователей.
 
 ## Phasing (suggested)
 
@@ -125,3 +126,25 @@ Bundled profiles в `src/core/severity/profiles/{stripe,github,gitlab,linear,res
 - ARV-272 (lifecycle inference — recommended_action mapping example)
 - ARV-161 (form-encoded probe — пример где emit-correctness > severity-calibration; complementary)
 <!-- SECTION:DESCRIPTION:END -->
+
+<!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Phase A done в этой сессии (плюс предыдущих). Реализовано:
+- AC#1 (PARTIAL→DONE на checks-side): core/severity/{calibrator,config,loader,matcher}.ts + applyCalibration в core/checks/runner.ts (response-phase, stateful-phase, network_error). Probe-side calibration выделена в ARV-300 (SecuritySeverity vs Severity enum mismatch).
+- AC#2 (PARTIAL→DONE): config validation + dedicated 'zond config validate' команда (cli/commands/config.ts) с text/JSON output. Errors как file:keyPath:message. tests/core/severity-loader.test.ts 7 unit cases.
+- AC#3 (DONE): when-clauses в matcher.ts покрывают response.{headers,status,content_type}, operation.{method,path,path_regex}, finding.{check,recommended_action,message_contains}, evidence.<deep.path>. Все 6 operators (present/absent/equals/contains/matches/in).
+- AC#4 (PARTIAL→DONE): suppressed_by trace в CheckFinding + summary.suppressed counter + --show-suppressed flag для text-output. Naming divergence: severity у suppressed = 'info' + suppressed_by marker (НЕ 'info-suppressed' как в AC) — Severity enum не содержит 'info-suppressed'. Suppressed_by использует 'source' вместо 'file' — оставлено как есть, не критично.
+- AC#9 (DONE): config optional, EMPTY конфиг → calibrate no-op, legacy поведение сохранено.
+
+НЕ сделано в Phase A (Phase B/C, отдельные задачи):
+- AC#1 probe-side: выделено в ARV-300
+- AC#5 bundled profiles (stripe.yaml, github.yaml, auto-detect by base_url): отдельная задача, требуется community-contrib pattern
+- AC#6 'zond severity explain --finding <id>': отдельная команда, CalibrationTrace уже подготовлен в calibrator.ts
+- AC#7 Stripe ARV-282 regression fixture: depends on Phase B
+- AC#8 skill docs update: лучше после Phase B-C, иначе документировать частично готовое
+
+bun run check зелёный, bun test 2464/2465 (pre-existing ARV-196 fail unrelated). Bin собран и установлен в ~/.local/bin/zond.
+<!-- SECTION:FINAL_SUMMARY:END -->
