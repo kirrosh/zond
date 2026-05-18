@@ -3,9 +3,10 @@ id: ARV-288
 title: >-
   pagination_invariants: per-finding severity matrix (duplicate_items HIGH /
   has_more+per_page+partial MEDIUM)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18 10:35'
+updated_date: '2026-05-18 14:02'
 labels:
   - severity
   - calibration
@@ -49,9 +50,9 @@ Anti-FP уже сильный: empty page A skip, broken-baseline skip, cursor f
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 paginationInvariants.severity = 'low'; kinds содержит duplicate_items → HIGH, остальные → MEDIUM, в обеих ветках (cursor + page)
-- [ ] #2 tests/core/checks/pagination-invariants-severity.test.ts лочит 6 кейсов (cursor-dup, has_more, partial, page-dup, per_page, combo)
-- [ ] #3 700+ unit tests pass
+- [x] #1 paginationInvariants.severity = 'low'; kinds содержит duplicate_items → HIGH, остальные → MEDIUM, в обеих ветках (cursor + page)
+- [x] #2 tests/core/checks/pagination-invariants-severity.test.ts лочит 6 кейсов (cursor-dup, has_more, partial, page-dup, per_page, combo)
+- [x] #3 700+ unit tests pass
 
 ## Связано
 
@@ -61,4 +62,11 @@ Anti-FP уже сильный: empty page A skip, broken-baseline skip, cursor f
 - ARV-220 (page-style addition)
 - ARV-283 (severity.yaml overlay)
 <!-- SECTION:DESCRIPTION:END -->
+
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Реализовано: paginationInvariants.severity='low' + duplicate_items→HIGH, остальные→MEDIUM в cursor+page ветках. Тест tests/core/checks/pagination-invariants-severity.test.ts 8 it() pass. Backlog status hygiene.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -3,9 +3,10 @@ id: ARV-285
 title: >-
   status_code_conformance: per-finding severity matrix (5xx HIGH /
   partial-contract MEDIUM / minimal-spec LOW)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18 10:34'
+updated_date: '2026-05-18 14:02'
 labels:
   - severity
   - calibration
@@ -51,9 +52,9 @@ ARV-283 config поверх работает как vendor overlay (per-API tuni
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 statusCodeConformance.severity = 'low'; run() возвращает per-finding severity по матрице (5xx HIGH / partial-contract 4xx MEDIUM / minimal-spec 4xx LOW / 2xx-negative LOW / 2xx-positive MEDIUM)
-- [ ] #2 tests/core/checks/status-code-conformance-severity.test.ts лочит все 6 классов матрицы
-- [ ] #3 ARV-282 Stripe scan baseline: severity-counts logged, 700+ unit tests pass
+- [x] #1 statusCodeConformance.severity = 'low'; run() возвращает per-finding severity по матрице (5xx HIGH / partial-contract 4xx MEDIUM / minimal-spec 4xx LOW / 2xx-negative LOW / 2xx-positive MEDIUM)
+- [x] #2 tests/core/checks/status-code-conformance-severity.test.ts лочит все 6 классов матрицы
+- [x] #3 ARV-282 Stripe scan baseline: severity-counts logged, 700+ unit tests pass
 
 ## Связано
 
@@ -62,4 +63,11 @@ ARV-283 config поверх работает как vendor overlay (per-API tuni
 - ARV-283 (severity.yaml — vendor overlay)
 - `project_zond_positioning_pivot` (no evidence → no high)
 <!-- SECTION:DESCRIPTION:END -->
+
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Реализовано: statusCodeConformance.severity='low' + per-finding dispatch (5xx HIGH, partial-contract MEDIUM, minimal-spec LOW, 2xx-negative LOW, 2xx-positive MEDIUM). Тест tests/core/checks/status-code-conformance-severity.test.ts 11 it() pass. Backlog status hygiene.
+<!-- SECTION:FINAL_SUMMARY:END -->

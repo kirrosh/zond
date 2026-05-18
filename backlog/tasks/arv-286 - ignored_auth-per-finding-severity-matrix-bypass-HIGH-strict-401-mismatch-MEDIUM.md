@@ -3,9 +3,10 @@ id: ARV-286
 title: >-
   ignored_auth: per-finding severity matrix (bypass HIGH / strict-401 mismatch
   MEDIUM)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18 10:35'
+updated_date: '2026-05-18 14:02'
 labels:
   - severity
   - calibration
@@ -47,9 +48,9 @@ Variants уже встроены в evidence объекта — менять н�
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ignoredAuth.severity = 'low'; bypass + differential branches → HIGH, *_strict branches → MEDIUM через outcome.severity
-- [ ] #2 tests/core/checks/ignored-auth-severity.test.ts лочит 6 variants + 1 pass
-- [ ] #3 700+ unit tests pass
+- [x] #1 ignoredAuth.severity = 'low'; bypass + differential branches → HIGH, *_strict branches → MEDIUM через outcome.severity
+- [x] #2 tests/core/checks/ignored-auth-severity.test.ts лочит 6 variants + 1 pass
+- [x] #3 700+ unit tests pass
 
 ## Связано
 
@@ -58,4 +59,11 @@ Variants уже встроены в evidence объекта — менять н�
 - ARV-181 (differential broken-baseline logic — источник variants)
 - ARV-283 (severity.yaml поверх)
 <!-- SECTION:DESCRIPTION:END -->
+
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Реализовано: ignoredAuth.severity='low' + bypass/differential→HIGH, *_strict→MEDIUM через outcome.severity. Тест tests/core/checks/ignored-auth-severity.test.ts 10 it() pass. Backlog status hygiene.
+<!-- SECTION:FINAL_SUMMARY:END -->
