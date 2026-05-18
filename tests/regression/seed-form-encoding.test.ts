@@ -69,10 +69,15 @@ describe("ARV-196 — seed POST honors application/x-www-form-urlencoded with br
                         },
                       },
                       // Array of strings → must serialise as
-                      // expand[0]=..&expand[1]=.. (Stripe convention).
-                      expand: {
+                      // tags[0]=..&tags[1]=.. (Stripe convention).
+                      // NB: we deliberately do NOT use `expand` here —
+                      // data-factory skips Stripe-style `expand` arrays
+                      // for request bodies (see shouldSkipForRequest);
+                      // this test is about bracket nesting on the wire,
+                      // not about that skip-rule.
+                      tags: {
                         type: "array",
-                        items: { type: "string", example: "tax" },
+                        items: { type: "string", example: "vip" },
                       },
                     },
                   },
@@ -141,8 +146,8 @@ describe("ARV-196 — seed POST honors application/x-www-form-urlencoded with br
     expect(lastBody!).toContain("email=");
     // Nested object → bracket key on the wire (URL-encoded `[` → `%5B`).
     expect(lastBody!).toMatch(/address(\[|%5B)line1(\]|%5D)=/);
-    // Array → indexed bracket (Stripe-style: expand[0]=...).
-    expect(lastBody!).toMatch(/expand(\[|%5B)0(\]|%5D)=/);
+    // Array → indexed bracket (Stripe-style: tags[0]=...).
+    expect(lastBody!).toMatch(/tags(\[|%5B)0(\]|%5D)=/);
     // Critically: NOT JSON.
     expect(lastBody!.startsWith("{")).toBe(false);
   });
