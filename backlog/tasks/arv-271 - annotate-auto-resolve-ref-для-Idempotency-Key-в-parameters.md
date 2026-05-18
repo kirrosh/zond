@@ -1,10 +1,10 @@
 ---
 id: ARV-271
 title: 'annotate-auto: resolve $ref для Idempotency-Key в parameters'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17 13:27'
-updated_date: '2026-05-17 14:43'
+updated_date: '2026-05-18 11:43'
 labels:
   - annotate
   - annotate-auto
@@ -48,7 +48,13 @@ Stripe **поддерживает** Idempotency-Key. Просто heuristic не
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 annotate auto разрешает $ref для parameters[*] перед матчингом name
-- [ ] #2 На Stripe spec idempotency inference появляется для всех POST с $ref на Idempotency-Key
-- [ ] #3 Unit test покрывает minimal $ref fixture
+- [x] #1 annotate auto разрешает $ref для parameters[*] перед матчингом name
+- [x] #2 На Stripe spec idempotency inference появляется для всех POST с $ref на Idempotency-Key
+- [x] #3 Unit test покрывает minimal $ref fixture
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Resolved $ref в parameters[*] перед матчингом name (src/cli/commands/api/annotate/prompts.ts: resolveParameter). Поддерживает оба варианта: components.parameters/X (канон) и components.headers/X (Stripe). Тесты: tests/cli/annotate-prompts.test.ts (3 кейса).
+<!-- SECTION:NOTES:END -->
