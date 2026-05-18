@@ -175,11 +175,11 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
       return "fix_auth_config";
 
     case "check:rate_limit_headers_absent":
-      // ARV-256: missing rate-limit on write endpoints is an
-      // infrastructure-config gap — closest existing action is
-      // "fix_auth_config" (server-side hardening) rather than report-
-      // backend-bug (the spec doesn't say rate-limit must exist).
-      return "fix_auth_config";
+      // ARV-304: this is a server-side hygiene gap (RFC-9239 /
+      // OWASP-API-04 expect rate-limit metadata on writes), not a
+      // caller-side auth problem. Agents triaging on `fix_auth_config`
+      // would chase the wrong fix; surface it as a backend-team task.
+      return "report_backend_bug";
 
     case "check:network_error":
       if (ctx.status === 401 || ctx.status === 403) return "fix_auth_config";

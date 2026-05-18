@@ -42,6 +42,11 @@ describe("ARV-11 AC #1: recommended_action table", () => {
     // Auth misconfiguration.
     ["ignored_auth", 200, "fix_auth_config"],
 
+    // Server-side hygiene gap — backend should emit rate-limit metadata
+    // on 2xx writes (RFC-9239 / OWASP-API-04). Not a caller-side fix.
+    // ARV-304 — was incorrectly mapped to fix_auth_config.
+    ["rate_limit_headers_absent", 200, "report_backend_bug"],
+
     // Network-error pseudo-check — branches on status.
     ["network_error", 0, "fix_network_config"],
     ["network_error", 401, "fix_auth_config"],

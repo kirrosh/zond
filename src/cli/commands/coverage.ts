@@ -441,7 +441,20 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
         runIds: covAudit?.runs.map((r) => r.id) ?? [],
       };
     }
-    printJson(jsonOk("coverage", json));
+    // ARV-303: envelope/exit-code contract — when the selector resolved
+    // to zero runs (closed session, no runs with the requested tag, etc),
+    // there's no coverage data to report. Surface that as ok:false so the
+    // non-zero exit lines up with the envelope shape, instead of an
+    // ok:true envelope alongside exit 1.
+    const noRuns = (covTest ?? covAudit!).runs.length === 0;
+    if (noRuns) {
+      const sel = cov.unionMode ?? "selection";
+      printJson(jsonError("coverage", [
+        `No runs match ${sel} — coverage cannot be computed against zero runs`,
+      ]));
+    } else {
+      printJson(jsonOk("coverage", json));
+    }
   }
 
   if (options.failOnCoverage !== undefined) {
@@ -486,31 +499,13 @@ async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
       }
     }
   } else {
-    const unhit = allEndpoints.map((ep) => ({
-      endpoint: `${ep.method.toUpperCase()} ${ep.path}`,
-      method: ep.method.toUpperCase(),
-      path: ep.path,
-      lastStatus: null,
-    }));
-    printJson(jsonOk("coverage", {
-      covered: 0,
-      uncovered: total,
-      partial: 0,
-      total,
-      percentage,
-      runId: null,
-      coveredEndpoints: [],
-      partialEndpoints: [],
-      uncoveredEndpoints: unhit.map(u => u.endpoint),
-      totals: { all: total, covered2xx: 0, coveredButNon2xx: 0, unhit: total },
-      covered2xxEndpoints: [],
-      coveredButNon2xxEndpoints: [],
-      unhitEndpoints: unhit,
-      // TASK-270: the spec-only path has no run results, so both metrics
-      // are zero. Surface them anyway for shape-stable JSON.
-      pass_coverage: { covered: 0, total, ratio: 0 },
-      hit_coverage: { covered: 0, total, ratio: 0 },
-    }));
+    // ARV-303: envelope/exit-code contract — spec-only path has no
+    // registered API to load runs from, so there is no coverage to
+    // report. Surface that as ok:false (errors[0] explains the fix) so
+    // the non-zero exit matches the envelope shape.
+    printJson(jsonError("coverage", [
+      `Coverage requires a registered API — pass --api <name> or run 'zond add api --spec ${options.spec}' first.`,
+    ]));
   }
 
   if (options.failOnCoverage !== undefined) {

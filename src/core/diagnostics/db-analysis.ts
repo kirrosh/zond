@@ -25,6 +25,48 @@ function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean)
   return msgLines.join("\n");
 }
 
+/**
+ * ARV-305: build a short reason string for `by_recommended_action.examples`.
+ *
+ * Preference order:
+ *   1. trimmed `error_message` (assertion- or network-level message)
+ *   2. first failing assertion → `<field> <rule>: got <actual>`
+ *   3. undefined (nothing left to say)
+ *
+ * Without (2) every assertion-only failure leaves examples[].reason as
+ * undefined, so triage agents lose the one signal that lets them route
+ * past method/path/status (regenerate_suite vs tighten_validation
+ * collapse to identical-looking buckets).
+ */
+function buildExampleReason(
+  errorMessage: unknown,
+  assertions: unknown,
+): string | undefined {
+  const trim = (s: string) => (s.length > 120 ? `${s.slice(0, 117)}...` : s);
+  if (typeof errorMessage === "string" && errorMessage.length > 0) {
+    return trim(errorMessage);
+  }
+  if (!Array.isArray(assertions)) return undefined;
+  for (const a of assertions) {
+    if (!a || typeof a !== "object") continue;
+    const row = a as Record<string, unknown>;
+    if (row.passed === false) {
+      const field = typeof row.field === "string" ? row.field : "";
+      const rule = typeof row.rule === "string" ? row.rule : "";
+      const actual = "actual" in row ? row.actual : undefined;
+      const actualStr = actual === undefined || actual === null
+        ? ""
+        : typeof actual === "string"
+          ? actual
+          : JSON.stringify(actual);
+      const parts = [field, rule].filter(Boolean).join(" ");
+      const text = actualStr ? `${parts}: got ${actualStr}` : parts;
+      return text ? trim(text) : undefined;
+    }
+  }
+  return undefined;
+}
+
 function parseBodySafe(raw: string | null | undefined): unknown {
   if (!raw) return undefined;
   const truncated = raw.length > 2000 ? raw.slice(0, 2000) + "\u2026[truncated]" : raw;
@@ -430,9 +472,14 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
     if (bucket.examples.length < 5) {
       // Trim reason to keep the bucket compact — full error_message lives
       // in failures[].error_message for agents that want it.
-      const reason = typeof f.error_message === "string" && f.error_message.length > 0
-        ? (f.error_message.length > 120 ? `${f.error_message.slice(0, 117)}...` : f.error_message)
-        : undefined;
+      //
+      // ARV-305: when there is no top-level error_message (typical for
+      // assertion failures — the row carries the failing rule in
+      // .assertions, not a free-form message), build a reason out of
+      // the first failing assertion so the example is not stripped
+      // down to method/path/status. The fallback keeps the field
+      // populated whenever any failure context exists.
+      const reason = buildExampleReason(f.error_message, f.assertions);
       bucket.examples.push({
         suite: f.suite_name,
         test: f.test_name,

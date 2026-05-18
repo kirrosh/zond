@@ -294,7 +294,8 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
       (v: string, prev: string[] = []) => prev.concat(v),
       [] as string[],
     )
-    .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.");
+    .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.")
+    .option("--max-endpoints <n>", "ARV-302: cap the number of endpoints probed in this run (after --include / --exclude / --tag filters). Used by `zond audit --budget` to keep probe stages inside a wall-clock budget instead of unbounded scanning.", parsePositiveInt("--max-endpoints"));
   addProbeReportOutputOptions(sub);
   sub.action(async (specPos: string | undefined, opts, cmd: Command) => {
       // ARV-33: resolve --api via the same fallback chain as prepare-fixtures /
@@ -346,6 +347,7 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         report: rep.report,
         verbose: opts.verbose === true,
         suspectField: Array.isArray(opts.suspectField) && opts.suspectField.length > 0 ? opts.suspectField : undefined,
+        maxEndpoints: typeof opts.maxEndpoints === "number" ? opts.maxEndpoints : undefined,
       });
     });
 }
@@ -386,7 +388,8 @@ function defineProbeSecurity(parent: Command, name: string): void {
     .option(
       "--verbose",
       "ARV-253: surface INFO-severity findings (sanitization-signal-only, e.g. CRLF accepted but no reflection observed). Default hides them — they're single-signal proof with no exploit pathway.",
-    );
+    )
+    .option("--max-endpoints <n>", "ARV-302: cap the number of endpoints probed in this run (after --include / --exclude / --tag filters). Used by `zond audit --budget` to keep probe stages inside a wall-clock budget instead of unbounded scanning.", parsePositiveInt("--max-endpoints"));
   addProbeReportOutputOptions(sub);
   sub.action(async (classes: string | undefined, specPos: string | undefined, opts, cmd: Command) => {
       // ARV-36: missing-arg path should list the available classes (parity
@@ -432,6 +435,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
         include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
         exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
         verbose: opts.verbose === true,
+        maxEndpoints: typeof opts.maxEndpoints === "number" ? opts.maxEndpoints : undefined,
       });
     });
 }
