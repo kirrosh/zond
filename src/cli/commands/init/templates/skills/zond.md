@@ -159,8 +159,9 @@ accept `--json` — use `--report json`.
 
 | User asked… | Start at |
 |---|---|
-| "smoke this API", "quick first pass", "demo / CI gate" | `zond audit --api <name>` (breadth+coverage only) |
+| "smoke this API", "quick first pass", "demo / CI gate" | `zond audit --api <name>` (safe-mode breadth pass — no live mutations) |
 | "audit this API", "test the whole API", "raise coverage", "deep pass" | walk Phase 0–9 — audit covers smoke; depth (stateful, security, learn-apply) needs phase-level decisions |
+| "full live audit against sandbox", "include seed/mass-assignment/security probes" | `zond audit --api <name> --live --seed --with-mass-assignment --with-security` (REQUIRES throwaway/sandbox account) |
 | "find bugs", "test for 5xx", "probe sweep" | Phase 0 → Phase 7 (Probes) |
 | "security only / SSRF / CRLF" | Phase 7.2 directly with `--dry-run` first |
 | "deep depth-checks", "SARIF", "stateful invariants" | Hand off → `zond-checks` |
@@ -637,11 +638,33 @@ new API". For a real depth campaign, walk Phase 0–9 from this skill.
 
 ```bash
 zond audit --api <name> --dry-run                       # print stage plan
-zond audit --api <name>                                  # minimal pipeline
-zond audit --api <name> --seed                           # add prepare-fixtures --cascade --seed
-zond audit --api <name> --with-mass-assignment --with-security   # add live probes (light depth)
+zond audit --api <name>                                  # safe mode (default) — no seed POSTs, no live probes
+zond audit --api <name> --live --seed                    # add prepare-fixtures --cascade --seed (throwaway/sandbox only)
+zond audit --api <name> --live --with-mass-assignment --with-security   # full live pipeline (throwaway/sandbox only)
 zond audit --api <name> --out reports/audit-<name>.html
 ```
+
+**ARV-264 safe vs live decision matrix.** Default is `--safe` (implicit;
+no flag needed). `--live` is the opt-in for traffic that mutates the
+target API.
+
+| Concern | `--safe` (default) | `--live` |
+|---|---|---|
+| `prepare-fixtures` mode | path-FK discovery only (GET) | adds `--cascade --seed` when `--seed` passed |
+| `probe mass-assignment` | skipped even if `--with-mass-assignment` set, with a warning | runs when `--with-mass-assignment` set |
+| `probe security` (SSRF/CRLF/redirect) | skipped even if `--with-security` set, with a warning | runs when `--with-security` set |
+| `probe static` (validation+methods) | always runs — pure spec walk, no live traffic | same |
+| `run tests / probes` | runs against the live API but only generated GET-shape suites by default | same plus seeded resources from `--seed` |
+
+**Pre-flight warnings (printed before any subprocess fires):** missing
+`auth_token` when the spec declares securitySchemes (probes will skip
+with 401 and the report will read misleadingly green); no
+securitySchemes declared in the spec (open API or incomplete spec —
+auth-related checks will skip).
+
+**Rule of thumb.** Unknown-scope PAT against a production API → `--safe`
+(default). Throwaway account / sandbox tenant → `--live` is fine. Never
+run `--live` against shared/production data on first contact.
 
 Each stage prints `==> Stage N/M: <name>` and a completion line
 `└─ OK · Ns` / `FAIL (exit K) · Ns` / `SKIPPED (reason)`. Exit 1 if

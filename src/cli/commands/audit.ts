@@ -63,6 +63,10 @@ export interface AuditOptions {
   dryRun?: boolean;
   force?: boolean;
   json?: boolean;
+  /** ARV-264: opt-in to the full pipeline against a real-traffic API.
+   *  When false (default), audit runs in safe mode — no --seed POSTs,
+   *  no mass-assignment / security probes, no destructive probes. */
+  live?: boolean;
 }
 
 /**
@@ -82,7 +86,13 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
   const api = opts.api;
   const stages: Stage[] = [];
 
-  if (opts.seed) {
+  // ARV-264: in safe mode (default) `--seed` is ignored — seed POSTs
+  // create real resources on the target API and have unacceptable blast
+  // radius when the user hasn't opted into --live. The "stage skipped:
+  // seed requires --live" warning is printed by `runSafeModeGuard`
+  // before the pipeline starts.
+  const seedEnabled = opts.seed === true && opts.live === true;
+  if (seedEnabled) {
     stages.push({
       key: "prepare-fixtures-cascade",
       name: "prepare-fixtures (cascade discover + seed)",
@@ -122,7 +132,11 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
     args: ["probe", "static", "--api", api, "--output", join(apiDir, "probes", "static")],
   });
 
-  if (opts.withMassAssignment) {
+  // ARV-264: mass-assignment + security probes send real POST/PUT/DELETE
+  // traffic. Gate them behind --live so the default (safe) audit can't
+  // pollute a production API.
+  const liveProbesEnabled = opts.live === true;
+  if (opts.withMassAssignment && liveProbesEnabled) {
     stages.push({
       key: "probe-mass-assignment",
       name: "probe mass-assignment",
@@ -134,7 +148,7 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
       ],
     });
   }
-  if (opts.withSecurity) {
+  if (opts.withSecurity && liveProbesEnabled) {
     stages.push({
       key: "probe-security",
       name: "probe security (ssrf,crlf,open-redirect)",
@@ -256,6 +270,13 @@ export async function auditCommand(options: AuditOptions): Promise<number> {
   if (!specPath) {
     const guess = join(apiDir, "spec.json");
     if (existsSync(guess)) specPath = guess;
+  }
+
+  // ARV-264: surface what safe mode silently drops and run pre-flight
+  // checks (auth + security schemes) before any subprocess fires.
+  const preflightWarnings = runSafePreflight(options, specPath, apiDir);
+  if (!options.json) {
+    for (const w of preflightWarnings) printWarning(w);
   }
 
   const stages = buildStages(options, apiDir, specPath);
@@ -583,6 +604,82 @@ ${drilldownBlocks}
   await writeFile(outPath, html, "utf-8");
 }
 
+/**
+ * ARV-264: pre-flight checks for safe-mode auditing.
+ *
+ *  1. Warn when the user passed `--seed` / `--with-mass-assignment` /
+ *     `--with-security` without `--live` — those stages are silently
+ *     dropped in safe mode and the user deserves to know.
+ *  2. Warn when the spec declares `components.securitySchemes` but the
+ *     workspace has no `auth_token` set — every probe will skip with
+ *     401 and the report will read as "all green" misleadingly.
+ *  3. Warn when no security schemes are declared at all (open API or
+ *     incomplete spec) — same misleading-green risk on auth gates.
+ */
+export function runSafePreflight(
+  opts: AuditOptions,
+  specPath: string | null,
+  apiDir: string,
+): string[] {
+  const out: string[] = [];
+  const safe = opts.live !== true;
+
+  if (safe) {
+    if (opts.seed) {
+      out.push(
+        "audit --safe (default): --seed ignored. Seed POSTs create real resources on the target API. " +
+        "Re-run with --live to enable, only against a throwaway / sandbox account.",
+      );
+    }
+    if (opts.withMassAssignment) {
+      out.push(
+        "audit --safe (default): --with-mass-assignment ignored. Mass-assignment probes POST mutated " +
+        "bodies and follow up with GET/DELETE — high blast radius. Re-run with --live to enable.",
+      );
+    }
+    if (opts.withSecurity) {
+      out.push(
+        "audit --safe (default): --with-security ignored. Security probes send live SSRF/CRLF/redirect " +
+        "payloads to real endpoints. Re-run with --live to enable.",
+      );
+    }
+  }
+
+  // Spec-level checks (cheap synchronous read; spec.json is JSON).
+  if (specPath && existsSync(specPath)) {
+    try {
+      const spec = JSON.parse(require("node:fs").readFileSync(specPath, "utf-8")) as {
+        components?: { securitySchemes?: Record<string, unknown> };
+      };
+      const hasSchemes = Boolean(
+        spec.components?.securitySchemes && Object.keys(spec.components.securitySchemes).length > 0,
+      );
+      const envPath = join(apiDir, ".env.yaml");
+      let authTokenSet = false;
+      if (existsSync(envPath)) {
+        const env = require("node:fs").readFileSync(envPath, "utf-8") as string;
+        // Match `auth_token: ...` lines whose value isn't an unfilled placeholder.
+        authTokenSet = /^\s*auth_token\s*:\s*(?!["']?\s*(<|UNSET|TODO|REPLACE|null|~)\b)\S/m.test(env);
+      }
+      if (hasSchemes && !authTokenSet) {
+        out.push(
+          "spec declares securitySchemes but auth_token is unset in .env.yaml — probes will likely hit " +
+          "401/403 and the report can read misleadingly green. Run `zond doctor --api " + opts.api + "` to fix.",
+        );
+      } else if (!hasSchemes) {
+        out.push(
+          "spec declares no securitySchemes — either the API is open or the spec is incomplete. " +
+          "Auth-related checks (ignored_auth, open_cors_on_sensitive) will skip; verify before sharing the report.",
+        );
+      }
+    } catch {
+      // Spec unreadable — separate failure mode, surfaced by other stages.
+    }
+  }
+
+  return out;
+}
+
 export function registerAudit(program: Command): void {
   program
     .command("audit")
@@ -595,9 +692,10 @@ export function registerAudit(program: Command): void {
     // mirror > .zond/current-api.
     .option("--api <name>", "Registered API to audit. Falls back to ZOND_API / .zond/current-api.")
     .option("--db <path>", "Path to SQLite database file")
-    .option("--seed", "Use 'prepare-fixtures --cascade --seed --apply' instead of the plain single-pass prep stage")
-    .option("--with-mass-assignment", "Include 'probe mass-assignment' as an extra stage")
-    .option("--with-security", "Include 'probe security ssrf,crlf,open-redirect' as an extra stage")
+    .option("--seed", "Use 'prepare-fixtures --cascade --seed --apply' instead of the plain single-pass prep stage. Requires --live.")
+    .option("--with-mass-assignment", "Include 'probe mass-assignment' as an extra stage. Requires --live.")
+    .option("--with-security", "Include 'probe security ssrf,crlf,open-redirect' as an extra stage. Requires --live.")
+    .option("--live", "ARV-264: opt into the full pipeline against a real-traffic API. Without this flag, audit runs in safe mode: no seed POSTs, no mass-assignment / security probes, no destructive traffic. Use only against throwaway/sandbox accounts.")
     .option("--out <path>", "HTML report output path (default: audit-report.html)")
     .option("--dry-run", "Print the stage plan without executing anything")
     .option("--force", "Disable mtime-based skip (always regenerate, even if tests/ newer than spec)")
@@ -620,6 +718,7 @@ export function registerAudit(program: Command): void {
         dryRun: opts.dryRun === true,
         force: opts.force === true,
         json: globalJson(cmd),
+        live: opts.live === true,
       });
     });
 }

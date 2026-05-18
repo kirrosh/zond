@@ -82,12 +82,15 @@ describe("zond audit (TASK-262)", () => {
     expect(out).toContain("session end (reused — kept active)");
   });
 
-  test("--seed swaps single-pass prep for cascade+seed; opt-in flags add probe stages", async () => {
+  test("--live --seed swaps single-pass prep for cascade+seed; opt-in flags add probe stages", async () => {
+    // ARV-264: --seed / --with-mass-assignment / --with-security are
+    // safe-mode-gated; --live is the explicit opt-in.
     const code = await auditCommand({
       api: "demo",
       seed: true,
       withMassAssignment: true,
       withSecurity: true,
+      live: true,
       dryRun: true,
     });
     expect(code).toBe(0);
@@ -101,6 +104,26 @@ describe("zond audit (TASK-262)", () => {
     // surfaces the post-stage capture in the dry-run plan.
     expect(out).toContain("(10 stages)");
     expect(out).toContain("coverage (session union)");
+  });
+
+  test("ARV-264: --safe (default) drops --seed / probe opt-ins with warnings", async () => {
+    const code = await auditCommand({
+      api: "demo",
+      seed: true,
+      withMassAssignment: true,
+      withSecurity: true,
+      dryRun: true,
+    });
+    expect(code).toBe(0);
+    const out = suppress.out;
+    // Plain prep, no seed.
+    expect(out).toContain("zond prepare-fixtures --api demo --apply\n");
+    expect(out).not.toContain("--apply --seed");
+    // Mass-assignment / security stages dropped.
+    expect(out).not.toContain("probe mass-assignment");
+    expect(out).not.toContain("probe security ssrf,crlf,open-redirect");
+    // Default 8 stages.
+    expect(out).toContain("(8 stages)");
   });
 
   test("--dry-run --json emits envelope with stage plan", async () => {
