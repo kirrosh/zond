@@ -62,7 +62,6 @@ describe("ARV-303: matrix-coverage no-runs envelope contract", () => {
       const code = await coverageCommand({
         apiName: "demo",
         sessionId: "no-such-session",
-        dbPath,
         json: true,
       });
       expect(code).toBe(1);
