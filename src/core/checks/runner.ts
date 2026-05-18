@@ -56,6 +56,7 @@ import {
   type CheckRunData,
   type CheckRunSummary,
 } from "./types.ts";
+import type { Severity } from "../severity/index.ts";
 import { categoryFor } from "../severity/category.ts";
 import {
   computeSpecFindings,
@@ -540,11 +541,16 @@ function recordFinding(
   evidence: Record<string, unknown> | undefined,
   onEvent: ((event: NdjsonEvent) => void) | undefined,
   severityConfig: MergedConfig | undefined,
+  /** ARV-284: per-finding severity from CheckOutcome — overrides
+   *  the check's natural tier when the check wants to dispatch by
+   *  evidence (e.g. negative_data_rejection LOW for additionalProperties,
+   *  HIGH for 5xx response). */
+  outcomeSeverity?: Severity,
 ): void {
   const action = recommendForCheck(check.id, resp.status);
   const finding: CheckFinding = {
     check: check.id,
-    severity: check.severity,
+    severity: outcomeSeverity ?? check.severity,
     operation: { path: c.operation.path, method: c.operation.method, operationId: c.operation.operationId },
     request_signature: `${c.request.method} ${c.request.url}`,
     response_summary: summarizeResponse(resp),
@@ -825,7 +831,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           options: checkRuntimeOptions,
         });
         if (outcome.kind === "fail") {
-          recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent, opts.severityConfig);
+          recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent, opts.severityConfig, outcome.severity);
         }
         if (outcome.kind === "skip") {
           // ARV-26: bucket skips by check+reason so the summary can surface
