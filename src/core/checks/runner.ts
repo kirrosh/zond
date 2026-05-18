@@ -1074,9 +1074,12 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
             outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
           }
           if (outcome.kind === "fail") {
+            // ARV-286 (follow-up ARV-284): respect per-finding severity
+            // returned by stateful check via `outcome.severity` — declared
+            // `check.severity` is the proof-cap baseline.
             const finding: CheckFinding = {
               check: check.id,
-              severity: check.severity,
+              severity: outcome.severity ?? check.severity,
               operation: { path: op.path, method: op.method, operationId: op.operationId },
               request_signature: `${op.method.toUpperCase()} ${op.path}`,
               response_summary: { status: 0 },
@@ -1138,9 +1141,13 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           }
           if (outcome.kind === "fail") {
             const repOp = group.create ?? group.read!;
+            // ARV-287/288 (follow-up ARV-284): respect per-finding severity
+            // from stateful CRUD checks (cross_call_references,
+            // pagination_invariants) — declared severity is the proof-cap
+            // baseline.
             const finding: CheckFinding = {
               check: check.id,
-              severity: check.severity,
+              severity: outcome.severity ?? check.severity,
               operation: { path: repOp.path, method: repOp.method, operationId: repOp.operationId },
               request_signature: `${repOp.method.toUpperCase()} ${repOp.path} (chain)`,
               response_summary: { status: 0 },
