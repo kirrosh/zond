@@ -14,6 +14,8 @@ import {
   inferSeedBody,
   inferAll,
   meetsConfidence,
+  extractEnumFromDescription,
+  collectStatusExamples,
 } from "../../src/cli/commands/api/annotate/auto.ts";
 import type { ResourceSlice } from "../../src/cli/commands/api/annotate/prompts.ts";
 
@@ -217,6 +219,202 @@ describe("inferLifecycle", () => {
       },
     });
     expect(inferLifecycle(s)).toBeNull();
+  });
+});
+
+describe("ARV-272: description + example fallback", () => {
+  test("description 'Possible values: a, b, c' → low confidence", () => {
+    const s = slice({
+      endpoints: {
+        read: {
+          method: "GET",
+          path: "/v1/things/{id}",
+          responses: {
+            "200": {
+              schema: {
+                type: "object",
+                properties: {
+                  status: {
+                    type: "string",
+                    description: "Possible values: active, canceled, past_due, unpaid.",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    const inf = inferLifecycle(s);
+    expect(inf).not.toBeNull();
+    expect(inf!.confidence).toBe("low");
+    expect(inf!.patch.lifecycle?.states).toEqual(["active", "canceled", "past_due", "unpaid"]);
+  });
+
+  test("examples-only (≥3 distinct) → medium confidence", () => {
+    const s = slice({
+      endpoints: {
+        list: {
+          method: "GET",
+          path: "/v1/things",
+          responses: {
+            "200": {
+              schema: {
+                example: { status: "active" },
+                properties: {
+                  status: { type: "string", example: "active" },
+                },
+              },
+            },
+          },
+        },
+        read: {
+          method: "GET",
+          path: "/v1/things/{id}",
+          responses: {
+            "200": {
+              schema: {
+                example: { status: "paid" },
+                properties: { status: { type: "string", example: "paid" } },
+              },
+            },
+          },
+        },
+        create: {
+          method: "POST",
+          path: "/v1/things",
+          requestBody: { example: { status: "open" } },
+          responses: {
+            "200": {
+              schema: {
+                properties: { status: { type: "string" } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const inf = inferLifecycle(s);
+    expect(inf).not.toBeNull();
+    expect(inf!.confidence).toBe("medium");
+    const states = inf!.patch.lifecycle?.states ?? [];
+    expect(new Set(states)).toEqual(new Set(["active", "paid", "open"]));
+  });
+
+  test("description + matching examples → high confidence", () => {
+    const s = slice({
+      endpoints: {
+        list: {
+          method: "GET",
+          path: "/v1/things",
+          responses: {
+            "200": {
+              schema: {
+                example: { status: "active" },
+                properties: { status: { type: "string", example: "active" } },
+              },
+            },
+          },
+        },
+        read: {
+          method: "GET",
+          path: "/v1/things/{id}",
+          responses: {
+            "200": {
+              schema: {
+                properties: {
+                  status: {
+                    type: "string",
+                    description: "Possible values: active, canceled, past_due, unpaid.",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    const inf = inferLifecycle(s);
+    expect(inf).not.toBeNull();
+    expect(inf!.confidence).toBe("high");
+    expect(inf!.patch.lifecycle?.states).toContain("active");
+    expect(inf!.patch.lifecycle?.states).toContain("canceled");
+  });
+
+  test("description with <3 values → no inference", () => {
+    const s = slice({
+      endpoints: {
+        read: {
+          method: "GET",
+          path: "/v1/things/{id}",
+          responses: {
+            "200": {
+              schema: {
+                properties: {
+                  status: {
+                    type: "string",
+                    description: "Possible values: active, canceled.",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(inferLifecycle(s)).toBeNull();
+  });
+});
+
+describe("extractEnumFromDescription", () => {
+  test("'Possible values: a, b, c'", () => {
+    expect(extractEnumFromDescription("Possible values: a, b, c")).toEqual(["a", "b", "c"]);
+  });
+  test("'Allowed values - a or b or c'", () => {
+    expect(extractEnumFromDescription("Allowed values - a or b or c")).toEqual(["a", "b", "c"]);
+  });
+  test("backticks/quotes stripped", () => {
+    expect(extractEnumFromDescription("Possible values: `active`, 'canceled', \"paid\"")).toEqual([
+      "active",
+      "canceled",
+      "paid",
+    ]);
+  });
+  test("no marker phrase → empty", () => {
+    expect(extractEnumFromDescription("Some random sentence about status.")).toEqual([]);
+  });
+  test("rejects sentence-shaped tokens", () => {
+    expect(
+      extractEnumFromDescription("Possible values: the state can be a, or maybe b"),
+    ).toEqual([]);
+  });
+});
+
+describe("collectStatusExamples", () => {
+  test("walks per-property + whole-object examples across endpoints", () => {
+    const s = slice({
+      endpoints: {
+        list: {
+          method: "GET",
+          path: "/x",
+          responses: {
+            "200": {
+              schema: {
+                example: { status: "a" },
+                properties: { status: { type: "string", example: "b" } },
+              },
+            },
+          },
+        },
+        create: {
+          method: "POST",
+          path: "/x",
+          requestBody: { example: { status: "c" } },
+          responses: {},
+        },
+      },
+    });
+    expect(new Set(collectStatusExamples(s, "status"))).toEqual(new Set(["a", "b", "c"]));
   });
 });
 
