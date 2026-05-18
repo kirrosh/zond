@@ -3,9 +3,10 @@ id: ARV-287
 title: >-
   cross_call_references: per-finding severity matrix (state_not_persisted HIGH /
   write_only_only MEDIUM)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18 10:35'
+updated_date: '2026-05-18 14:02'
 labels:
   - severity
   - calibration
@@ -47,9 +48,9 @@ Anti-FP уже работает: spec-declared write-only поля фильтр�
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 crossCallReferences.severity = 'low'; state_not_persisted non-empty → HIGH, write_only-only → MEDIUM
-- [ ] #2 tests/core/checks/cross-call-references-severity.test.ts лочит 4 кейса (state-only, write-only, both, neither)
-- [ ] #3 700+ unit tests pass
+- [x] #1 crossCallReferences.severity = 'low'; state_not_persisted non-empty → HIGH, write_only-only → MEDIUM
+- [x] #2 tests/core/checks/cross-call-references-severity.test.ts лочит 4 кейса (state-only, write-only, both, neither)
+- [x] #3 700+ unit tests pass
 
 ## Связано
 
@@ -58,4 +59,11 @@ Anti-FP уже работает: spec-declared write-only поля фильтр�
 - ARV-169 (cross_call_references origin)
 - ARV-283 (severity.yaml + readback_diff overlay)
 <!-- SECTION:DESCRIPTION:END -->
+
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Реализовано: crossCallReferences.severity='low' + state_not_persisted→HIGH, write_only-only→MEDIUM. Тест tests/core/checks/cross-call-references-severity.test.ts 6 it() pass. Backlog status hygiene.
+<!-- SECTION:FINAL_SUMMARY:END -->
