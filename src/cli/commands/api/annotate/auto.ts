@@ -200,7 +200,124 @@ export function inferLifecycle(slice: ResourceSlice): AutoInference | null {
     }
   }
 
+  // ARV-272: final fallback — mine description text + cluster response
+  // examples for state values. Stripe (and similar) declare the status
+  // field without an `enum`, listing the allowed values in prose
+  // ("Possible values: active, canceled, ...") and via response
+  // examples. Source A is text-mining-brittle (low), Source B is real
+  // data (medium); both agreeing → high.
+  if (props) {
+    for (const candidate of STATE_FIELD_NAMES) {
+      const found = findCaseInsensitive(props, candidate);
+      if (!found) continue;
+      const fieldSchema = found.value as { description?: string } | undefined;
+      const descStates = extractEnumFromDescription(fieldSchema?.description);
+      const exampleStates = collectStatusExamples(slice, found.name);
+
+      let states: string[] = [];
+      let confidence: AutoInference["confidence"] | null = null;
+      let rationale = "";
+      const exampleSet = new Set(exampleStates);
+      const overlap = descStates.filter((s) => exampleSet.has(s));
+
+      if (descStates.length >= 3 && overlap.length >= 1) {
+        states = Array.from(new Set([...descStates, ...exampleStates]));
+        confidence = "high";
+        rationale = `${found.name}: ${descStates.length} values from description, ${exampleStates.length} from examples (${overlap.length} overlap)`;
+      } else if (exampleStates.length >= 3) {
+        states = exampleStates;
+        confidence = "medium";
+        rationale = `${found.name}: ${exampleStates.length} distinct values clustered from spec examples`;
+      } else if (descStates.length >= 3) {
+        states = descStates;
+        confidence = "low";
+        rationale = `${found.name}: ${descStates.length} values mined from description text`;
+      } else {
+        continue;
+      }
+
+      return {
+        resource: slice.resource,
+        aspect: "lifecycle",
+        confidence,
+        rationale,
+        patch: {
+          resource: slice.resource,
+          lifecycle: {
+            field: found.name,
+            states,
+            transitions: [],
+            actions: {},
+          },
+        },
+      };
+    }
+  }
+
   return null;
+}
+
+const POSSIBLE_VALUES_RE = /(?:possible|allowed|valid|accepted|supported)\s+values?\s*[:\-—]?\s*([^.\n]+)/i;
+
+/**
+ * Mine an enum-like list of values from a free-text description that
+ * follows the "Possible values: a, b, c" / "Allowed values - a | b | c"
+ * convention (Stripe, Twilio, GitHub partial). Returns deduped, in-
+ * order tokens after stripping wrapping quotes/backticks/punctuation.
+ */
+export function extractEnumFromDescription(desc: string | undefined): string[] {
+  if (!desc) return [];
+  const m = desc.match(POSSIBLE_VALUES_RE);
+  if (!m) return [];
+  const tail = m[1]!;
+  const tokens = tail
+    .split(/\s*(?:,|\sor\s|\|)\s*/i)
+    .map((t) => t.replace(/^["'`]+|["'`,.;:]+$/g, "").trim())
+    .filter((t) => t.length > 0 && t.length < 60 && /^[a-z0-9_\-]+$/i.test(t));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const t of tokens) {
+    if (!seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out;
+}
+
+/**
+ * Cluster distinct values of `fieldName` across all endpoints' response
+ * schema examples and request-body examples in the slice. Honors both
+ * shapes: a per-property `example` on the field schema, and a
+ * whole-object `example` on the requestBody.
+ */
+export function collectStatusExamples(slice: ResourceSlice, fieldName: string): string[] {
+  const seen = new Set<string>();
+  const lower = fieldName.toLowerCase();
+  const collectFromObject = (obj: unknown): void => {
+    if (!obj || typeof obj !== "object") return;
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      if (k.toLowerCase() === lower && typeof v === "string") seen.add(v);
+    }
+  };
+  for (const ep of Object.values(slice.endpoints)) {
+    if (!ep) continue;
+    collectFromObject(ep.requestBody?.example);
+    for (const resp of Object.values(ep.responses ?? {})) {
+      const sch = resp?.schema as
+        | { properties?: Record<string, unknown>; example?: unknown }
+        | undefined;
+      if (!sch) continue;
+      collectFromObject(sch.example);
+      const props = sch.properties;
+      if (!props) continue;
+      const found = findCaseInsensitive(props, fieldName);
+      if (!found) continue;
+      const v = found.value as { example?: unknown; enum?: unknown[] } | undefined;
+      if (typeof v?.example === "string") seen.add(v.example);
+    }
+  }
+  return Array.from(seen);
 }
 
 function findCaseInsensitive(

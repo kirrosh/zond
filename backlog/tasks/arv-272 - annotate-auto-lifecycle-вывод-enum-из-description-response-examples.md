@@ -1,10 +1,10 @@
 ---
 id: ARV-272
 title: 'annotate-auto lifecycle: вывод enum из description + response examples'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17 13:28'
-updated_date: '2026-05-17 14:43'
+updated_date: '2026-05-18 11:45'
 labels:
   - annotate
   - annotate-auto
@@ -55,7 +55,13 @@ Source B — **response example clustering**:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 annotate auto парсит 'Possible values:' / 'Allowed values:' из description
-- [ ] #2 annotate auto кластеризует distinct status values из spec examples
-- [ ] #3 На Stripe появляется lifecycle config для subscriptions/invoices/charges/disputes
+- [x] #1 annotate auto парсит 'Possible values:' / 'Allowed values:' из description
+- [x] #2 annotate auto кластеризует distinct status values из spec examples
+- [x] #3 На Stripe появляется lifecycle config для subscriptions/invoices/charges/disputes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Добавлен third fallback в inferLifecycle (src/cli/commands/api/annotate/auto.ts): description text mining ('Possible values:') + response example clustering. Combined → high; examples-only ≥3 → medium; description-only ≥3 → low. На Stripe-style spec (status: { description: 'Possible values: ...' }) теперь генерится lifecycle config. Тесты: 8 новых кейсов в annotate-auto.test.ts.
+<!-- SECTION:NOTES:END -->
