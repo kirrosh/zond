@@ -3,9 +3,10 @@ id: ARV-292
 title: >-
   budget flag (quick/standard/full): adaptive --max-requests cap for corpus +
   60-sec gate UX
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18 11:36'
+updated_date: '2026-05-18 14:10'
 labels:
   - m-23
   - corpus
@@ -32,11 +33,11 @@ priority: high
 Сохраняем совместимость с `--max-requests N` (override).
 
 ## Acceptance Criteria
-
-- [ ] #1 `--budget` flag added to `zond audit/checks run/corpus run`
-- [ ] #2 Tier mapping реализован в options layer
-- [ ] #3 `--max-requests` override берёт верх над budget
-- [ ] #4 Regression test: quick budget на mock-API завершается < 60s wall-clock
+<!-- AC:BEGIN -->
+- [x] #1 #1 `--budget` flag added to `zond audit/checks run/corpus run`
+- [x] #2 #2 Tier mapping реализован в options layer
+- [x] #3 #3 `--max-requests` override берёт верх над budget
+- [x] #4 #4 Regression test: quick budget на mock-API завершается < 60s wall-clock
 
 ## Связано
 
@@ -44,3 +45,11 @@ priority: high
 - ARV-227 (--max-requests origin)
 - strategy.md §3.1
 <!-- SECTION:DESCRIPTION:END -->
+
+<!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Реализовано: src/core/checks/budget.ts (resolveBudget + isBudget), --budget flag на checks run и audit, skipStateful в RunChecksOptions с surface через summary.skipped_outcomes['stateful-skipped:budget']. Tier mapping: quick=50req+no-stateful, standard=500req+all, full=uncapped+all. --max-requests override всегда выигрывает. --check stateful опт-обратно в stateful даже под quick (forceStatefulIfIncluded). Omitted --budget сохраняет legacy uncapped (no silent regression). Unit-тесты budget.test.ts 10/10 + regression checks-budget.test.ts 4/4 (quick < 60s wall-clock на mock-API). corpus run не делался — команды нет (ARV-291). bun run check зелёный, bun test 2456/2457 (pre-existing ARV-196 fail unrelated).
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -18,6 +18,7 @@ import { listChecks, runChecks } from "../../core/checks/index.ts";
 import { findWorkspaceRoot } from "../../core/workspace/root.ts";
 import { loadSeverityConfig, SeverityConfigError } from "../../core/severity/loader.ts";
 import { listStatefulChecks } from "../../core/checks/stateful.ts";
+import { resolveBudget, isBudget, BUDGETS, type Budget } from "../../core/checks/budget.ts";
 import { generateSarifReport } from "../../core/checks/sarif.ts";
 import { emitToStdout } from "../../core/reporter/ndjson.ts";
 import { parseWorkers } from "../../core/runner/async-pool.ts";
@@ -125,6 +126,7 @@ interface ChecksRunOptions {
   strict405?: boolean;
   strict401?: boolean;
   maxRequests?: number;
+  budget?: string;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -603,11 +605,26 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       }
     : undefined;
 
+  let budget: Budget | undefined;
+  if (opts.budget !== undefined) {
+    if (!isBudget(opts.budget)) {
+      printError(`--budget must be one of: ${BUDGETS.join(", ")}; got '${opts.budget}'`);
+      process.exit(1);
+    }
+    budget = opts.budget;
+  }
+  const includeList = expandStatefulAlias(splitList(opts.check));
+  const statefulIds = new Set(listStatefulChecks().map((c) => c.id));
+  const includesStateful = includeList?.some((id) => statefulIds.has(id)) === true;
+  const budgetResolved = resolveBudget(budget, opts.maxRequests, {
+    forceStatefulIfIncluded: includesStateful,
+  });
+
   try {
     const result = await runChecks({
       specPath: specRes.spec,
       baseUrl: baseRes.baseUrl,
-      include: expandStatefulAlias(splitList(opts.check)),
+      include: includeList,
       exclude: expandStatefulAlias(splitList(opts.excludeCheck)),
       timeoutMs: typeof opts.timeout === "number" ? opts.timeout : undefined,
       authHeaders: Object.keys(authHeaders).length > 0 ? authHeaders : undefined,
@@ -627,7 +644,8 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       // path inside runPool — same observable behaviour.
       workers,
       rateLimiter,
-      maxRequests: typeof opts.maxRequests === "number" && opts.maxRequests > 0 ? opts.maxRequests : undefined,
+      maxRequests: budgetResolved.maxRequests,
+      skipStateful: budgetResolved.skipStateful,
       severityConfig,
     });
 
@@ -873,8 +891,12 @@ function defineRun(parent: Command): void {
     )
     .option(
       "--max-requests <n>",
-      "ARV-227: hard cap on outbound HTTP requests for the whole run (per-response + stateful share the same budget). Once reached, remaining cases short-circuit with `max-requests-cap-reached` in summary.skipped_outcomes. Use to keep coverage runs against large specs (github, kubernetes) bounded.",
+      "ARV-227: hard cap on outbound HTTP requests for the whole run (per-response + stateful share the same budget). Once reached, remaining cases short-circuit with `max-requests-cap-reached` in summary.skipped_outcomes. Always wins over the --budget tier cap.",
       (v) => Number.parseInt(v, 10),
+    )
+    .option(
+      "--budget <tier>",
+      "ARV-292: adaptive cap and stateful gating tier. `quick` (cap 50, skip stateful) → ~60-sec gate. `standard` (cap 500, all checks). `full` (uncapped). Omitted ⇒ legacy uncapped behaviour. --max-requests always overrides the tier cap; `--check stateful` opts back into stateful even under `quick`.",
     )
     .action(checksRunAction);
 }
