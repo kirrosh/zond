@@ -127,6 +127,7 @@ interface ChecksRunOptions {
   strict401?: boolean;
   maxRequests?: number;
   budget?: string;
+  showSuppressed?: boolean;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -772,10 +773,16 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
           }
         }
       }
+      // ARV-283 AC#4: suppressed findings stay in the ndjson audit-trail
+      // but are hidden from the human summary unless `--show-suppressed`
+      // is passed. They never count toward CI gates regardless.
+      const activeFindings = result.data.findings.filter((f) => !f.suppressed_by);
+      const suppressedFindings = result.data.findings.filter((f) => f.suppressed_by);
+
       // Per-op findings — skip those already covered by a status_drift
       // rollup unless --verbose was passed.
       if (opts.verbose) {
-        for (const f of result.data.findings) {
+        for (const f of activeFindings) {
           console.log(`  [${f.severity}] ${f.check} ${f.operation.method} ${f.operation.path} — ${f.message}`);
         }
       } else {
@@ -785,13 +792,22 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
         // duplicates so the human summary stays readable even when boundary
         // mutations each trip the same status.
         const seen = new Set<string>();
-        for (const f of result.data.findings) {
+        for (const f of activeFindings) {
           const opKey = `${f.check}|${f.operation.method} ${f.operation.path}`;
           if (rolledUpOps.has(opKey)) continue;
           const dedupKey = `${f.severity}|${opKey}|${f.response_summary?.status ?? 0}|${f.message}`;
           if (seen.has(dedupKey)) continue;
           seen.add(dedupKey);
           console.log(`  [${f.severity}] ${f.check} ${f.operation.method} ${f.operation.path} — ${f.message}`);
+        }
+      }
+
+      if (opts.showSuppressed && suppressedFindings.length > 0) {
+        console.log(`\nSuppressed (${suppressedFindings.length}, not counted in summary):`);
+        for (const f of suppressedFindings) {
+          const sb = f.suppressed_by!;
+          console.log(`  [${f.severity}] ${f.check} ${f.operation.method} ${f.operation.path} — ${f.message}`);
+          console.log(`         ↳ suppressed by ${sb.source}#${sb.rule_index}: ${sb.reason}`);
         }
       }
     }
@@ -897,6 +913,10 @@ function defineRun(parent: Command): void {
     .option(
       "--budget <tier>",
       "ARV-292: adaptive cap and stateful gating tier. `quick` (cap 50, skip stateful) → ~60-sec gate. `standard` (cap 500, all checks). `full` (uncapped). Omitted ⇒ legacy uncapped behaviour. --max-requests always overrides the tier cap; `--check stateful` opts back into stateful even under `quick`.",
+    )
+    .option(
+      "--show-suppressed",
+      "ARV-283: show findings suppressed by `.zond/severity.yaml` in the text summary (with their suppressed_by trace). Suppressed findings stay in ndjson/JSON audit-trail regardless of this flag and never count toward CI exit codes.",
     )
     .action(checksRunAction);
 }
