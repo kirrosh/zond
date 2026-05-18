@@ -499,13 +499,36 @@ async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
       }
     }
   } else {
-    // ARV-303: envelope/exit-code contract — spec-only path has no
-    // registered API to load runs from, so there is no coverage to
-    // report. Surface that as ok:false (errors[0] explains the fix) so
-    // the non-zero exit matches the envelope shape.
-    printJson(jsonError("coverage", [
-      `Coverage requires a registered API — pass --api <name> or run 'zond add api --spec ${options.spec}' first.`,
-    ]));
+    // TASK-250 + ARV-303: the spec-only path emits a shape-stable
+    // ok:true envelope even when there's no registered API. The
+    // legacy contract here is "we parsed the spec, here is 0% with a
+    // null runId" — agents and CI scripts depend on the key shape.
+    // ARV-303 only tightens the matrix-coverage path (no runs match
+    // --union / --session-id), which DID emit ok:true alongside exit
+    // 1; the spec-only path was intentionally informational.
+    const unhit = allEndpoints.map((ep) => ({
+      endpoint: `${ep.method.toUpperCase()} ${ep.path}`,
+      method: ep.method.toUpperCase(),
+      path: ep.path,
+      lastStatus: null,
+    }));
+    printJson(jsonOk("coverage", {
+      covered: 0,
+      uncovered: total,
+      partial: 0,
+      total,
+      percentage,
+      runId: null,
+      coveredEndpoints: [],
+      partialEndpoints: [],
+      uncoveredEndpoints: unhit.map(u => u.endpoint),
+      totals: { all: total, covered2xx: 0, coveredButNon2xx: 0, unhit: total },
+      covered2xxEndpoints: [],
+      coveredButNon2xxEndpoints: [],
+      unhitEndpoints: unhit,
+      pass_coverage: { covered: 0, total, ratio: 0 },
+      hit_coverage: { covered: 0, total, ratio: 0 },
+    }));
   }
 
   if (options.failOnCoverage !== undefined) {
