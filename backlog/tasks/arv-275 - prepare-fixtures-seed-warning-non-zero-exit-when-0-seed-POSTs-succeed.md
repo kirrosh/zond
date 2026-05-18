@@ -1,9 +1,10 @@
 ---
 id: ARV-275
 title: 'prepare-fixtures --seed: warning + non-zero exit when 0% seed POSTs succeed'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17 13:29'
+updated_date: '2026-05-18 11:51'
 labels:
   - ux
   - prepare-fixtures
@@ -50,7 +51,13 @@ Seed POST attempts: N total, M succeeded (M/N=K%)
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Summary block в конце: Discovery vs Seed counts
-- [ ] #2 Warning line if seed success rate < 50%
-- [ ] #3 Exit code 2 если seed attempted и 0% успеха
+- [x] #1 Summary block в конце: Discovery vs Seed counts
+- [x] #2 Warning line if seed success rate < 50%
+- [x] #3 Exit code 2 если seed attempted и 0% успеха
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+src/cli/commands/bootstrap.ts: текстовый summary теперь разделяет Discovery vs Seed counts, warning при <50% seed success, exit 2 при 0% seed success (когда seeds attempted). JSON envelope.summary уже содержал seedsAttempted/seedsSucceeded. Тесты: tests/cli/bootstrap-seed-failure.test.ts (2 кейса).
+<!-- SECTION:NOTES:END -->
