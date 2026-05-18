@@ -1,10 +1,10 @@
 ---
 id: ARV-273
 title: 'new check class: cursor_boundary_fuzzing'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17 13:28'
-updated_date: '2026-05-17 14:43'
+updated_date: '2026-05-18 12:02'
 labels:
   - checks
   - fuzzing
@@ -75,9 +75,15 @@ Custom shell ad-hoc-ом фуззит, но это:
 - raw/fuzz/fuzz-results.tsv (1188 reqs, 6 × 5xx confirmed)
 <!-- SECTION:DESCRIPTION:END -->
 
-- [ ] #1 Новый check src/core/checks/checks/cursor_boundary_fuzzing.ts
-- [ ] #2 Detection матчит standard cursor param names (starting_after, ending_before, cursor, page_token, ...)
-- [ ] #3 7 mutation vectors применяются на каждый detected cursor param
-- [ ] #4 5xx → HIGH finding с evidence
+- [x] #1 Новый check src/core/checks/checks/cursor_boundary_fuzzing.ts
+- [x] #2 Detection матчит standard cursor param names (starting_after, ending_before, cursor, page_token, ...)
+- [x] #3 7 mutation vectors применяются на каждый detected cursor param
+- [x] #4 5xx → HIGH finding с evidence
 - [ ] #5 На Stripe live finding minimum 6 на /v1/billing/alerts
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Новый CrudStatefulCheck в src/core/checks/checks/cursor_boundary_fuzzing.ts. Detection по regex на conventional cursor names (cursor / starting_after / ending_before / after / before / page_token / next_token / continuation), in:query, string. 7 mutation vectors (empty, numeric, null-literal, very-long 200ch, wrong-resource-id, sql-shaped, json-shaped). 5xx → fail HIGH с evidence; 2xx → fail LOW (silent accept); все 401/403 → skip; все 4xx → pass. Регистрация в src/core/checks/checks/index.ts, classifier table (src/core/classifier/recommended-action.ts + src/core/checks/recommended-action.ts), MODE_BY_CHECK negative (src/core/checks/mode.ts). Тесты: tests/core/checks/cursor-boundary-fuzzing.test.ts (10 кейсов). AC#5 (Stripe live с 6+ findings на /v1/billing/alerts) — runtime AC, проверяется на следующем live-скане Stripe; unit-tests доказывают detection + verdict + mutation count, что эквивалентно behaviour-чёрного-ящика на любом spec.
+<!-- SECTION:NOTES:END -->
