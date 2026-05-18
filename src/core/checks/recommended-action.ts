@@ -35,6 +35,7 @@ const CHECK_ID_TO_CLASS: Record<string, FindingClass> = {
   lifecycle_transitions: "check:lifecycle_transitions",
   open_cors_on_sensitive: "check:open_cors_on_sensitive",
   rate_limit_headers_absent: "check:rate_limit_headers_absent",
+  cursor_boundary_fuzzing: "check:cursor_boundary_fuzzing",
   network_error: "check:network_error",
 };
 
