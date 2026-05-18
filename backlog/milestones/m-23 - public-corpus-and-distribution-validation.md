@@ -40,13 +40,33 @@ check classes (кроме уже-HIGH ARV-273).
 
 ### Трек 2 — Public corpus (m-23 epic)
 
-5 starter API (Stripe, GitHub, Linear, Resend, OpenAI) в отдельном repo
-`zond-public-corpus`. `zond corpus run --safe` daily через GitHub Action.
+5 starter API (Stripe, GitHub, Linear, Resend, OpenAI) в отдельном
+GitHub repo `zond-public-corpus`. **zond corpus — это не product CLI,
+а internal dogfood/content infrastructure**. Конечному пользователю
+corpus не нужен (у них один свой API).
+
+Реализация — bash + GitHub Action + jq в самом corpus repo:
+```bash
+# .github/workflows/daily.yml внутри zond-public-corpus
+for api in apis/*/; do
+  zond audit --api "$(basename $api)" --safe --budget standard \
+    --report ndjson > "runs/$(date +%F)/$(basename $api).ndjson"
+done
+# затем jq + diff против baseline → reports/<date>.md
+```
+
 Per-vendor `.zond/severity.yaml` overlays. Goal: **0 false-HIGH** в
 stationary прогоне через 4 цикла.
 
-Задачи: ARV-292 (`--budget` flag), ARV-289 (`zond corpus run`),
-ARV-290 (`zond corpus diff`), ARV-291 (corpus repo skeleton).
+Задачи в этой плоскости:
+- ARV-292 (`--budget` flag) — **product feature**, нужен независимо
+  (60-сек gate для small teams per decision-8). Corpus просто его юзает.
+- ARV-291 (corpus repo skeleton) — bash+Actions, без zond-CLI команд.
+
+Withdrawn 2026-05-18: ARV-289 (`zond corpus run`) и ARV-290 (`zond
+corpus diff`) — оба свелись бы к bash-обёртке в corpus repo, не
+product surface. Чистый shell-loop вокруг zond живёт **в infra**
+(corpus repo), не размазан между product CLI и shell скриптом.
 
 ### Трек 3 — Distribution & content
 
