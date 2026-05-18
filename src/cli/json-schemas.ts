@@ -136,6 +136,11 @@ export const CheckRunSummarySchema = z.object({
     reason: z.string(),
     count: z.number().int().nonnegative(),
   })),
+  // ARV-283 / ARV-68: count of findings the severity matrix demoted to
+  // `info-suppressed`. Excluded from `findings` / `by_severity` so CI
+  // gates ignore them, but exposed here so consumers (ajv validators
+  // included) accept the field — the runner emits it unconditionally.
+  suppressed: z.number().int().nonnegative().optional(),
 });
 
 /** ARV-60: spec-level rollup row. Emitted when ≥80% of a check's
