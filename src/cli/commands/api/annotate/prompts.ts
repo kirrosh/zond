@@ -95,8 +95,9 @@ function dumpEndpoint(doc: OpenAPIV3.Document, method: string, path: string): En
   if (!op) return null;
 
   const parameters: EndpointDump["parameters"] = [];
-  for (const p of [...(pathItem.parameters ?? []), ...(op.parameters ?? [])]) {
-    if ("$ref" in p) continue;
+  for (const raw of [...(pathItem.parameters ?? []), ...(op.parameters ?? [])]) {
+    const p = resolveParameter(doc, raw);
+    if (!p) continue;
     parameters.push({
       name: p.name,
       in: p.in,
@@ -179,5 +180,41 @@ function simplifySchema(s: OpenAPIV3.SchemaObject | undefined): unknown {
 function truncate(s: string | undefined, n: number): string | undefined {
   if (!s) return undefined;
   return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+/**
+ * Resolve a parameter that may be inline or a $ref. Handles
+ * `#/components/parameters/X` (canonical) and, leniently,
+ * `#/components/headers/X` — some specs (Stripe) keep their
+ * `Idempotency-Key` declaration under `components.headers` and reuse
+ * it as a parameter $ref. Returns null on unresolvable refs.
+ */
+function resolveParameter(
+  doc: OpenAPIV3.Document,
+  raw: OpenAPIV3.ParameterObject | OpenAPIV3.ReferenceObject,
+): OpenAPIV3.ParameterObject | null {
+  if (!("$ref" in raw)) return raw;
+  const ref = raw.$ref;
+  const paramMatch = ref.match(/^#\/components\/parameters\/(.+)$/);
+  if (paramMatch) {
+    const target = doc.components?.parameters?.[paramMatch[1]!];
+    if (target && !("$ref" in target)) return target as OpenAPIV3.ParameterObject;
+  }
+  const headerMatch = ref.match(/^#\/components\/headers\/(.+)$/);
+  if (headerMatch) {
+    const name = headerMatch[1]!;
+    const target = doc.components?.headers?.[name];
+    if (target && !("$ref" in target)) {
+      const h = target as OpenAPIV3.HeaderObject;
+      return {
+        name,
+        in: "header",
+        required: h.required,
+        description: h.description,
+        schema: h.schema,
+      } as OpenAPIV3.ParameterObject;
+    }
+  }
+  return null;
 }
 
