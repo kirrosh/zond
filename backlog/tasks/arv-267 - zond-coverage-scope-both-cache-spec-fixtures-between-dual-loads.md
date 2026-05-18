@@ -4,9 +4,11 @@ title: 'zond coverage --scope both: cache spec/fixtures between dual loads'
 status: To Do
 assignee: []
 created_date: '2026-05-17 11:44'
+updated_date: '2026-05-18 13:02'
 labels:
   - coverage
   - perf
+  - defer-post-m-23
 dependencies: []
 priority: low
 ---
@@ -30,8 +32,9 @@ Single spec/fixtures/env read per `coverage` invocation. Matrix engine runs twic
 - Or: introduce a `{ scopes: ['test', 'audit'] }` option that returns both matrices in one call.
 
 ## Acceptance Criteria
-
-- [ ] `coverage --scope both` does exactly one read of spec.json + .api-fixtures.yaml + .env.yaml
-- [ ] No behavioural change in test/audit metric values
-- [ ] Existing single-scope callers (server, report.ts) unaffected
+<!-- AC:BEGIN -->
+- [ ] #1 `coverage --scope both` does exactly one read of spec.json + .api-fixtures.yaml + .env.yaml
+- [ ] #2 No behavioural change in test/audit metric values
+- [ ] #3 Existing single-scope callers (server, report.ts) unaffected
 <!-- SECTION:DESCRIPTION:END -->
+<!-- AC:END -->

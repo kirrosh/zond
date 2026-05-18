@@ -4,10 +4,12 @@ title: 'prepare-fixtures: warn when seed_body overlay found but ignored (pre-ARV
 status: To Do
 assignee: []
 created_date: '2026-05-17 13:29'
+updated_date: '2026-05-18 13:02'
 labels:
   - ux
   - prepare-fixtures
   - overlay
+  - defer-post-m-23
 dependencies:
   - ARV-269
 priority: low
