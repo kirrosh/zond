@@ -25,8 +25,25 @@
  *   signal end-of-list via Link headers / total_pages rather than a
  *   body boolean, so a missing has_more field is normal.
  *
- * Severity policy: HIGH. Dominant signal class is duplicates (data
- * loss / off-by-one); secondary kinds surface in `evidence.kind`.
+ * Severity matrix (ARV-288, follow-up to ARV-284 pattern):
+ *
+ *   declared severity = 'low' (proof-cap baseline per ARV-250 — stateful
+ *   two-page probe is single-signal without an out-of-band diff confirmation).
+ *
+ *   Per-finding dispatch via `outcome.severity` (applied in BOTH
+ *   runCursorStyle and runPageStyle):
+ *
+ *     HIGH   — `kinds` contains 'duplicate_items': items overlap on
+ *               consecutive pages → real data-loss / off-by-one evidence
+ *               chain → can reach HIGH (evidence_chain proof).
+ *
+ *     MEDIUM — all other `kinds` only (`has_more_inconsistent`,
+ *               `partial_page_with_has_more`, `per_page_exceeded`):
+ *               protocol bugs / single-signal contract violations per
+ *               ARV-250. Escalated above declared baseline because a
+ *               concrete invariant is broken, but no data-loss evidence.
+ *
+ * References: ARV-250 (proof-cap ladder), ARV-284 (per-finding pattern).
  *
  * Anti-FP guards (both styles):
  *   • Page A empty → skip ("empty collection — no data to paginate").
@@ -41,6 +58,7 @@
  */
 import type { OpenAPIV3 } from "openapi-types";
 import type { CrudStatefulCheck } from "../stateful.ts";
+import type { Severity } from "../../severity/index.ts";
 import type { PaginationConfig } from "../../generator/resources-builder.ts";
 import { fillPathParams } from "./_crud-helpers.ts";
 
@@ -195,7 +213,10 @@ function buildUrl(base: string, path: string, pathVars: Record<string, string> |
 
 export const paginationInvariants: CrudStatefulCheck = {
   id: "pagination_invariants",
-  severity: "high",
+  // ARV-288: declared severity is the proof-cap baseline (low) per ARV-250.
+  // Per-finding severity is dispatched via outcome.severity in run() below:
+  // duplicate_items (data-loss evidence chain) → high; protocol-only kinds → medium.
+  severity: "low",
   defaultExpected: "Consecutive cursor pages must be disjoint and has_more must agree with item presence",
   references: [{ id: "ARV-171" }],
   phase: "crud",
@@ -281,8 +302,12 @@ async function runCursorStyle(
   if (inconsistentHasMore) kinds.push("has_more_inconsistent");
   if (partialPageWithMore) kinds.push("partial_page_with_has_more");
 
+  // ARV-288: per-finding severity dispatch.
+  const severity: Severity = kinds.includes("duplicate_items") ? "high" : "medium";
+
   return {
     kind: "fail",
+    severity,
     message:
       duplicates.length > 0
         ? `Pagination on ${g.resource}: ${duplicates.length} item id(s) appear on both pages (${duplicates.slice(0, 3).join(", ")}${duplicates.length > 3 ? ", …" : ""})`
@@ -354,8 +379,12 @@ async function runPageStyle(
   if (duplicates.length > 0) kinds.push("duplicate_items");
   if (perPageBreach) kinds.push("per_page_exceeded");
 
+  // ARV-288: per-finding severity dispatch.
+  const severity: Severity = kinds.includes("duplicate_items") ? "high" : "medium";
+
   return {
     kind: "fail",
+    severity,
     message:
       duplicates.length > 0
         ? `Pagination on ${g.resource}: ${duplicates.length} item id(s) appear on pages ${resolved.startPage} and ${resolved.startPage + 1} (${duplicates.slice(0, 3).join(", ")}${duplicates.length > 3 ? ", …" : ""})`
