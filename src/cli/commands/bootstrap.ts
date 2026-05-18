@@ -832,6 +832,29 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
         }
         console.log("");
         console.log(`Filled ${filledFkVars}/${totalFkVars} path-FK vars (${Math.round(fillRate * 100)}%).`);
+        // ARV-275: split Discovery vs Seed in the human summary. Without
+        // this, a run where `Filled 27/92` came entirely from discovery
+        // and every one of 26 seed POSTs failed reads as a partial
+        // success; the user has no signal that overlays are missing.
+        const seedsTotal = seeds.length;
+        const seedsOk = seeds.filter(s => s.status === "seeded").length;
+        const discoveryWrites = Math.max(0, writes.size - seedsOk);
+        if (seedsTotal > 0) {
+          const pct = Math.round((seedsOk / seedsTotal) * 100);
+          console.log(`  Discovery: ${discoveryWrites} value(s) from list-endpoints (cascade ${passes.length} pass(es))`);
+          console.log(`  Seed POST attempts: ${seedsTotal} total, ${seedsOk} succeeded (${pct}%)`);
+          if (seedsOk === 0) {
+            printWarning(
+              `0/${seedsTotal} seed POSTs succeeded — likely missing seed_body overlay ` +
+              `(see ARV-187 / ARV-269 / ARV-270) or the token can't create resources.`,
+            );
+          } else if (pct < 50) {
+            printWarning(
+              `seed success rate ${pct}% (${seedsOk}/${seedsTotal}) — review failing bodies; ` +
+              `consider adding seed_body overlay (ARV-187 / ARV-269 / ARV-270).`,
+            );
+          }
+        }
       }
 
       if (applied) {
@@ -841,6 +864,13 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
       } else {
         printWarning(`[plan] ${writes.size} value(s) ready. Re-run with --apply to write ${envPath}.`);
       }
+    }
+    // ARV-275: signal 0% seed-success via exit 2 (warning). Discovery-only
+    // runs and runs with no seed attempts keep exit 0; runs where every
+    // seed failed get a non-zero so CI / fb-loop drivers don't treat them
+    // as healthy.
+    if (seeds.length > 0 && seeds.every(s => s.status !== "seeded")) {
+      return 2;
     }
     return 0;
   } catch (err) {
