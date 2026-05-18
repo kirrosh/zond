@@ -3,11 +3,7 @@ import { loadEnvironment, substituteString, substituteDeep } from "../parser/var
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
 import { encodeFormBody } from "./form-encode.ts";
-
-function hasHeaderCI(headers: Record<string, string>, name: string): boolean {
-  const lower = name.toLowerCase();
-  return Object.keys(headers).some((k) => k.toLowerCase() === lower);
-}
+import { hasHeaderCI } from "../util/headers.ts";
 
 export function extractByPath(obj: unknown, path: string): unknown {
   return extractByPathWithDiagnostic(obj, path).value;

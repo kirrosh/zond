@@ -15,6 +15,7 @@ import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import { generateFromSchema } from "../generator/data-factory.ts";
 import { substituteDeep, substituteString } from "../parser/variables.ts";
 import { convertPath, liveAuthHeaders } from "./shared.ts";
+import { joinBaseAndPath } from "../util/url.ts";
 import { encodeFormBody } from "../runner/form-encode.ts";
 import type { SeedBodyConfig } from "../generator/resources-builder.ts";
 
@@ -63,8 +64,7 @@ export function buildProbeUrl(
   ep: EndpointInfo,
   vars: Record<string, string>,
 ): { url: string; unresolved: string[] } {
-  const baseUrl = (vars["base_url"] ?? "").replace(/\/+$/, "");
-  const templated = `${baseUrl}${convertPath(ep.path)}`;
+  const templated = joinBaseAndPath(vars["base_url"], convertPath(ep.path));
   const url = String(substituteString(templated, vars));
   const unresolved = Array.from(url.matchAll(/\{\{([^}]+)\}\}/g)).map(m => m[1]!);
   return { url, unresolved };

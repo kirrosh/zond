@@ -61,6 +61,7 @@ import type { CrudStatefulCheck } from "../stateful.ts";
 import type { Severity } from "../../severity/index.ts";
 import type { PaginationConfig } from "../../generator/resources-builder.ts";
 import { fillPathParams } from "./_crud-helpers.ts";
+import { buildUrl as buildUrlBase } from "../../util/url.ts";
 
 /** Cursor-style query params we recognise on auto-detect (Stripe,
  *  GitHub, Resend, Linear). Lower-cased for case-insensitive match. */
@@ -206,9 +207,7 @@ function pickCursor(item: unknown, field: string): string | number | null {
 }
 
 function buildUrl(base: string, path: string, pathVars: Record<string, string> | undefined, qs: Record<string, string | number>): string {
-  const params = new URLSearchParams();
-  for (const [k, v] of Object.entries(qs)) params.append(k, String(v));
-  return `${base.replace(/\/+$/, "")}${fillPathParams(path, pathVars)}?${params.toString()}`;
+  return buildUrlBase(base, fillPathParams(path, pathVars), qs);
 }
 
 export const paginationInvariants: CrudStatefulCheck = {
