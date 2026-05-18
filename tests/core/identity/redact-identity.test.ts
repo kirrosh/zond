@@ -28,4 +28,41 @@ describe("redactIdentityIn (TASK-173)", () => {
     expect(redactIdentityIn("", { x: "y" })).toBe("");
     expect(redactIdentityIn("hello", {})).toBe("hello");
   });
+
+  // ARV-221: home-directory path segments must be preserved verbatim —
+  // the user/org name in `/Users/<name>/` is a local artifact, not
+  // identity material the redactor should ship-strip.
+  test("ARV-221: preserves /Users/<name>/ even when name matches an identity value", () => {
+    const out = redactIdentityIn(
+      "see /Users/kirrotech/foo/bar for the digest",
+      { org: "kirrotech" },
+    );
+    expect(out).toBe("see /Users/kirrotech/foo/bar for the digest");
+  });
+
+  test("ARV-221: preserves /home/<name>/ on Linux", () => {
+    const out = redactIdentityIn(
+      "path: /home/kirrotech/data",
+      { org: "kirrotech" },
+    );
+    expect(out).toBe("path: /home/kirrotech/data");
+  });
+
+  test("ARV-221: preserves C:\\Users\\<name>\\ on Windows", () => {
+    const out = redactIdentityIn(
+      "C:\\Users\\kirrotech\\data",
+      { org: "kirrotech" },
+    );
+    expect(out).toBe("C:\\Users\\kirrotech\\data");
+  });
+
+  test("ARV-221: still redacts identity references OUTSIDE home-dir paths", () => {
+    // Mixed: org=kirrotech appears both as a real reference and inside
+    // a /Users/ path. Only the standalone reference should be redacted.
+    const out = redactIdentityIn(
+      "owner: kirrotech, see /Users/kirrotech/x",
+      { org: "kirrotech" },
+    );
+    expect(out).toBe("owner: <identity:org>, see /Users/kirrotech/x");
+  });
 });

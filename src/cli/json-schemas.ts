@@ -128,11 +128,46 @@ export const CheckRunSummarySchema = z.object({
   // never produced a checkable response (e.g. probe got 4xx, schema only on
   // 200) so "0 findings" doesn't read as "all green".
   skipped_outcomes: z.record(z.string(), z.number().int().nonnegative()),
+  // ARV-83: structured counterpart to skipped_outcomes — split into
+  // {check, reason, count} so consumers don't have to colon-tokenise a
+  // reason that may itself contain colons. Sorted by count desc.
+  skipped_outcomes_grouped: z.array(z.object({
+    check: z.string(),
+    reason: z.string(),
+    count: z.number().int().nonnegative(),
+  })),
+  // ARV-283 / ARV-68: count of findings the severity matrix demoted to
+  // `info-suppressed`. Excluded from `findings` / `by_severity` so CI
+  // gates ignore them, but exposed here so consumers (ajv validators
+  // included) accept the field — the runner emits it unconditionally.
+  suppressed: z.number().int().nonnegative().optional(),
+});
+
+/** ARV-60: spec-level rollup row. Emitted when ≥80% of a check's
+ *  applicable operations share the same root cause (status drift,
+ *  missing-declaration skip cluster, or no-detector zero-case). Lives in
+ *  `data.spec_findings` and as its own `spec_finding` NDJSON event. */
+export const SpecFindingSchema = z.object({
+  check: z.string(),
+  kind: z.enum(["status_drift", "missing_declaration", "no_detector", "other"]),
+  severity: SeveritySchema,
+  category: CategorySchema.optional(),
+  reason: z.string(),
+  fix_hint: z.string(),
+  affected_operations: z.array(z.object({
+    path: z.string(),
+    method: z.string(),
+    operationId: z.string().optional(),
+  })),
+  count: z.number().int().nonnegative(),
+  applicable: z.number().int().nonnegative(),
 });
 
 export const ChecksRunDataSchema = z.object({
   findings: z.array(CheckFindingSchema),
   summary: CheckRunSummarySchema,
+  // ARV-60: always present (empty array when no clusters cross 80%).
+  spec_findings: z.array(SpecFindingSchema),
 });
 
 /** ARV-10 (m-15): NDJSON streaming events emitted by `zond checks run
@@ -157,6 +192,10 @@ export const NdjsonCheckResultEventSchema = z.object({
   type: z.literal("check_result"),
   ts: z.string(),
   check: z.string(),
+  // ARV-215: severity from the registry (mirrors `zond checks list`
+  // [high|medium|low]). Lets consumers group NDJSON by severity without
+  // re-joining against the registry.
+  severity: z.enum(["info", "low", "medium", "high", "critical"]),
   verdict: z.enum(["pass", "fail"]),
   operation: OperationRefSchema,
   request_signature: z.string(),
@@ -184,10 +223,22 @@ export const NdjsonSummaryEventSchema = z.object({
   summary: CheckRunSummarySchema,
 });
 
+/** ARV-60: rolled-up spec-level finding event. Emitted before the
+ *  terminal `summary` event so streaming consumers see clusters in the
+ *  same order the CLI renders them. Per-op `finding` events are NOT
+ *  removed — both layers coexist. */
+export const NdjsonSpecFindingEventSchema = z.object({
+  type: z.literal("spec_finding"),
+  ts: z.string(),
+  check: z.string(),
+  spec_finding: SpecFindingSchema,
+});
+
 export const NdjsonEventSchema = z.discriminatedUnion("type", [
   NdjsonCheckStartEventSchema,
   NdjsonCheckResultEventSchema,
   NdjsonFindingEventSchema,
+  NdjsonSpecFindingEventSchema,
   NdjsonSummaryEventSchema,
 ]);
 

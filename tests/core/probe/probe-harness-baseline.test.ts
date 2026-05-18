@@ -94,3 +94,41 @@ describe("ARV-164: buildBaselineFromSpec inherits format-aware cascade", () => {
     expect(buildBaselineFromSpec(ep, vars)).toBeNull();
   });
 });
+
+describe("ARV-269: seed_body overlay wins over generator", () => {
+  const vars: Record<string, string> = { base_url: "https://api.example.com" };
+
+  test("overlay body replaces generator output", () => {
+    // Generator would produce { name: "{{$randomString}}", amount: <number> }.
+    // Overlay carries exact values an agent observed the API accepts.
+    const ep = mkEndpoint({
+      type: "object",
+      properties: {
+        name: { type: "string" } as OpenAPIV3.SchemaObject,
+        amount: { type: "integer" } as OpenAPIV3.SchemaObject,
+      },
+    });
+    const baseline = buildBaselineFromSpec(ep, vars, {
+      body: { name: "zond-overlay", amount: 500 },
+    })!;
+    expect(baseline.name).toBe("zond-overlay");
+    expect(baseline.amount).toBe(500);
+  });
+
+  test("overlay body still resolves {{var}} markers", () => {
+    const ep = mkEndpoint({ type: "object", properties: {} });
+    const baseline = buildBaselineFromSpec(ep, { ...vars, customer_id: "cus_123" }, {
+      body: { customer: "{{customer_id}}" },
+    })!;
+    expect(baseline.customer).toBe("cus_123");
+  });
+
+  test("undefined seedBody → falls back to generator (legacy contract)", () => {
+    const ep = mkEndpoint({
+      type: "object",
+      properties: { email: { type: "string", format: "email" } as OpenAPIV3.SchemaObject },
+    });
+    const baseline = buildBaselineFromSpec(ep, vars)!;
+    expect(baseline.email).toMatch(/@/);
+  });
+});

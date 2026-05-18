@@ -1,38 +1,50 @@
 /**
- * `lifecycle_transitions` (m-20 ARV-172) — verify a resource's declared
- * state machine on the live API.
+ * `lifecycle_transitions` (m-20 ARV-172, ARV-219 added observation in m-21)
+ * — verify a resource's declared state machine on the live API.
  *
- * For each CRUD group whose resource has a `lifecycle:` yaml block:
+ * Two modes, gated on the `actions` field of the yaml manifest:
  *
- *   1. POST create → capture id + initial state from the response.
- *   2. Assert initial state ∈ declared `states[]`. Undeclared state →
- *      finding (`undeclared_state`).
- *   3. For each declared `action` in turn:
- *       a. POST <action.endpoint> with {id} substituted.
- *       b. GET resource → read `state.field`.
- *       c. Assert observed state == `action.expected_state`. Wrong
- *          terminal → finding (`wrong_expected_state`).
- *       d. Assert (previous_state, observed_state) ∈ declared
- *          transitions. Forbidden hop → finding (`forbidden_transition`).
- *       e. POST <action.endpoint> a second time (idempotency probe):
- *          either 4xx (rejected) or 2xx with state unchanged. State
- *          regression on replay → finding (`state_regression_on_replay`).
+ *  ── Action-driven mode (preferred when CRUD allows mutation) ───────
+ *   Requires `g.create && g.read`. For each declared `action`:
+ *     1. POST create → capture id + initial state.
+ *     2. Assert initial state ∈ declared `states[]`.
+ *     3. For each action in object-key order:
+ *        a. POST <action.endpoint> with {id} substituted.
+ *        b. GET resource → read `state.field`.
+ *        c. Assert observed state == `action.expected_state` and the
+ *           (previous, observed) hop is in `transitions`.
+ *        d. POST action a second time (idempotency probe); state must
+ *           not regress.
  *
- * Severity: HIGH. The four failure classes share one finding per
- * action (consistent with cross_call_references / idempotency_replay /
- * pagination_invariants). evidence.kind discriminates.
+ *  ── Pure-observation mode (ARV-219, for read-only state machines) ──
+ *   Triggers when `actions: {}` (or omitted). Requires `g.list`.
+ *   GET list once, walk items, collect any state values not in
+ *   `states[]`. Surfaces a single finding listing each undeclared
+ *   state with sample item ids. Useful for APIs where zond cannot
+ *   POST (read-only PAT, GitHub Issues without write scope, …) but
+ *   the spec still declares a status enum — drift between observed
+ *   and declared states is a contract-doc bug.
  *
- * Anti-FP guards:
+ * Severity: HIGH. Failure classes share one finding (consistent with
+ * cross_call_references / idempotency_replay / pagination_invariants);
+ * evidence.kind discriminates.
+ *
+ * Anti-FP guards (both modes):
  *   • Yaml manifest validated at load (validateLifecycleManifest in
  *     resources-builder); a malformed manifest skips with the
  *     concrete error so the operator gets actionable feedback.
- *   • POST create non-2xx → broken-baseline skip.
+ *   • Non-2xx baseline (create or list) → broken-baseline skip.
  *   • Action POST non-2xx on first call → action-not-supported skip
  *     (the API may have authoritative server-side gating; not a
  *     contract bug).
- *   • Each action runs once per check execution — actions interact in
- *     the order yaml declares them, so authoring the yaml in a
- *     legal-transition order lets the chain advance the resource.
+ *   • Pure-observation: empty list response → skip (no data to
+ *     observe), not a finding.
+ *
+ * Limitations:
+ *   • Pure-observation cannot verify `transitions[]` — there is no
+ *     time series in a single list call. The check only enforces
+ *     `observed ⊆ declared`; the transition graph is purely
+ *     documentation in observation mode.
  */
 import type { OpenAPIV3 } from "openapi-types";
 import type { CrudStatefulCheck } from "../stateful.ts";
@@ -85,7 +97,7 @@ export const lifecycleTransitions: CrudStatefulCheck = {
   references: [{ id: "ARV-172" }],
   phase: "crud",
   applies(g) {
-    return Boolean(g.create && g.read);
+    return Boolean((g.create && g.read) || g.list);
   },
   async run(g, h) {
     if (h.bootstrapCleanupFailed) {
@@ -98,8 +110,19 @@ export const lifecycleTransitions: CrudStatefulCheck = {
     if (manifestErrors.length > 0) {
       return { kind: "skip", reason: `lifecycle manifest invalid: ${manifestErrors[0]}` };
     }
+
+    // ARV-219: actions-empty → pure-observation mode (read-only state
+    // machine). Requires a list endpoint to sample observed states.
     if (Object.keys(cfg.actions).length === 0) {
-      return { kind: "skip", reason: "lifecycle has no actions to verify" };
+      if (!g.list) {
+        return { kind: "skip", reason: "lifecycle has no actions and no list endpoint — nothing to verify or observe" };
+      }
+      return runPureObservation(g, h, cfg);
+    }
+
+    // Action-driven mode requires both create + read.
+    if (!g.create || !g.read) {
+      return { kind: "skip", reason: "lifecycle actions declared but resource lacks create+read endpoints" };
     }
 
     const create = g.create!;
@@ -271,3 +294,123 @@ export const lifecycleTransitions: CrudStatefulCheck = {
     };
   },
 };
+
+/** Item-array containers we recognise when a list endpoint returns
+ *  `{ data: [...] }` etc. Mirrors `pagination_invariants` defaults so
+ *  the two checks stay in sync on response-shape heuristics. */
+const ITEMS_FIELD_FALLBACKS: ReadonlyArray<string> = ["data", "items", "results", "value"];
+
+function extractListItems(body: unknown): unknown[] | null {
+  if (Array.isArray(body)) return body;
+  if (!body || typeof body !== "object") return null;
+  const obj = body as Record<string, unknown>;
+  for (const f of ITEMS_FIELD_FALLBACKS) {
+    const v = obj[f];
+    if (Array.isArray(v)) return v;
+  }
+  // ARV-219 follow-up: GitHub-shape responses use API-specific keys
+  // (`workflow_runs`, `check_runs`, `artifacts`, `installations`, …)
+  // alongside metadata fields like `total_count`. Pick the longest
+  // array-valued property as the items collection — that's the
+  // canonical shape across the GitHub REST API. Wrong-array picks
+  // surface as `state field missing on all items` (informative skip),
+  // never as a finding.
+  let best: unknown[] | null = null;
+  for (const v of Object.values(obj)) {
+    if (Array.isArray(v) && (!best || v.length > best.length)) {
+      best = v as unknown[];
+    }
+  }
+  return best;
+}
+
+function pickSampleId(item: unknown, idParam: string): string | null {
+  if (item == null || typeof item !== "object") return null;
+  const obj = item as Record<string, unknown>;
+  // Try the resource's id-param field, then a generic `id` fallback —
+  // GitHub's `/issues` returns `number`, Stripe's returns `id`; both
+  // serve as a human-readable sample handle in the finding evidence.
+  for (const k of [idParam, "id", "number", "uuid", "key"]) {
+    const v = obj[k];
+    if (typeof v === "string" || typeof v === "number") return String(v);
+  }
+  return null;
+}
+
+async function runPureObservation(
+  g: Parameters<CrudStatefulCheck["run"]>[0],
+  h: Parameters<CrudStatefulCheck["run"]>[1],
+  cfg: LifecycleConfig,
+): ReturnType<CrudStatefulCheck["run"]> {
+  const list = g.list!;
+  const baseHeaders = { Accept: "application/json", ...h.authHeaders };
+  const url = `${h.baseUrl.replace(/\/+$/, "")}${fillPathParams(list.path, h.pathVars)}`;
+
+  const resp = await h.send({ method: "GET", url, headers: baseHeaders });
+  if (resp.status < 200 || resp.status >= 300) {
+    return { kind: "skip", reason: `list returned ${resp.status} — broken-baseline guard (observation mode)` };
+  }
+  const body = resp.body_parsed ?? safeParse(resp.body);
+  const items = extractListItems(body);
+  if (items == null) {
+    return { kind: "skip", reason: "list response shape not recognised (expected array or {data|items|results|value: []})" };
+  }
+  if (items.length === 0) {
+    return { kind: "skip", reason: "list empty — no data to observe" };
+  }
+
+  const stateSet = new Set(cfg.states);
+  const missingField: string[] = [];
+  // Map of undeclared state → up to N sample ids for evidence; using
+  // a Map preserves observed-order so the finding mentions states
+  // in the order the API surfaced them.
+  const undeclared = new Map<string, string[]>();
+  const SAMPLE_CAP = 5;
+
+  for (const item of items) {
+    if (item == null || typeof item !== "object") continue;
+    const state = (item as Record<string, unknown>)[cfg.field];
+    const sampleId = pickSampleId(item, g.idParam) ?? "?";
+    if (typeof state !== "string") {
+      if (missingField.length < SAMPLE_CAP) missingField.push(sampleId);
+      continue;
+    }
+    if (!stateSet.has(state)) {
+      const ids = undeclared.get(state) ?? [];
+      if (ids.length < SAMPLE_CAP) ids.push(sampleId);
+      undeclared.set(state, ids);
+    }
+  }
+
+  // Field-missing is informational only — many APIs nest state under a
+  // sub-object the operator may have misspelled. Surface as a skip when
+  // EVERY item lacks the field (yaml mismatch), but don't fail the run
+  // when only some items lack it (could be a polymorphic schema).
+  if (undeclared.size === 0 && missingField.length === items.length) {
+    return {
+      kind: "skip",
+      reason: `state field "${cfg.field}" missing on all ${items.length} observed items — yaml mismatch or nested field`,
+    };
+  }
+
+  if (undeclared.size === 0) return { kind: "pass" };
+
+  const observedList = [...undeclared.entries()].map(([state, ids]) => ({
+    state,
+    sample_ids: ids,
+    occurrence_cap_hit: ids.length === SAMPLE_CAP,
+  }));
+  const stateNames = [...undeclared.keys()];
+  return {
+    kind: "fail",
+    message: `Lifecycle on ${g.resource} (observation mode): observed ${undeclared.size} undeclared state(s) — ${stateNames.join(", ")}`,
+    evidence: {
+      resource: g.resource,
+      kind: "undeclared_state",
+      mode: "observation",
+      observed_undeclared: observedList,
+      declared_states: cfg.states,
+      items_examined: items.length,
+    },
+  };
+}

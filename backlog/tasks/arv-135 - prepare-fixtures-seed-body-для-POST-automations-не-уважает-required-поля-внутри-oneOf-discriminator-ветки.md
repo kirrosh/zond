@@ -3,9 +3,10 @@ id: ARV-135
 title: >-
   prepare-fixtures --seed: body для POST /automations не уважает required-поля
   внутри oneOf/discriminator-ветки
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 17:53'
+updated_date: '2026-05-16 09:21'
 labels:
   - feedback-loop
   - api-resend
@@ -42,3 +43,21 @@ Log: ~/Projects/zond-test/.fb-loop/rounds/raw-01.log (Seed attempts), apis/resen
 - [ ] #3 regression: POST /automations seed-attempt у resend перестаёт получать 422 'Missing steps/config/event_name'
 - [ ] #4 если ни одна ветка oneOf не резолвится — explicit miss-reason 'unresolvable-discriminator-branch' (не silent skip)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Implemented in data-factory.ts (m-21).
+
+Variant selection rewritten as score-based pickBestVariant():
+1) Drop type:null (3.1 nullable shorthand) unless only choice.
+2) Sort by fewest UNRESOLVABLE required fields (required keys absent from properties — what the builder can't synthesise; Resend automations failed exactly here).
+3) Tie-break: discriminator-tagged variant > object-with-props > more properties total > spec order (stable sort).
+4) Replaced pickDiscriminatorVariant + pickPreferredVariant with this single scorer; old 'first variant with single-enum discriminator' rule no longer wins when a sibling variant is demonstrably more complete.
+
+stampDiscriminator now honours discriminator.mapping — when picked variant lacks inline enum/const, fills from first mapping key (Stripe/Linear-style central mapping).
+
+Tests: 5 new (data-factory.test.ts) — more-complete variant wins, discriminator tie-break, mapping fallback, F24/ARV-135 deeply-nested oneOf repro (nested config oneOf where first variant is incomplete), type:null regression. All 126 in file green incl. existing ARV-78 F25 test; 2218/2218 unit suite; tsc clean.
+
+zond.md Phase 1 caveat (silver-bullet paragraph) rewritten — replaces 'deeply nested oneOf still 422s silently' with 'most schema shapes covered including discriminator chains; rare edge cases (server-validated externals, fields not in required+properties) escape to annotate seed_body'.
+<!-- SECTION:NOTES:END -->

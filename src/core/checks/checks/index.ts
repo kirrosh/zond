@@ -27,6 +27,7 @@ import { paginationInvariants } from "./pagination_invariants.ts";
 import { lifecycleTransitions } from "./lifecycle_transitions.ts";
 import { openCorsOnSensitive } from "./open_cors_on_sensitive.ts";
 import { rateLimitHeadersAbsent } from "./rate_limit_headers_absent.ts";
+import { cursorBoundaryFuzzing } from "./cursor_boundary_fuzzing.ts";
 
 let registered = false;
 
@@ -59,6 +60,8 @@ export function registerBuiltinChecks(): void {
   // ARV-256 (m-21) — small-team value-add checks.
   registerStatefulCheck(openCorsOnSensitive);
   registerCheck(rateLimitHeadersAbsent);
+  // ARV-273 (m-22) — cursor/page-token fuzzing on list endpoints.
+  registerStatefulCheck(cursorBoundaryFuzzing);
   registered = true;
 }
 

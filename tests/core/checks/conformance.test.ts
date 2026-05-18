@@ -113,6 +113,21 @@ describe("status_code_conformance", () => {
     const r = statusCodeConformance.run(ctx(makeCase(), makeResponse({ status: 599 }), docWithDefault));
     expect(r.kind).toBe("pass");
   });
+  // ARV-224: finding message must echo the *request* method, not the
+  // operation's declared method — unsupported_method probes fire POST
+  // against a GET-only endpoint and the message used to mis-say "for GET".
+  test("ARV-224: message uses request method (POST), not declared method (GET)", () => {
+    const c = makeCase({
+      kind: "unsupported_method",
+      request: { method: "POST", url: "http://x/widgets", headers: {}, body: undefined },
+    });
+    const r = statusCodeConformance.run(ctx(c, makeResponse({ status: 418 }), docWith200Only));
+    expect(r.kind).toBe("fail");
+    if (r.kind === "fail") {
+      expect(r.message).toContain("POST /widgets");
+      expect(r.message).not.toContain("GET /widgets");
+    }
+  });
 });
 
 // ── content_type_conformance ────────────────────────────────────────

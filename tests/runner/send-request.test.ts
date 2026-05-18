@@ -104,6 +104,24 @@ describe("send-request — extractByPathWithDiagnostic (ARV-70)", () => {
     expect(out.resolved).toEqual([]);
     expect(out.reason).toMatch(/^expected an array index/);
   });
+
+  // ARV-207: jq-style `length` for arrays.
+  test("array length: 'length' segment resolves to array size", () => {
+    const out = extractDiag({ data: [{ id: "a" }, { id: "b" }, { id: "c" }] }, "data.length");
+    expect(out.value).toBe(3);
+    expect(out.failedAt).toBeUndefined();
+    expect(out.resolved).toEqual(["data", "length"]);
+  });
+
+  test("top-level array length", () => {
+    const out = extractDiag([1, 2, 3, 4], "length");
+    expect(out.value).toBe(4);
+  });
+
+  test("empty array length is 0", () => {
+    const out = extractDiag({ items: [] }, "items.length");
+    expect(out.value).toBe(0);
+  });
 });
 
 describe("send-request — resolveAdHocRequest (TASK-200)", () => {

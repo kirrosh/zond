@@ -417,3 +417,221 @@ describe("buildApiResourceMap with implicit list-only resources", () => {
     expect(widgetDep!.ownerResource).toBe("widgets");
   });
 });
+
+// ── ARV-134: duplicate-name disambiguation + implicit idParam recovery ──
+
+describe("buildApiResourceMap — ARV-134 fixes", () => {
+  test("two CRUD groups with same last-segment name → nested one renamed via parent noun", () => {
+    // Resend-shape: POST /segments (top-level) AND POST /contacts/{contact_id}/segments.
+    // Both currently produce `resource: segments` from the last-segment heuristic.
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "resend-mini", version: "1" },
+      paths: {
+        "/segments": {
+          get: { responses: { "200": {} } },
+          post: { responses: { "201": {} } },
+        },
+        "/segments/{segment_id}": {
+          get: { responses: { "200": {} } },
+          delete: { responses: { "204": {} } },
+        },
+        "/contacts": {
+          get: { responses: { "200": {} } },
+          post: { responses: { "201": {} } },
+        },
+        "/contacts/{contact_id}": {
+          get: { responses: { "200": {} } },
+        },
+        "/contacts/{contact_id}/segments": {
+          get: { responses: { "200": {} } },
+          post: { responses: { "201": {} } },
+        },
+        "/contacts/{contact_id}/segments/{segment_id}": {
+          get: { responses: { "200": {} } },
+        },
+      },
+    };
+    const eps = extractEndpoints(spec as any);
+    const map = buildApiResourceMap({ endpoints: eps, specHash: "s" });
+
+    const segmentsEntries = map.resources.filter(r => r.resource === "segments");
+    expect(segmentsEntries).toHaveLength(1);
+    expect(segmentsEntries[0]!.basePath).toBe("/segments");
+
+    const nestedSegments = map.resources.find(r => r.resource === "contact_segments");
+    expect(nestedSegments).toBeDefined();
+    expect(nestedSegments!.basePath).toBe("/contacts/{contact_id}/segments");
+    expect(nestedSegments!.idParam).toBe("segment_id");
+    // The nested entry chains: it carries the contact_id path-FK.
+    const contactDep = nestedSegments!.fkDependencies.find(d => d.var === "contact_id");
+    expect(contactDep).toBeDefined();
+    expect(contactDep!.ownerResource).toBe("contacts");
+  });
+
+  test("disambiguation: when no strictly shortest basePath exists, all colliding entries get parent-prefixed", () => {
+    // Both basePaths are equally nested (same length) — neither deserves the
+    // canonical name. Implementation renames BOTH rather than silently
+    // picking one by sort order.
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/things/{thing_id}/items": {
+          get: { responses: { "200": {} } },
+          post: { responses: { "201": {} } },
+        },
+        "/things/{thing_id}/items/{item_id}": { get: { responses: { "200": {} } } },
+        "/places/{place_id}/items": {
+          get: { responses: { "200": {} } },
+          post: { responses: { "201": {} } },
+        },
+        "/places/{place_id}/items/{item_id}": { get: { responses: { "200": {} } } },
+      },
+    };
+    const eps = extractEndpoints(spec as any);
+    const map = buildApiResourceMap({ endpoints: eps, specHash: "t" });
+    const names = map.resources.map(r => r.resource);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toContain("thing_items");
+    expect(names).toContain("place_items");
+    expect(names).not.toContain("items"); // neither got the canonical bare name
+  });
+
+  test("disambiguation: single-resource specs left untouched (no spurious rename)", () => {
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/widgets": { get: { responses: { "200": {} } }, post: { responses: { "201": {} } } },
+        "/widgets/{widget_id}": { get: { responses: { "200": {} } } },
+      },
+    };
+    const eps = extractEndpoints(spec as any);
+    const map = buildApiResourceMap({ endpoints: eps, specHash: "t" });
+    expect(map.resources.map(r => r.resource)).toEqual(["widgets"]);
+  });
+
+  test("implicit list-only resource recovers idParam + itemPath from GET-by-id companion", () => {
+    // Resend-shape `logs`: GET /logs and GET /logs/{log_id}. No POST.
+    // Currently surfaces as implicit-resource with idParam:"".
+    // Also one path that references log_id so it ends up in ownerListPaths.
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/logs": { get: { responses: { "200": {} } } },
+        "/logs/{log_id}": { get: { responses: { "200": {} } } },
+        // Something else referencing log_id so the implicit-resource path triggers.
+        "/audit/{log_id}/replay": { post: { responses: { "200": {} } } },
+      },
+    };
+    const eps = extractEndpoints(spec as any);
+    const map = buildApiResourceMap({ endpoints: eps, specHash: "t" });
+    const logs = map.resources.find(r => r.resource === "logs");
+    expect(logs).toBeDefined();
+    expect(logs!.idParam).toBe("log_id");
+    expect(logs!.itemPath).toBe("/logs/{log_id}");
+    expect(logs!.endpoints.read).toBe("GET /logs/{log_id}");
+    expect(logs!.endpoints.create).toBeUndefined();
+  });
+
+  test("implicit resource idParam falls back to ownerListPaths reverse-map when no item endpoint", () => {
+    // GET /metrics has no /metrics/{x} companion, but another path uses
+    // metric_id and ownerListPaths links the param back to /metrics.
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        "/metrics": { get: { responses: { "200": {} } } },
+        // metric_id surfaces in another endpoint's path; ownerListPaths Strategy 1
+        // resolves metric_id → /metrics.
+        "/metrics/{metric_id}/snapshot": { get: { responses: { "200": {} } } },
+      },
+    };
+    const eps = extractEndpoints(spec as any);
+    const map = buildApiResourceMap({ endpoints: eps, specHash: "t" });
+    const metrics = map.resources.find(r => r.resource === "metrics");
+    expect(metrics).toBeDefined();
+    // No direct GET /metrics/{metric_id} item endpoint → fallback path.
+    expect(metrics!.itemPath).toBe("");
+    expect(metrics!.idParam).toBe("metric_id");
+  });
+
+  test("CRUD group vs implicit-list-only with the same name → both kept, implicit gets parent-prefix", () => {
+    // GitHub-shape: POST /repos/{owner}/{repo}/check-runs is CRUD,
+    // GET /repos/{owner}/{repo}/commits/{ref}/check-runs is GET-only.
+    // The implicit list-only resource only registers when SOMETHING in
+    // the spec depends on its idParam (otherwise ownerListPaths doesn't
+    // surface it). Synthesise that dependency via a child path so the
+    // implicit registration path actually fires.
+    // The implicit-resource pipeline only registers a listPath when some
+    // param structurally resolves to it (ownerListPaths). For the nested
+    // `/...check-runs` to surface as implicit we add a sub-resource whose
+    // path-FK forces Strategy-1 resolution at the nested check-runs path:
+    // `annotation_id` only appears under the nested path, so it resolves
+    // there — exactly the GitHub-shape we want to disambiguate.
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "gh-mini", version: "1" },
+      paths: {
+        "/repos/{owner}/{repo}/check-runs": {
+          get: { responses: { "200": {} } },
+          post: { responses: { "201": {} } },
+        },
+        "/repos/{owner}/{repo}/check-runs/{check_run_id}": {
+          get: { responses: { "200": {} } },
+        },
+        "/repos/{owner}/{repo}/commits/{ref}/check-runs": {
+          get: { responses: { "200": {} } },
+        },
+        // Sub-resource under the nested check-runs: forces the nested
+        // listPath into ownerListPaths so it lands in the implicit loop.
+        "/repos/{owner}/{repo}/commits/{ref}/check-runs/{nested_run_id}/annotations": {
+          get: { responses: { "200": {} } },
+        },
+        "/repos/{owner}/{repo}/commits": {
+          get: { responses: { "200": {} } },
+        },
+      },
+    };
+    const eps = extractEndpoints(spec as any);
+    const map = buildApiResourceMap({ endpoints: eps, specHash: "gh" });
+    const names = map.resources.map(r => r.resource);
+    expect(new Set(names).size).toBe(names.length); // no duplicates
+
+    const crudCheckRuns = map.resources.find(r => r.resource === "check-runs");
+    expect(crudCheckRuns).toBeDefined();
+    expect(crudCheckRuns!.basePath).toBe("/repos/{owner}/{repo}/check-runs");
+
+    // Nested implicit one is renamed via its parent noun (commits → commit).
+    const nestedCheckRuns = map.resources.find(r => r.resource === "commit_check-runs");
+    expect(nestedCheckRuns).toBeDefined();
+    expect(nestedCheckRuns!.basePath).toBe("/repos/{owner}/{repo}/commits/{ref}/check-runs");
+  });
+
+  test("implicit resource with no signal anywhere → idParam stays empty (graceful fallback)", () => {
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1" },
+      paths: {
+        // A nested path that triggers an implicit resource without naming
+        // its own idParam in any item endpoint.
+        "/foo/{foo_id}/bar": { get: { responses: { "200": {} } } },
+        "/foo": { get: { responses: { "200": {} } } },
+      },
+    };
+    const eps = extractEndpoints(spec as any);
+    const map = buildApiResourceMap({ endpoints: eps, specHash: "t" });
+    const bar = map.resources.find(r => r.resource === "bar");
+    // No /bar/{...} item endpoint, no ownerListPaths entry for /foo/{foo_id}/bar.
+    if (bar) {
+      expect(bar.idParam).toBe("");
+      expect(bar.itemPath).toBe("");
+    }
+    // foo has /foo/{foo_id}/... so ownerListPaths fallback resolves foo_id → /foo.
+    const foo = map.resources.find(r => r.resource === "foo");
+    expect(foo).toBeDefined();
+    expect(foo!.idParam).toBe("foo_id");
+  });
+});

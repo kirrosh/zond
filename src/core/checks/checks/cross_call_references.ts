@@ -7,9 +7,15 @@
  * echoed) but the read didn't return surface as drift findings — the
  * server is silently dropping state.
  *
- * Severity policy:
- *   • `state_not_persisted` (POST echoed, GET dropped) is the high-
- *     signal class, so the check is registered as HIGH.
+ * Severity policy (ARV-287, follow-up to ARV-284):
+ *   • Declared check severity is LOW (proof-cap baseline per ARV-250:
+ *     single-signal checks cap at LOW until evidence confirms higher).
+ *   • Per-finding dispatch in the fail branch:
+ *       - state_not_persisted non-empty → HIGH
+ *         (POST echoed field, GET dropped it: two-signal evidence chain —
+ *         the server promised state it later discarded)
+ *       - write-only-only (state_not_persisted=[], writeOnly non-empty) → MEDIUM
+ *         (single-signal contract gap per ARV-250)
  *   • `write_only` (POST accepted, GET never returned) is also surfaced
  *     in the same finding's evidence. Anti-FP: write-only fields the
  *     spec explicitly declares are *not* present on GET (e.g. password
@@ -48,7 +54,9 @@ function safeParse(v: unknown): unknown {
 
 export const crossCallReferences: CrudStatefulCheck = {
   id: "cross_call_references",
-  severity: "high",
+  // ARV-287: proof-cap baseline per ARV-250 (single-signal cap → LOW).
+  // Per-finding dispatch in run() escalates to HIGH / MEDIUM by evidence.
+  severity: "low",
   defaultExpected: "Fields accepted or echoed by POST must be readable via GET on the same resource",
   references: [{ id: "ARV-169" }, { id: "OWASP-API-3-2023" }],
   phase: "crud",
@@ -117,6 +125,11 @@ export const crossCallReferences: CrudStatefulCheck = {
     ];
     return {
       kind: "fail",
+      // ARV-287: per-finding severity dispatch (follow-up to ARV-284).
+      // state_not_persisted → HIGH: two-signal evidence chain (POST echoed,
+      // GET dropped) confirms the server is discarding persisted state.
+      // write-only-only → MEDIUM: single-signal contract gap per ARV-250.
+      severity: stateNotPersisted.length > 0 ? "high" : "medium",
       message:
         stateNotPersisted.length > 0
           ? `POST→GET drift on ${g.resource}: ${stateNotPersisted.length} state-not-persisted field(s)` +

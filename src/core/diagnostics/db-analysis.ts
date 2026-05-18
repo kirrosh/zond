@@ -212,7 +212,24 @@ export interface DiagnoseResult {
    *  subset), so counts match `.summary.failed`. Each bucket carries
    *  total count + a small examples list (`<suite>/<test>`). Empty when
    *  there are no failures. */
-  by_recommended_action?: Record<string, { count: number; examples: string[] }>;
+  by_recommended_action?: Record<string, {
+    count: number;
+    /** ARV-228: each example carries the per-failure context the
+     *  zond-triage skill renders in its output template (`POST
+     *  /v1/projects → 500 (×3) — <reason>`). Previously a bare
+     *  `string[]` of `<suite>/<test>` ids — agents had to cross-join
+     *  with `failures[]` to recover method/path/status, which broke
+     *  triage scripts on large runs. Bounded to 5 entries per bucket
+     *  (same cap as the legacy string form). */
+    examples: Array<{
+      suite: string;
+      test: string;
+      method: string;
+      path: string;
+      status: number;
+      reason?: string;
+    }>;
+  }>;
 }
 
 export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, maxExamples?: number): DiagnoseResult {
@@ -395,7 +412,13 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
   // from the full failure set (not compactFailures) so counts match
   // .summary.failed. Bounded examples list (5) keeps payload small while
   // still pointing at concrete suites the agent can open.
-  const by_recommended_action: Record<string, { count: number; examples: string[] }> = {};
+  //
+  // ARV-228: each example is now an object carrying method/path/status/
+  // reason so the zond-triage skill can render its output template
+  // ("POST /v1/projects → 500 (×3) — TypeError") without cross-joining
+  // failures[]. Bound preserved at 5/bucket; ordering = insertion order
+  // (matches failures[] traversal, deterministic per run).
+  const by_recommended_action: Record<string, NonNullable<DiagnoseResult["by_recommended_action"]>[string]> = {};
   for (const f of failures) {
     const key = f.recommended_action;
     let bucket = by_recommended_action[key];
@@ -405,7 +428,22 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
     }
     bucket.count += 1;
     if (bucket.examples.length < 5) {
-      bucket.examples.push(`${f.suite_name}/${f.test_name}`);
+      // Trim reason to keep the bucket compact — full error_message lives
+      // in failures[].error_message for agents that want it.
+      const reason = typeof f.error_message === "string" && f.error_message.length > 0
+        ? (f.error_message.length > 120 ? `${f.error_message.slice(0, 117)}...` : f.error_message)
+        : undefined;
+      bucket.examples.push({
+        suite: f.suite_name,
+        test: f.test_name,
+        // DB columns are nullable (early steps may not have a request
+        // recorded yet — e.g. fixture-load failures). Coerce to "" / 0
+        // rather than leaking null into the contract.
+        method: f.request_method ?? "",
+        path: f.request_url ?? "",
+        status: f.response_status ?? 0,
+        ...(reason ? { reason } : {}),
+      });
     }
   }
 

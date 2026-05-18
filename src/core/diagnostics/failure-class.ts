@@ -91,7 +91,27 @@ export function classifyFailure(result: StepResult): FailureClassification | nul
     }
   }
 
-  // 4. Negative-probe family — distinguish "API accepted bad input" (likely_bug)
+  // 4. ARV-236: 401/403 on a step that expected success → env_issue
+  //    ("token_scope"). Surfaces narrowly-scoped tokens (Resend free plan,
+  //    GitHub PAT without `repo`, Stripe restricted key, etc.) so coverage
+  //    and triage don't tag them as fail. Only fires when the failing
+  //    assertion is on `status` and the expected status was 2xx — a real
+  //    "expect 403" test deliberately checking auth still classifies normally.
+  if (typeof respStatus === "number" && (respStatus === 401 || respStatus === 403)) {
+    const statusFail = failed.find((a) => a.field === "status");
+    if (statusFail) {
+      const expected = expectedStatusList(statusFail);
+      const allExpected2xx = expected?.every((s) => s >= 200 && s < 300) ?? false;
+      if (allExpected2xx) {
+        return {
+          failure_class: "env_issue",
+          failure_class_reason: `token_scope: API returned ${respStatus} where the test expected ${expected!.join("/")} — token lacks scope or plan for this endpoint`,
+        };
+      }
+    }
+  }
+
+  // 5. Negative-probe family — distinguish "API accepted bad input" (likely_bug)
   //    from "API rejected with a different 4xx" (quirk).
   if (generator === "negative-probe" || generator === "method-probe") {
     const statusFail = failed.find((a) => a.field === "status");

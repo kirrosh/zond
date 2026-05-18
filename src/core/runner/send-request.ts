@@ -3,11 +3,7 @@ import { loadEnvironment, substituteString, substituteDeep } from "../parser/var
 import { getDb } from "../../db/schema.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
 import { encodeFormBody } from "./form-encode.ts";
-
-function hasHeaderCI(headers: Record<string, string>, name: string): boolean {
-  const lower = name.toLowerCase();
-  return Object.keys(headers).some((k) => k.toLowerCase() === lower);
-}
+import { hasHeaderCI } from "../util/headers.ts";
 
 export function extractByPath(obj: unknown, path: string): unknown {
   return extractByPathWithDiagnostic(obj, path).value;
@@ -31,9 +27,18 @@ export function extractByPathWithDiagnostic(
       return { value: undefined, resolved, failedAt: seg, reason: "previous segment resolved to null/undefined" };
     }
     if (Array.isArray(current)) {
+      // ARV-207: `length` resolves to the array length (jq-style). This
+      // lets `--json-path data.items.length` answer "is the list non-empty?"
+      // in one call — the harvest flow needs it ('length>0 → has data;
+      // length==0 → seed') and previously had to shell out to jq.
+      if (seg === "length") {
+        current = current.length;
+        resolved.push(seg);
+        continue;
+      }
       const idx = parseInt(seg, 10);
       if (isNaN(idx)) {
-        return { value: undefined, resolved, failedAt: seg, reason: `expected an array index, got non-numeric segment "${seg}"` };
+        return { value: undefined, resolved, failedAt: seg, reason: `expected an array index, got non-numeric segment "${seg}" (hint: use 'length' for array size)` };
       }
       if (idx < 0 || idx >= current.length) {
         return { value: undefined, resolved, failedAt: seg, reason: `array index ${idx} out of bounds (length ${current.length})` };

@@ -52,6 +52,9 @@ export const MODE_BY_CHECK: Record<string, Mode> = {
   // ARV-256 (m-21): rate-limit headers check inspects 2xx responses
   // for advertised rate-limit metadata — runs on the positive path.
   rate_limit_headers_absent: "positive",
+  // ARV-273 (m-22): cursor-fuzzing sends malformed cursor values and
+  // expects 4xx — classic negative-mode probe.
+  cursor_boundary_fuzzing: "negative",
 };
 
 export function modeFor(checkId: string): Mode {

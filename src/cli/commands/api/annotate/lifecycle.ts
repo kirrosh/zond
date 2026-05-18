@@ -32,7 +32,7 @@ export const EXPECTED_OUTPUT_SHAPE = {
     field: "string (response field holding state, e.g. 'status')",
     states: "string[] (≥2 enum values)",
     transitions: "[{from: state, to: state[]}]",
-    actions: "{ <verb>: { endpoint: 'METHOD /path', expected_state: state, body?: object } }",
+    actions: "{ <verb>: { endpoint: 'METHOD /path', expected_state: state, body?: object } } — return {} for read-only state machines (observation mode walks the list endpoint and asserts observed ⊆ states; cannot verify transitions in this mode)",
   },
   rationale: "string (optional)",
   confidence: "low | medium | high",

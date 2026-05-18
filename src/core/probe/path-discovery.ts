@@ -18,6 +18,7 @@ import type { EndpointInfo, SecuritySchemeInfo } from "../generator/types.ts";
 import { executeRequest } from "../runner/http-client.ts";
 import { substituteString } from "../parser/variables.ts";
 import { convertPath, captureFieldFor, liveAuthHeaders } from "./shared.ts";
+import { joinBaseAndPath } from "../util/url.ts";
 
 export type DiscoveryHit = { kind: "hit"; values: Record<string, string> };
 export type DiscoveryMiss = { kind: "miss"; reason: string };
@@ -103,8 +104,7 @@ async function discoverFromList(opts: DiscoverFromListOpts): Promise<DiscoveryRe
   opts.cache.inFlight.add(cacheKey);
   try {
     // Resolve listEp's own path placeholders (nested-collection case).
-    const baseUrl = (opts.vars["base_url"] ?? "").replace(/\/+$/, "");
-    const templated = `${baseUrl}${convertPath(listEp.path)}`;
+    const templated = joinBaseAndPath(opts.vars["base_url"], convertPath(listEp.path));
     let urlVars = opts.vars;
     let urlSubstituted = String(substituteString(templated, urlVars));
     let stillUnresolved = collectUnresolved(urlSubstituted);
@@ -326,8 +326,7 @@ export async function discoverBodyFkVars(
       continue;
     }
 
-    const baseUrl = (opts.vars["base_url"] ?? "").replace(/\/+$/, "");
-    const url = `${baseUrl}${listEp.path}`;
+    const url = joinBaseAndPath(opts.vars["base_url"], listEp.path);
     const headers: Record<string, string> = {
       accept: "application/json",
       ...liveAuthHeaders(listEp, opts.schemes, opts.vars),

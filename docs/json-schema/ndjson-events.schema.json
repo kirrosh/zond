@@ -51,6 +51,16 @@
         "check": {
           "type": "string"
         },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
         "verdict": {
           "type": "string",
           "enum": [
@@ -102,6 +112,7 @@
         "type",
         "ts",
         "check",
+        "severity",
         "verdict",
         "operation",
         "request_signature",
@@ -237,6 +248,113 @@
       "properties": {
         "type": {
           "type": "string",
+          "const": "spec_finding"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string"
+        },
+        "spec_finding": {
+          "type": "object",
+          "properties": {
+            "check": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "status_drift",
+                "missing_declaration",
+                "no_detector",
+                "other"
+              ]
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "info"
+              ]
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "security",
+                "reliability",
+                "contract",
+                "hygiene"
+              ]
+            },
+            "reason": {
+              "type": "string"
+            },
+            "fix_hint": {
+              "type": "string"
+            },
+            "affected_operations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "operationId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "method"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "applicable": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "check",
+            "kind",
+            "severity",
+            "reason",
+            "fix_hint",
+            "affected_operations",
+            "count",
+            "applicable"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "type",
+        "ts",
+        "check",
+        "spec_finding"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
           "const": "summary"
         },
         "ts": {
@@ -345,6 +463,36 @@
                 "minimum": 0,
                 "maximum": 9007199254740991
               }
+            },
+            "skipped_outcomes_grouped": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "check": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "check",
+                  "reason",
+                  "count"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "suppressed": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -354,7 +502,8 @@
             "findings",
             "by_severity",
             "by_category",
-            "skipped_outcomes"
+            "skipped_outcomes",
+            "skipped_outcomes_grouped"
           ],
           "additionalProperties": false
         }

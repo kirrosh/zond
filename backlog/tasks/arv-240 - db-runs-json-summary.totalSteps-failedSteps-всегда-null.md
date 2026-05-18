@@ -1,10 +1,10 @@
 ---
 id: ARV-240
 title: 'db runs --json: summary.totalSteps/failedSteps всегда null'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 11:16'
-updated_date: '2026-05-14 11:22'
+updated_date: '2026-05-16 10:55'
 labels:
   - feedback-loop
   - api-github
@@ -29,4 +29,6 @@ Log: ~/Projects/zond-test/.fb-loop/rounds/raw-03.log
 round-03/F13 — envelope shape is correct; runs[].total/passed/failed are present at top level, not inside .summary. Tester used incorrect jq path. Could add a jq cheat-line to skill zond.md:539 — see follow-up below.
 
 NOTE: keep as backlog, low priority. Не блокер.
+
+Closed in triage 2026-05-16: envelope shape is correct — total/passed/failed live at runs[].* (top-level), not nested under summary. Tester used wrong jq path. Optional follow-up (skill jq cheat-line) tracked separately if needed.
 <!-- SECTION:NOTES:END -->

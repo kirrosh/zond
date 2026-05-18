@@ -51,6 +51,7 @@ describe("ARV-7 mode catalog", () => {
 
     expect(idsForMode("negative")).toEqual([
       "content_type_conformance",
+      "cursor_boundary_fuzzing",
       "ensure_resource_availability",
       "ignored_auth",
       "missing_required_header",
