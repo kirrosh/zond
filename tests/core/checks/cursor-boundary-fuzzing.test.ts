@@ -166,3 +166,60 @@ describe("cursor_boundary_fuzzing — verdicts", () => {
     expect(out.kind).toBe("skip");
   });
 });
+
+describe("cursor_boundary_fuzzing — ARV-308 budget exhaustion is not a network error", () => {
+  test("send() throws MAX_REQUESTS_SKIP_REASON → skip with the budget reason, not the network one", async () => {
+    // Models the real Stripe run: every mutation attempt throws the
+    // budget-cap sentinel because earlier checks already drained the
+    // --max-requests budget. Pre-ARV-308 this surfaced as "no
+    // mutations dispatched (network errors on every probe)" which
+    // hid the 500 finding behind a misleading skip reason.
+    const g = makeGroup(makeList([cursorParam("starting_after")]));
+    const h: StatefulHarness & { calls: HttpRequest[] } = {
+      baseUrl: "http://test",
+      doc: { openapi: "3.0.0", info: { title: "t", version: "1" }, paths: {} } as OpenAPIV3.Document,
+      authHeaders: {},
+      bootstrapCleanupFailed: false,
+      calls: [],
+      async send(req): Promise<HttpResponse> {
+        this.calls.push(req);
+        throw new Error("max-requests-cap-reached");
+      },
+    };
+    const out = await cursorBoundaryFuzzing.run(g, h);
+    expect(out.kind).toBe("skip");
+    if (out.kind === "skip") {
+      expect(out.reason).toBe("max-requests-cap-reached");
+      expect(out.reason).not.toMatch(/network/i);
+    }
+    // The check should have stopped on the first sentinel — no point
+    // retrying the remaining 6 vectors when the budget is gone.
+    expect(h.calls).toHaveLength(1);
+  });
+
+  test("real per-request network errors still keep fuzzing the remaining vectors", async () => {
+    // First vector throws (genuine connection drop), the rest get
+    // legitimate 400 responses → still a pass, NOT the budget-skip
+    // path. Locks the two error classes don't collapse.
+    const g = makeGroup(makeList([cursorParam("cursor")]));
+    let i = 0;
+    const responses: HttpResponse[] = Array.from({ length: 6 }, () => rs(400));
+    const h: StatefulHarness & { calls: HttpRequest[] } = {
+      baseUrl: "http://test",
+      doc: { openapi: "3.0.0", info: { title: "t", version: "1" }, paths: {} } as OpenAPIV3.Document,
+      authHeaders: {},
+      bootstrapCleanupFailed: false,
+      calls: [],
+      async send(req): Promise<HttpResponse> {
+        this.calls.push(req);
+        if (i++ === 0) throw new Error("ECONNRESET");
+        const r = responses[i - 2]!;
+        return r;
+      },
+    };
+    const out = await cursorBoundaryFuzzing.run(g, h);
+    // 6 real attempts, all 400 → pass.
+    expect(out.kind).toBe("pass");
+    expect(h.calls).toHaveLength(7);
+  });
+});
