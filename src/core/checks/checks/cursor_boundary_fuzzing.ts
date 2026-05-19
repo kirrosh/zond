@@ -34,6 +34,7 @@ import type { CrudStatefulCheck } from "../stateful.ts";
 import type { CheckOutcome, Severity } from "../types.ts";
 import { fillPathParams } from "./_crud-helpers.ts";
 import { buildUrl as buildUrlBase } from "../../util/url.ts";
+import { MAX_REQUESTS_SKIP_REASON } from "../../runner/executor.ts";
 
 const CURSOR_PARAM_NAME_RE = /^(cursor|starting_after|ending_before|after|before|page_token|next_token|continuation)$/i;
 
@@ -114,13 +115,27 @@ export const cursorBoundaryFuzzing: CrudStatefulCheck = {
     let totalAttempted = 0;
     let allAuthGated = true;
 
-    for (const param of cursorParams) {
+    let budgetExhausted = false;
+    outer: for (const param of cursorParams) {
       for (const vec of MUTATION_VECTORS) {
         const url = buildUrl(h.baseUrl, list.path, h.pathVars, param.name, vec.value);
         let resp;
         try {
           resp = await h.send({ method: "GET", url, headers: baseHeaders });
-        } catch {
+        } catch (err) {
+          // ARV-308: distinguish budget exhaustion (every subsequent
+          // mutation will throw the same MAX_REQUESTS_SKIP_REASON and
+          // wasn't dispatched on the wire) from real per-request
+          // network errors (genuine connection problems, where we
+          // should keep fuzzing the remaining vectors). The earlier
+          // `catch {}` swallowed both as "network errors", which
+          // misreported the run on Stripe — budget had simply run out
+          // before this check got its turn, but the summary blamed
+          // the network and the 500 finding never surfaced.
+          if (err instanceof Error && err.message === MAX_REQUESTS_SKIP_REASON) {
+            budgetExhausted = true;
+            break outer;
+          }
           continue;
         }
         totalAttempted += 1;
@@ -144,6 +159,12 @@ export const cursorBoundaryFuzzing: CrudStatefulCheck = {
     }
 
     if (totalAttempted === 0) {
+      // ARV-308: dedicated reason for budget exhaustion so the run
+      // summary shows the real cause (and an actionable fix — raise
+      // --max-requests / --budget) instead of blaming the network.
+      if (budgetExhausted) {
+        return { kind: "skip", reason: MAX_REQUESTS_SKIP_REASON };
+      }
       return { kind: "skip", reason: "no mutations dispatched (network errors on every probe)" };
     }
     if (allAuthGated) {
