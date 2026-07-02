@@ -92,11 +92,9 @@ export function getResultsByRunId(runId: number): StoredStepResult[] {
 }
 
 /**
- * ARV-277: find the most recent fixture-kind POST whose request_url
- * matches the SQL LIKE pattern (typically the create-endpoint URL with
- * `{var}` path params replaced by `%`). Used by `zond api annotate
- * dump --with-last-attempt` so the calling agent sees exactly what
- * zond tried last + how the server rejected it.
+ * Row shape for the fixture-kind POST history matched by
+ * `getRecentFixturePosts`'s SQL LIKE pattern (typically the
+ * create-endpoint URL with `{var}` path params replaced by `%`).
  */
 export interface LastFixtureAttempt {
   request_method: string;
@@ -105,11 +103,6 @@ export interface LastFixtureAttempt {
   response_status: number | null;
   response_body: string | null;
   attempted_at: string;
-}
-
-export function getLastFixturePost(urlLikePattern: string): LastFixtureAttempt | null {
-  const rows = getRecentFixturePosts(urlLikePattern, 1);
-  return rows[0] ?? null;
 }
 
 /**

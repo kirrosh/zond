@@ -108,7 +108,7 @@ export function classifyFromBody(
     }
     const observed = body[field.field];
     field.observed = observed;
-    if (deepEqual(observed, field.injected)) {
+    if (Bun.deepEquals(observed, field.injected)) {
       field.outcome = "applied";
     } else if (fromGet) {
       field.outcome = "ignored";
@@ -116,14 +116,6 @@ export function classifyFromBody(
       field.outcome = "echoed-overwritten";
     }
   }
-}
-
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== typeof b) return false;
-  if (a === null || b === null) return false;
-  if (typeof a !== "object") return false;
-  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 export function findIdParam(ep: EndpointInfo): string {

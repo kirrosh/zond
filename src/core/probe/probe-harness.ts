@@ -71,26 +71,13 @@ export function buildProbeUrl(
 }
 
 /**
- * Standard probe headers: JSON content-type/accept plus the resolved
- * auth header for the endpoint. Empty `liveAuthHeaders` is fine — the
- * spread is a no-op for unauthenticated endpoints.
+ * Standard probe headers: content-type from the endpoint's spec
+ * (form-urlencoded for Stripe v1, JSON otherwise) plus the resolved
+ * auth header for the endpoint. Accept stays JSON — the server still
+ * answers in JSON even when the body is form-encoded. Empty
+ * `liveAuthHeaders` is fine — the spread is a no-op for unauthenticated
+ * endpoints.
  */
-export function buildJsonAuthHeaders(
-  ep: EndpointInfo,
-  schemes: SecuritySchemeInfo[],
-  vars: Record<string, string>,
-): Record<string, string> {
-  return {
-    "content-type": "application/json",
-    accept: "application/json",
-    ...liveAuthHeaders(ep, schemes, vars),
-  };
-}
-
-/** ARV-150: like buildJsonAuthHeaders but picks the Content-Type from the
- *  endpoint's spec (form-urlencoded for Stripe v1, JSON otherwise). Accept
- *  stays JSON — the server still answers in JSON even when the body is
- *  form-encoded. */
 export function buildBodyAuthHeaders(
   ep: EndpointInfo,
   schemes: SecuritySchemeInfo[],

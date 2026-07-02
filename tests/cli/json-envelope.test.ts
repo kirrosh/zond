@@ -3,7 +3,6 @@ import {
   jsonOk,
   jsonError,
   writeEnvelope,
-  withEnvelope,
 } from "../../src/cli/json-envelope.ts";
 
 function captureStdout(fn: () => Promise<number> | number): { code: number; out: string } | { code: number; out: string } {
@@ -18,21 +17,6 @@ function captureStdout(fn: () => Promise<number> | number): { code: number; out:
     if (typeof ret === "number") return { code: ret, out: captured };
     // async path handled by caller
     return { code: NaN, out: captured };
-  } finally {
-    process.stdout.write = orig;
-  }
-}
-
-async function captureAsync(fn: () => Promise<number>): Promise<{ code: number; out: string }> {
-  let captured = "";
-  const orig = process.stdout.write;
-  process.stdout.write = ((chunk: string | Uint8Array) => {
-    captured += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString();
-    return true;
-  }) as typeof process.stdout.write;
-  try {
-    const code = await fn();
-    return { code, out: captured };
   } finally {
     process.stdout.write = orig;
   }
@@ -120,30 +104,5 @@ describe("TASK-184: writeEnvelope", () => {
       writeEnvelope("demo", { ok: false, errors: ["x"] }),
     ) as { code: number; out: string };
     expect(code).toBe(2);
-  });
-});
-
-describe("TASK-184: withEnvelope", () => {
-  test("renders the producer's data on success", async () => {
-    const { code, out } = await captureAsync(() =>
-      withEnvelope("demo", async () => ({ data: { hello: "world" }, warnings: ["w"] })),
-    );
-    expect(code).toBe(0);
-    const parsed = JSON.parse(out);
-    expect(parsed.ok).toBe(true);
-    expect(parsed.data).toEqual({ hello: "world" });
-    expect(parsed.warnings).toEqual(["w"]);
-  });
-
-  test("turns thrown errors into an error envelope with exit 2", async () => {
-    const { code, out } = await captureAsync(() =>
-      withEnvelope("demo", async () => {
-        throw new Error("nope");
-      }),
-    );
-    expect(code).toBe(2);
-    const parsed = JSON.parse(out);
-    expect(parsed.ok).toBe(false);
-    expect(parsed.errors).toEqual([{ code: "unknown_error", message: "nope" }]);
   });
 });

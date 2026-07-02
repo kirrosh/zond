@@ -34,10 +34,8 @@
  * categories, not contract bugs the API owner promised against.
  */
 import type { OpenAPIV3, OpenAPIV3_1 } from "openapi-types";
-import Ajv2020 from "ajv/dist/2020.js";
-import Ajv from "ajv";
-import addFormats from "ajv-formats";
 import type { ValidateFunction, ErrorObject } from "ajv";
+import { makeAjv } from "../util/ajv.ts";
 
 interface SingleSchemaValidator {
   validate(value: unknown): boolean;
@@ -48,10 +46,7 @@ interface SingleSchemaValidator {
  *  3.1-flavour by default (`webhooks:` is OpenAPI 3.1) but tolerates
  *  pre-3.1 specs using `x-webhooks` — they ship Draft-7-ish schemas. */
 function compileSingleSchema(schema: OpenAPIV3.SchemaObject, isV31: boolean): SingleSchemaValidator {
-  const ajv = isV31
-    ? new (Ajv2020 as unknown as typeof Ajv)({ strict: false, allErrors: true })
-    : new Ajv({ strict: false, allErrors: true });
-  addFormats(ajv);
+  const ajv = makeAjv(isV31, { strict: false, allErrors: true });
   const validate: ValidateFunction = ajv.compile(schema);
   return {
     validate(value) { return validate(value) as boolean; },

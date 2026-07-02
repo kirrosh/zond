@@ -1,5 +1,5 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
-import { runSuite, runSuites } from "../../src/core/runner/executor.ts";
+import { runSuite } from "../../src/core/runner/executor.ts";
 import { createSchemaValidator } from "../../src/core/runner/schema-validator.ts";
 import type { TestSuite } from "../../src/core/parser/types.ts";
 import { DEFAULT_CONFIG } from "../../src/core/parser/schema.ts";
@@ -456,7 +456,7 @@ describe("runSuite", () => {
     }
   });
 
-  test("runSuites propagates schemaValidator + networkRetries; provenance merges suite/step", async () => {
+  test("runSuite propagates schemaValidator + networkRetries; provenance merges suite/step", async () => {
     let capturedHeaders: Record<string, string> = {};
     globalThis.fetch = mock(async (_url, init?: RequestInit) => {
       capturedHeaders = Object.fromEntries(new Headers(init?.headers as Record<string, string>).entries());
@@ -464,7 +464,7 @@ describe("runSuite", () => {
     }) as unknown as typeof fetch;
 
     const validateMock = mock(() => []);
-    const validator = { validate: validateMock } as unknown as Parameters<typeof runSuites>[3] extends { schemaValidator?: infer V } ? NonNullable<V> : never;
+    const validator = { validate: validateMock } as unknown as Parameters<typeof runSuite>[3] extends { schemaValidator?: infer V } ? NonNullable<V> : never;
 
     const suite: TestSuite = {
       name: "Provenance",
@@ -478,13 +478,13 @@ describe("runSuite", () => {
         expect: { status: 200 },
       }],
     };
-    const results = await runSuites([suite], {}, false, {
+    const result = await runSuite(suite, {}, false, {
       schemaValidator: validator,
       networkRetries: 7,
     });
     expect(capturedHeaders).toBeDefined();
     expect(validateMock).toHaveBeenCalledTimes(1);
-    const step = results[0]!.steps[0]!;
+    const step = result.steps[0]!;
     // step-level overrides suite-level via shallow merge
     expect(step.provenance).toBeDefined();
     expect(step.provenance!.spec).toBe("spec.json");
@@ -505,27 +505,6 @@ describe("runSuite", () => {
     const result = await runSuite(suite);
     expect(result.started_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(result.finished_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-  });
-});
-
-describe("runSuites", () => {
-  test("runs multiple suites in parallel", async () => {
-    let callCount = 0;
-    globalThis.fetch = mock(async () => {
-      callCount++;
-      return new Response(JSON.stringify({ n: callCount }), { status: 200, headers: { "Content-Type": "application/json" } });
-    }) as unknown as typeof fetch;
-
-    const suites: TestSuite[] = [
-      { name: "A", config: DEFAULT_CONFIG, tests: [{ name: "A1", method: "GET", path: "http://x.com/a", expect: { status: 200 } }] },
-      { name: "B", config: DEFAULT_CONFIG, tests: [{ name: "B1", method: "GET", path: "http://x.com/b", expect: { status: 200 } }] },
-    ];
-
-    const results = await runSuites(suites);
-    expect(results).toHaveLength(2);
-    expect(results[0]!.suite_name).toBe("A");
-    expect(results[1]!.suite_name).toBe("B");
-    expect(callCount).toBe(2);
   });
 });
 

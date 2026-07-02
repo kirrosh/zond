@@ -110,11 +110,7 @@ function diffFields(a: unknown, b: unknown, ignore: ReadonlySet<string>): string
 }
 
 function generateKey(): string {
-  // Bun + Node 19+ ship crypto.randomUUID; fall back to a timestamp+rand
-  // mash so tests on minimal stubs still produce a stable-ish key.
-  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-  if (c?.randomUUID) return c.randomUUID();
-  return `zond-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return crypto.randomUUID();
 }
 
 export const idempotencyReplay: CrudStatefulCheck = {

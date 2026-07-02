@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   parseStatusFilter,
-  statusMatches,
   compileStatusFilterToSql,
 } from "../../src/cli/status-filter.ts";
 
@@ -53,26 +52,6 @@ describe("parseStatusFilter", () => {
     expect(() => parseStatusFilter("700")).toThrow();
     expect(() => parseStatusFilter("5xx,bogus")).toThrow();
     expect(() => parseStatusFilter("599-500")).toThrow(/range start > end/);
-  });
-});
-
-describe("statusMatches", () => {
-  test("exact + range", () => {
-    const m = parseStatusFilter("5xx,429");
-    expect(statusMatches(m, 500)).toBe(true);
-    expect(statusMatches(m, 599)).toBe(true);
-    expect(statusMatches(m, 429)).toBe(true);
-    expect(statusMatches(m, 200)).toBe(false);
-    expect(statusMatches(m, 400)).toBe(false);
-    expect(statusMatches(m, null)).toBe(false);
-    expect(statusMatches(m, undefined)).toBe(false);
-  });
-
-  test(">=500 boundary", () => {
-    const m = parseStatusFilter(">=500");
-    expect(statusMatches(m, 499)).toBe(false);
-    expect(statusMatches(m, 500)).toBe(true);
-    expect(statusMatches(m, 599)).toBe(true);
   });
 });
 

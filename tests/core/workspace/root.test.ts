@@ -6,7 +6,6 @@ import { join } from "node:path";
 import {
   WORKSPACE_MARKERS,
   findWorkspaceRoot,
-  resolveWorkspacePath,
   _resetWorkspaceWarning,
 } from "../../../src/core/workspace/root.ts";
 
@@ -88,12 +87,5 @@ describe("findWorkspaceRoot", () => {
       else process.env.ZOND_WORKSPACE = prev;
       rmSync(other, { recursive: true, force: true });
     }
-  });
-
-  test("resolveWorkspacePath joins relative onto detected root", () => {
-    writeFileSync(join(root, "zond.config.yml"), "");
-    const sub = join(root, "x");
-    mkdirSync(sub);
-    expect(resolveWorkspacePath("zond.db", sub)).toBe(join(root, "zond.db"));
   });
 });

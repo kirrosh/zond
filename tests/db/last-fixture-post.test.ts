@@ -1,16 +1,23 @@
 /**
- * ARV-277: tests for `getLastFixturePost(urlLikePattern)` — used by
- * `zond api annotate dump --seed-bodies --with-last-attempt` to surface
- * the most recent fixture-kind POST attempt against a resource's
- * create-endpoint URL.
+ * ARV-277/278: tests for `getRecentFixturePosts(urlLikePattern, limit)` —
+ * used by `zond api annotate dump --seed-bodies --with-last-attempt` to
+ * surface the most recent fixture-kind POST attempt(s) against a
+ * resource's create-endpoint URL.
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { getDb, closeDb } from "../../src/db/schema.ts";
 import { tmpDb, unlinkDb as tryUnlink } from "../_helpers/tmp-db";
 import { createRun, saveResults } from "../../src/db/queries.ts";
-import { getLastFixturePost, getRecentFixturePosts } from "../../src/db/queries/results.ts";
+import { getRecentFixturePosts } from "../../src/db/queries/results.ts";
+import type { LastFixtureAttempt } from "../../src/db/queries/results.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
+
+/** `getRecentFixturePosts(pattern, 1)[0]` — the single-most-recent-match
+ *  shape the old `getLastFixturePost` convenience wrapper used to return. */
+function lastFixturePost(urlLikePattern: string): LastFixtureAttempt | null {
+  return getRecentFixturePosts(urlLikePattern, 1)[0] ?? null;
+}
 
 let dbPath: string;
 
@@ -47,11 +54,11 @@ function postStep(url: string, opts: { status: number; body?: string; reqBody?: 
   };
 }
 
-describe("getLastFixturePost (ARV-277)", () => {
+describe("fixture POST history (ARV-277/278)", () => {
   test("returns null when no fixture POSTs match the pattern", () => {
     const runId = createRun({ started_at: "2026-05-17T00:00:00.000Z", run_kind: "fixture" });
     saveResults(runId, [postStep("https://api.stripe.com/v1/customers", { status: 400 })]);
-    expect(getLastFixturePost("%/v1/topups%")).toBeNull();
+    expect(lastFixturePost("%/v1/topups%")).toBeNull();
   });
 
   test("returns the most recent fixture POST when several runs match", () => {
@@ -64,7 +71,7 @@ describe("getLastFixturePost (ARV-277)", () => {
       status: 400, body: '{"error":"new"}', reqBody: "amount=1000&currency=usd",
     })]);
 
-    const got = getLastFixturePost("%/v1/topups%");
+    const got = lastFixturePost("%/v1/topups%");
     expect(got).not.toBeNull();
     expect(got?.response_status).toBe(400);
     expect(got?.response_body).toBe('{"error":"new"}');
@@ -78,7 +85,7 @@ describe("getLastFixturePost (ARV-277)", () => {
       status: 400, body: '{"error":"missing source"}', reqBody: "",
     })]);
 
-    const got = getLastFixturePost("%/v1/customers/%/sources%");
+    const got = lastFixturePost("%/v1/customers/%/sources%");
     expect(got).not.toBeNull();
     expect(got?.request_url).toContain("cus_abc");
     expect(got?.response_body).toContain("missing source");
@@ -91,7 +98,7 @@ describe("getLastFixturePost (ARV-277)", () => {
     saveResults(regularRun, [postStep("https://api.stripe.com/v1/topups", {
       status: 200, body: '{"id":"tu_ok"}',
     })]);
-    expect(getLastFixturePost("%/v1/topups%")).toBeNull();
+    expect(lastFixturePost("%/v1/topups%")).toBeNull();
   });
 
   test("getRecentFixturePosts returns last N in newest-first order (ARV-278)", () => {
@@ -138,6 +145,6 @@ describe("getLastFixturePost (ARV-277)", () => {
       ],
     };
     saveResults(runId, [step]);
-    expect(getLastFixturePost("%/v1/topups%")).toBeNull();
+    expect(lastFixturePost("%/v1/topups%")).toBeNull();
   });
 });

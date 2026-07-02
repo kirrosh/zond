@@ -31,37 +31,13 @@ export interface BaselineEchoCtx {
   baselineBody: unknown;
 }
 
-function deepEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (a === null || b === null) return false;
-  if (typeof a !== typeof b) return false;
-  if (typeof a !== "object") return false;
-  if (Array.isArray(a) !== Array.isArray(b)) return false;
-  if (Array.isArray(a) && Array.isArray(b)) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-      if (!deepEqual(a[i], b[i])) return false;
-    }
-    return true;
-  }
-  const ao = a as Record<string, unknown>;
-  const bo = b as Record<string, unknown>;
-  const keys = Object.keys(ao);
-  if (keys.length !== Object.keys(bo).length) return false;
-  for (const k of keys) {
-    if (!Object.prototype.hasOwnProperty.call(bo, k)) return false;
-    if (!deepEqual(ao[k], bo[k])) return false;
-  }
-  return true;
-}
-
 export const BASELINE_ECHO_RULE: FpRule<BaselineEchoCtx> = {
   id: "baseline-echo",
   scope: "probe:security",
   references: ["ARV-126"],
   applies(ctx) {
     if (ctx.baselineBody === undefined) return null;
-    if (!deepEqual(ctx.responseBody, ctx.baselineBody)) return null;
+    if (!Bun.deepEquals(ctx.responseBody, ctx.baselineBody)) return null;
     return {
       ruleId: "baseline-echo",
       scope: "probe:security",

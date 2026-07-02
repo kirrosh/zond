@@ -9,6 +9,7 @@
  */
 import { loadOrphans, markRemoved } from "../../core/probe/orphan-tracker.ts";
 import type { OrphanRecord } from "../../core/probe/orphan-tracker.ts";
+import { encodePathForRepro } from "../../core/probe/shared.ts";
 import { executeRequest } from "../../core/runner/http-client.ts";
 import { loadEnvironment, loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
@@ -41,37 +42,10 @@ export interface CleanupOptions {
  * raw `\r`, `\n`, spaces, etc. (e.g. label name `zond-safe\rX-Zond: yes`),
  * which makes the DELETE URL malformed: the API gets a request line with an
  * embedded CR and silently splits or routes elsewhere → 404 → record stays
- * in the queue and the resource leaks.
- *
- * Encode unsafe characters per path-segment while preserving anything that
- * is already percent-encoded. Slashes (segment separators), the unreserved
- * set, and a conservative slice of sub-delims are kept verbatim.
+ * in the queue and the resource leaks. Encoding is shared with the
+ * security-probe digest via `core/probe/shared.ts#encodePathForRepro`.
  */
-export function encodeOrphanPath(deletePath: string): string {
-  const SAFE = /[A-Za-z0-9._~!$&'()*+,;=:@-]/;
-  return deletePath
-    .split("/")
-    .map((segment) => {
-      if (segment.length === 0) return segment;
-      let out = "";
-      for (let i = 0; i < segment.length; i++) {
-        const ch = segment.charAt(i);
-        // Preserve existing percent escapes (`%XX`) — probe pre-encoded.
-        if (ch === "%" && /^[0-9A-Fa-f]{2}$/.test(segment.slice(i + 1, i + 3))) {
-          out += segment.slice(i, i + 3);
-          i += 2;
-          continue;
-        }
-        if (SAFE.test(ch)) {
-          out += ch;
-        } else {
-          out += encodeURIComponent(ch);
-        }
-      }
-      return out;
-    })
-    .join("/");
-}
+export const encodeOrphanPath = encodePathForRepro;
 
 export async function cleanupCommand(opts: CleanupOptions): Promise<number> {
   if (!opts.orphans) {

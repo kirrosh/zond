@@ -30,7 +30,7 @@ function deepEquals(a: unknown, b: unknown): boolean {
   if (typeof a === "string" && typeof b === "number") return Number(a) === b;
   if (typeof a !== typeof b) return false;
   if (typeof a !== "object" || a === null || b === null) return false;
-  return JSON.stringify(a) === JSON.stringify(b);
+  return Bun.deepEquals(a, b);
 }
 
 function checkRule(path: string, rule: AssertionRule, actual: unknown): AssertionResult[] {

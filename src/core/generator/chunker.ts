@@ -16,14 +16,7 @@ export interface ChunkPlan {
  * usable first segment (e.g. `/`) keep the legacy `untagged` key.
  */
 export function groupEndpointsByTag(endpoints: EndpointInfo[]): Map<string, EndpointInfo[]> {
-  const groups = new Map<string, EndpointInfo[]>();
-  for (const ep of endpoints) {
-    const key = ep.tags[0] ?? resourceKeyFromPath(ep.path);
-    const list = groups.get(key);
-    if (list) list.push(ep);
-    else groups.set(key, [ep]);
-  }
-  return groups;
+  return Map.groupBy(endpoints, (ep) => ep.tags[0] ?? resourceKeyFromPath(ep.path));
 }
 
 /** Extract the first non-templated path segment for tagless fallback. */

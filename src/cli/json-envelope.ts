@@ -106,23 +106,3 @@ export function writeEnvelope<T>(command: string, result: EnvelopeResult<T>): nu
   printJson(jsonError(command, result.errors, result.warnings, exit));
   return exit;
 }
-
-/**
- * High-order wrapper for `--json` action handlers. Accepts an async
- * producer and renders its return value (or thrown error) as an
- * envelope. Errors thrown synchronously or asynchronously become
- * `{ ok: false, errors: [{code: "unknown_error", message}] }` with
- * `exitCode = 2`.
- */
-export async function withEnvelope<T>(
-  command: string,
-  produce: () => Promise<{ data: T; warnings?: string[] }>,
-): Promise<number> {
-  try {
-    const { data, warnings } = await produce();
-    return writeEnvelope(command, { ok: true, data, warnings });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return writeEnvelope(command, { ok: false, errors: [message] });
-  }
-}
