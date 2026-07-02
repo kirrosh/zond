@@ -28,10 +28,11 @@
  * the 5xx signal, and `ACCEPTABLE()` below treats 5xx as a non-silent
  * accept so this check passes for those cases. Avoids double-counting.
  *
- * Per ARV-250 `capSeverityByProof`: single-signal proof caps at LOW;
- * concrete schema breach escalates to MEDIUM. The declared
- * `severity: "low"` is the natural fallback / proof-cap baseline;
- * stronger findings use `outcome.severity` to override.
+ * Per ARV-250's proof-cap principle (no evidence → no high severity):
+ * single-signal proof caps at LOW; concrete schema breach escalates to
+ * MEDIUM. The declared `severity: "low"` is the natural fallback /
+ * proof-cap baseline; stronger findings use `outcome.severity` to
+ * override.
  *
  * Users can re-calibrate any of these per-API via `.zond/severity.yaml`
  * (ARV-283) — e.g. promote `additionalProperties-violation` to MEDIUM

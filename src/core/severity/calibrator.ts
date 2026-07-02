@@ -117,7 +117,3 @@ export function calibrate(
     trace: { kind: "default", appliedSeverity: input.defaultSeverity },
   };
 }
-
-/** Empty merged config — calibrate against this is a no-op (returns
- *  the built-in default unchanged). Use when no config is loaded. */
-export const EMPTY_MERGED_CONFIG: MergedConfig = { checks: {}, suppressions: [] };

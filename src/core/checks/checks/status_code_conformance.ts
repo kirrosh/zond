@@ -30,10 +30,10 @@
  * those return pass before we reach this dispatch. The 5xx-undeclared case
  * only fires when there is no 5XX wildcard and no default.
  *
- * Per ARV-250 `capSeverityByProof`: proof-cap baseline is LOW; evidence
- * strength escalates the individual finding via `outcome.severity`. The
- * declared `severity: "low"` is the natural fallback / documentation tier;
- * stronger findings use `outcome.severity` to override.
+ * Per ARV-250's proof-cap principle (no evidence → no high severity):
+ * the declared `severity: "low"` is the natural fallback / proof-cap
+ * baseline; evidence strength escalates individual findings via
+ * `outcome.severity` to override it.
  *
  * Users can re-calibrate per-API via `.zond/severity.yaml` (ARV-283).
  */

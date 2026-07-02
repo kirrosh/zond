@@ -173,6 +173,32 @@ export function renderPath(
   });
 }
 
+/** ARV-244/ARV-245: percent-encode unsafe characters per path segment,
+ *  preserving anything already percent-encoded (`%XX`). Slashes, the
+ *  unreserved set, and a conservative slice of sub-delims are kept
+ *  verbatim. Used both for orphan-cleanup DELETE URLs and paste-ready
+ *  manual repro lines in the security-probe digest. */
+export function encodePathForRepro(deletePath: string): string {
+  const SAFE = /[A-Za-z0-9._~!$&'()*+,;=:@-]/;
+  return deletePath
+    .split("/")
+    .map((segment) => {
+      if (segment.length === 0) return segment;
+      let out = "";
+      for (let i = 0; i < segment.length; i++) {
+        const ch = segment.charAt(i);
+        if (ch === "%" && /^[0-9A-Fa-f]{2}$/.test(segment.slice(i + 1, i + 3))) {
+          out += segment.slice(i, i + 3);
+          i += 2;
+          continue;
+        }
+        out += SAFE.test(ch) ? ch : encodeURIComponent(ch);
+      }
+      return out;
+    })
+    .join("/");
+}
+
 export function isMutating(method: string): boolean {
   const m = method.toUpperCase();
   return m === "POST" || m === "PUT" || m === "PATCH";

@@ -3,31 +3,7 @@ import type {
   SecuritySeverity,
   SecurityVerdict,
 } from "./types.ts";
-
-/** ARV-245 (R-04/F16): percent-encode unsafe characters per path segment
- *  for paste-ready manual repro lines in the digest. Mirrors the encoding
- *  rules used by `cleanup --orphans` so the printed command works against
- *  the same APIs the probe targeted. */
-function encodeDeletePathForRepro(deletePath: string): string {
-  const SAFE = /[A-Za-z0-9._~!$&'()*+,;=:@-]/;
-  return deletePath
-    .split("/")
-    .map((segment) => {
-      if (segment.length === 0) return segment;
-      let out = "";
-      for (let i = 0; i < segment.length; i++) {
-        const ch = segment.charAt(i);
-        if (ch === "%" && /^[0-9A-Fa-f]{2}$/.test(segment.slice(i + 1, i + 3))) {
-          out += segment.slice(i, i + 3);
-          i += 2;
-          continue;
-        }
-        out += SAFE.test(ch) ? ch : encodeURIComponent(ch);
-      }
-      return out;
-    })
-    .join("/");
-}
+import { encodePathForRepro } from "../shared.ts";
 
 /** TASK-154 §N: clip noisy payloads (some SSRF/CRLF/redirect strings are URL-
  *  encoded blobs > 60 chars). Keep the leading prefix users recognise plus an
@@ -81,7 +57,7 @@ export function formatSecurityDigest(
       // to percent-encode `\r`/`\n`/spaces themselves.
       const dp = v.cleanup?.deletePath;
       if (dp) {
-        const encoded = encodeDeletePathForRepro(dp);
+        const encoded = encodePathForRepro(dp);
         const note = /[\r\n\t ]/.test(dp) ? " (note: id contains whitespace/CRLF — percent-encoded)" : "";
         lines.push(`  - Manual repro: \`zond request DELETE ${encoded} --api <name>\`${note}`);
       }

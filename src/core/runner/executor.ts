@@ -648,12 +648,3 @@ export async function runSuite(
     steps,
   };
 }
-
-export async function runSuites(
-  suites: TestSuite[],
-  env: Environment = {},
-  dryRun = false,
-  options: RunSuiteOptions = {},
-): Promise<TestRunResult[]> {
-  return Promise.all(suites.map((suite) => runSuite(suite, env, dryRun, options)));
-}

@@ -58,13 +58,19 @@ function applyResetPause(prevNextAvailable: number, meta: RateLimitMeta, now: nu
 
 class IntervalRateLimiter implements RateLimiter {
   private nextAvailable = 0;
+  /** 0 means adaptive: no proactive throttling until a policy is learned
+   *  from a response (matches the original AdaptiveRateLimiter behaviour). */
   private intervalMs: number;
 
-  constructor(reqPerSec: number) {
-    if (!Number.isFinite(reqPerSec) || reqPerSec <= 0) {
-      throw new Error(`Invalid rate limit: ${reqPerSec}`);
+  constructor(reqPerSec?: number) {
+    if (reqPerSec === undefined) {
+      this.intervalMs = 0;
+    } else {
+      if (!Number.isFinite(reqPerSec) || reqPerSec <= 0) {
+        throw new Error(`Invalid rate limit: ${reqPerSec}`);
+      }
+      this.intervalMs = 1000 / reqPerSec;
     }
-    this.intervalMs = 1000 / reqPerSec;
   }
 
   async acquire(): Promise<void> {
@@ -89,30 +95,6 @@ class IntervalRateLimiter implements RateLimiter {
   }
 }
 
-class AdaptiveRateLimiter implements RateLimiter {
-  private nextAvailable = 0;
-  /** Learned from RateLimit-Policy. 0 until a policy is seen — until then,
-   *  parallel acquires are not spaced (matches the original adaptive
-   *  behaviour). Once known, every acquire reserves a slot of `intervalMs`. */
-  private intervalMs = 0;
-
-  async acquire(): Promise<void> {
-    const now = Date.now();
-    const slot = Math.max(now, this.nextAvailable);
-    const waitMs = slot - now;
-    this.nextAvailable = slot + this.intervalMs;
-    if (waitMs > 0) await Bun.sleep(waitMs);
-  }
-
-  note(meta: RateLimitMeta, now: number = Date.now()): void {
-    if (meta.intervalMs !== undefined && meta.intervalMs > this.intervalMs) {
-      this.nextAvailable += meta.intervalMs - this.intervalMs;
-      this.intervalMs = meta.intervalMs;
-    }
-    this.nextAvailable = applyResetPause(this.nextAvailable, meta, now);
-  }
-}
-
 export function createRateLimiter(reqPerSec: number | undefined): RateLimiter | undefined {
   if (reqPerSec === undefined || reqPerSec === null) return undefined;
   if (!Number.isFinite(reqPerSec) || reqPerSec <= 0) return undefined;
@@ -128,7 +110,7 @@ export function createRateLimiter(reqPerSec: number | undefined): RateLimiter | 
  * from blowing through small windows (e.g. 5-req/1-sec policies).
  */
 export function createAdaptiveRateLimiter(): RateLimiter {
-  return new AdaptiveRateLimiter();
+  return new IntervalRateLimiter();
 }
 
 /**

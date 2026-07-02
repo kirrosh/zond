@@ -109,10 +109,6 @@ export function formatDigestMarkdown(
   return lines.join("\n");
 }
 
-function groupBySeverity(verdicts: EndpointVerdict[]): Record<Severity, EndpointVerdict[]> {
-  const out: Record<Severity, EndpointVerdict[]> = {
-    high: [], "inconclusive-baseline": [], "inconclusive-5xx": [], medium: [], low: [], info: [], ok: [], skipped: [],
-  };
-  for (const v of verdicts) out[v.severity].push(v);
-  return out;
+function groupBySeverity(verdicts: EndpointVerdict[]): Partial<Record<Severity, EndpointVerdict[]>> {
+  return Object.groupBy(verdicts, (v) => v.severity);
 }

@@ -91,11 +91,6 @@ export function findWorkspaceRoot(cwd?: string): WorkspaceInfo {
   return { root: start, marker: "", fromFallback: true };
 }
 
-/** Resolve `relative` against the workspace root (auto-detected from `cwd`). */
-export function resolveWorkspacePath(relative: string, cwd?: string): string {
-  return resolve(findWorkspaceRoot(cwd).root, relative);
-}
-
 /** Test helper: reset the one-shot warning latch. */
 export function _resetWorkspaceWarning(): void {
   warned = false;

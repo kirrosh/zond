@@ -1,19 +1,15 @@
 # core/output — typed `--report` / `--output` / `--json` policy
 
 `OutputSpec<Payload>` is the single source-of-truth for how a command
-produces output. Per-command parsers (`checks run`, `probe security`,
-`run`, …) are migrated in ARV-117/118/119 — this directory only ships
-the infrastructure.
-
-Closes the seven divergent-output bugs collected in
+produces output. Closes the seven divergent-output bugs collected in
 `strategy/lessons.md` §E (ARV-50, ARV-82, ARV-97, …) by replacing N
 ad-hoc parsers with one resolver.
 
 ## Policy matrix
 
-The runner (`runCommandWithOutput`) reads `--report`, `--output`, and
-`--json` from the CLI layer and resolves them to a `ResolvedOutput`
-decision according to this matrix:
+`resolveOutput(spec, opts)` reads `--report`, `--output`, and `--json`
+from the CLI layer and resolves them to a `ResolvedOutput` decision
+according to this matrix:
 
 | Input                                | Format         | Channel             | Notes |
 | ------------------------------------ | -------------- | ------------------- | ----- |
@@ -50,30 +46,16 @@ export const CHECKS_RUN_OUTPUT: OutputSpec<ChecksPayload> = {
     // `--report ndjson` is a friendly alias retained from skill prompts.
     ndjson: "ndjson",
   },
-  render: (format, payload) => {
-    if (format === "sarif")  return generateSarifReport(payload);
-    if (format === "ndjson") return payload.findings.map(f => JSON.stringify(f)).join("\n");
-    return JSON.stringify(payload, null, 2);
-  },
 };
 ```
 
-The CLI handler then does:
-
-```ts
-const { resolved, exitCode } = await runCommandWithOutput(
-  CHECKS_RUN_OUTPUT,
-  cmd.opts<OutputOptions>(),
-  async () => runChecks({ /* ... */ }),
-);
-process.exit(exitCode);
-```
-
-`resolveOutput()` can be called standalone (without rendering) when a
-command wants to plug the resolution into its own streaming pipeline —
-e.g. `checks run` opens an fd ahead of time and feeds events into it
-incrementally; in that case the command consumes `resolved.path` and
-`resolved.channel` and handles I/O itself.
+The CLI handler calls `resolveOutput()` and renders/writes the payload
+itself — each command's shape (streaming vs single-shot, envelope vs
+raw) differs enough that a shared render/write runner added indirection
+without removing per-command logic. `checks run` and `probe *` open an
+fd from `resolved.path`/`resolved.channel` and feed output into it
+incrementally; `run` renders a single payload and writes it once. See
+any of `src/cli/commands/{run,checks,probe}.ts` for the pattern.
 
 ## Why the format set is open
 
