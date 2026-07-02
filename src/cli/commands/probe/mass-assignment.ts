@@ -189,6 +189,18 @@ export async function probeMassAssignmentCommand(
         options: {},
       });
       const data = summarizeDryRun(plan);
+      // ARV-317: persist the planned inventory when --output is given, so it
+      // survives beyond stdout (an agent can read it back). --emit-tests is
+      // skipped on dry-run — there are no findings to turn into regression
+      // suites; the plan digest is the dry-run deliverable.
+      if (options.output) {
+        const payload = options.report === "json"
+          ? JSON.stringify(data, null, 2)
+          : formatDryRunDigest(plan);
+        await mkdir(join(options.output, "..").replace(/\/\.$/, ""), { recursive: true }).catch(() => {});
+        rotateOutputTarget(options.output, { overwrite: options.overwrite });
+        await writeFile(options.output, payload + "\n", "utf-8");
+      }
       if (options.json) {
         printJson(jsonOk("probe-mass-assignment", data));
       } else {

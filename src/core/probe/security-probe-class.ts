@@ -18,7 +18,8 @@ import {
   type SecurityProbeResult,
   type SecurityVerdict,
 } from "./security-probe.ts";
-import { hasJsonBody, pathTouchesSeededVar } from "./shared.ts";
+import { pathTouchesSeededVar } from "./shared.ts";
+import { hasProbeBody } from "./probe-harness.ts";
 
 const FLAGS: ProbeFlags = {
   api: true,
@@ -55,7 +56,12 @@ function planForSecurity(
       continue;
     }
 
-    if (!hasJsonBody(ep)) {
+    // ARV-313: parity with the live orchestrator (which uses hasProbeBody)
+    // and the mass-assignment planner — accept application/x-www-form-urlencoded
+    // bodies, not just JSON. The old hasJsonBody gate made the dry-run
+    // inventory a no-op on form-encoded APIs (Stripe v1), so `probe security
+    // --dry-run` planned 0/291 while mass-assignment planned 290/291.
+    if (!hasProbeBody(ep)) {
       out.push({
         path: ep.path,
         method: m,

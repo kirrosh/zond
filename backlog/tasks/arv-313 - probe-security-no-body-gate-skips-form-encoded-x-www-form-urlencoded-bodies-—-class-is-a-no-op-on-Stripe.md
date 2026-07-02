@@ -3,9 +3,10 @@ id: ARV-313
 title: >-
   probe security 'no-body' gate skips form-encoded (x-www-form-urlencoded)
   bodies — class is a no-op on Stripe
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-02 14:19'
+updated_date: '2026-07-02 15:40'
 labels:
   - probe
 dependencies: []
@@ -24,3 +25,9 @@ Found on Stripe zond-audit run 20260702-170615. 'zond probe security ssrf,crlf,o
 - [ ] #2 on Stripe spec, security dry-run plans a comparable count to mass-assignment (not 0)
 - [ ] #3 regression: form-encoded POST with body params is not skipped as no-body
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+dry-run planner (security-probe-class.ts) used hasJsonBody (JSON-only); live orchestrator uses hasProbeBody (JSON+form). Switched planner to hasProbeBody → parity with mass-assignment. Test: security-probe-form-body.test.ts +1 (dry-run plans form-urlencoded).
+<!-- SECTION:NOTES:END -->
