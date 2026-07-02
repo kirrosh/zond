@@ -55,11 +55,13 @@ import {
   type CheckFinding,
   type CheckRunData,
   type CheckRunSummary,
+  type SpecFinding,
 } from "./types.ts";
 import type { Severity } from "../severity/index.ts";
 import { categoryFor } from "../severity/category.ts";
 import {
   computeSpecFindings,
+  applyBrokenBaselineGuard,
   type PerCheckObservations,
 } from "./spec-findings.ts";
 
@@ -691,11 +693,17 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     /** ARV-60: per-check case count for this op (passed + failed +
      *  skipped). Summed at merge-time. */
     casesByCheck: Record<string, number>;
+    /** ARV-307: positive (expected-success) probe responses observed on
+     *  this op — feeds the run-level broken-baseline guard. */
+    positiveTotal: number;
+    positiveTwoxx: number;
   }
 
   async function processOperation(op: EndpointInfo): Promise<OpReport> {
     const localFindings: CheckFinding[] = [];
     let localCases = 0;
+    let localPositiveTotal = 0;
+    let localPositiveTwoxx = 0;
     const localSkipped: Record<string, number> = {};
     // ARV-60: per-check observations for this op — `applies()` membership
     // and case-count. Deduplicated within the op (one applies-vote per
@@ -800,6 +808,13 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       }
 
       localCases += 1;
+      // ARV-307: tally the positive-probe baseline. Only the positive case
+      // kind is "expected to succeed" — negative/boundary cases legitimately
+      // 4xx, so they must not count toward the broken-baseline ratio.
+      if (built.case.kind === "positive") {
+        localPositiveTotal += 1;
+        if (httpResp.status >= 200 && httpResp.status < 300) localPositiveTwoxx += 1;
+      }
       const checkResp = {
         status: httpResp.status,
         headers: httpResp.headers,
@@ -884,6 +899,8 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       skipped: localSkipped,
       applicableChecks: [...localApplicable],
       casesByCheck: localCasesByCheck,
+      positiveTotal: localPositiveTotal,
+      positiveTwoxx: localPositiveTwoxx,
     };
   }
 
@@ -893,15 +910,20 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   const workers = opts.workers ?? 1;
   const opReports = await runPool(ops, workers, processOperation);
 
-  const findings: CheckFinding[] = [];
+  let findings: CheckFinding[] = [];
   /** ARV-60: per-check accumulator for spec_findings rollup. Built from
    *  the per-op `applicableChecks` and `casesByCheck` fields each worker
    *  returns; skipped is reconstructed from `summary.skipped_outcomes`
    *  after the loop. */
   const perCheckApplicable: Map<string, number> = new Map();
   const perCheckCases: Map<string, number> = new Map();
+  // ARV-307: run-level positive-probe baseline health.
+  let positiveTotal = 0;
+  let positiveTwoxx = 0;
   for (const report of opReports) {
     summary.cases += report.cases;
+    positiveTotal += report.positiveTotal;
+    positiveTwoxx += report.positiveTwoxx;
     for (const [key, n] of Object.entries(report.skipped)) {
       summary.skipped_outcomes[key] = (summary.skipped_outcomes[key] ?? 0) + n;
     }
@@ -1150,6 +1172,10 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           }
           if (outcome.kind === "fail") {
             const repOp = group.create ?? group.read!;
+            // ARV-310: prefer the check's explicit operation attribution (e.g.
+            // cursor_boundary_fuzzing → the GET list it probed) over the
+            // group's canonical create/read op.
+            const opFor = outcome.operation ?? { path: repOp.path, method: repOp.method, operationId: repOp.operationId };
             // ARV-287/288 (follow-up ARV-284): respect per-finding severity
             // from stateful CRUD checks (cross_call_references,
             // pagination_invariants) — declared severity is the proof-cap
@@ -1157,8 +1183,8 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
             const finding: CheckFinding = {
               check: check.id,
               severity: outcome.severity ?? check.severity,
-              operation: { path: repOp.path, method: repOp.method, operationId: repOp.operationId },
-              request_signature: `${repOp.method.toUpperCase()} ${repOp.path} (chain)`,
+              operation: opFor,
+              request_signature: `${opFor.method.toUpperCase()} ${opFor.path} (chain)`,
               response_summary: { status: 0 },
               message: outcome.message,
               evidence: outcome.evidence,
@@ -1183,6 +1209,25 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       }
     }
     findings.push(...collected);
+  }
+
+  // ARV-307: run-level broken-baseline guard for the conformance family.
+  // When the positive-probe baseline was degenerate (>90% non-2xx), the
+  // conformance findings are baseline artifacts — replace the per-op pile
+  // with a single broken_baseline spec_finding and decrement the summary
+  // tallies for the removed findings so CI gates and category rollups match.
+  const baselineGuard = applyBrokenBaselineGuard({ findings, positiveTotal, positiveTwoxx });
+  const extraSpecFindings: SpecFinding[] = [];
+  if (baselineGuard.specFinding) {
+    findings = baselineGuard.kept;
+    for (const f of baselineGuard.removed) {
+      summary.findings -= 1;
+      summary.by_severity[f.severity] -= 1;
+      if (f.category) summary.by_category[f.category] -= 1;
+    }
+    const reasonKey = `status_code_conformance: broken-baseline (${baselineGuard.removed.length} conformance finding(s) suppressed)`;
+    summary.skipped_outcomes[reasonKey] = (summary.skipped_outcomes[reasonKey] ?? 0) + baselineGuard.removed.length;
+    extraSpecFindings.push(baselineGuard.specFinding);
   }
 
   const highOrCritical = findings.filter(
@@ -1211,7 +1256,9 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       skipped,
     });
   }
-  const spec_findings = computeSpecFindings(findings, perCheck);
+  // ARV-307: broken-baseline rollup(s) prepend the computed clusters so the
+  // reader sees "your baseline is broken" before any residual per-op rows.
+  const spec_findings = [...extraSpecFindings, ...computeSpecFindings(findings, perCheck)];
   // ARV-83: build the structured view of `skipped_outcomes` once, after
   // all per-op/per-group writers have settled. Sorted by descending count
   // so the most-impactful skip reason lands first.

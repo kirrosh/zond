@@ -52,6 +52,39 @@ describe("detectFields", () => {
     expect(hits).toEqual([{ field: "redirect", class: "open-redirect" }]);
   });
 
+  // ARV-310: CRLF must not match free-text body fields (name/title/description
+  // /tag) — those are not header-reflected sinks and produced the bulk of the
+  // GitHub-scan false positives.
+  it("CRLF excludes free-text name / title / description / tag", () => {
+    const freeText: OpenAPIV3.SchemaObject = {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        title: { type: "string" },
+        description: { type: "string" },
+        tag: { type: "string" },
+      },
+    };
+    const hits = detectFields(ep({ requestBodySchema: freeText }), ["crlf"]);
+    expect(hits).toEqual([]);
+  });
+
+  // ARV-310: SSRF restricted to URL-shaped names (url / *_url / *_uri / href /
+  // endpoint) + format=uri|url. Bare `callback` / `description` are not sinks.
+  it("SSRF excludes non-URL-shaped names but keeps *_url / *_uri", () => {
+    const mixed: OpenAPIV3.SchemaObject = {
+      type: "object",
+      properties: {
+        callback: { type: "string" },        // not URL-shaped → excluded
+        description: { type: "string" },      // free text → excluded
+        callback_url: { type: "string" },     // *_url → included
+        redirect_uri: { type: "string" },     // *_uri → included
+      },
+    };
+    const hits = detectFields(ep({ requestBodySchema: mixed }), ["ssrf"]).map(h => h.field).sort();
+    expect(hits).toEqual(["callback_url", "redirect_uri"]);
+  });
+
   it("ignores enum-bounded fields", () => {
     const enumSchema: OpenAPIV3.SchemaObject = {
       type: "object",

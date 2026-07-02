@@ -3,9 +3,10 @@ id: ARV-309
 title: >-
   probes in safe/GET-only mode emit plan with no 'not executed' line / no result
   artifact
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-02 11:09'
+updated_date: '2026-07-02 11:35'
 labels:
   - zond-side
   - ux

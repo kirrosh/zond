@@ -1,10 +1,10 @@
 ---
 id: ARV-303
 title: ARV-303 — zond coverage envelope/exit code contract violation
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18 15:26'
-updated_date: '2026-07-02 11:10'
+updated_date: '2026-07-02 11:35'
 labels:
   - bug
   - zond-side

@@ -267,6 +267,7 @@
               "status_drift",
               "missing_declaration",
               "no_detector",
+              "broken_baseline",
               "other"
             ]
           },

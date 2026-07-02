@@ -2,10 +2,20 @@ import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo } from "../../generator/types.ts";
 import type { SecurityClass, SecurityFieldHit } from "./types.ts";
 
+// ARV-310: SSRF only targets URL-shaped field names — url / *_url / *_uri /
+// href / endpoint. Dropped the unanchored `webhook` / `callback` substrings
+// that matched free-text fields (e.g. `callback_message`, and grouped
+// `description` hits) which are not request-forgeable sinks. Schema
+// format=uri|url still qualifies a field regardless of name.
 const SSRF_NAME_RE =
-  /(^url$|url$|webhook|callback|^redirect_uri$|^endpoint$|^uri$|^href$)/i;
+  /(url$|uri$|^href$|^endpoint$)/i;
+// ARV-310: CRLF targets header-reflected / redirect-shaped fields (email
+// Subject, log prefix, redirect targets), NOT free-text body fields. Dropped
+// `^name$` / `^title$` / `^description$` / `^tag$` — those are not header
+// sinks and produced the bulk of the GitHub-scan false positives
+// (name ×37, name,description ×22, title ×9).
 const CRLF_NAME_RE =
-  /(^subject$|prefix$|^name$|^title$|^description$|^tag$|^message_subject$)/i;
+  /(^subject$|^message_subject$|prefix$|^location$|^redirect$)/i;
 const OPEN_REDIRECT_NAME_RE =
   /(^redirect$|^next$|^return_to$|^redirect_url$|^redirect_to$|^redirectTo$)/i;
 
