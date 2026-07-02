@@ -1,9 +1,10 @@
 ---
 id: ARV-301
 title: 'ARV-301 — audit stage 8 (coverage) fails: --union session vs. closed session'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18 15:26'
+updated_date: '2026-07-02 14:05'
 labels:
   - bug
   - zond-side

@@ -1,9 +1,10 @@
 ---
 id: ARV-302
 title: ARV-302 — probe security/mass-assignment ignores --budget from audit
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18 15:26'
+updated_date: '2026-07-02 14:05'
 labels:
   - bug
   - zond-side

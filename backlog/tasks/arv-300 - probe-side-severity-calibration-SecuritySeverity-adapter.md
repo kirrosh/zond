@@ -4,6 +4,7 @@ title: 'probe-side severity calibration: SecuritySeverity adapter'
 status: To Do
 assignee: []
 created_date: '2026-05-18 14:23'
+updated_date: '2026-07-02 14:07'
 labels:
   - severity
   - calibration
@@ -27,3 +28,9 @@ ARV-283 Phase A wired calibrate() в core/checks/runner.ts для checks-side. �
 - [ ] #3 severity.yaml suppression с when.finding.check: ssrf подавляет соответствующие probe findings (integration test)
 - [ ] #4 bun test + bun run check проходят
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Security-probe slice done (commit pending): core/severity/probe-adapter.ts (calibrateProbeSeverity — sentinel passthrough, string-keyed so enum-agnostic), rollupSecuritySeverity exported from security/orchestrator.ts, calibrateSecurityVerdicts wired in cli/commands/probe/security.ts after result. AC#2 (sentinel round-trip) + AC#3 (when.finding.check: ssrf suppression) covered by tests/core/probe/probe-severity-calibration.test.ts (5/5). AC#1 met for security only — mass-assignment/static/webhooks carried to ARV-311. bun run check + full suite green (2484/0).
+<!-- SECTION:NOTES:END -->
