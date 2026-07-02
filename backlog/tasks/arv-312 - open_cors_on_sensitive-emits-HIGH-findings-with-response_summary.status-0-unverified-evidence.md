@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-07-02 14:19'
-updated_date: '2026-07-02 14:44'
+updated_date: '2026-07-02 15:18'
 labels:
   - severity
 dependencies: []
@@ -29,5 +29,5 @@ Found on live Stripe zond-audit run 20260702-170615 (auth-gated). 261/261 open_c
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Fixed. Root cause: response_summary.status:0 is a runner placeholder for auth/stateful checks (they send their own requests, runner has no response to summarize) — NOT 'no response captured'. The 261 phantom HIGHs were real Origin-reflection on 401-gated responses: Stripe reflects the Origin + creds:true even on 401, and the check flagged HIGH without checking the status. Fix: (1) open_cors caps at HIGH only on 2xx (authed data actually CORS-readable), downgrades to LOW on non-2xx with the real status recorded; (2) CheckOutcome.fail gains responseStatus?, threaded into response_summary by the runner (kills phantom status:0 for auth checks generally); (3) evidence carries response_status. Tests: small-team-checks.test.ts +3 (2xx HIGH, 401 LOW, 500 LOW). Full suite 2487/0.
+LIVE-VERIFIED on Stripe run 20260702-174915 (valid sk_test key, 585×200 responses). open_cors now: 117 HIGH on status:200 (real Origin reflection on authed 2xx), 144 downgraded to LOW (57×400, 10×403, 77×404) with real status in evidence.response_status + response_summary.status. Phantom status:0 gone across all findings. Fix confirmed working. Deeper anti-FP gap remains (bearer-auth exploitability) → ARV-316.
 <!-- SECTION:NOTES:END -->
