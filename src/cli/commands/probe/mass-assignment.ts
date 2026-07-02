@@ -193,6 +193,12 @@ export async function probeMassAssignmentCommand(
       // survives beyond stdout (an agent can read it back). --emit-tests is
       // skipped on dry-run — there are no findings to turn into regression
       // suites; the plan digest is the dry-run deliverable.
+      // ARV-321: say so explicitly. A silent no-op read as a bug on the live
+      // Stripe run (report-zond friction, 2026-07-02) — the target dir stayed
+      // empty with zero signal that --emit-tests was ignored.
+      if (options.emitTests) {
+        printWarning(`--emit-tests skipped: --dry-run has no live verdicts to lock in as regression suites. Re-run without --dry-run to emit ${options.emitTests}.`);
+      }
       if (options.output) {
         const payload = options.report === "json"
           ? JSON.stringify(data, null, 2)
