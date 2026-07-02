@@ -377,19 +377,29 @@ async function probeOneEndpoint(
     }
   }
 
-  // Roll up to the worst severity. ARV-253: "info" sits below "low"
-  // (single_signal sanitization-only). ARV-254: "medium" sits between
-  // "high" and "low" (SSRF accept on endpoint declaring delivery).
-  const severities: SecuritySeverity[] = verdict.findings.map(f => f.severity);
-  if (severities.includes("high")) verdict.severity = "high";
-  else if (severities.includes("inconclusive")) verdict.severity = "inconclusive";
-  else if (severities.includes("medium")) verdict.severity = "medium";
-  else if (severities.includes("low")) verdict.severity = "low";
-  else if (severities.includes("info")) verdict.severity = "info";
-  else verdict.severity = "ok";
-
+  verdict.severity = rollupSecuritySeverity(verdict.findings);
   verdict.summary = summaryLine(verdict);
   return verdict;
+}
+
+/**
+ * Roll up per-finding severities to the worst verdict-level severity.
+ * ARV-253: "info" sits below "low" (single_signal sanitization-only).
+ * ARV-254: "medium" sits between "high" and "low" (SSRF accept on an
+ * endpoint declaring delivery). Exported so ARV-300 can recompute the
+ * rollup after `.zond/severity.yaml` re-severitizes / suppresses
+ * individual findings.
+ */
+export function rollupSecuritySeverity(
+  findings: readonly { severity: SecuritySeverity }[],
+): SecuritySeverity {
+  const severities = findings.map((f) => f.severity);
+  if (severities.includes("high")) return "high";
+  if (severities.includes("inconclusive")) return "inconclusive";
+  if (severities.includes("medium")) return "medium";
+  if (severities.includes("low")) return "low";
+  if (severities.includes("info")) return "info";
+  return "ok";
 }
 
 function summaryLine(v: SecurityVerdict): string {
