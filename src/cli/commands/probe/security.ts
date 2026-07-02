@@ -256,10 +256,21 @@ export async function probeSecurityCommand(
         options: { isolated: options.isolated === true },
       });
       const data = summarizeDryRun(plan);
+      const { formatDryRunDigest } = await import("../../../core/probe/dry-run-envelope.ts");
+      // ARV-317: persist the planned inventory when --output is given (parity
+      // with probe mass-assignment). --emit-tests is skipped on dry-run —
+      // there are no findings to turn into regression suites.
+      if (options.output) {
+        const payload = options.report === "json"
+          ? JSON.stringify(data, null, 2)
+          : formatDryRunDigest(plan);
+        await mkdir(join(options.output, "..").replace(/\/\.$/, ""), { recursive: true }).catch(() => {});
+        rotateOutputTarget(options.output, { overwrite: options.overwrite });
+        await writeFile(options.output, payload + "\n", "utf-8");
+      }
       if (options.json) {
         printJson(jsonOk("probe-security", data));
       } else {
-        const { formatDryRunDigest } = await import("../../../core/probe/dry-run-envelope.ts");
         console.log(formatDryRunDigest(plan));
       }
       return 0;

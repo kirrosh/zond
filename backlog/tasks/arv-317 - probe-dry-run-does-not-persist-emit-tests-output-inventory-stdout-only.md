@@ -1,9 +1,10 @@
 ---
 id: ARV-317
 title: probe --dry-run does not persist emit-tests / --output inventory (stdout only)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-02 15:18'
+updated_date: '2026-07-02 15:40'
 labels:
   - probe
 dependencies: []
@@ -21,3 +22,9 @@ Live Stripe run 20260702-174915. 'zond probe mass-assignment --dry-run --emit-te
 - [ ] #1 probe <class> --dry-run --emit-tests <dir> writes the planned inventory files
 - [ ] #2 probe <class> --dry-run --output <file> writes the digest
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+dry-run branch now writes the plan digest to --output (JSON or formatDryRunDigest) in both probe mass-assignment + security. --emit-tests skipped on dry-run (no findings → no regression suites); the digest is the dry-run deliverable.
+<!-- SECTION:NOTES:END -->
