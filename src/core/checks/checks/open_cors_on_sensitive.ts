@@ -99,30 +99,36 @@ export const openCorsOnSensitive: AuthStatefulCheck = {
     const originIsStar = allowOrigin === "*";
     const originReflects = allowOrigin === PROBE_ORIGIN;
 
-    // The smoking guns.
-    if (credsTrue && originIsStar) {
+    // ARV-312: HIGH requires evidence that authed data is actually
+    // CORS-readable — i.e. a 2xx response served real content under the
+    // reflected Origin. On a non-2xx (401/403/4xx/5xx) the CORS policy is
+    // still misconfigured, but *this* response exposed no authenticated
+    // payload, so the impact is unproven → cap at LOW per the m-21
+    // "no evidence → no high severity" matrix. Recording the real status
+    // also kills the phantom `response_summary.status: 0` (auth checks
+    // don't otherwise thread their response back to the runner).
+    const status = resp.status;
+    const authExposed = status >= 200 && status < 300;
+    const impactNote = authExposed
+      ? "any attacker site can read authed cross-origin responses"
+      : `observed on a ${status} response — cross-origin CORS is misconfigured but authed-data exposure is unproven`;
+
+    if (credsTrue && (originIsStar || originReflects)) {
+      const variant = originIsStar ? "wildcard+credentials" : "reflected+credentials";
+      const shape = originIsStar
+        ? "Allow-Origin: * with Allow-Credentials: true"
+        : "response reflects arbitrary Origin with Allow-Credentials: true";
       return {
         kind: "fail",
-        message:
-          "CORS misconfiguration: Allow-Origin: * with Allow-Credentials: true allows cross-origin reads of authenticated data",
+        severity: authExposed ? "high" : "low",
+        responseStatus: status,
+        message: `CORS misconfiguration: ${shape} — ${impactNote}`,
         evidence: {
           request_origin: PROBE_ORIGIN,
+          response_status: status,
           access_control_allow_origin: allowOrigin,
           access_control_allow_credentials: allowCreds,
-          variant: "wildcard+credentials",
-        },
-      };
-    }
-    if (credsTrue && originReflects) {
-      return {
-        kind: "fail",
-        message:
-          "CORS misconfiguration: response reflects arbitrary Origin with Allow-Credentials: true — any attacker site can read authed responses",
-        evidence: {
-          request_origin: PROBE_ORIGIN,
-          access_control_allow_origin: allowOrigin,
-          access_control_allow_credentials: allowCreds,
-          variant: "reflected+credentials",
+          variant,
         },
       };
     }

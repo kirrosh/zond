@@ -129,6 +129,12 @@ export type CheckOutcome =
        *  probes the GET list endpoint — without this the finding lands on the
        *  POST create and reads as "a create endpoint that doesn't paginate". */
       operation?: { path: string; method: string; operationId?: string };
+      /** ARV-312: observed HTTP status of the response the check acted on.
+       *  Auth/stateful checks send their own requests, so the runner has no
+       *  response to summarize and otherwise records `status: 0` — a phantom
+       *  that reads as "no response captured". Set this so the finding carries
+       *  the real status (and severity gating can key off it). */
+      responseStatus?: number;
     };
 
 export interface Check {

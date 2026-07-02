@@ -108,6 +108,61 @@ describe("open_cors_on_sensitive (ARV-256)", () => {
     const publicOp = { ...ep(), security: [] };
     expect(openCorsOnSensitive.applies(publicOp)).toBe(false);
   });
+
+  // ARV-312: HIGH requires a 2xx response (authed data actually exposed).
+  // On the Stripe live scan every finding fired on a 401-gated response
+  // that still reflected the Origin — 261 phantom HIGHs. Cap those at LOW
+  // and record the real status so `response_summary.status` isn't a
+  // phantom 0.
+  it("HIGH carries the real 2xx status via responseStatus", async () => {
+    const h = fakeHarness({
+      status: 200,
+      headers: {
+        "access-control-allow-origin": "https://evil.zond.test",
+        "access-control-allow-credentials": "true",
+      },
+    });
+    const outcome = await openCorsOnSensitive.run(ep(), h as never);
+    expect(outcome.kind).toBe("fail");
+    if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("high");
+      expect(outcome.responseStatus).toBe(200);
+      expect(outcome.evidence?.response_status).toBe(200);
+    }
+  });
+
+  it("ARV-312: LOW (not HIGH) when reflection is on a 401 — no authed data exposed", async () => {
+    const h = fakeHarness({
+      status: 401,
+      headers: {
+        "access-control-allow-origin": "https://evil.zond.test",
+        "access-control-allow-credentials": "true",
+      },
+    });
+    const outcome = await openCorsOnSensitive.run(ep(), h as never);
+    expect(outcome.kind).toBe("fail");
+    if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("low");
+      expect(outcome.responseStatus).toBe(401);
+      expect(outcome.message).toMatch(/unproven/);
+    }
+  });
+
+  it("ARV-312: wildcard+credentials on 500 also caps at LOW", async () => {
+    const h = fakeHarness({
+      status: 500,
+      headers: {
+        "access-control-allow-origin": "*",
+        "access-control-allow-credentials": "true",
+      },
+    });
+    const outcome = await openCorsOnSensitive.run(ep(), h as never);
+    expect(outcome.kind).toBe("fail");
+    if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("low");
+      expect(outcome.evidence?.variant).toBe("wildcard+credentials");
+    }
+  });
 });
 
 describe("rate_limit_headers_absent (ARV-256)", () => {
