@@ -3,9 +3,10 @@ id: ARV-314
 title: >-
   checks run --report ndjson emits different event schema across invocations
   (check_result present/absent)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-02 14:19'
+updated_date: '2026-07-02 15:40'
 labels:
   - contract
 dependencies: []
@@ -24,3 +25,9 @@ Found on Stripe zond-audit run 20260702-170615. Same command 'zond checks run --
 - [ ] #2 stateful selection either emits check_result or the schema explicitly declares its absence
 - [ ] #3 contract test pins the ndjson event-type set
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+stateful auth + crud loops now emit check_result events (verdict/operation/response{status}) matching the per-response phase, so the ndjson event schema is stable across --check selections. status uses outcome.responseStatus (ARV-312) when present, else 0.
+<!-- SECTION:NOTES:END -->

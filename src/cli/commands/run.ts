@@ -832,8 +832,16 @@ export async function runCommand(options: RunOptions): Promise<number> {
   // --json so the JSON envelope stays alone on stdout (this is stderr
   // anyway, but skip avoids confusing parsers that capture both streams).
   if (hasFailures && !options.json) {
-    const total = results.reduce((s, r) => s + r.failed, 0);
-    process.stderr.write(`zond: ${total} test step(s) failed — exiting with code 1 (pass --no-fail-on-failures to suppress, e.g. for advisory runs).\n`);
+    // ARV-318: error steps (env_issue/network — couldn't execute) also drive
+    // the non-zero exit (see hasFailures above). The old line counted only
+    // `failed`, so an all-errored run printed "0 test step(s) failed —
+    // exiting with code 1", a contradiction. Name both classes.
+    const failed = results.reduce((s, r) => s + r.failed, 0);
+    const errored = results.reduce((s, r) => s + r.steps.filter((st) => st.status === "error").length, 0);
+    const parts: string[] = [];
+    if (failed > 0) parts.push(`${failed} step(s) failed`);
+    if (errored > 0) parts.push(`${errored} step(s) errored (couldn't execute — see failure_class)`);
+    process.stderr.write(`zond: ${parts.join(", ")} — exiting with code 1 (pass --no-fail-on-failures to suppress, e.g. for advisory runs).\n`);
   }
 
   if (hasFailures && options.failOnFailures === false) {

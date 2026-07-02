@@ -645,6 +645,8 @@ export async function runSuite(
     passed: steps.filter((s) => s.status === "pass").length,
     failed: steps.filter((s) => s.status === "fail").length,
     skipped: steps.filter((s) => s.status === "skip").length,
+    // ARV-318: surface error steps so total = passed+failed+skipped+errored.
+    errored: steps.filter((s) => s.status === "error").length,
     steps,
   };
 }

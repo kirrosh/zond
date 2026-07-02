@@ -79,13 +79,13 @@ describe("zond run: --fail-on-failures default + override (ARV-72)", () => {
   test("default: failing step → exit 1 and stderr tail names the count", async () => {
     const { stderr, exitCode } = await runCli(["run", "tests/smoke.yaml"]);
     expect(exitCode).toBe(1);
-    expect(stderr).toContain("test step(s) failed");
+    expect(stderr).toContain("step(s) failed");
     expect(stderr).toContain("exiting with code 1");
   });
 
   test("--no-fail-on-failures: same failure → exit 0, stderr tail still surfaces the count", async () => {
     const { stderr, exitCode } = await runCli(["run", "tests/smoke.yaml", "--no-fail-on-failures"]);
     expect(exitCode).toBe(0);
-    expect(stderr).toContain("test step(s) failed");
+    expect(stderr).toContain("step(s) failed");
   });
 });
