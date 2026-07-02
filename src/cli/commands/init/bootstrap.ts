@@ -44,7 +44,10 @@ export interface BootstrapResult {
  * (unless `writeAgents` is false) `AGENTS.md`.
  */
 export function bootstrapWorkspace(opts: BootstrapOptions = {}): BootstrapResult {
-  const cwd = resolve(opts.cwd ?? process.cwd());
+  // Honor ZOND_WORKSPACE so `zond init` writes the workspace at the same root
+  // that findWorkspaceRoot() reads from (headless/CI runs anchor both here).
+  // Explicit opts.cwd (tests) still wins.
+  const cwd = resolve(opts.cwd ?? process.env.ZOND_WORKSPACE?.trim() ?? process.cwd());
   const warnings: string[] = [];
   const writeAgents = opts.writeAgents ?? true;
   const writeSkills = opts.writeSkills ?? true;
