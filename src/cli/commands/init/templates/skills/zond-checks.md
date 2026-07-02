@@ -246,7 +246,11 @@ can route without parsing free-form messages:
 | `wontfix_known_limitation` | Known accepted gap. Don't retry, don't file a bug. |
 
 Triage by `recommended_action` first, then by severity. HIGH/CRITICAL
-gates exit-code 1; LOW/MEDIUM is informational.
+gates exit-code 1; LOW/MEDIUM is informational. In an orchestrator/CI
+that must tell "found drift" from "command crashed", pass
+`--no-fail-on-findings` (alias `--advisory`, ARV-308): exit 0 even with
+HIGH/CRITICAL findings — the findings are still in the envelope. Mirrors
+`zond run --no-fail-on-failures`. Exit 2 stays reserved for real failures.
 
 ### Spec-level rollup (ARV-60)
 
@@ -261,11 +265,18 @@ Each `spec_finding` has:
 
 | Field | Meaning |
 |---|---|
-| `kind` | `status_drift` / `missing_declaration` / `no_detector` / `other` |
+| `kind` | `status_drift` / `missing_declaration` / `no_detector` / `broken_baseline` / `other` |
 | `reason` | One-line root cause statement |
 | `fix_hint` | Actionable next step (spec edit / tolerate flag / annotate command) |
 | `affected_operations` | Operations covered (empty for skip/no-detector clusters) |
 | `count` / `applicable` | Cluster size + the population it was measured against |
+
+`broken_baseline` (ARV-307) is special: when the positive/success probes
+overwhelmingly failed (>90% non-2xx — e.g. a fully auth-rejected scan),
+`status_code_conformance` / `content_type_conformance` findings are baseline
+artifacts, so they're removed from `findings[]` and rolled into this one
+row. Fix the baseline (auth + path-param fixtures) and re-run before trusting
+conformance — undeclared statuses on an all-4xx scan are not real drift.
 
 Triage spec_findings first — they collapse 1×N noise into one decision.
 Per-op findings still live in `data.findings`; `--verbose` brings the

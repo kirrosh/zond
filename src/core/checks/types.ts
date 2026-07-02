@@ -124,6 +124,11 @@ export type CheckOutcome =
        *  documentation tier. Subject to severity-config calibration
        *  overlay (ARV-283) downstream. */
       severity?: Severity;
+      /** ARV-310: attribute the finding to a specific operation instead of
+       *  the CRUD group's canonical create/read op. cursor_boundary_fuzzing
+       *  probes the GET list endpoint — without this the finding lands on the
+       *  POST create and reads as "a create endpoint that doesn't paginate". */
+      operation?: { path: string; method: string; operationId?: string };
     };
 
 export interface Check {
@@ -229,8 +234,13 @@ export interface SpecFinding {
    *  - `no_detector`: check is applicable to ≥5 operations but ran 0 cases
    *    (use_after_free without DELETE+GET pair, cross_call_references
    *    without followups in scope).
+   *  - `broken_baseline`: ARV-307 — the positive/success baseline was
+   *    degenerate (>90% of positive probes returned non-2xx, e.g. a
+   *    fully auth-rejected scan). The conformance checks' per-op findings
+   *    are baseline artifacts, so they're rolled up into this one row and
+   *    removed from `findings[]` (mirrors the stateful broken-baseline skip).
    *  - `other`: skip-cluster that doesn't fit the above. */
-  kind: "status_drift" | "missing_declaration" | "no_detector" | "other";
+  kind: "status_drift" | "missing_declaration" | "no_detector" | "broken_baseline" | "other";
   /** Severity inherited from the underlying findings (status_drift) or
    *  fixed to "info" for missing_declaration / no_detector — those signal
    *  "spec gap, not server bug" so the team knows where to act. */

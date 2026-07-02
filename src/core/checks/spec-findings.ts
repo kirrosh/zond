@@ -135,6 +135,86 @@ function explainNoDetector(checkId: string): { reason: string; fix: string } {
   };
 }
 
+/**
+ * ARV-307: broken-baseline guard for conformance checks.
+ *
+ * On a degenerate baseline (e.g. a fully auth-rejected scan where every
+ * response is 401/404, zero 2xx), `status_code_conformance` and
+ * `content_type_conformance` fire on every undeclared status/content-type
+ * and emit thousands of findings that are pure baseline artifacts — the
+ * status_drift rollup in computeSpecFindings can't collapse them because the
+ * undeclared statuses are diverse (401 here, 404 there), so no single
+ * (check,status) group crosses the 80% threshold.
+ *
+ * Stateful checks already skip on a per-case broken-baseline guard; this is
+ * the run-level equivalent for the conformance family: if the positive
+ * (expected-success) probes overwhelmingly failed, the whole conformance
+ * signal is untrustworthy, so we roll it up into one `broken_baseline`
+ * spec_finding and drop the per-op conformance findings.
+ *
+ * We gate on the POSITIVE-probe baseline, not all responses — negative /
+ * boundary cases legitimately return 4xx on a healthy API, so counting them
+ * would false-trip the guard. `positiveTwoxx / positiveTotal` is the success
+ * rate of the probes that are supposed to succeed.
+ *
+ * Threshold: >90% of positive probes non-2xx, with ≥10 positive probes so a
+ * tiny run doesn't trip on a single failure. When fewer than 10 positive
+ * probes ran (e.g. negative-only mode) the baseline can't be judged and the
+ * guard is a no-op.
+ */
+export const BASELINE_GATED_CHECKS: ReadonlySet<string> = new Set([
+  "status_code_conformance",
+  "content_type_conformance",
+]);
+export const BROKEN_BASELINE_NON2XX_RATIO = 0.9;
+export const BROKEN_BASELINE_MIN_POSITIVE = 10;
+
+export function applyBrokenBaselineGuard(input: {
+  findings: CheckFinding[];
+  positiveTotal: number;
+  positiveTwoxx: number;
+}): { kept: CheckFinding[]; removed: CheckFinding[]; specFinding: SpecFinding | null } {
+  const { findings, positiveTotal, positiveTwoxx } = input;
+  const noop = { kept: findings, removed: [] as CheckFinding[], specFinding: null };
+  if (positiveTotal < BROKEN_BASELINE_MIN_POSITIVE) return noop;
+  const nonTwoxxRatio = (positiveTotal - positiveTwoxx) / positiveTotal;
+  if (nonTwoxxRatio < BROKEN_BASELINE_NON2XX_RATIO) return noop;
+
+  const kept: CheckFinding[] = [];
+  const removed: CheckFinding[] = [];
+  for (const f of findings) {
+    // Suppressed findings are already out of the CI-gating tallies; leave
+    // them in the audit trail untouched.
+    if (!f.suppressed_by && BASELINE_GATED_CHECKS.has(f.check)) removed.push(f);
+    else kept.push(f);
+  }
+  if (removed.length === 0) return noop;
+
+  const affected = new Map<string, { path: string; method: string; operationId?: string }>();
+  for (const f of removed) {
+    affected.set(`${f.operation.method} ${f.operation.path}`, f.operation);
+  }
+  const pct = Math.round(nonTwoxxRatio * 100);
+  const specFinding: SpecFinding = {
+    check: "status_code_conformance",
+    kind: "broken_baseline",
+    severity: "info",
+    category: categoryFor("status_code_conformance"),
+    reason:
+      `Degenerate baseline: ${pct}% of ${positiveTotal} positive probes returned non-2xx ` +
+      `(only ${positiveTwoxx} succeeded). ${removed.length} conformance finding(s) suppressed as ` +
+      `baseline artifacts.`,
+    fix_hint:
+      `Fix the baseline first — supply valid auth (--auth-header / apis/<name>/.env.yaml) and ` +
+      `seed path-param fixtures (\`zond prepare-fixtures\`) so positive probes reach 2xx, then re-run ` +
+      `conformance. Undeclared statuses on an all-4xx scan are not real spec drift.`,
+    affected_operations: [...affected.values()],
+    count: removed.length,
+    applicable: positiveTotal,
+  };
+  return { kept, removed, specFinding };
+}
+
 export function computeSpecFindings(
   findings: CheckFinding[],
   perCheck: Map<string, PerCheckObservations>,

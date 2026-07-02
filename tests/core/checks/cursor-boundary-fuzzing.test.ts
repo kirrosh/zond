@@ -93,6 +93,15 @@ describe("cursor_boundary_fuzzing — detection", () => {
     const g = makeGroup(makeList([{ name: "cursor", in: "query" } as OpenAPIV3.ParameterObject]));
     expect(cursorBoundaryFuzzing.applies(g)).toBe(true);
   });
+
+  // ARV-310: a create/mutation endpoint bound as `list` (mis-grouped POST
+  // carrying a cursor-shaped query param) must NOT trip cursor fuzzing —
+  // it doesn't paginate. Only paginating GET lists qualify.
+  test("rejects a non-GET (POST create) list endpoint", () => {
+    const postList: EndpointInfo = { ...makeList([cursorParam("cursor")]), method: "POST", operationId: "create_item" };
+    const g = makeGroup(postList);
+    expect(cursorBoundaryFuzzing.applies(g)).toBe(false);
+  });
 });
 
 describe("cursor_boundary_fuzzing — verdicts", () => {

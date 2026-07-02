@@ -97,6 +97,10 @@ export const cursorBoundaryFuzzing: CrudStatefulCheck = {
   phase: "crud",
   applies(g) {
     if (!g.list) return false;
+    // ARV-310: cursor fuzzing is only meaningful on a paginating GET list.
+    // A create/mutation endpoint that happens to carry a cursor-shaped query
+    // param (or a mis-grouped POST bound as `list`) must not trip this check.
+    if (g.list.method.toUpperCase() !== "GET") return false;
     return g.list.parameters.some(isCursorParam);
   },
   async run(g, h): Promise<CheckOutcome> {
@@ -176,6 +180,9 @@ export const cursorBoundaryFuzzing: CrudStatefulCheck = {
       return {
         kind: "fail",
         severity: sev,
+        // ARV-310: attribute to the GET list actually probed, not the group's
+        // POST create.
+        operation: { path: list.path, method: "GET", operationId: list.operationId },
         message:
           `Server returned ${first.status} on ${first.vector} cursor (${first.param}) — ${serverErrors.length}/${totalAttempted} mutation(s) hit 5xx`,
         evidence: {
@@ -192,6 +199,9 @@ export const cursorBoundaryFuzzing: CrudStatefulCheck = {
       return {
         kind: "fail",
         severity: "low",
+        // ARV-310: attribute to the GET list actually probed, not the group's
+        // POST create.
+        operation: { path: list.path, method: "GET", operationId: list.operationId },
         message:
           `Server returned 2xx on ${silentAccepts.length}/${totalAttempted} malformed cursor mutation(s) — likely silent tolerance of bad input`,
         evidence: {

@@ -149,7 +149,7 @@ export const CheckRunSummarySchema = z.object({
  *  `data.spec_findings` and as its own `spec_finding` NDJSON event. */
 export const SpecFindingSchema = z.object({
   check: z.string(),
-  kind: z.enum(["status_drift", "missing_declaration", "no_detector", "other"]),
+  kind: z.enum(["status_drift", "missing_declaration", "no_detector", "broken_baseline", "other"]),
   severity: SeveritySchema,
   category: CategorySchema.optional(),
   reason: z.string(),

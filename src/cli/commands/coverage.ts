@@ -244,6 +244,13 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
   const coveredCount = coveredRows.length;
   const percentage = Math.round((coveredCount / total) * 100);
 
+  // ARV-303: envelope/exit-code contract. When the selector resolved to zero
+  // runs (closed session, --session-id with no runs, --union tag with no
+  // matches), there is no coverage data — that is the only command-level
+  // failure of the matrix path. Everything else (uncovered endpoints remain)
+  // is a data point, not a failure, so it must not gate the exit code.
+  const noRuns = (covTest ?? covAudit!).runs.length === 0;
+
   // ARV-265: per-source breakdown for audit-coverage. Walks each
   // contributing run, groups its results by (METHOD, path-template), and
   // tallies distinct endpoints reached + raw event counts. The match is
@@ -441,12 +448,9 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
         runIds: covAudit?.runs.map((r) => r.id) ?? [],
       };
     }
-    // ARV-303: envelope/exit-code contract — when the selector resolved
-    // to zero runs (closed session, no runs with the requested tag, etc),
-    // there's no coverage data to report. Surface that as ok:false so the
-    // non-zero exit lines up with the envelope shape, instead of an
-    // ok:true envelope alongside exit 1.
-    const noRuns = (covTest ?? covAudit!).runs.length === 0;
+    // ARV-303: surface the zero-runs case as ok:false so the non-zero exit
+    // lines up with the envelope shape, instead of an ok:true envelope
+    // alongside exit 1.
     if (noRuns) {
       const sel = cov.unionMode ?? "selection";
       printJson(jsonError("coverage", [
@@ -457,10 +461,16 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
     }
   }
 
+  // ARV-303: exit-code contract. ok:false (no runs) ⇒ exit 1. Otherwise the
+  // coverage was computed successfully (ok:true) ⇒ exit 0 by default — an
+  // orchestrator must be able to tell "coverage ran" from "command failed".
+  // "Uncovered endpoints remain" no longer gates the exit on its own; use
+  // --fail-on-coverage to opt into a threshold gate.
+  if (noRuns) return 1;
   if (options.failOnCoverage !== undefined) {
     return percentage < options.failOnCoverage ? 1 : 0;
   }
-  return uncoveredRows.length > 0 ? 1 : 0;
+  return 0;
 }
 
 /**
@@ -670,10 +680,12 @@ export function registerCoverage(program: Command): void {
       "  zond run apis/<api>/probes\n" +
       "  zond coverage --api <api> --union session\n" +
       "\n" +
-      "Exit codes: 0 = every endpoint covered (or pass-coverage ≥ " +
-      "--fail-on-coverage when set); 1 = uncovered endpoints remain (or " +
-      "pass-coverage < --fail-on-coverage); 2 = bad input or read error. " +
-      "--fail-on-coverage gates pass-coverage, not hit-coverage.",
+      "Exit codes (ARV-303): 0 = coverage computed successfully (envelope " +
+      "ok:true — uncovered endpoints remaining is a data point, not a " +
+      "failure); 1 = coverage could not be computed (selector resolved to " +
+      "zero runs) or pass-coverage < --fail-on-coverage; 2 = bad input or " +
+      "read error. Uncovered endpoints only gate the exit when you opt in " +
+      "with --fail-on-coverage; that flag gates pass-coverage, not hit-coverage.",
     )
     .option("--api <name>", "Use API collection (auto-resolves spec; reads stored runs)")
     .option("--spec <path>", "Spec-only fallback when no API is registered (no run results)")

@@ -3,9 +3,10 @@ id: ARV-308
 title: >-
   zond checks run: add --no-fail-on-findings / --advisory (exit-code asymmetry
   with zond run)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-02 11:09'
+updated_date: '2026-07-02 11:35'
 labels:
   - zond-side
 dependencies: []

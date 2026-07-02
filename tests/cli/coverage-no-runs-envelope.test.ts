@@ -15,7 +15,8 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { captureOutput } from "../_helpers/output";
 import { getDb, closeDb } from "../../src/db/schema.ts";
-import { createCollection } from "../../src/db/queries.ts";
+import { createCollection, findCollectionByNameOrId } from "../../src/db/queries.ts";
+import { beginAuditRun, finalizeAuditRun } from "../../src/core/audit/persist.ts";
 import { coverageCommand } from "../../src/cli/commands/coverage.ts";
 
 const minimalSpec = JSON.stringify({
@@ -23,6 +24,9 @@ const minimalSpec = JSON.stringify({
   info: { title: "demo", version: "1" },
   paths: {
     "/things": {
+      get: { responses: { "200": { description: "ok" } } },
+    },
+    "/other": {
       get: { responses: { "200": { description: "ok" } } },
     },
   },
@@ -69,6 +73,33 @@ describe("ARV-303: matrix-coverage no-runs envelope contract", () => {
       expect(env.ok).toBe(false);
       expect(env.command).toBe("coverage");
       expect(env.errors?.[0]?.message).toMatch(/no runs|cannot be computed/i);
+    } finally {
+      cap.restore();
+    }
+  });
+
+  test("resolvable run with uncovered endpoints → envelope ok:true + exit 0", async () => {
+    // ARV-303 corroboration: a run resolves (covered 1/2), yet the pre-fix
+    // path returned exit 1 because uncovered endpoints remained — while the
+    // envelope said ok:true. An orchestrator can't tell that from a crash.
+    const collectionId = findCollectionByNameOrId("demo")!.id;
+    const runId = beginAuditRun({ runKind: "regular", collectionId });
+    finalizeAuditRun(runId, [{
+      suiteName: "smoke",
+      testName: "GET /things",
+      status: "pass",
+      request: { method: "GET", url: "https://api.test/things", headers: {} },
+      response: { status: 200, headers: {}, body: "{}", duration_ms: 1 },
+      durationMs: 1,
+    }]);
+
+    const cap = captureOutput({ console: true });
+    try {
+      const code = await coverageCommand({ apiName: "demo", json: true });
+      expect(code).toBe(0);
+      const env = JSON.parse(cap.out.trim());
+      expect(env.ok).toBe(true);
+      expect(env.data.uncovered).toBeGreaterThan(0);
     } finally {
       cap.restore();
     }

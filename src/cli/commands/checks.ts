@@ -128,6 +128,12 @@ interface ChecksRunOptions {
   maxRequests?: number;
   budget?: string;
   showSuppressed?: boolean;
+  /** ARV-308: `--no-fail-on-findings` sets this to false (commander default
+   *  true) — keep exit 0 even when HIGH/CRITICAL findings exist so an
+   *  orchestrator can distinguish "found drift" from "command failed". */
+  failOnFindings?: boolean;
+  /** ARV-308: `--advisory` alias for --no-fail-on-findings. */
+  advisory?: boolean;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -814,9 +820,25 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     // Exit-code rule: 0 when no HIGH/CRITICAL findings, 1 otherwise. LOW/MEDIUM
     // findings are reported but don't gate CI by default — agents that want
     // strict gating can post-process the JSON envelope.
+    //
+    // ARV-308: --no-fail-on-findings / --advisory keeps exit 0 even with
+    // HIGH/CRITICAL findings, mirroring `zond run --no-fail-on-failures`, so
+    // an orchestrator can tell "found drift" (exit 0, findings in envelope)
+    // from "command failed" (exit 2). The stderr tail still names the count.
+    const advisory = opts.advisory === true || opts.failOnFindings === false;
+    if (result.high_or_critical > 0 && !ndjson) {
+      // Skip on ndjson (stdout is the event stream; stderr already carried
+      // the summary just above). json/console both get the visibility tail.
+      const suffix = advisory
+        ? " — advisory mode, exiting 0 (findings are in the envelope)"
+        : " — exiting with code 1 (pass --no-fail-on-findings / --advisory to suppress, e.g. for advisory runs)";
+      process.stderr.write(
+        `zond: ${result.high_or_critical} HIGH/CRITICAL finding(s)${suffix}.\n`,
+      );
+    }
     if (ndjsonFd !== undefined) closeSync(ndjsonFd);
     removeNdjsonSigHandlers?.();
-    process.exit(result.high_or_critical > 0 ? 1 : 0);
+    process.exit(result.high_or_critical > 0 && !advisory ? 1 : 0);
   } catch (err) {
     if (ndjsonFd !== undefined) {
       try { closeSync(ndjsonFd); } catch { /* fd may already be invalid */ }
@@ -917,6 +939,14 @@ function defineRun(parent: Command): void {
     .option(
       "--show-suppressed",
       "ARV-283: show findings suppressed by `.zond/severity.yaml` in the text summary (with their suppressed_by trace). Suppressed findings stay in ndjson/JSON audit-trail regardless of this flag and never count toward CI exit codes.",
+    )
+    .option(
+      "--no-fail-on-findings",
+      "ARV-308: keep exit code 0 even when HIGH/CRITICAL findings exist (advisory runs). Mirrors `zond run --no-fail-on-failures`. Lets an orchestrator distinguish 'found drift' (exit 0) from 'command failed' (exit 2). Default: exit 1 on any HIGH/CRITICAL finding.",
+    )
+    .option(
+      "--advisory",
+      "ARV-308: alias for --no-fail-on-findings.",
     )
     .action(checksRunAction);
 }
