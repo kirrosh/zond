@@ -528,6 +528,17 @@ function summarizeResponse(resp: HttpResponse): { status: number; content_type?:
   return { status: resp.status, content_type: ct };
 }
 
+/** ARV-319: `CrudGroup.create`/`.list`/`.read`/`.update`/`.delete` are ALL
+ *  optional — a group can be update/delete-only (no create, no read), which
+ *  is common on wide specs like Stripe. Pick whichever canonical operation
+ *  exists, in create > list > read > update > delete order, for use as a
+ *  representative op (finding attribution, x-zond-skip lookup, ndjson
+ *  event). Returns undefined only if the group somehow has none of the
+ *  five — callers must not assume non-null. */
+function representativeOp(g: CrudGroup): EndpointInfo | undefined {
+  return g.create ?? g.list ?? g.read ?? g.update ?? g.delete;
+}
+
 /** Build a finding, push it into the per-op buffer, and stream the
  *  ARV-10 NDJSON event. Summary aggregation moved out — the caller
  *  merges per-op buffers in input order so workers > 1 doesn't have to
@@ -1158,7 +1169,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
         // every stateful check listed there for the whole widget chain.
         const applicable: typeof allApplicable = [];
         for (const g of allApplicable) {
-          const repOp = g.create ?? g.list ?? g.read;
+          const repOp = representativeOp(g);
           if (repOp && endpointSkipsCheck(repOp, check.id)) {
             const key = `${check.id}: ${reasonForSkip(repOp, check.id)}`;
             summary.skipped_outcomes[key] = (summary.skipped_outcomes[key] ?? 0) + 1;
@@ -1188,10 +1199,16 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           }
           // ARV-314: emit check_result for CRUD-stateful checks too (see the
           // auth loop above) so the ndjson event schema stays stable.
-          if (opts.onEvent && (outcome.kind === "pass" || outcome.kind === "fail")) {
-            const evOp = outcome.kind === "fail" && outcome.operation
-              ? outcome.operation
-              : (() => { const r = group.create ?? group.read!; return { path: r.path, method: r.method, operationId: r.operationId }; })();
+          // ARV-319: `group.create`/`.read` are BOTH optional (a group can be
+          // update/delete/list-only) — the earlier `group.create ?? group.read!`
+          // non-null assertion crashed with "undefined is not an object" the
+          // first time a check passed/failed on such a group (Stripe has
+          // plenty: update-only or list-only resources). representativeOp()
+          // widens the fallback chain and stays undefined-safe.
+          const groupRepOp = representativeOp(group);
+          const outcomeOp = outcome.kind === "fail" ? outcome.operation : undefined;
+          const evOp = outcomeOp ?? groupRepOp;
+          if (opts.onEvent && (outcome.kind === "pass" || outcome.kind === "fail") && evOp) {
             opts.onEvent({
               type: "check_result",
               ts: nowIso(),
@@ -1204,11 +1221,16 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
             });
           }
           if (outcome.kind === "fail") {
-            const repOp = group.create ?? group.read!;
             // ARV-310: prefer the check's explicit operation attribution (e.g.
             // cursor_boundary_fuzzing → the GET list it probed) over the
-            // group's canonical create/read op.
-            const opFor = outcome.operation ?? { path: repOp.path, method: repOp.method, operationId: repOp.operationId };
+            // group's canonical create/read op. ARV-319: groupRepOp can be
+            // undefined for a group with no create/list/read/update/delete
+            // (shouldn't happen if `check.applies()` gated correctly, but
+            // this path must not crash if it does) — fall back to a
+            // synthetic operation rather than dereferencing undefined.
+            const opFor = outcome.operation ?? (groupRepOp
+              ? { path: groupRepOp.path, method: groupRepOp.method, operationId: groupRepOp.operationId }
+              : { path: group.basePath, method: "UNKNOWN" });
             // ARV-287/288 (follow-up ARV-284): respect per-finding severity
             // from stateful CRUD checks (cross_call_references,
             // pagination_invariants) — declared severity is the proof-cap
