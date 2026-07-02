@@ -1104,6 +1104,22 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           } catch (err) {
             outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
           }
+          // ARV-314: emit check_result for stateful checks too, so the ndjson
+          // event schema is stable regardless of --check selection (the
+          // per-response phase already does this). Without it a consumer keyed
+          // on .type=="check_result" got zero rows from a stateful-only run.
+          if (opts.onEvent && (outcome.kind === "pass" || outcome.kind === "fail")) {
+            opts.onEvent({
+              type: "check_result",
+              ts: nowIso(),
+              check: check.id,
+              severity: check.severity,
+              verdict: outcome.kind,
+              operation: { path: op.path, method: op.method, operationId: op.operationId },
+              request_signature: `${op.method.toUpperCase()} ${op.path}`,
+              response: { status: (outcome.kind === "fail" ? outcome.responseStatus : undefined) ?? 0 },
+            });
+          }
           if (outcome.kind === "fail") {
             // ARV-286 (follow-up ARV-284): respect per-finding severity
             // returned by stateful check via `outcome.severity` — declared
@@ -1169,6 +1185,23 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
             outcome = await check.run(group, crudHarness);
           } catch (err) {
             outcome = { kind: "skip" as const, reason: `error: ${(err as Error).message}` };
+          }
+          // ARV-314: emit check_result for CRUD-stateful checks too (see the
+          // auth loop above) so the ndjson event schema stays stable.
+          if (opts.onEvent && (outcome.kind === "pass" || outcome.kind === "fail")) {
+            const evOp = outcome.kind === "fail" && outcome.operation
+              ? outcome.operation
+              : (() => { const r = group.create ?? group.read!; return { path: r.path, method: r.method, operationId: r.operationId }; })();
+            opts.onEvent({
+              type: "check_result",
+              ts: nowIso(),
+              check: check.id,
+              severity: check.severity,
+              verdict: outcome.kind,
+              operation: evOp,
+              request_signature: `${evOp.method.toUpperCase()} ${evOp.path} (chain)`,
+              response: { status: (outcome.kind === "fail" ? outcome.responseStatus : undefined) ?? 0 },
+            });
           }
           if (outcome.kind === "fail") {
             const repOp = group.create ?? group.read!;

@@ -1,9 +1,10 @@
 ---
 id: ARV-318
 title: 'zond run accounting: error steps excluded from total=passed+failed+skipped'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-02 15:18'
+updated_date: '2026-07-02 15:40'
 labels:
   - reporter
 dependencies: []
@@ -21,3 +22,9 @@ Live Stripe run 20260702-174915. status=error steps reconcile into no bucket: ne
 - [ ] #1 run summary accounts for error steps (total reconciles or error count surfaced)
 - [ ] #2 exit-code closing line names error steps when they drive a non-zero exit
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Added TestRunResult.errored (steps with status=error) so total=passed+failed+skipped+errored reconciles. run's exit-code stderr tail now names both failed and errored steps (was '0 test step(s) failed — exiting code 1' when all steps errored). Test wording updated.
+<!-- SECTION:NOTES:END -->
