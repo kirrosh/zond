@@ -3,9 +3,10 @@ id: ARV-306
 title: >-
   ARV-308 — cursor_boundary_fuzzing swallows budget exhaustion as 'network
   errors'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-19 06:00'
+updated_date: '2026-07-02 14:05'
 labels:
   - bug
   - zond-side
