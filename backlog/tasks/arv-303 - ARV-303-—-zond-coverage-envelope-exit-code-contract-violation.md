@@ -4,6 +4,7 @@ title: ARV-303 — zond coverage envelope/exit code contract violation
 status: To Do
 assignee: []
 created_date: '2026-05-18 15:26'
+updated_date: '2026-07-02 11:10'
 labels:
   - bug
   - zond-side
@@ -23,3 +24,9 @@ Bug: `zond coverage --api ... --union session` returns envelope `{ok: true, ...}
 - [ ] #2 if envelope ok=true, exit code is 0
 - [ ] #3 regression test covers the contract on the failure path
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Corroborated again 2026-07-02 on live GitHub authed scan (zond-audit workflow): 'zond coverage --api github --union session --json' exits 1 while envelope ok:true (covered 552/1184, percentage 47), stderr empty — resolvable session too. Artifact: /Users/kirrotech/Projects/zond-runs/github/20260702-133655/report-zond.md (Z1), raw/70-coverage.json.
+<!-- SECTION:NOTES:END -->
