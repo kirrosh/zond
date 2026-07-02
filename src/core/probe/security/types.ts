@@ -45,6 +45,10 @@ export interface SecurityFinding {
   /** TASK-294: agent-routable action. FAIL/WARN → `report_backend_bug`;
    *  PASS → undefined (no action needed). */
   recommended_action?: RecommendedAction;
+  /** ARV-300: set when `.zond/severity.yaml` suppressed this finding
+   *  (severity forced to `info`). Preserves the audit-trail so ndjson/JSON
+   *  consumers can tell a suppressed finding from a naturally-INFO one. */
+  suppressed_by?: { source: string; rule_index: number; reason: string };
 }
 
 export interface SecurityVerdict {
