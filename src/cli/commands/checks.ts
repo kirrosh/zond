@@ -826,9 +826,15 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     // an orchestrator can tell "found drift" (exit 0, findings in envelope)
     // from "command failed" (exit 2). The stderr tail still names the count.
     const advisory = opts.advisory === true || opts.failOnFindings === false;
-    if (result.high_or_critical > 0 && !ndjson) {
-      // Skip on ndjson (stdout is the event stream; stderr already carried
-      // the summary just above). json/console both get the visibility tail.
+    // ARV-320: this used to skip on ndjson under the assumption that "stderr
+    // already carried the summary just above" — false for ndjson, which takes
+    // a separate branch that only ever writes "NDJSON report written to
+    // <path>" to stderr. Under `--report ndjson` + `set -e` in CI, that made
+    // exit 1 look unexplained (report-zond friction on the 2026-07-02 Stripe
+    // run: "this step will 'fail' silently with valid data sitting right
+    // there"). Always write the reason to stderr — it's stderr, not stdout,
+    // so ndjson's stdout-discipline (AC#5) is untouched.
+    if (result.high_or_critical > 0) {
       const suffix = advisory
         ? " — advisory mode, exiting 0 (findings are in the envelope)"
         : " — exiting with code 1 (pass --no-fail-on-findings / --advisory to suppress, e.g. for advisory runs)";
