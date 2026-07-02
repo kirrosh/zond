@@ -99,19 +99,41 @@ export const openCorsOnSensitive: AuthStatefulCheck = {
     const originIsStar = allowOrigin === "*";
     const originReflects = allowOrigin === PROBE_ORIGIN;
 
-    // ARV-312: HIGH requires evidence that authed data is actually
-    // CORS-readable — i.e. a 2xx response served real content under the
-    // reflected Origin. On a non-2xx (401/403/4xx/5xx) the CORS policy is
-    // still misconfigured, but *this* response exposed no authenticated
-    // payload, so the impact is unproven → cap at LOW per the m-21
-    // "no evidence → no high severity" matrix. Recording the real status
-    // also kills the phantom `response_summary.status: 0` (auth checks
-    // don't otherwise thread their response back to the runner).
+    // HIGH requires two independent pieces of evidence that authed data is
+    // actually CORS-readable by an attacker site:
+    //
+    // ARV-312: a 2xx response served real content under the reflected
+    //   Origin. On a non-2xx (401/403/4xx/5xx) *this* response exposed no
+    //   authenticated payload. Recording the real status also kills the
+    //   phantom `response_summary.status: 0` (auth checks don't otherwise
+    //   thread their response back to the runner).
+    //
+    // ARV-316: an AMBIENT credential the browser auto-attaches cross-origin
+    //   — i.e. a cookie (apiKey-in-cookie scheme, or a Set-Cookie observed
+    //   on the probe). `Allow-Credentials: true` is only exploitable with
+    //   one: for bearer/header/oauth2 token auth the attacker's page can't
+    //   set the victim's Authorization header, so a reflected Origin is a
+    //   hygiene nit, not a data leak (Stripe et al are bearer-auth).
+    //
+    // Without both, cap at LOW per the m-21 "no evidence → no high" matrix.
     const status = resp.status;
-    const authExposed = status >= 200 && status < 300;
+    const isTwoXx = status >= 200 && status < 300;
+    const schemes = (h.doc?.components?.securitySchemes ?? {}) as Record<
+      string,
+      OpenAPIV3.SecuritySchemeObject | OpenAPIV3.ReferenceObject
+    >;
+    const usesCookieAuth = op.security.some((name) => {
+      const s = schemes[name];
+      return !!s && !("$ref" in s) && s.type === "apiKey" && s.in === "cookie";
+    });
+    const setCookie = getHeader(resp.headers, "set-cookie");
+    const ambientCredential = usesCookieAuth || setCookie !== undefined;
+    const authExposed = isTwoXx && ambientCredential;
     const impactNote = authExposed
       ? "any attacker site can read authed cross-origin responses"
-      : `observed on a ${status} response — cross-origin CORS is misconfigured but authed-data exposure is unproven`;
+      : !isTwoXx
+        ? `observed on a ${status} response — cross-origin CORS is misconfigured but authed-data exposure is unproven`
+        : "no ambient (cookie) credential — bearer/token auth isn't auto-attached cross-origin, so the reflection isn't exploitable as a data leak";
 
     if (credsTrue && (originIsStar || originReflects)) {
       const variant = originIsStar ? "wildcard+credentials" : "reflected+credentials";
@@ -128,6 +150,7 @@ export const openCorsOnSensitive: AuthStatefulCheck = {
           response_status: status,
           access_control_allow_origin: allowOrigin,
           access_control_allow_credentials: allowCreds,
+          ambient_credential: ambientCredential,
           variant,
         },
       };

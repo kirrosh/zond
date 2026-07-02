@@ -52,34 +52,58 @@ describe("open_cors_on_sensitive (ARV-256)", () => {
     extensions: {},
   } as unknown as Parameters<typeof openCorsOnSensitive.run>[0]);
 
-  it("HIGH on Allow-Origin: * + Allow-Credentials: true", async () => {
+  // ARV-316: HIGH also requires an ambient (cookie) credential — the
+  // Set-Cookie here supplies it. Without one, bearer/token auth caps at LOW.
+  it("HIGH on Allow-Origin: * + Allow-Credentials: true (cookie auth)", async () => {
     const h = fakeHarness({
       status: 200,
       headers: {
         "access-control-allow-origin": "*",
         "access-control-allow-credentials": "true",
+        "set-cookie": "session=abc; HttpOnly",
       },
     });
     const outcome = await openCorsOnSensitive.run(ep(), h as never);
     expect(outcome.kind).toBe("fail");
     if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("high");
       expect(outcome.message).toMatch(/wildcard|cross-origin/i);
       expect(outcome.evidence?.variant).toBe("wildcard+credentials");
     }
   });
 
-  it("HIGH when server reflects attacker Origin + Allow-Credentials: true", async () => {
+  it("HIGH when server reflects attacker Origin + Allow-Credentials: true (cookie auth)", async () => {
     const h = fakeHarness({
       status: 200,
       headers: {
         "access-control-allow-origin": "https://evil.zond.test",
         "access-control-allow-credentials": "true",
+        "set-cookie": "session=abc; HttpOnly",
       },
     });
     const outcome = await openCorsOnSensitive.run(ep(), h as never);
     expect(outcome.kind).toBe("fail");
     if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("high");
       expect(outcome.evidence?.variant).toBe("reflected+credentials");
+    }
+  });
+
+  it("ARV-316: LOW (not HIGH) on bearer/token auth 2xx — no ambient cookie", async () => {
+    const h = fakeHarness({
+      status: 200,
+      headers: {
+        "access-control-allow-origin": "https://evil.zond.test",
+        "access-control-allow-credentials": "true",
+        // no Set-Cookie → bearer/header auth, reflection not exploitable
+      },
+    });
+    const outcome = await openCorsOnSensitive.run(ep(), h as never);
+    expect(outcome.kind).toBe("fail");
+    if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("low");
+      expect(outcome.evidence?.ambient_credential).toBe(false);
+      expect(outcome.message).toMatch(/exploitable|ambient/);
     }
   });
 
@@ -120,6 +144,7 @@ describe("open_cors_on_sensitive (ARV-256)", () => {
       headers: {
         "access-control-allow-origin": "https://evil.zond.test",
         "access-control-allow-credentials": "true",
+        "set-cookie": "session=abc; HttpOnly",
       },
     });
     const outcome = await openCorsOnSensitive.run(ep(), h as never);
