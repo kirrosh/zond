@@ -9,15 +9,7 @@ import { evaluateExpr } from "./expr-eval.ts";
 import { applyTransform } from "./transforms.ts";
 import type { SchemaValidator } from "./schema-validator.ts";
 import { classifyFailure } from "../diagnostics/failure-class.ts";
-
-function buildUrl(baseUrl: string | undefined, path: string, query?: Record<string, string>): string {
-  let url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}${path}` : path;
-  if (query && Object.keys(query).length > 0) {
-    const params = new URLSearchParams(query);
-    url += `?${params.toString()}`;
-  }
-  return url;
-}
+import { buildUrl } from "../util/url.ts";
 
 /** Shallow-merge suite-level и step-level provenance. Step перекрывает suite. */
 function mergeProvenance(
@@ -653,15 +645,8 @@ export async function runSuite(
     passed: steps.filter((s) => s.status === "pass").length,
     failed: steps.filter((s) => s.status === "fail").length,
     skipped: steps.filter((s) => s.status === "skip").length,
+    // ARV-318: surface error steps so total = passed+failed+skipped+errored.
+    errored: steps.filter((s) => s.status === "error").length,
     steps,
   };
-}
-
-export async function runSuites(
-  suites: TestSuite[],
-  env: Environment = {},
-  dryRun = false,
-  options: RunSuiteOptions = {},
-): Promise<TestRunResult[]> {
-  return Promise.all(suites.map((suite) => runSuite(suite, env, dryRun, options)));
 }

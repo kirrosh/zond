@@ -3,9 +3,10 @@ id: ARV-60
 title: >-
   checks run: roll up spec-level findings (1-issue × N-ops noise → 1 summary
   line)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-11 02:48'
+updated_date: '2026-05-16 07:53'
 labels:
   - checks
   - feedback-loop
@@ -13,7 +14,7 @@ labels:
   - depth
   - ux
 dependencies: []
-priority: medium
+priority: high
 ---
 
 ## Description
@@ -48,9 +49,26 @@ References:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 checks run распознаёт spec-level cluster: N>=80% identical-reason findings/skips сводятся в 1 summary line
-- [ ] #2 Текст rollup-сообщения называет root cause (spec/server/no-detector) и предлагает actionable next-step
-- [ ] #3 JSON/NDJSON envelope: type=spec_finding с affected_operations + count
-- [ ] #4 --verbose возвращает старое поведение (per-op rows) для SARIF / CI debug
-- [ ] #5 Применяется как минимум к: status_code_conformance, response_schema_conformance, response_headers_conformance, use_after_free
+- [x] #1 checks run распознаёт spec-level cluster: N>=80% identical-reason findings/skips сводятся в 1 summary line
+- [x] #2 Текст rollup-сообщения называет root cause (spec/server/no-detector) и предлагает actionable next-step
+- [x] #3 JSON/NDJSON envelope: type=spec_finding с affected_operations + count
+- [x] #4 --verbose возвращает старое поведение (per-op rows) для SARIF / CI debug
+- [x] #5 Применяется как минимум к: status_code_conformance, response_schema_conformance, response_headers_conformance, use_after_free
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Closed in m-22 validation sprint 2026-05-16.
+
+Implementation:
+- src/core/checks/types.ts: added SpecFinding type, extended CheckRunData with spec_findings: SpecFinding[]
+- src/core/checks/spec-findings.ts (NEW): computeSpecFindings() with 3 cluster classes (status_drift, missing_declaration, no_detector) at 80% threshold + 5-op floor for no_detector. Per-check explainer table for actionable fix hints (status_code_conformance → 'Add to spec.json or pass --tolerate-undeclared N', response_schema_conformance → 'Add response schemas or zond api annotate dump readback', etc).
+- src/core/checks/runner.ts: track perCheckApplicable + perCheckCases accumulators across response-phase and stateful-phase; emit spec_finding NDJSON events before terminal summary.
+- src/cli/json-schemas.ts: SpecFindingSchema + NdjsonSpecFindingEventSchema in discriminated union.
+- src/cli/commands/checks.ts: render spec_findings as top-of-output rollup with fix hint; restored per-op case-dedup (same op + same status + same message collapses).
+- src/cli/commands/init/templates/skills/zond-checks.md: documented spec-level rollup section with jq examples.
+- tests/core/checks/spec-findings.test.ts (NEW): 8 unit tests covering 83/83 status drift cluster, below-threshold negative case, missing_declaration skip cluster, no_detector floor, max_requests exclusion, affected_operations shape.
+
+Verified e2e on synthetic spec (5 ops all returning undeclared 404): output collapses 35 findings into 1 line + fix hint. --verbose preserves full per-op list. JSON envelope + NDJSON event match published schemas.
+<!-- SECTION:NOTES:END -->

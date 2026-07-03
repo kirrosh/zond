@@ -674,6 +674,161 @@ describe("zond bootstrap", () => {
     expect(replay!.status).toMatch(/miss-empty-no-seed/);
   });
 
+  // ARV-269: seed_body overlay in `.api-resources.local.yaml` must win over
+  // the generator. Pre-fix Stripe live-scan repro: agent authored an exact
+  // body the API accepts, `prepare-fixtures --seed` ignored it and POSTed a
+  // generator-random body → 400, 0 fixtures filled. Verifies the wire body
+  // matches the overlay AND that summary surfaces a non-zero overlay count.
+  test("--seed prefers seed_body overlay over generator (ARV-269)", async () => {
+    const ovDir = join(tmpDir, "apis", "arv269");
+    await mkdir(ovDir, { recursive: true });
+    type ShipBody = { display_name?: string; type?: string; amount?: number };
+    let lastBody: ShipBody | null = null;
+    const srv = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const u = new URL(req.url);
+        if (u.pathname === "/v1/shipping_rates" && req.method === "GET") {
+          return Response.json([]);
+        }
+        if (u.pathname === "/v1/shipping_rates" && req.method === "POST") {
+          const body = (await req.json()) as ShipBody;
+          lastBody = body;
+          // Strict validator: accepts only the exact overlay shape, rejects
+          // generator-random scalars with 400 — mirrors Stripe's behaviour.
+          if (body.display_name !== "zond" || body.type !== "fixed_amount") {
+            return Response.json({ error: "invalid params" }, { status: 400 });
+          }
+          return Response.json({ id: "shr_overlay_ok" }, { status: 201 });
+        }
+        if (u.pathname === "/v1/orders/_" && req.method === "GET") {
+          return new Response("ok", { status: 200 });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    const ovBase = `http://localhost:${srv.port}`;
+    const ovSpec = join(ovDir, "spec.json");
+    await writeFile(ovSpec, JSON.stringify({
+      openapi: "3.0.0",
+      info: { title: "ov", version: "1" },
+      paths: {
+        "/v1/shipping_rates": {
+          get: { responses: { "200": {} } },
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  // Spec advertises a richer schema; the generator would
+                  // synth `{ display_name: <random>, type: <random>, … }`
+                  // and trigger 400. Overlay short-circuits that.
+                  schema: {
+                    type: "object",
+                    required: ["display_name", "type"],
+                    properties: {
+                      display_name: { type: "string" },
+                      type: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { "201": {} },
+          },
+        },
+        "/v1/orders/{shipping_rate_id}": {
+          get: {
+            parameters: [{ name: "shipping_rate_id", in: "path", required: true, schema: { type: "string" } }],
+            responses: { "200": {} },
+          },
+        },
+      },
+    }));
+    await writeFile(join(ovDir, ".api-resources.yaml"),
+      [
+        "resources:",
+        "  - resource: shipping_rates",
+        "    basePath: /v1/shipping_rates",
+        "    itemPath: /v1/shipping_rates/{shipping_rate_id}",
+        "    idParam: shipping_rate_id",
+        "    captureField: id",
+        "    hasFullCrud: false",
+        "    endpoints:",
+        "      list: GET /v1/shipping_rates",
+        "      create: POST /v1/shipping_rates",
+        "    fkDependencies: []",
+        "  - resource: orders",
+        "    basePath: /v1/orders",
+        "    itemPath: \"\"",
+        "    idParam: \"\"",
+        "    captureField: id",
+        "    hasFullCrud: false",
+        "    endpoints: {}",
+        "    fkDependencies:",
+        "      - var: shipping_rate_id",
+        "        param: shipping_rate_id",
+        "        in: path",
+        "        ownerResource: shipping_rates",
+        "",
+      ].join("\n"));
+    // Agent-authored overlay — the exact body the API accepts. Uses the
+    // `patches:` shape (ARV-169) so the field overlays onto the upstream
+    // `shipping_rates` entry without redeclaring its CRUD wiring.
+    await writeFile(join(ovDir, ".api-resources.local.yaml"),
+      [
+        "patches:",
+        "  - resource: shipping_rates",
+        "    seed_body:",
+        "      body:",
+        "        display_name: zond",
+        "        type: fixed_amount",
+        "",
+      ].join("\n"));
+    const envPath = join(ovDir, ".env.yaml");
+    await writeFile(envPath, `base_url: ${ovBase}\n`);
+
+    const origWrite = process.stdout.write;
+    let captured = "";
+    process.stdout.write = ((c: unknown) => { captured += typeof c === "string" ? c : String(c); return true; }) as typeof process.stdout.write;
+    let exit: number;
+    try {
+      exit = await bootstrapCommand({
+        specPath: ovSpec,
+        apiDir: ovDir,
+        envPath,
+        apply: true,
+        seed: true,
+        json: true,
+      });
+    } finally {
+      process.stdout.write = origWrite;
+      srv.stop();
+    }
+    expect(exit).toBe(0);
+
+    // 1. The POST body matches the overlay exactly — generator did not win.
+    const captured1 = lastBody as ShipBody | null;
+    expect(captured1?.display_name).toBe("zond");
+    expect(captured1?.type).toBe("fixed_amount");
+
+    // 2. Seed succeeded → shipping_rate_id captured from response.
+    const out = JSON.parse(captured) as {
+      data: {
+        seeds: Array<{ varName: string; status: string; bodySource?: string; capturedId?: string }>;
+        summary: { seedBodyOverlayResources: number; seedsSucceeded: number };
+      };
+    };
+    const seeded = out.data.seeds.find(s => s.varName === "shipping_rate_id");
+    expect(seeded?.status).toBe("seeded");
+    expect(seeded?.bodySource).toBe("overlay");
+    expect(seeded?.capturedId).toBe("shr_overlay_ok");
+
+    // 3. Summary counts overlay-sourced resources.
+    expect(out.data.summary.seedBodyOverlayResources).toBe(1);
+    expect(out.data.summary.seedsSucceeded).toBe(1);
+  });
+
   test("missing base_url returns exit 2", async () => {
     const envPath = join(apiDir, ".env.nobase.yaml");
     await writeFile(envPath, "auth_token: abc\n");

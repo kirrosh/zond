@@ -25,6 +25,48 @@ function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean)
   return msgLines.join("\n");
 }
 
+/**
+ * ARV-305: build a short reason string for `by_recommended_action.examples`.
+ *
+ * Preference order:
+ *   1. trimmed `error_message` (assertion- or network-level message)
+ *   2. first failing assertion → `<field> <rule>: got <actual>`
+ *   3. undefined (nothing left to say)
+ *
+ * Without (2) every assertion-only failure leaves examples[].reason as
+ * undefined, so triage agents lose the one signal that lets them route
+ * past method/path/status (regenerate_suite vs tighten_validation
+ * collapse to identical-looking buckets).
+ */
+function buildExampleReason(
+  errorMessage: unknown,
+  assertions: unknown,
+): string | undefined {
+  const trim = (s: string) => (s.length > 120 ? `${s.slice(0, 117)}...` : s);
+  if (typeof errorMessage === "string" && errorMessage.length > 0) {
+    return trim(errorMessage);
+  }
+  if (!Array.isArray(assertions)) return undefined;
+  for (const a of assertions) {
+    if (!a || typeof a !== "object") continue;
+    const row = a as Record<string, unknown>;
+    if (row.passed === false) {
+      const field = typeof row.field === "string" ? row.field : "";
+      const rule = typeof row.rule === "string" ? row.rule : "";
+      const actual = "actual" in row ? row.actual : undefined;
+      const actualStr = actual === undefined || actual === null
+        ? ""
+        : typeof actual === "string"
+          ? actual
+          : JSON.stringify(actual);
+      const parts = [field, rule].filter(Boolean).join(" ");
+      const text = actualStr ? `${parts}: got ${actualStr}` : parts;
+      return text ? trim(text) : undefined;
+    }
+  }
+  return undefined;
+}
+
 function parseBodySafe(raw: string | null | undefined): unknown {
   if (!raw) return undefined;
   const truncated = raw.length > 2000 ? raw.slice(0, 2000) + "\u2026[truncated]" : raw;
@@ -212,7 +254,24 @@ export interface DiagnoseResult {
    *  subset), so counts match `.summary.failed`. Each bucket carries
    *  total count + a small examples list (`<suite>/<test>`). Empty when
    *  there are no failures. */
-  by_recommended_action?: Record<string, { count: number; examples: string[] }>;
+  by_recommended_action?: Record<string, {
+    count: number;
+    /** ARV-228: each example carries the per-failure context the
+     *  zond-triage skill renders in its output template (`POST
+     *  /v1/projects → 500 (×3) — <reason>`). Previously a bare
+     *  `string[]` of `<suite>/<test>` ids — agents had to cross-join
+     *  with `failures[]` to recover method/path/status, which broke
+     *  triage scripts on large runs. Bounded to 5 entries per bucket
+     *  (same cap as the legacy string form). */
+    examples: Array<{
+      suite: string;
+      test: string;
+      method: string;
+      path: string;
+      status: number;
+      reason?: string;
+    }>;
+  }>;
 }
 
 export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, maxExamples?: number): DiagnoseResult {
@@ -395,7 +454,13 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
   // from the full failure set (not compactFailures) so counts match
   // .summary.failed. Bounded examples list (5) keeps payload small while
   // still pointing at concrete suites the agent can open.
-  const by_recommended_action: Record<string, { count: number; examples: string[] }> = {};
+  //
+  // ARV-228: each example is now an object carrying method/path/status/
+  // reason so the zond-triage skill can render its output template
+  // ("POST /v1/projects → 500 (×3) — TypeError") without cross-joining
+  // failures[]. Bound preserved at 5/bucket; ordering = insertion order
+  // (matches failures[] traversal, deterministic per run).
+  const by_recommended_action: Record<string, NonNullable<DiagnoseResult["by_recommended_action"]>[string]> = {};
   for (const f of failures) {
     const key = f.recommended_action;
     let bucket = by_recommended_action[key];
@@ -405,7 +470,27 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
     }
     bucket.count += 1;
     if (bucket.examples.length < 5) {
-      bucket.examples.push(`${f.suite_name}/${f.test_name}`);
+      // Trim reason to keep the bucket compact — full error_message lives
+      // in failures[].error_message for agents that want it.
+      //
+      // ARV-305: when there is no top-level error_message (typical for
+      // assertion failures — the row carries the failing rule in
+      // .assertions, not a free-form message), build a reason out of
+      // the first failing assertion so the example is not stripped
+      // down to method/path/status. The fallback keeps the field
+      // populated whenever any failure context exists.
+      const reason = buildExampleReason(f.error_message, f.assertions);
+      bucket.examples.push({
+        suite: f.suite_name,
+        test: f.test_name,
+        // DB columns are nullable (early steps may not have a request
+        // recorded yet — e.g. fixture-load failures). Coerce to "" / 0
+        // rather than leaking null into the contract.
+        method: f.request_method ?? "",
+        path: f.request_url ?? "",
+        status: f.response_status ?? 0,
+        ...(reason ? { reason } : {}),
+      });
     }
   }
 

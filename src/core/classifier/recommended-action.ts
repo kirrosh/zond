@@ -57,6 +57,7 @@ export type FindingClass =
   | "check:pagination_invariants"
   | "check:lifecycle_transitions"
   | "check:open_cors_on_sensitive"
+  | "check:cursor_boundary_fuzzing"
   | "check:rate_limit_headers_absent"
   | "check:network_error"
 
@@ -105,6 +106,13 @@ export interface ClassifierContext {
    *  fix_test_logic. Producers (db-analysis) set this after walking the
    *  step's assertions array. */
   schema_violation?: boolean;
+  /** ARV-324: true when `prepare-fixtures`/`discover` already confirmed
+   *  this exact operation returns a client error / empty list while
+   *  hunting for fixture values (`.fixture-gaps.yaml`) — e.g. an empty
+   *  test account. Same shape of problem `probe:mass_assignment`'s
+   *  `inconclusive-baseline` branch already solves below: a finding
+   *  caused by our own missing test data isn't a backend bug. */
+  unresolved_fixture?: boolean;
 }
 
 /**
@@ -152,6 +160,10 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
       return "fix_spec";
 
     case "check:not_a_server_error":
+      // A 5xx on this operation is worth flagging regardless of fixture
+      // state — even a synthetic/garbage id shouldn't crash the server.
+      return "report_backend_bug";
+
     case "check:unsupported_method":
     case "check:positive_data_acceptance":
     case "check:use_after_free":
@@ -160,6 +172,12 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
     case "check:idempotency_replay":
     case "check:pagination_invariants":
     case "check:lifecycle_transitions":
+    case "check:cursor_boundary_fuzzing":
+      // ARV-324: same treatment as probe:mass_assignment's
+      // inconclusive-baseline branch below — a finding on an operation
+      // we already know is an unresolved fixture gap isn't new evidence
+      // of a backend defect.
+      if (ctx.unresolved_fixture) return "fix_fixture";
       return "report_backend_bug";
 
     case "check:negative_data_rejection":
@@ -173,11 +191,11 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
       return "fix_auth_config";
 
     case "check:rate_limit_headers_absent":
-      // ARV-256: missing rate-limit on write endpoints is an
-      // infrastructure-config gap — closest existing action is
-      // "fix_auth_config" (server-side hardening) rather than report-
-      // backend-bug (the spec doesn't say rate-limit must exist).
-      return "fix_auth_config";
+      // ARV-304: this is a server-side hygiene gap (RFC-9239 /
+      // OWASP-API-04 expect rate-limit metadata on writes), not a
+      // caller-side auth problem. Agents triaging on `fix_auth_config`
+      // would chase the wrong fix; surface it as a backend-team task.
+      return "report_backend_bug";
 
     case "check:network_error":
       if (ctx.status === 401 || ctx.status === 403) return "fix_auth_config";

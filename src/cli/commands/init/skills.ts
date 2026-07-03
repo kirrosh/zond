@@ -48,6 +48,40 @@ export interface StaleSkill {
 }
 
 /**
+ * Per-skill drift status vs the in-binary template. `missing` is
+ * non-actionable on its own (user may have intentionally passed
+ * `--no-skills`); `outdated` is the actionable one — workspace skill
+ * predates a binary upgrade and `zond init` will refresh it.
+ */
+export type SkillDriftStatus = "fresh" | "outdated" | "missing";
+
+export interface SkillDrift {
+  name: string;
+  path: string;
+  status: SkillDriftStatus;
+}
+
+/**
+ * Compare each in-binary skill template against the workspace copy at
+ * `<cwd>/.claude/skills/<name>/SKILL.md`. Returns one entry per skill —
+ * callers filter by status (`outdated` → warn the user to re-run
+ * `zond init`).
+ */
+export function detectSkillDrift(cwd: string): SkillDrift[] {
+  return SKILLS.map(({ name, body }) => {
+    const path = join(cwd, ".claude", "skills", name, "SKILL.md");
+    const desired = body.endsWith("\n") ? body : body + "\n";
+    if (!existsSync(path)) return { name, path, status: "missing" as const };
+    const current = readFileSync(path, "utf-8");
+    return {
+      name,
+      path,
+      status: (current === desired ? "fresh" : "outdated") as SkillDriftStatus,
+    };
+  });
+}
+
+/**
  * Returns directories under `<cwd>/.claude/skills/` whose name is in
  * `LEGACY_SKILL_NAMES`. User-authored skill directories (any other
  * name) are intentionally ignored.

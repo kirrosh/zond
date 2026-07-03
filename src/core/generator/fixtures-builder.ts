@@ -13,25 +13,15 @@
  */
 
 import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
+import type { OpenAPIV3 } from "openapi-types";
 import { schemeVarName, resourceVar } from "./suite-generator.ts";
 import type { ApiResourceMap } from "./resources-builder.ts";
+import { canonicalVarName, isFkFixtureField, effectiveObjectShape } from "./data-factory.ts";
 
-/**
- * ARV-138: canonicalise a body field name to a manifest var name.
- * Converts camelCase → snake_case + lowercase so spec body fields
- * (`issueId`, `audienceId`, `accountID`) collapse onto the same manifest
- * entry as the spec's path-param spelling (`issue_id`, `audience_id`).
- *
- * Idempotent on already-snake_case input. The HTTP request still sends
- * the raw field name to the server — only the var-name namespace is
- * normalised (see `create-body.ts:substituteFkFields`).
- */
-export function canonicalVarName(name: string): string {
-  return name
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .replace(/[^a-zA-Z0-9]+/g, "_")
-    .toLowerCase();
-}
+// canonicalVarName now lives in data-factory (leaf module, shared with the
+// suite generator). Re-exported here for back-compat: create-body.ts and
+// existing callers still import it from fixtures-builder.
+export { canonicalVarName };
 
 export type FixtureSource = "auth" | "server" | "path" | "header" | "body-fk" | "capture-chain";
 
@@ -200,14 +190,19 @@ export function buildApiFixtureManifest(params: BuildFixturesParams): ApiFixture
   for (const ep of params.endpoints) {
     const method = ep.method.toUpperCase();
     if (method !== "POST" && method !== "PUT" && method !== "PATCH") continue;
-    const schema = ep.requestBodySchema as
-      | { properties?: Record<string, unknown>; required?: string[] }
-      | undefined;
-    if (!schema?.properties) continue;
-    const required = new Set(schema.required ?? []);
-    for (const fieldName of Object.keys(schema.properties)) {
-      if (!/_id$|Id$|_uuid$/.test(fieldName)) continue;
+    const schema = ep.requestBodySchema as OpenAPIV3.SchemaObject | undefined;
+    if (!schema) continue;
+    // effectiveObjectShape merges allOf — .NET/Swagger bodies wrap models in
+    // allOf, so a direct schema.properties read misses every FK field.
+    const { properties, required } = effectiveObjectShape(schema);
+    if (Object.keys(properties).length === 0) continue;
+    for (const [fieldName, propSchema] of Object.entries(properties)) {
       if (!required.has(fieldName)) continue;
+      // ARV-45: catch FK ids AND closed-vocab reference codes
+      // (`sequenceTypeCode`) the generator can't synthesise — kept in
+      // lockstep with `wireBodyFkRefs` in suite-generator so every var the
+      // tests reference appears here (decision-7 manifest contract).
+      if (!isFkFixtureField(fieldName, propSchema as OpenAPIV3.SchemaObject)) continue;
       // ARV-138: canonicalise camelCase to snake_case so `issueId` shares
       // a manifest slot with path-param `issue_id`. The raw `fieldName`
       // still goes to the server unchanged via `create-body.ts` —
@@ -223,7 +218,7 @@ export function buildApiFixtureManifest(params: BuildFixturesParams): ApiFixture
       fixtures.set(varName, {
         name: varName,
         source: "body-fk",
-        description: `Foreign-key id consumed by ${epLabel(ep)} request body. Set to a real id from your account, or leave blank to skip dependent tests.`,
+        description: `Foreign-key / reference field "${fieldName}" consumed by ${epLabel(ep)} request body. Set to a real value from your account, or leave blank to skip dependent tests.`,
         affectedEndpoints: [epLabel(ep)],
         required: true,
         defaultValue: "",

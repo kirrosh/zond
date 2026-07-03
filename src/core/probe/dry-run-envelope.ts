@@ -53,5 +53,9 @@ export function formatDryRunDigest(plans: EndpointPlan[]): string {
   const summary = summarizeDryRun(plans).summary;
   lines.push("");
   lines.push(`Plan: ${summary.planned} planned · ${summary.skipped} skipped · ${summary.totalEndpoints} total`);
+  // ARV-309: the plan above lists what *would* be attacked — no traffic was
+  // sent. Without this line a reader can't tell "ran, found nothing" from
+  // "never fired" (the plan reads like a findings list). State it explicitly.
+  lines.push("Dry-run: mutation probes NOT executed — no requests sent. Re-run without --dry-run to attack live.");
   return lines.join("\n");
 }

@@ -304,6 +304,10 @@ function defineCheckSpec(parent: Command, name: string): void {
     .option("--strict", "Exit non-zero even on LOW-severity issues")
     .option("--ndjson", "Stream issues as one JSON per line (NDJSON), instead of the wrapped envelope")
     .option(
+      "--report <format>",
+      "ARV-204: output format alias for parity with `checks run`. Accepts: console (default human summary), json (equivalent to --json envelope), ndjson (equivalent to --ndjson). Last writer wins if combined with --json/--ndjson.",
+    )
+    .option(
       "--rule <list>",
       "Unified rule selector (TASK-291). Comma-separated items: 'B1' (whitelist), " +
       "'!B2' (disable), 'B3=low|info' (severity override; also implicitly whitelists). " +
@@ -329,10 +333,19 @@ function defineCheckSpec(parent: Command, name: string): void {
 
       const merged = mergeRuleFlags(opts.rule, opts.filterRule);
 
+      // ARV-204: --report ndjson|json|console aliases the existing booleans
+      // so scripts can keep one flag shape across `checks run` and `check spec`.
+      let report = typeof opts.report === "string" ? opts.report.toLowerCase() : undefined;
+      if (report && !["console", "json", "ndjson"].includes(report)) {
+        printError(`--report: unknown format '${opts.report}'. Use one of: console, json, ndjson.`);
+        process.exitCode = 2;
+        return;
+      }
+
       process.exitCode = await checkSpecCommand({
         specPath: resolved.spec,
-        json: globalJson(cmd),
-        ndjson: opts.ndjson === true,
+        json: globalJson(cmd) || report === "json",
+        ndjson: opts.ndjson === true || report === "ndjson",
         strict: opts.strict === true,
         rule: merged.cliRule,
         config: opts.config,

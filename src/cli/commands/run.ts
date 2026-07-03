@@ -447,9 +447,11 @@ export async function runCommand(options: RunOptions): Promise<number> {
   }
 
   // TASK-282: validate --learn flag combinations early (before run).
+  // ARV-199: --learn-apply implies --learn — cf. `git stash apply` (no
+  // explicit `git stash` toggle required). The earlier hard error here
+  // tripped up scripted callers that only thought to pass --learn-apply.
   if (options.learnApply && !options.learn) {
-    printError("--learn-apply requires --learn");
-    return 2;
+    options.learn = true;
   }
   if (options.learnApply && !options.learnTarget) {
     printError("--learn-apply requires --learn-target=test or --learn-target=drifts");
@@ -830,8 +832,16 @@ export async function runCommand(options: RunOptions): Promise<number> {
   // --json so the JSON envelope stays alone on stdout (this is stderr
   // anyway, but skip avoids confusing parsers that capture both streams).
   if (hasFailures && !options.json) {
-    const total = results.reduce((s, r) => s + r.failed, 0);
-    process.stderr.write(`zond: ${total} test step(s) failed — exiting with code 1 (pass --no-fail-on-failures to suppress, e.g. for advisory runs).\n`);
+    // ARV-318: error steps (env_issue/network — couldn't execute) also drive
+    // the non-zero exit (see hasFailures above). The old line counted only
+    // `failed`, so an all-errored run printed "0 test step(s) failed —
+    // exiting with code 1", a contradiction. Name both classes.
+    const failed = results.reduce((s, r) => s + r.failed, 0);
+    const errored = results.reduce((s, r) => s + r.steps.filter((st) => st.status === "error").length, 0);
+    const parts: string[] = [];
+    if (failed > 0) parts.push(`${failed} step(s) failed`);
+    if (errored > 0) parts.push(`${errored} step(s) errored (couldn't execute — see failure_class)`);
+    process.stderr.write(`zond: ${parts.join(", ")} — exiting with code 1 (pass --no-fail-on-failures to suppress, e.g. for advisory runs).\n`);
   }
 
   if (hasFailures && options.failOnFailures === false) {
@@ -1000,7 +1010,7 @@ export function registerRun(program: Command): void {
     .option("--spec <path>", "Path or URL to OpenAPI spec used for --validate-schema (overrides the collection's openapi_spec)")
     .option("--session-id <id>", "Group this run under a session. Resolution order: --session-id flag > ZOND_SESSION_ID env > .zond/current-session file (set by 'zond session start')")
     .option("--learn", "TASK-282: detect status-code drift (passing-test-but-wrong-status). Implies --validate-schema. Without --learn-apply prints the plan; combine with --learn-apply --learn-target=test|drifts to mutate.")
-    .option("--learn-apply", "Apply the drift plan instead of printing it. Requires --learn and --learn-target.")
+    .option("--learn-apply", "Apply the drift plan instead of printing it. Implies --learn; still requires --learn-target=test|drifts.")
     .addOption(
       new Option("--learn-target <where>", "What to mutate when --learn-apply is set: rewrite expect.status in YAML (test) or append to apis/<name>/tolerated-drifts.yaml (drifts)")
         .choices(["test", "drifts"]),

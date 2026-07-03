@@ -35,6 +35,7 @@ const CHECK_ID_TO_CLASS: Record<string, FindingClass> = {
   lifecycle_transitions: "check:lifecycle_transitions",
   open_cors_on_sensitive: "check:open_cors_on_sensitive",
   rate_limit_headers_absent: "check:rate_limit_headers_absent",
+  cursor_boundary_fuzzing: "check:cursor_boundary_fuzzing",
   network_error: "check:network_error",
 };
 
@@ -46,10 +47,13 @@ const CHECK_ID_TO_CLASS: Record<string, FindingClass> = {
 export function recommendForCheck(
   checkId: string,
   status?: number,
+  /** ARV-324: true when `.fixture-gaps.yaml` already confirmed this
+   *  operation as a known-empty/inaccessible resource. */
+  unresolvedFixture?: boolean,
 ): RecommendedAction | undefined {
   const findingClass = CHECK_ID_TO_CLASS[checkId];
   if (!findingClass) return undefined;
-  return classify({ finding_class: findingClass, status: status ?? null });
+  return classify({ finding_class: findingClass, status: status ?? null, unresolved_fixture: unresolvedFixture });
 }
 
 /** Test-only export — keeps the unit table authoritative without

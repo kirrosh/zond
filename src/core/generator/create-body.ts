@@ -24,7 +24,10 @@ import type { OpenAPIV3 } from "openapi-types";
 import { generateFromSchema } from "./data-factory.ts";
 import { canonicalVarName } from "./fixtures-builder.ts";
 
-const FK_FIELD_RE = /(?:_id|Id|_uuid)$/;
+// ARV-45: FK ids plus closed-vocab reference codes (`sequenceTypeCode`).
+// Substitution only fires when a matching fixture exists, so widening the
+// pattern can't over-write fields the user didn't provide a value for.
+const FK_FIELD_RE = /(?:_id|Id|_uuid|_code|Code)$/;
 
 function substituteFkFields(value: unknown, knownFixtures: Record<string, string>): unknown {
   if (Array.isArray(value)) {

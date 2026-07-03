@@ -190,8 +190,15 @@ function defineProbeStatic(parent: Command, name: string): void {
     .option("--max-per-endpoint <N>", "Cap negative-input probes per endpoint (default 50)", parsePositiveInt("--max-per-endpoint"))
     .option("--no-cleanup", "Skip emission of follow-up DELETE cleanup steps for mutating probes (use in namespace-isolated test envs)")
     .option("--use-synthetic-parents", "Bake synthetic-by-type values into all path params (legacy). By default, non-attacked path params are emitted as {{name}} and resolved from .env.yaml at run time — needed to reach the leaf validator on nested paths (TASK-135).")
-    .option("--include <classes>", "Comma-separated subset of {validation, methods} (default: both)")
-    .option("--exclude <classes>", "Comma-separated subset to skip (mutually exclusive with --include)")
+    // ARV-225: probe static --include is a CLASS LIST ({validation, methods}),
+    // while sibling commands (probe security, probe mass-assignment, checks
+    // run) use SELECTOR grammar (path:/method:/tag:/operation-id:). Rename the
+    // canonical flag to --include-class / --exclude-class for clarity; keep
+    // --include / --exclude as deprecated aliases (warn on use).
+    .option("--include-class <classes>", "Comma-separated subset of {validation, methods} (default: both)")
+    .option("--exclude-class <classes>", "Comma-separated subset to skip (mutually exclusive with --include-class)")
+    .option("--include <classes>", "[deprecated, use --include-class] Comma-separated subset of {validation, methods}")
+    .option("--exclude <classes>", "[deprecated, use --exclude-class] Comma-separated subset to skip")
     .action(async (specPos: string | undefined, optsArg, cmdRef: Command) => {
       // ARV-33: see resolveProbeApi — keep the chain consistent with the
       // sibling subcommands (mass-assignment, security).
@@ -199,7 +206,25 @@ function defineProbeStatic(parent: Command, name: string): void {
       const resolved = resolveSpecArg(specPos, apiName, optsArg.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
 
-      const r = resolveStaticClasses(optsArg.include, optsArg.exclude);
+      // ARV-225: prefer --include-class / --exclude-class. Fall back to
+      // --include / --exclude with a one-line stderr deprecation note —
+      // these are the legacy names that collide semantically with the
+      // selector --include on sibling commands.
+      let includeClasses: string | undefined = optsArg.includeClass;
+      let excludeClasses: string | undefined = optsArg.excludeClass;
+      if (!includeClasses && optsArg.include) {
+        process.stderr.write(
+          "Warning: `probe static --include <classes>` is deprecated (class-list, not a selector — collides with probe security / checks run). Use --include-class.\n",
+        );
+        includeClasses = optsArg.include;
+      }
+      if (!excludeClasses && optsArg.exclude) {
+        process.stderr.write(
+          "Warning: `probe static --exclude <classes>` is deprecated. Use --exclude-class.\n",
+        );
+        excludeClasses = optsArg.exclude;
+      }
+      const r = resolveStaticClasses(includeClasses, excludeClasses);
       if ("error" in r) { printError(r.error); process.exitCode = 2; return; }
 
       // ARV-30: derive --output from the registered API's base_dir when the
@@ -269,7 +294,8 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
       (v: string, prev: string[] = []) => prev.concat(v),
       [] as string[],
     )
-    .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.");
+    .option("--emit-template <method:path>", "TASK-146: emit a ready-to-edit YAML probe template for one endpoint (e.g. \"POST:/users\") instead of running the live probe. Pairs `--output <file>` to write to disk (default: stdout). Use to drop down to manual catch-up after INCONCLUSIVE / INCONCLUSIVE-5XX verdicts without copy-pasting boilerplate from the skill.")
+    .option("--max-endpoints <n>", "ARV-302: cap the number of endpoints probed in this run (after --include / --exclude / --tag filters). Used by `zond audit --budget` to keep probe stages inside a wall-clock budget instead of unbounded scanning.", parsePositiveInt("--max-endpoints"));
   addProbeReportOutputOptions(sub);
   sub.action(async (specPos: string | undefined, opts, cmd: Command) => {
       // ARV-33: resolve --api via the same fallback chain as prepare-fixtures /
@@ -305,6 +331,7 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
       process.exitCode = await probeMassAssignmentCommand({
         specPath: resolved.spec,
         env: envFile.env,
+        apiName,
         output: rep.output,
         emitTests: opts.emitTests,
         tag: opts.tag,
@@ -320,6 +347,7 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         report: rep.report,
         verbose: opts.verbose === true,
         suspectField: Array.isArray(opts.suspectField) && opts.suspectField.length > 0 ? opts.suspectField : undefined,
+        maxEndpoints: typeof opts.maxEndpoints === "number" ? opts.maxEndpoints : undefined,
       });
     });
 }
@@ -360,7 +388,8 @@ function defineProbeSecurity(parent: Command, name: string): void {
     .option(
       "--verbose",
       "ARV-253: surface INFO-severity findings (sanitization-signal-only, e.g. CRLF accepted but no reflection observed). Default hides them — they're single-signal proof with no exploit pathway.",
-    );
+    )
+    .option("--max-endpoints <n>", "ARV-302: cap the number of endpoints probed in this run (after --include / --exclude / --tag filters). Used by `zond audit --budget` to keep probe stages inside a wall-clock budget instead of unbounded scanning.", parsePositiveInt("--max-endpoints"));
   addProbeReportOutputOptions(sub);
   sub.action(async (classes: string | undefined, specPos: string | undefined, opts, cmd: Command) => {
       // ARV-36: missing-arg path should list the available classes (parity
@@ -406,6 +435,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
         include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
         exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
         verbose: opts.verbose === true,
+        maxEndpoints: typeof opts.maxEndpoints === "number" ? opts.maxEndpoints : undefined,
       });
     });
 }

@@ -16,12 +16,18 @@
  *   - `check`   — every suite path lives under `apis/<api>/checks/`. Mirrors
  *                 the same logic: conformance checks don't reflect endpoint
  *                 coverage breadth.
+ *   - `request` — a single ad-hoc `zond request` invocation persisted into
+ *                 the session DB (ARV-265). Excluded from `pass-coverage`
+ *                 but counted toward `audit-coverage`.
+ *   - `fixture` — `prepare-fixtures --cascade` discovery list-calls
+ *                 (ARV-265). Pure HTTP touches in service of fixture
+ *                 derivation; audit-coverage only.
  *   - `regular` — anything else, including mixed runs (probe + smoke). A
  *                 mixed run is treated as regular because at least one
  *                 suite contributed real coverage signal.
  */
 
-export type RunKind = "regular" | "probe" | "check";
+export type RunKind = "regular" | "probe" | "check" | "request" | "fixture";
 
 const PROBE_SEGMENT_RE = /(^|\/)probes(\/|$)/;
 const CHECK_SEGMENT_RE = /(^|\/)checks(\/|$)/;

@@ -20,6 +20,13 @@ import { persistVerdictsAsOrphans } from "../../../core/probe/orphan-tracker.ts"
 import { SecurityProbe } from "../../../core/probe/security-probe-class.ts";
 import { summarizeDryRun } from "../../../core/probe/dry-run-envelope.ts";
 import { compileOperationFilter } from "../../../core/selectors/operation-filter.ts";
+import { loadSeedBodyOverlays } from "./_seed-bodies.ts";
+import { findWorkspaceRoot } from "../../../core/workspace/root.ts";
+import { loadSeverityConfig, SeverityConfigError } from "../../../core/severity/loader.ts";
+import { calibrateProbeSeverity } from "../../../core/severity/probe-adapter.ts";
+import { rollupSecuritySeverity } from "../../../core/probe/security/orchestrator.ts";
+import type { SecuritySeverity } from "../../../core/probe/security/types.ts";
+import type { MergedConfig } from "../../../core/severity/config.ts";
 
 interface Buckets {
   high: number;
@@ -58,6 +65,39 @@ const SEC_ZERO: Buckets = {
   high: 0, medium: 0, low: 0, info: 0, inconclusive: 0, inconclusiveBaseline: 0, ok: 0, skipped: 0,
 };
 
+/** ARV-300: calibrate each finding's severity in-place and recompute the
+ *  verdict rollup. No-op when `config` is empty (pass-through). */
+function calibrateSecurityVerdicts(
+  verdicts: SecurityVerdict[],
+  config: MergedConfig | undefined,
+): void {
+  if (!config) return;
+  for (const v of verdicts) {
+    for (const f of v.findings) {
+      const cal = calibrateProbeSeverity(
+        {
+          check: f.class,
+          severity: f.severity,
+          recommendedAction: f.recommended_action,
+          context: {
+            finding: {
+              check: f.class,
+              recommended_action: f.recommended_action,
+              message: f.reason,
+            },
+            operation: { method: v.method.toUpperCase(), path: v.path },
+            response: { status: f.status, headers: {} },
+          },
+        },
+        config,
+      );
+      f.severity = cal.severity as SecuritySeverity;
+      if (cal.suppressed_by) f.suppressed_by = cal.suppressed_by;
+    }
+    v.severity = rollupSecuritySeverity(v.findings);
+  }
+}
+
 export interface ProbeSecurityOptions {
   specPath: string;
   classes: string;
@@ -95,6 +135,11 @@ export interface ProbeSecurityOptions {
    *  reflection — sanitization signal only). Hidden by default since
    *  they carry single_signal proof with no exploit pathway. */
   verbose?: boolean;
+  /** ARV-302: cap the number of endpoints probed in this run (after
+   *  --include / --exclude / --tag filters). Used by `zond audit
+   *  --budget` to keep the security stage inside a wall-clock budget
+   *  on big specs (Stripe: 587 endpoints) instead of unbounded scanning. */
+  maxEndpoints?: number;
 }
 
 function parseClasses(input: string): SecurityClass[] | string {
@@ -157,6 +202,21 @@ export async function probeSecurityCommand(
       }
       endpoints = endpoints.filter(compiled.filter);
     }
+    // ARV-302: --max-endpoints cap — see probe/mass-assignment.ts for the
+    // rationale. Applied after user-visible filters; a warning fires so
+    // partial output is obvious.
+    let cappedEndpoints = false;
+    if (typeof options.maxEndpoints === "number" && options.maxEndpoints > 0
+        && endpoints.length > options.maxEndpoints) {
+      const total = endpoints.length;
+      endpoints = endpoints.slice(0, options.maxEndpoints);
+      cappedEndpoints = true;
+      if (!options.json) {
+        process.stderr.write(
+          `zond: probe security capped at ${options.maxEndpoints}/${total} endpoints (--max-endpoints) — pass --max-endpoints <N> or --budget full to widen.\n`,
+        );
+      }
+    }
 
     let vars: Record<string, string> = {};
     if (options.env) {
@@ -196,10 +256,26 @@ export async function probeSecurityCommand(
         options: { isolated: options.isolated === true },
       });
       const data = summarizeDryRun(plan);
+      const { formatDryRunDigest } = await import("../../../core/probe/dry-run-envelope.ts");
+      // ARV-317: persist the planned inventory when --output is given (parity
+      // with probe mass-assignment). --emit-tests is skipped on dry-run —
+      // there are no findings to turn into regression suites.
+      // ARV-321: say so explicitly — see mass-assignment.ts for the friction
+      // that prompted this.
+      if (options.emitTests) {
+        printWarning(`--emit-tests skipped: --dry-run has no live verdicts to lock in as regression suites. Re-run without --dry-run to emit ${options.emitTests}.`);
+      }
+      if (options.output) {
+        const payload = options.report === "json"
+          ? JSON.stringify(data, null, 2)
+          : formatDryRunDigest(plan);
+        await mkdir(join(options.output, "..").replace(/\/\.$/, ""), { recursive: true }).catch(() => {});
+        rotateOutputTarget(options.output, { overwrite: options.overwrite });
+        await writeFile(options.output, payload + "\n", "utf-8");
+      }
       if (options.json) {
         printJson(jsonOk("probe-security", data));
       } else {
-        const { formatDryRunDigest } = await import("../../../core/probe/dry-run-envelope.ts");
         console.log(formatDryRunDigest(plan));
       }
       return 0;
@@ -210,17 +286,75 @@ export async function probeSecurityCommand(
     // travel in the envelope instead).
     printMutationBanner("probe-security", vars, { quiet: options.json === true });
 
-    const result = await runSecurityProbes({
-      endpoints,
-      securitySchemes,
-      vars,
-      classes,
-      noCleanup: options.noCleanup,
-      timeoutMs: options.timeoutMs,
-      dryRun: options.dryRun,
-      isolated: options.isolated === true,
-      allowLeaks: options.allowLeaks === true,
-    });
+    // ARV-265: capture every HTTP request the probe sends so audit-coverage
+    // sees the touches. Dry-run never reaches this branch (early return
+    // above), so AC#5 holds — only live probes pollute the run table.
+    const { withHttpAudit, beginAuditRun, finalizeAuditRun, auditRecordToCase, checksPersistEnabled } =
+      await import("../../../core/audit/persist.ts");
+    const auditEnabled = checksPersistEnabled();
+    // ARV-269: same overlay-lift as probe-mass-assignment.
+    const seedBodies = await loadSeedBodyOverlays(options.apiName);
+    const { value: result, records: auditRecords } = await withHttpAudit(async () =>
+      runSecurityProbes({
+        endpoints,
+        securitySchemes,
+        vars,
+        classes,
+        noCleanup: options.noCleanup,
+        timeoutMs: options.timeoutMs,
+        dryRun: options.dryRun,
+        isolated: options.isolated === true,
+        allowLeaks: options.allowLeaks === true,
+        seedBodies,
+      }),
+    );
+
+    if (auditEnabled && auditRecords.length > 0) {
+      try {
+        const { getDb } = await import("../../../db/schema.ts");
+        const { findCollectionByNameOrId } = await import("../../../db/queries.ts");
+        const { readCurrentSession } = await import("../../../core/context/session.ts");
+        getDb();
+        const collectionId = options.apiName ? findCollectionByNameOrId(options.apiName)?.id : undefined;
+        const session = readCurrentSession();
+        const runId = beginAuditRun({
+          runKind: "probe",
+          ...(collectionId != null ? { collectionId } : {}),
+          ...(session?.id ? { sessionId: session.id } : {}),
+          tags: ["probe", "security", ...classes],
+        });
+        const suiteFile = `apis/${options.apiName ?? "_"}/probes/security.yaml`;
+        finalizeAuditRun(runId, auditRecords.map((rec) =>
+          auditRecordToCase(rec, {
+            suiteName: "probe/security",
+            suiteFile,
+            testName: `security::${rec.request.method.toUpperCase()} ${rec.request.url}`,
+          }),
+        ));
+      } catch (err) {
+        process.stderr.write(`zond: audit persistence failed (${(err as Error).message}).\n`);
+      }
+    }
+
+    // ARV-300: run every finding through the same severity calibrator as
+    // checks. `.zond/severity.yaml` can re-severitize or suppress by
+    // `when.finding.check: <class>` (ssrf/crlf/open-redirect). Sentinel
+    // severities (inconclusive/ok/skipped) pass through untouched; the
+    // verdict rollup is recomputed so digests + counts stay consistent.
+    let severityConfig: MergedConfig | undefined;
+    try {
+      const ws = findWorkspaceRoot();
+      severityConfig = loadSeverityConfig({ workspaceRoot: ws.root, api: options.apiName });
+    } catch (err) {
+      if (err instanceof SeverityConfigError) {
+        const msgs = err.errors.map((e) => `${e.source}: ${e.keyPath}: ${e.message}`);
+        if (options.json) printJson(jsonError("probe-security", msgs));
+        else for (const m of msgs) printError(m);
+        return 2;
+      }
+      throw err;
+    }
+    calibrateSecurityVerdicts(result.verdicts, severityConfig);
 
     // ARV-253: filter verdicts for display under the evidence-chain
     // principle. INFO-severity findings (CRLF accepted, no reflection
@@ -328,6 +462,14 @@ export async function probeSecurityCommand(
           },
           orphans,
           emittedTests: emittedSuites,
+          // ARV-302: surface the partial-run warning so JSON consumers
+          // see that --max-endpoints trimmed the set (otherwise the cap
+          // is invisible in machine-readable output).
+          ...(cappedEndpoints ? {
+            warnings: [
+              `--max-endpoints capped this run at ${options.maxEndpoints}; pass --max-endpoints <N> or --budget full to widen.`,
+            ],
+          } : {}),
         }),
       );
     } else {

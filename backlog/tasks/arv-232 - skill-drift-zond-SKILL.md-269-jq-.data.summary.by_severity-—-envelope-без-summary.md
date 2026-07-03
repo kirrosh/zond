@@ -3,17 +3,17 @@ id: ARV-232
 title: >-
   skill drift: zond/SKILL.md:269 jq .data.summary.by_severity — envelope без
   summary
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-14 10:41'
-updated_date: '2026-05-14 10:42'
+updated_date: '2026-05-16 07:38'
 labels:
   - feedback-loop
   - api-github
   - m-16
   - skill-drift
 dependencies: []
-priority: medium
+priority: high
 ---
 
 ## Description
@@ -32,3 +32,9 @@ Log: ~/Projects/zond-test/.fb-loop/rounds/raw-01.log (check-spec-01.json)
 <!-- AC:BEGIN -->
 - [x] #1 Skill template src/cli/commands/init/templates/skills/zond.md:267 jq pattern matches actual envelope shape (.data.stats with severity counts)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Closed in validation-sprint 2026-05-16. Verified: src/cli/commands/init/templates/skills/zond.md:285 уже использует .data.stats; устаревший .data.summary.by_severity больше нигде в skills не встречается. AC #1 (skill jq matches actual envelope) выполнен. Stale In Progress — забыли пометить Done.
+<!-- SECTION:NOTES:END -->

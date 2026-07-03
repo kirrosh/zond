@@ -10,4 +10,4 @@ export type {
   ResolvedOutput,
 } from "./types.ts";
 export { OutputSpecError } from "./types.ts";
-export { resolveOutput, runCommandWithOutput, type RunOutputResult } from "./run.ts";
+export { resolveOutput } from "./run.ts";

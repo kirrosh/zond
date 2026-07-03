@@ -13,7 +13,7 @@
 
 import type { EndpointInfo, CrudGroup } from "./types.ts";
 import type { OpenAPIV3 } from "openapi-types";
-import { detectCrudGroups } from "./suite-generator.ts";
+import { detectCrudGroups, singularizeResource } from "./suite-generator.ts";
 
 export interface ResourceFkRef {
   /** Variable name expected in `.env.yaml` to satisfy the FK (e.g. `audience_id`). */
@@ -78,10 +78,12 @@ export interface IdempotencyConfig {
  * disjointness + has_more consistency.
  *
  * Supported types in this milestone:
- *   • `cursor` — Stripe/GitHub style: caller passes a cursor (e.g.
+ *   • `cursor` — Stripe-style: caller passes a cursor (e.g.
  *     `starting_after=<id>`) derived from the last item of the
- *     previous page. The check is built around this pattern.
- *   • `page` and `offset` — declared for forward compatibility; the
+ *     previous page.
+ *   • `page` — page-number style (GitHub, GitLab, Atlassian, Notion,
+ *     Linear): `?page=N&per_page=M`. ARV-220 enabled this in m-21.
+ *   • `offset` and `token` — declared for forward compatibility; the
  *     check currently skips with a "pagination type not implemented"
  *     reason so the yaml block stays a stable schema.
  *
@@ -178,19 +180,29 @@ export function validateLifecycleManifest(cfg: LifecycleConfig): string[] {
 export interface PaginationConfig {
   /** Pagination flavor. Default `cursor`. */
   type?: "cursor" | "page" | "offset" | "token";
-  /** Query-param name that takes the cursor value. Default `starting_after`. */
+  /** Query-param name that takes the cursor value. Default `starting_after`.
+   *  Only used when `type: cursor`. */
   cursorParam?: string;
-  /** Response field on each item that becomes the next cursor. Default `id`. */
+  /** Response field on each item that becomes the next cursor (cursor-style)
+   *  and the dedupe key when comparing pages (both styles). Default `id`. */
   cursorField?: string;
-  /** Response field that signals "more pages remain". Default `has_more`. */
+  /** Response field that signals "more pages remain". Default `has_more`.
+   *  Only consulted for `type: cursor` — page-style APIs typically rely on
+   *  Link headers or `total_pages` instead, so the field is ignored there. */
   hasMoreField?: string;
-  /** Query-param name for page size. Default `limit`. */
+  /** Query-param name for page size. Default `limit` for cursor-style,
+   *  `per_page` for page-style. */
   limitParam?: string;
   /** Probe page-size. Default 2 (small enough to land two replies fast). */
   defaultLimit?: number;
   /** Response field carrying the array of items. Default `data` (Stripe);
    *  falls back to `items` / `results` when missing. */
   itemsField?: string;
+  /** Page-number query-param name. Default `page`. Only used when `type: page`. */
+  pageParam?: string;
+  /** First page number (1-based on GitHub/GitLab, 0-based on some custom APIs).
+   *  Default 1. Only used when `type: page`. */
+  startPage?: number;
 }
 
 /** ARV-187: LLM-authored example POST body. Stateful checks prefer this
@@ -252,6 +264,135 @@ function pathStripSlash(p: string): string {
 
 function isParamSeg(seg: string | undefined): boolean {
   return !!seg && /^\{[^}]+\}$/.test(seg);
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * ARV-134 (resource-builder fix #1): when two CRUD groups would collide on
+ * the same `resource` name (e.g. `POST /segments` and `POST /contacts/
+ * {contact_id}/segments` both produce `resource: "segments"`), keep the
+ * canonical (shortest basePath) entry and rename the nested ones to
+ * `<parent-noun>_<resource>` — `contact_segments` here. Without this,
+ * `.api-resources.yaml` ends up with duplicate entries that break
+ * map-by-name lookups (annotate overlay, refresh-api idempotence,
+ * stateful-check resource configs).
+ */
+function disambiguateResourceCollisions(groups: CrudGroup[]): CrudGroup[] {
+  const byName = new Map<string, CrudGroup[]>();
+  for (const g of groups) {
+    const arr = byName.get(g.resource) ?? [];
+    arr.push(g);
+    byName.set(g.resource, arr);
+  }
+
+  const renames = new Map<CrudGroup, string>();
+  const usedNames = new Set<string>(byName.keys());
+
+  for (const [name, members] of byName) {
+    if (members.length < 2) continue;
+    // Canonical name goes to the entry with the *strictly* shortest
+    // basePath (the top-level collection in the typical /segments vs
+    // /contacts/{id}/segments case). If two members tie for shortest,
+    // there is no obvious winner — rename all of them so the yaml never
+    // silently picks one arbitrary entry as canonical.
+    const sorted = [...members].sort((a, b) => a.basePath.length - b.basePath.length);
+    const shortest = sorted[0]!.basePath.length;
+    const tiedAtShortest = sorted.filter(g => g.basePath.length === shortest).length;
+    const startFromIndex = tiedAtShortest === 1 ? 1 : 0;
+
+    for (let i = startFromIndex; i < sorted.length; i++) {
+      const g = sorted[i]!;
+      const prefix = parentNounForBasePath(g.basePath);
+      const singularPrefix = prefix ? singularizeResource(prefix) : null;
+      let candidate = singularPrefix ? `${singularPrefix}_${name}` : `${name}_${i + 1}`;
+      let n = 2;
+      while (usedNames.has(candidate)) {
+        candidate = singularPrefix ? `${singularPrefix}_${name}_${n++}` : `${name}_${n++}`;
+      }
+      usedNames.add(candidate);
+      renames.set(g, candidate);
+    }
+  }
+
+  if (renames.size === 0) return groups;
+  return groups.map(g => (renames.has(g) ? { ...g, resource: renames.get(g)! } : g));
+}
+
+/**
+ * ARV-134 follow-up: same rename strategy as `disambiguateResourceCollisions`,
+ * but operating on the final `ApiResourceEntry[]` so CRUD-vs-implicit
+ * name clashes also get resolved. Keeps the implementation parallel so
+ * the behaviour stays consistent (strictly-shortest basePath keeps the
+ * canonical name; ties get all-renamed; suffix-bumping on hash
+ * collision).
+ */
+function disambiguateEntryCollisions(entries: ApiResourceEntry[]): ApiResourceEntry[] {
+  const byName = new Map<string, ApiResourceEntry[]>();
+  for (const e of entries) {
+    const arr = byName.get(e.resource) ?? [];
+    arr.push(e);
+    byName.set(e.resource, arr);
+  }
+
+  const renames = new Map<ApiResourceEntry, string>();
+  const usedNames = new Set<string>(byName.keys());
+
+  for (const [name, members] of byName) {
+    if (members.length < 2) continue;
+    const sorted = [...members].sort((a, b) => a.basePath.length - b.basePath.length);
+    const shortest = sorted[0]!.basePath.length;
+    const tiedAtShortest = sorted.filter(e => e.basePath.length === shortest).length;
+    const startFromIndex = tiedAtShortest === 1 ? 1 : 0;
+
+    for (let i = startFromIndex; i < sorted.length; i++) {
+      const e = sorted[i]!;
+      const prefix = parentNounForBasePath(e.basePath);
+      const singularPrefix = prefix ? singularizeResource(prefix) : null;
+      let candidate = singularPrefix ? `${singularPrefix}_${name}` : `${name}_${i + 1}`;
+      let n = 2;
+      while (usedNames.has(candidate)) {
+        candidate = singularPrefix ? `${singularPrefix}_${name}_${n++}` : `${name}_${n++}`;
+      }
+      usedNames.add(candidate);
+      renames.set(e, candidate);
+    }
+  }
+
+  if (renames.size === 0) return entries;
+  return entries.map(e => (renames.has(e) ? { ...e, resource: renames.get(e)! } : e));
+}
+
+function parentNounForBasePath(basePath: string): string | null {
+  const segs = pathStripSlash(basePath).split("/").filter(Boolean);
+  // Skip the last segment (the resource itself); walk back to the nearest
+  // non-param noun. `/contacts/{contact_id}/segments` → "contacts".
+  for (let i = segs.length - 2; i >= 0; i--) {
+    if (!isParamSeg(segs[i])) return segs[i]!;
+  }
+  return null;
+}
+
+/**
+ * ARV-134 (resource-builder fix #2): for an implicit list-only resource
+ * (no CRUD group), look for a GET-by-id companion endpoint that gives us
+ * a real idParam + itemPath. Resend's `/logs/{log_id}` and `/automations/
+ * {automation_id}/runs/{run_id}` were getting `idParam: ""` because the
+ * implicit-resource constructor never inspected the spec for their item
+ * endpoints — `prepare-fixtures` then skipped them.
+ */
+function findItemEndpointForListPath(
+  listPath: string,
+  endpoints: EndpointInfo[],
+): EndpointInfo | null {
+  const itemRe = new RegExp(`^${escapeRegex(listPath)}/\\{([^}]+)\\}/?$`);
+  for (const ep of endpoints) {
+    if (ep.method.toUpperCase() !== "GET" || ep.deprecated) continue;
+    if (itemRe.test(pathStripSlash(ep.path))) return ep;
+  }
+  return null;
 }
 
 function getCaptureField(create: EndpointInfo): string {
@@ -430,8 +571,17 @@ export interface BuildResourcesParams {
 }
 
 export function buildApiResourceMap(params: BuildResourcesParams): ApiResourceMap {
-  const groups = detectCrudGroups(params.endpoints);
+  const groups = disambiguateResourceCollisions(detectCrudGroups(params.endpoints));
   const ownerListPaths = resolveOwnerListPaths(params.endpoints);
+
+  // ARV-134: reverse-index ownerListPaths so implicit resources can fall
+  // back to the FK param name when no direct GET-by-id companion exists.
+  const paramsByListPath = new Map<string, string[]>();
+  for (const [param, listPath] of ownerListPaths) {
+    const arr = paramsByListPath.get(listPath) ?? [];
+    arr.push(param);
+    paramsByListPath.set(listPath, arr);
+  }
 
   // Index CRUD-group list paths by normalised path so the FK resolver can
   // hand back the resource name a structural lookup pointed at.
@@ -460,14 +610,45 @@ export function buildApiResourceMap(params: BuildResourcesParams): ApiResourceMa
     );
     if (!listEp) continue;
     const name = listPathToResourceName(listPath);
+
+    // ARV-134: try to recover idParam + itemPath from a GET-by-id companion
+    // (e.g. implicit `logs` at `/logs` + `GET /logs/{log_id}` → log_id).
+    // Falls back to the reverse-indexed ownerListPaths param when no direct
+    // item endpoint exists — preferring a name that matches the resource's
+    // singular form so e.g. `attachment_id` wins over a sibling FK that
+    // happens to point at the same list path.
+    const itemEp = findItemEndpointForListPath(listPath, params.endpoints);
+    let idParam = "";
+    let itemPath = "";
+    const endpoints: ApiResourceEntry["endpoints"] = { list: epLabel(listEp) };
+    if (itemEp) {
+      const m = pathStripSlash(itemEp.path).match(/\{([^}]+)\}\/?$/);
+      if (m) {
+        idParam = m[1]!;
+        itemPath = itemEp.path;
+        endpoints.read = epLabel(itemEp);
+      }
+    }
+    if (!idParam) {
+      const candidates = paramsByListPath.get(listPath) ?? [];
+      if (candidates.length > 0) {
+        const singular = singularizeResource(name).toLowerCase();
+        const preferred = candidates.find(p => {
+          const lower = p.toLowerCase();
+          return lower === singular || lower.startsWith(`${singular}_`);
+        });
+        idParam = preferred ?? candidates[0]!;
+      }
+    }
+
     implicitResources.push({
       resource: name,
       basePath: listPath,
-      itemPath: "",
-      idParam: "",
+      itemPath,
+      idParam,
       captureField: "id",
       hasFullCrud: false,
-      endpoints: { list: epLabel(listEp) },
+      endpoints,
       fkDependencies: [],
     });
     resourceByListPath.set(listPath, name);
@@ -510,7 +691,13 @@ export function buildApiResourceMap(params: BuildResourcesParams): ApiResourceMa
     r.fkDependencies = collectPathFkDeps(r.basePath, "", ownerListPaths, resourceByListPath);
   }
 
-  const resources = [...crudResources, ...implicitResources];
+  // ARV-134 (follow-up): the early disambiguation pass only operated on
+  // CRUD groups, but collisions also fire CRUD-vs-implicit (`/repos/
+  // {owner}/{repo}/check-runs` is CRUD, `/repos/{owner}/{repo}/commits/
+  // {ref}/check-runs` is implicit-list-only — both end up named
+  // `check-runs`). Run the same prefix-rename here on the combined list
+  // so the final yaml never carries duplicate `resource:` lines.
+  const resources = disambiguateEntryCollisions([...crudResources, ...implicitResources]);
 
   // Endpoints that aren't in any CRUD group — RPC-style actions, webhook
   // accept-only routes, etc. Implicit-list endpoints stay in orphans
@@ -614,6 +801,8 @@ export function serializeApiResourceMap(m: ApiResourceMap): string {
       if (r.pagination.limitParam) lines.push(`      limit_param: ${escape(r.pagination.limitParam)}`);
       if (r.pagination.defaultLimit != null) lines.push(`      default_limit: ${r.pagination.defaultLimit}`);
       if (r.pagination.itemsField) lines.push(`      items_field: ${escape(r.pagination.itemsField)}`);
+      if (r.pagination.pageParam) lines.push(`      page_param: ${escape(r.pagination.pageParam)}`);
+      if (r.pagination.startPage != null) lines.push(`      start_page: ${r.pagination.startPage}`);
     }
     if (r.lifecycle) {
       lines.push(`    lifecycle:`);

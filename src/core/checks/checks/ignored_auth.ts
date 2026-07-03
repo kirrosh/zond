@@ -29,6 +29,31 @@
  *   - skip operations with `security: []` override (explicitly public),
  *   - skip when `bootstrap_cleanup_failed` (data state corrupted),
  *   - skip when no auth headers provided to the harness at all.
+ *
+ * Severity matrix (ARV-286, dispatched per finding via outcome.severity;
+ * follow-up to ARV-284 `negative_data_rejection` pattern):
+ *
+ *   Declared severity: 'low' (proof-cap baseline per ARV-250 — single-
+ *   signal evidence alone caps at LOW; chain evidence elevates to HIGH).
+ *
+ *   Per-finding dispatch:
+ *
+ *   | evidence.variant          | severity | rationale                         |
+ *   |---------------------------|----------|-----------------------------------|
+ *   | no_auth                   | HIGH     | baseline 2xx + no-auth 2xx        |
+ *   | bogus_auth                | HIGH     | baseline 2xx + bogus 2xx          |
+ *   | no_auth_differential      | HIGH     | broken-baseline + lower bucket    |
+ *   | bogus_auth_differential   | HIGH     | broken-baseline + lower bucket    |
+ *   | no_auth_strict            | MEDIUM   | --strict-401 mismatch, no bypass  |
+ *   | bogus_auth_strict         | MEDIUM   | --strict-401 mismatch, no bypass  |
+ *
+ *   HIGH variants (bypass + differential) provide chain evidence: both a
+ *   baseline probe and an auth-stripped probe contribute — two independent
+ *   signals proving auth is ignored. MEDIUM variants (strict-401
+ *   conformance) are single-signal: auth is likely enforced (server still
+ *   rejects), just with the wrong status code (403/404 instead of 401).
+ *
+ *   Users can re-calibrate per-API via `.zond/severity.yaml` (ARV-283).
  */
 import type { OpenAPIV3 } from "openapi-types";
 import type { AuthStatefulCheck } from "../stateful.ts";
@@ -89,7 +114,10 @@ function isAcceptableRejection(status: number, strict401: boolean): boolean {
 
 export const ignoredAuth: AuthStatefulCheck = {
   id: "ignored_auth",
-  severity: "high",
+  /** ARV-286: proof-cap baseline (ARV-250). Bypass findings emit
+   *  outcome.severity="high" (chain evidence); strict-401 conformance
+   *  findings emit outcome.severity="medium" (single-signal). */
+  severity: "low",
   defaultExpected: "Server must reject requests without (or with bogus) auth credentials with 401/403",
   references: [{ id: "OWASP-API-01" }],
   phase: "auth",
@@ -139,6 +167,8 @@ export const ignoredAuth: AuthStatefulCheck = {
       if (noAuth.status >= 200 && noAuth.status < 300) {
         return {
           kind: "fail",
+          // chain evidence: baseline 2xx + no-auth 2xx → proven bypass
+          severity: "high",
           message: `Server accepted request without auth credentials (status ${noAuth.status}) — auth is being ignored`,
           evidence: { variant: "no_auth", baseline_status: baseline.status, no_auth_status: noAuth.status },
         };
@@ -146,6 +176,8 @@ export const ignoredAuth: AuthStatefulCheck = {
       if (bogus.status >= 200 && bogus.status < 300) {
         return {
           kind: "fail",
+          // chain evidence: baseline 2xx + bogus-auth 2xx → credentials not validated
+          severity: "high",
           message: `Server accepted request with bogus auth (status ${bogus.status}) — credentials not validated`,
           evidence: { variant: "bogus_auth", baseline_status: baseline.status, bogus_auth_status: bogus.status },
         };
@@ -154,6 +186,8 @@ export const ignoredAuth: AuthStatefulCheck = {
         if (noAuth.status !== 401) {
           return {
             kind: "fail",
+            // single-signal: auth is likely enforced (4xx returned), just wrong status code
+            severity: "medium",
             message: `no_auth returned ${noAuth.status}, expected 401 (--strict-401)`,
             evidence: { variant: "no_auth_strict", baseline_status: baseline.status, no_auth_status: noAuth.status, strict_401: true },
           };
@@ -161,6 +195,8 @@ export const ignoredAuth: AuthStatefulCheck = {
         if (bogus.status !== 401) {
           return {
             kind: "fail",
+            // single-signal: auth is likely enforced (4xx returned), just wrong status code
+            severity: "medium",
             message: `bogus_auth returned ${bogus.status}, expected 401 (--strict-401)`,
             evidence: { variant: "bogus_auth_strict", baseline_status: baseline.status, bogus_auth_status: bogus.status, strict_401: true },
           };
@@ -179,6 +215,8 @@ export const ignoredAuth: AuthStatefulCheck = {
     if (noAuthBucket >= 0 && noAuthBucket < baseBucket) {
       return {
         kind: "fail",
+        // chain evidence: broken-baseline + lower bucket without auth → smoking gun bypass
+        severity: "high",
         message: `Server gave a more permissive status (${noAuth.status}) without auth than with valid auth (${baseline.status}) — possible bypass`,
         evidence: { variant: "no_auth_differential", baseline_status: baseline.status, no_auth_status: noAuth.status },
       };
@@ -186,6 +224,8 @@ export const ignoredAuth: AuthStatefulCheck = {
     if (bogusBucket >= 0 && bogusBucket < baseBucket) {
       return {
         kind: "fail",
+        // chain evidence: broken-baseline + lower bucket with bogus token → bypass
+        severity: "high",
         message: `Server gave a more permissive status (${bogus.status}) with bogus auth than with valid auth (${baseline.status}) — possible bypass`,
         evidence: { variant: "bogus_auth_differential", baseline_status: baseline.status, bogus_auth_status: bogus.status },
       };
@@ -194,6 +234,8 @@ export const ignoredAuth: AuthStatefulCheck = {
       if (!isAcceptableRejection(noAuth.status, true) && noAuthBucket >= 0) {
         return {
           kind: "fail",
+          // single-signal: auth is enforced (server still rejects), wrong status code
+          severity: "medium",
           message: `no_auth returned ${noAuth.status}, expected 401 (--strict-401, baseline ${baseline.status})`,
           evidence: { variant: "no_auth_strict", baseline_status: baseline.status, no_auth_status: noAuth.status, strict_401: true },
         };
@@ -201,6 +243,8 @@ export const ignoredAuth: AuthStatefulCheck = {
       if (!isAcceptableRejection(bogus.status, true) && bogusBucket >= 0) {
         return {
           kind: "fail",
+          // single-signal: auth is enforced (server still rejects), wrong status code
+          severity: "medium",
           message: `bogus_auth returned ${bogus.status}, expected 401 (--strict-401, baseline ${baseline.status})`,
           evidence: { variant: "bogus_auth_strict", baseline_status: baseline.status, bogus_auth_status: bogus.status, strict_401: true },
         };

@@ -69,4 +69,29 @@ describe("ARV-161: security probe + form-encoded body", () => {
     const haveReturnUrl = formCalls.some(c => c.body.includes("return_url="));
     expect(haveReturnUrl).toBe(true);
   });
+
+  // ARV-313: the dry-run PLANNER (not just the live orchestrator) must also
+  // accept form-encoded bodies. It used hasJsonBody → planned 0/291 on Stripe
+  // while mass-assignment planned 290/291.
+  it("dry-run plans form-urlencoded POSTs (not skip_reason 'no-body')", async () => {
+    const { SecurityProbe } = await import("../../../src/core/probe/security-probe-class.ts");
+    const formEp = ep({
+      method: "POST",
+      path: "/v1/payment_links/{id}/capture",
+      requestBodyContentType: "application/x-www-form-urlencoded",
+      requestBodySchema: bodyWithUrl,
+      responses: [{ statusCode: 200, description: "ok" }],
+    });
+    const plan = await new SecurityProbe().dryRun({
+      specPath: "",
+      endpoints: [formEp],
+      securitySchemes: [],
+      vars: { base_url: "https://api.test", id: "pl_1" },
+      classes: ["ssrf"],
+      options: {},
+    } as never);
+    const p = plan.find((e) => e.path === "/v1/payment_links/{id}/capture")!;
+    expect(p.skip_reason).not.toBe("no-body");
+    expect(p.planned).toBe(true);
+  });
 });

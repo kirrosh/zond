@@ -133,7 +133,7 @@ function stableJson(v: unknown): string {
 }
 
 function deepClone<T>(v: T): T {
-  return JSON.parse(JSON.stringify(v));
+  return structuredClone(v);
 }
 
 /**

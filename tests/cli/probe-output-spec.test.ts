@@ -91,4 +91,30 @@ describe("ARV-119: probe family --report resolution", () => {
     ]);
     expect(stderr).not.toContain("Unknown --report format");
   });
+
+  // ARV-321: --emit-tests + --dry-run silently no-op'd (target dir stayed
+  // empty, zero signal) — read as a bug on the live Stripe run
+  // (report-zond friction, 2026-07-02). Both probe families now warn.
+  test("probe mass-assignment --dry-run --emit-tests warns it's a no-op", async () => {
+    const { stderr } = await runCli([
+      "probe", "mass-assignment", specPath, "--dry-run",
+      "--emit-tests", join(workspace, "emitted"),
+    ]);
+    expect(stderr).toContain("--emit-tests skipped");
+    expect(stderr).toContain("--dry-run");
+  });
+
+  test("probe security --dry-run --emit-tests warns it's a no-op", async () => {
+    const { stderr } = await runCli([
+      "probe", "security", "ssrf", specPath, "--dry-run",
+      "--emit-tests", join(workspace, "emitted"),
+    ]);
+    expect(stderr).toContain("--emit-tests skipped");
+    expect(stderr).toContain("--dry-run");
+  });
+
+  test("probe mass-assignment --dry-run without --emit-tests stays silent about it", async () => {
+    const { stderr } = await runCli(["probe", "mass-assignment", specPath, "--dry-run"]);
+    expect(stderr).not.toContain("--emit-tests skipped");
+  });
 });

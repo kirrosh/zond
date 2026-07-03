@@ -34,6 +34,7 @@ import { hashSpec } from "../../core/meta/meta-store.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError } from "../output.ts";
 import { getApi } from "../util/api-context.ts";
+import { detectSkillDrift } from "./init/skills.ts";
 
 export interface DoctorOptions {
   api?: string;
@@ -120,6 +121,10 @@ interface DoctorReport {
     exists: boolean;
     sha: string | null;
   };
+  endpoints: {
+    total: number;
+    by_method: Record<string, number>;
+  } | null;
   fixtures: {
     required: FixtureMetaRow[];
     optional: FixtureMetaRow[];
@@ -341,11 +346,52 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   const warnings: string[] = [];
   if (!specExists) warnings.push(`spec.json not found at ${specAbsPath}`);
   if (!manifest) warnings.push(`.api-fixtures.yaml missing — run \`zond refresh-api ${apiName}\``);
+
+  // ARV-237: warn when workspace .claude/skills/ copy drifts from the
+  // in-binary template (binary upgraded but `zond init` not re-run).
+  // `missing` is silent — user may have opted out via `--no-skills`.
+  try {
+    const wsRoot = findWorkspaceRoot().root;
+    const outdated = detectSkillDrift(wsRoot).filter(d => d.status === "outdated");
+    if (outdated.length > 0) {
+      warnings.push(
+        `workspace skills outdated (${outdated.map(d => d.name).join(", ")}) — run \`zond init\` to refresh .claude/skills/`,
+      );
+    }
+  } catch {
+    // not in a workspace — skip
+  }
   const placeholderRows = [...requiredOut, ...optionalOut].filter(r => r.placeholder);
   if (placeholderRows.length > 0) {
     warnings.push(
       `${placeholderRows.length} path fixture${placeholderRows.length === 1 ? "" : "s"} hold placeholder values (${placeholderRows.map(r => r.name).join(", ")}); positive/CRUD suites will hit fake ids — replace with real values in .env.yaml`,
     );
+  }
+
+  // Endpoint counts from .api-catalog.yaml — read what `zond add api` already
+  // computed, so `--json` consumers (e.g. /zond-scan PF2 budget estimate)
+  // don't have to walk raw spec.json themselves (which would violate the
+  // "never read raw OpenAPI" iron rule in the zond skill).
+  let endpoints: DoctorReport["endpoints"] = null;
+  const catalogPath = join(baseDir, ".api-catalog.yaml");
+  if (existsSync(catalogPath)) {
+    const catalog = readYamlIfExists<{
+      endpointCount?: number;
+      endpoints?: Array<{ method?: string }>;
+    }>(catalogPath);
+    if (catalog) {
+      const list = Array.isArray(catalog.endpoints) ? catalog.endpoints : [];
+      const byMethod: Record<string, number> = {};
+      for (const ep of list) {
+        const m = (ep.method ?? "").toUpperCase();
+        if (!m) continue;
+        byMethod[m] = (byMethod[m] ?? 0) + 1;
+      }
+      endpoints = {
+        total: typeof catalog.endpointCount === "number" ? catalog.endpointCount : list.length,
+        by_method: byMethod,
+      };
+    }
   }
 
   const report: DoctorReport = {
@@ -357,6 +403,7 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
       exists: specExists,
       sha: specSha,
     },
+    endpoints,
     fixtures: {
       required: requiredOut,
       optional: optionalOut,
@@ -378,12 +425,18 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   if (opts.query) {
     const resolved = resolveDotPath(presented, opts.query);
     if (resolved === undefined) {
-      const message = `--query path '${opts.query}' did not resolve in the doctor report (canonical paths: api, spec, fixtures.required, fixtures.optional, fixtures.extraInEnv, staleArtifacts, warnings)`;
+      const message = `--query path '${opts.query}' did not resolve in the doctor report (canonical paths: api, spec, endpoints, fixtures.required, fixtures.optional, fixtures.extraInEnv, staleArtifacts, warnings)`;
       if (opts.json) printJson(jsonError("doctor", [message]));
       else printError(message);
       return 2;
     }
     process.stdout.write(JSON.stringify(resolved, null, 2) + "\n");
+    // ARV-274: --json (incl. --query) returns 0 on successful emit.
+    // Fixture/staleness state is *data*, not command failure — non-zero is
+    // reserved for command failure (missing api, parse error). Text mode
+    // still surfaces state via exit code so `if zond doctor; then ...`
+    // remains a useful gate.
+    if (opts.json) return 0;
     if (blockedRequired > 0) return 1;
     if (staleArtifacts.some(s => !s.fresh) || !specExists || !manifest) return 2;
     return 0;
@@ -392,9 +445,10 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   // ── Output ──
   if (opts.json) {
     printJson(jsonOk("doctor", presented));
-  } else {
-    printHuman(presented, envVars, { missingOnly: opts.missingOnly === true });
+    return 0; // ARV-274: JSON envelope emit success → exit 0
   }
+
+  printHuman(presented, envVars, { missingOnly: opts.missingOnly === true });
 
   if (blockedRequired > 0) return 1;
   if (staleArtifacts.some(s => !s.fresh) || !specExists || !manifest) return 2;

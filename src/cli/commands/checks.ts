@@ -15,7 +15,10 @@ import { resolve as resolvePath, relative as relativePath } from "node:path";
 import type { Command } from "commander";
 
 import { listChecks, runChecks } from "../../core/checks/index.ts";
+import { findWorkspaceRoot } from "../../core/workspace/root.ts";
+import { loadSeverityConfig, SeverityConfigError } from "../../core/severity/loader.ts";
 import { listStatefulChecks } from "../../core/checks/stateful.ts";
+import { resolveBudget, isBudget, BUDGETS, type Budget } from "../../core/checks/budget.ts";
 import { generateSarifReport } from "../../core/checks/sarif.ts";
 import { emitToStdout } from "../../core/reporter/ndjson.ts";
 import { parseWorkers } from "../../core/runner/async-pool.ts";
@@ -27,10 +30,15 @@ import type { ReadbackDiffConfig, IdempotencyConfig, PaginationConfig, Lifecycle
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
+import { readFixtureGaps, gapIndex } from "../../core/workspace/fixture-gaps.ts";
 import { getApi } from "../util/api-context.ts";
 import { VERSION } from "../version.ts";
 import { resolveOutput, OutputSpecError, type OutputSpec, type ResolvedOutput } from "../../core/output/index.ts";
 import type { RunChecksResult } from "../../core/checks/index.ts";
+import type { ChecksCaseEvent } from "../../core/checks/runner.ts";
+import { beginAuditRun, finalizeAuditRun, checksPersistEnabled, type AuditCaseRecord } from "../../core/audit/persist.ts";
+import { readCurrentSession } from "../../core/context/session.ts";
+import { getDb } from "../../db/schema.ts";
 
 /**
  * ARV-118 (m-19): typed declaration of every `--report` / `--output` /
@@ -119,6 +127,14 @@ interface ChecksRunOptions {
   strict405?: boolean;
   strict401?: boolean;
   maxRequests?: number;
+  budget?: string;
+  showSuppressed?: boolean;
+  /** ARV-308: `--no-fail-on-findings` sets this to false (commander default
+   *  true) — keep exit 0 even when HIGH/CRITICAL findings exist so an
+   *  orchestrator can distinguish "found drift" from "command failed". */
+  failOnFindings?: boolean;
+  /** ARV-308: `--advisory` alias for --no-fail-on-findings. */
+  advisory?: boolean;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -188,6 +204,8 @@ async function deriveResourceConfigsFromApi(
         limitParam: r.pagination.limit_param,
         defaultLimit: r.pagination.default_limit,
         itemsField: r.pagination.items_field,
+        pageParam: r.pagination.page_param,
+        startPage: r.pagination.start_page,
       };
     }
     if (r.lifecycle) {
@@ -238,6 +256,19 @@ async function derivePathVarsFromApi(apiName: string | undefined, dbPath: string
   } catch {
     return {};
   }
+}
+
+/** ARV-324: load `.fixture-gaps.yaml` (written by a prior prepare-fixtures/
+ *  discover run) so findings on a known-empty/inaccessible operation get
+ *  `fix_fixture` instead of `report_backend_bug`. Undefined (not an empty
+ *  Set) when there's no API context or no gaps file, so the classifier
+ *  can tell "nothing to check" apart from "checked, no gaps". */
+async function deriveFixtureGapsFromApi(apiName: string | undefined, dbPath: string | undefined): Promise<Set<string> | undefined> {
+  if (!apiName) return undefined;
+  const col = resolveApiCollection(apiName, dbPath);
+  if ("error" in col || !col.baseDir) return undefined;
+  const gaps = await readFixtureGaps(col.baseDir);
+  return gaps.length > 0 ? gapIndex(gaps) : undefined;
 }
 
 async function deriveAuthHeadersFromApi(apiName: string | undefined, dbPath: string | undefined): Promise<Record<string, string>> {
@@ -421,6 +452,23 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     process.exit(2);
   }
 
+  // ARV-283: severity overlay from .zond/severity.yaml and
+  // apis/<api>/.zond-severity.yaml. Both optional — silent when absent;
+  // invalid config aborts with file:keypath:msg (AC#2).
+  let severityConfig;
+  try {
+    const ws = findWorkspaceRoot();
+    severityConfig = loadSeverityConfig({ workspaceRoot: ws.root, api: apiName });
+  } catch (err) {
+    if (err instanceof SeverityConfigError) {
+      const msgs = err.errors.map((e) => `${e.source}: ${e.keyPath}: ${e.message}`);
+      if (json) printJson(jsonError("checks run", msgs));
+      else for (const m of msgs) printError(m);
+      process.exit(2);
+    }
+    throw err;
+  }
+
   // ARV-3: lift auth headers from --auth-header (wins) and/or the
   // resolved --api's .env.yaml (auth_token / api_key conventions).
   const fromEnv = await deriveAuthHeadersFromApi(apiName, opts.db);
@@ -432,6 +480,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   // rounds and CI can't distinguish "spec stable" from "checks ignored deltas").
   const pathVars = await derivePathVarsFromApi(apiName, opts.db);
   const resourceConfigs = await deriveResourceConfigsFromApi(apiName, opts.db);
+  const fixtureGaps = await deriveFixtureGapsFromApi(apiName, opts.db);
 
   const phaseRaw = typeof opts.phase === "string" ? opts.phase : "examples";
   if (phaseRaw !== "examples" && phaseRaw !== "coverage" && phaseRaw !== "all") {
@@ -503,27 +552,106 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   const ndjsonOutputPath: string | undefined = ndjson && resolved.channel === "file" ? resolved.path : undefined;
   let ndjsonFd: number | undefined;
   let ndjsonEventCount = 0;
+  let ndjsonLastFullyWritten = true;
   if (ndjsonOutputPath) {
     ndjsonFd = openSync(ndjsonOutputPath, "w");
   }
   const ndjsonOnEvent = ndjson
     ? (ndjsonFd !== undefined
         ? (ev: import("../../core/reporter/ndjson.ts").NdjsonEvent) => {
+            ndjsonLastFullyWritten = false;
             ndjsonEventCount += 1;
             writeSync(ndjsonFd!, `${JSON.stringify(ev)}\n`);
+            ndjsonLastFullyWritten = true;
           }
         : emitToStdout)
     : undefined;
+
+  // ARV-230: clean SIGTERM/SIGINT shutdown for NDJSON streams. Without
+  // this, killing a long `checks run --report ndjson` leaves a truncated
+  // last line in the file (or in the consumer's pipe) and downstream
+  // `jq -s` chokes until the user strips it with `sed '$d'`. The handler
+  // closes the fd (or drains stdout) and exits with the conventional
+  // 128+signo code instead of letting Node default-terminate mid-write.
+  let removeNdjsonSigHandlers: (() => void) | undefined;
+  if (ndjson) {
+    const shutdown = (signo: number) => {
+      try {
+        if (ndjsonFd !== undefined) {
+          if (!ndjsonLastFullyWritten) {
+            try { writeSync(ndjsonFd, "\n"); } catch { /* fd already gone */ }
+          }
+          try { closeSync(ndjsonFd); } catch { /* already closed */ }
+          ndjsonFd = undefined;
+        }
+      } catch { /* swallow; we're tearing down */ }
+      try { process.stderr.write(`zond: NDJSON run interrupted (signal ${signo}); ${ndjsonEventCount} event(s) flushed.\n`); } catch { /* ignore */ }
+      process.exit(128 + signo);
+    };
+    const onTerm = () => shutdown(15);
+    const onInt = () => shutdown(2);
+    process.on("SIGTERM", onTerm);
+    process.on("SIGINT", onInt);
+    removeNdjsonSigHandlers = () => {
+      process.off("SIGTERM", onTerm);
+      process.off("SIGINT", onInt);
+    };
+  }
+
+  // ARV-265: accumulate every HTTP case `runChecks` dispatches so we can
+  // persist them into the run/results tables after the run completes. The
+  // adapter maps ChecksCaseEvent → AuditCaseRecord (1:1) and groups by
+  // synthetic suite path (`apis/<api>/checks/<phase>`) so `detectRunKind`
+  // would still classify these rows as `check`-kind on legacy queries.
+  const auditPersist = checksPersistEnabled();
+  const auditCases: AuditCaseRecord[] = [];
+  const auditSuiteRoot = `apis/${apiName ?? "_"}/checks`;
+  const onCase = auditPersist
+    ? (ev: ChecksCaseEvent) => {
+        const phaseLabel = ev.phase === "response" ? "response" : ev.phase.replace("stateful_", "stateful/");
+        const suiteFile = `${auditSuiteRoot}/${phaseLabel}.yaml`;
+        const status = ev.verdict === "pass" ? "pass"
+          : ev.verdict === "fail" ? "fail"
+          : ev.verdict === "skip" ? "skip"
+          : "error";
+        auditCases.push({
+          suiteName: `checks/${phaseLabel}`,
+          suiteFile,
+          testName: `${ev.checkId}::${ev.operation.method.toUpperCase()} ${ev.operation.path}`,
+          status,
+          request: ev.request,
+          ...(ev.response ? { response: ev.response } : {}),
+          durationMs: ev.durationMs,
+          ...(ev.error ? { error: ev.error } : {}),
+        });
+      }
+    : undefined;
+
+  let budget: Budget | undefined;
+  if (opts.budget !== undefined) {
+    if (!isBudget(opts.budget)) {
+      printError(`--budget must be one of: ${BUDGETS.join(", ")}; got '${opts.budget}'`);
+      process.exit(1);
+    }
+    budget = opts.budget;
+  }
+  const includeList = expandStatefulAlias(splitList(opts.check));
+  const statefulIds = new Set(listStatefulChecks().map((c) => c.id));
+  const includesStateful = includeList?.some((id) => statefulIds.has(id)) === true;
+  const budgetResolved = resolveBudget(budget, opts.maxRequests, {
+    forceStatefulIfIncluded: includesStateful,
+  });
 
   try {
     const result = await runChecks({
       specPath: specRes.spec,
       baseUrl: baseRes.baseUrl,
-      include: expandStatefulAlias(splitList(opts.check)),
+      include: includeList,
       exclude: expandStatefulAlias(splitList(opts.excludeCheck)),
       timeoutMs: typeof opts.timeout === "number" ? opts.timeout : undefined,
       authHeaders: Object.keys(authHeaders).length > 0 ? authHeaders : undefined,
       pathVars: Object.keys(pathVars).length > 0 ? pathVars : undefined,
+      fixtureGaps,
       resourceConfigs,
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed === true,
       phase: phaseRaw as "examples" | "coverage" | "all",
@@ -533,13 +661,41 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       mode: modeRaw as "positive" | "negative" | "all",
       operationFilter,
       onEvent: ndjsonOnEvent,
+      onCase,
       // ARV-8: bounded concurrency at op-level + optional rate-limiter
       // gating. workers=1 (default) preserves the pre-ARV-8 sequential
       // path inside runPool — same observable behaviour.
       workers,
       rateLimiter,
-      maxRequests: typeof opts.maxRequests === "number" && opts.maxRequests > 0 ? opts.maxRequests : undefined,
+      maxRequests: budgetResolved.maxRequests,
+      skipStateful: budgetResolved.skipStateful,
+      severityConfig,
     });
+
+    // ARV-265: persist the accumulated cases as a `run_kind='check'` run
+    // so `zond coverage --scope audit` can count them. Failures here
+    // degrade to a warning — the user's primary command already succeeded.
+    if (auditPersist && auditCases.length > 0) {
+      try {
+        getDb(opts.db);
+        const { findCollectionByNameOrId } = await import("../../db/queries.ts");
+        const collectionId = apiName ? findCollectionByNameOrId(apiName)?.id : undefined;
+        const session = readCurrentSession();
+        const runId = beginAuditRun({
+          runKind: "check",
+          ...(collectionId != null ? { collectionId } : {}),
+          ...(session?.id ? { sessionId: session.id } : {}),
+          tags: ["checks", `phase:${phaseRaw}`, `mode:${modeRaw}`],
+        });
+        finalizeAuditRun(runId, auditCases);
+      } catch (err) {
+        // Audit persistence is best-effort. Surface the failure on stderr
+        // so an agent can detect it (the missing audit-coverage downstream
+        // will already point them here) without breaking the run.
+        const msg = (err as Error).message;
+        process.stderr.write(`zond: audit persistence failed (${msg}). Re-run with ZOND_CHECKS_PERSIST=0 to silence.\n`);
+      }
+    }
     const warnings: string[] = [];
     for (const id of result.selection.unknown) {
       warnings.push(`Unknown check: "${id}" — ignored. Run \`zond checks list\` to see registered ids.`);
@@ -612,50 +768,104 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       }
       const skipLine = formatSkippedOutcomes(s.skipped_outcomes);
       if (skipLine) console.log(`  ${skipLine}`);
-      // ARV-18: aggregate identical findings (same check + same response
-      // status + same severity) so a 30-operation 401-not-in-spec sweep
-      // collapses to one row instead of drowning out single-shot findings.
-      // Per-operation detail is restored under --verbose; the JSON envelope
-      // and SARIF sidecar always carry the full unaggregated list.
+      // ARV-60: spec-level rollup. When the runner detected ≥80% of a
+      // check's applicable ops sharing one root cause, print one summary
+      // row with an actionable fix hint instead of N per-op rows that
+      // all say the same thing. `--verbose` always shows per-op detail
+      // (and JSON/SARIF carry the full unaggregated list regardless).
+      const rolledUpOps = new Set<string>();
+      if (!opts.verbose) {
+        for (const sf of result.data.spec_findings) {
+          if (sf.kind === "status_drift") {
+            for (const op of sf.affected_operations) {
+              rolledUpOps.add(`${sf.check}|${op.method} ${op.path}`);
+            }
+            console.log(
+              `  [${sf.severity}] ${sf.check} — ${sf.reason} (${sf.count}/${sf.applicable} operations)`,
+            );
+            console.log(`         → ${sf.fix_hint}`);
+          } else {
+            // missing_declaration / no_detector / other — no affected_operations
+            // to enumerate; surfaces as a single info row + fix hint.
+            const tag = sf.kind === "no_detector"
+              ? `${sf.count === 0 ? "0 cases" : `${sf.count} cases`} / ${sf.applicable} applicable ops`
+              : `${sf.count}/${sf.applicable} cases`;
+            console.log(`  [${sf.severity}] ${sf.check} — ${sf.reason} (${tag})`);
+            console.log(`         → ${sf.fix_hint}`);
+          }
+        }
+      }
+      // ARV-283 AC#4: suppressed findings stay in the ndjson audit-trail
+      // but are hidden from the human summary unless `--show-suppressed`
+      // is passed. They never count toward CI gates regardless.
+      const activeFindings = result.data.findings.filter((f) => !f.suppressed_by);
+      const suppressedFindings = result.data.findings.filter((f) => f.suppressed_by);
+
+      // Per-op findings — skip those already covered by a status_drift
+      // rollup unless --verbose was passed.
       if (opts.verbose) {
-        for (const f of result.data.findings) {
+        for (const f of activeFindings) {
           console.log(`  [${f.severity}] ${f.check} ${f.operation.method} ${f.operation.path} — ${f.message}`);
         }
       } else {
-        const groups = new Map<string, { severity: string; check: string; status: number; ops: Set<string>; sample: string }>();
-        for (const f of result.data.findings) {
-          const status = f.response_summary?.status ?? 0;
-          const key = `${f.severity}|${f.check}|${status}`;
-          const opKey = `${f.operation.method} ${f.operation.path}`;
-          let g = groups.get(key);
-          if (!g) {
-            g = { severity: f.severity, check: f.check, status, ops: new Set(), sample: f.message };
-            groups.set(key, g);
-          }
-          g.ops.add(opKey);
+        // ARV-18: dedup identical findings on the SAME op (multiple cases
+        // hitting the same gap) before printing. Spec-rollup above already
+        // handled the across-op clusters; this collapses the within-op
+        // duplicates so the human summary stays readable even when boundary
+        // mutations each trip the same status.
+        const seen = new Set<string>();
+        for (const f of activeFindings) {
+          const opKey = `${f.check}|${f.operation.method} ${f.operation.path}`;
+          if (rolledUpOps.has(opKey)) continue;
+          const dedupKey = `${f.severity}|${opKey}|${f.response_summary?.status ?? 0}|${f.message}`;
+          if (seen.has(dedupKey)) continue;
+          seen.add(dedupKey);
+          console.log(`  [${f.severity}] ${f.check} ${f.operation.method} ${f.operation.path} — ${f.message}`);
         }
-        for (const g of groups.values()) {
-          if (g.ops.size <= 1) {
-            const op = [...g.ops][0] ?? "(unknown op)";
-            console.log(`  [${g.severity}] ${g.check} ${op} — ${g.sample}`);
-          } else {
-            const stem = g.status > 0
-              ? `Status ${g.status} not declared / unexpected`
-              : g.sample.replace(/ for [A-Z]+ .+$/, "");
-            console.log(`  [${g.severity}] ${g.check} — ${stem} (${g.ops.size} operation${g.ops.size === 1 ? "" : "s"} affected; --verbose for per-op detail)`);
-          }
+      }
+
+      if (opts.showSuppressed && suppressedFindings.length > 0) {
+        console.log(`\nSuppressed (${suppressedFindings.length}, not counted in summary):`);
+        for (const f of suppressedFindings) {
+          const sb = f.suppressed_by!;
+          console.log(`  [${f.severity}] ${f.check} ${f.operation.method} ${f.operation.path} — ${f.message}`);
+          console.log(`         ↳ suppressed by ${sb.source}#${sb.rule_index}: ${sb.reason}`);
         }
       }
     }
     // Exit-code rule: 0 when no HIGH/CRITICAL findings, 1 otherwise. LOW/MEDIUM
     // findings are reported but don't gate CI by default — agents that want
     // strict gating can post-process the JSON envelope.
+    //
+    // ARV-308: --no-fail-on-findings / --advisory keeps exit 0 even with
+    // HIGH/CRITICAL findings, mirroring `zond run --no-fail-on-failures`, so
+    // an orchestrator can tell "found drift" (exit 0, findings in envelope)
+    // from "command failed" (exit 2). The stderr tail still names the count.
+    const advisory = opts.advisory === true || opts.failOnFindings === false;
+    // ARV-320: this used to skip on ndjson under the assumption that "stderr
+    // already carried the summary just above" — false for ndjson, which takes
+    // a separate branch that only ever writes "NDJSON report written to
+    // <path>" to stderr. Under `--report ndjson` + `set -e` in CI, that made
+    // exit 1 look unexplained (report-zond friction on the 2026-07-02 Stripe
+    // run: "this step will 'fail' silently with valid data sitting right
+    // there"). Always write the reason to stderr — it's stderr, not stdout,
+    // so ndjson's stdout-discipline (AC#5) is untouched.
+    if (result.high_or_critical > 0) {
+      const suffix = advisory
+        ? " — advisory mode, exiting 0 (findings are in the envelope)"
+        : " — exiting with code 1 (pass --no-fail-on-findings / --advisory to suppress, e.g. for advisory runs)";
+      process.stderr.write(
+        `zond: ${result.high_or_critical} HIGH/CRITICAL finding(s)${suffix}.\n`,
+      );
+    }
     if (ndjsonFd !== undefined) closeSync(ndjsonFd);
-    process.exit(result.high_or_critical > 0 ? 1 : 0);
+    removeNdjsonSigHandlers?.();
+    process.exit(result.high_or_critical > 0 && !advisory ? 1 : 0);
   } catch (err) {
     if (ndjsonFd !== undefined) {
       try { closeSync(ndjsonFd); } catch { /* fd may already be invalid */ }
     }
+    removeNdjsonSigHandlers?.();
     const msg = err instanceof Error ? err.message : String(err);
     if (json) printJson(jsonError("checks run", [msg]));
     else printError(msg);
@@ -741,8 +951,24 @@ function defineRun(parent: Command): void {
     )
     .option(
       "--max-requests <n>",
-      "ARV-227: hard cap on outbound HTTP requests for the whole run (per-response + stateful share the same budget). Once reached, remaining cases short-circuit with `max-requests-cap-reached` in summary.skipped_outcomes. Use to keep coverage runs against large specs (github, kubernetes) bounded.",
+      "ARV-227: hard cap on outbound HTTP requests for the whole run (per-response + stateful share the same budget). Once reached, remaining cases short-circuit with `max-requests-cap-reached` in summary.skipped_outcomes. Always wins over the --budget tier cap.",
       (v) => Number.parseInt(v, 10),
+    )
+    .option(
+      "--budget <tier>",
+      "ARV-292: adaptive cap and stateful gating tier. `quick` (cap 50, skip stateful) → ~60-sec gate. `standard` (cap 500, all checks). `full` (uncapped). Omitted ⇒ legacy uncapped behaviour. --max-requests always overrides the tier cap; `--check stateful` opts back into stateful even under `quick`.",
+    )
+    .option(
+      "--show-suppressed",
+      "ARV-283: show findings suppressed by `.zond/severity.yaml` in the text summary (with their suppressed_by trace). Suppressed findings stay in ndjson/JSON audit-trail regardless of this flag and never count toward CI exit codes.",
+    )
+    .option(
+      "--no-fail-on-findings",
+      "ARV-308: keep exit code 0 even when HIGH/CRITICAL findings exist (advisory runs). Mirrors `zond run --no-fail-on-failures`. Lets an orchestrator distinguish 'found drift' (exit 0) from 'command failed' (exit 2). Default: exit 1 on any HIGH/CRITICAL finding.",
+    )
+    .option(
+      "--advisory",
+      "ARV-308: alias for --no-fail-on-findings.",
     )
     .action(checksRunAction);
 }

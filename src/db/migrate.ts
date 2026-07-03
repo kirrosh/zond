@@ -32,6 +32,7 @@
 import type { Database } from "bun:sqlite";
 
 import migration_0001_run_kind from "./migrations/0001_run_kind.sql" with { type: "text" };
+import migration_0002_run_kind_request from "./migrations/0002_run_kind_request.sql" with { type: "text" };
 
 /** Migration manifest. Each entry is a `{ id, sql }` pair; order in
  *  this array is the apply order, matching the lexical sort that the
@@ -40,6 +41,7 @@ import migration_0001_run_kind from "./migrations/0001_run_kind.sql" with { type
  *  list. The runner reads this constant, not the filesystem. */
 const MIGRATIONS: ReadonlyArray<{ id: string; sql: string }> = [
   { id: "0001_run_kind", sql: migration_0001_run_kind },
+  { id: "0002_run_kind_request", sql: migration_0002_run_kind_request },
 ];
 
 /** Pre-existing migration ids that were already applied by the legacy

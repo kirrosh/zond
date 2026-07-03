@@ -156,7 +156,8 @@ describe("zond doctor", () => {
   test("TASK-145: --missing-only hides healthy rows in --json", async () => {
     writeFileSync(join(workspace, "apis", "tiny", ".env.yaml"), "_unused: 1\n", "utf-8");
     const r = await runDoctor({ api: "tiny", json: true, missingOnly: true });
-    expect(r.exitCode).toBe(1);
+    // ARV-274: --json exit 0 on successful envelope emit, regardless of fixture state.
+    expect(r.exitCode).toBe(0);
     const env = JSON.parse(r.stdout) as {
       data: {
         fixtures: { required: Array<{ set: boolean }>; optional: unknown[]; extraInEnv: string[] };
@@ -195,5 +196,26 @@ describe("zond doctor", () => {
     const r = await runDoctor({ api: "tiny", query: "diagnostics.fixtures" });
     expect(r.exitCode).toBe(2);
     expect(r.stderr + r.stdout).toMatch(/did not resolve/);
+  });
+
+  test("ARV-274: --json exit 0 even when fixtures UNSET (envelope is valid)", async () => {
+    writeFileSync(join(workspace, "apis", "tiny", ".env.yaml"), "_unused: 1\n", "utf-8");
+    const r = await runDoctor({ api: "tiny", json: true });
+    expect(r.exitCode).toBe(0);
+    const env = JSON.parse(r.stdout) as { ok: boolean; data: { blockedRequired: number } };
+    expect(env.ok).toBe(true);
+    expect(env.data.blockedRequired).toBeGreaterThan(0);
+  });
+
+  test("ARV-274: --json + --query exit 0 on valid JSON emit", async () => {
+    writeFileSync(join(workspace, "apis", "tiny", ".env.yaml"), "_unused: 1\n", "utf-8");
+    const r = await runDoctor({ api: "tiny", json: true, query: "fixtures.required" });
+    expect(r.exitCode).toBe(0);
+  });
+
+  test("ARV-274: text mode still surfaces fixture state via exit 1", async () => {
+    writeFileSync(join(workspace, "apis", "tiny", ".env.yaml"), "_unused: 1\n", "utf-8");
+    const r = await runDoctor({ api: "tiny" });
+    expect(r.exitCode).toBe(1);
   });
 });

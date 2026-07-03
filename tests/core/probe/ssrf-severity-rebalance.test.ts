@@ -55,9 +55,15 @@ describe("SSRF severity rebalance (ARV-254)", () => {
   });
 
   it("LOW on a plain endpoint when URL accepted but not echoed (no OOB)", async () => {
+    // Each response carries a unique id so the baseline-echo anti-FP
+    // rule (ARV-126) does NOT fire — without this the rule deep-equals
+    // the baseline and attack bodies, downgrades severity to "ok", and
+    // the test flakes whenever this file runs after another test that
+    // bootstraps the anti-FP registry (order-dependent on CI).
+    let n = 0;
     harness.setResponder((req) => {
       if (req.method === "DELETE") return { status: 204 };
-      return { status: 201, body: { id: "x" } };
+      return { status: 201, body: { id: `lnk_${n++}` } };
     });
     const result = await runSecurityProbes({
       allowLeaks: true,

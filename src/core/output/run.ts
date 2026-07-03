@@ -89,38 +89,3 @@ function pickEnvelopeFormat<P>(spec: OutputSpec<P>): string | undefined {
   return undefined;
 }
 
-export interface RunOutputResult<P> {
-  resolved: ResolvedOutput;
-  payload: P;
-  exitCode: number;
-}
-
-/** Render and write the payload according to the resolved decision.
- *  Returns the resolved decision plus the exit code from the spec's
- *  `exitCodePolicy` (0 by default). The CLI handler typically passes
- *  the exit code straight to `process.exit`. */
-export async function runCommandWithOutput<P>(
-  spec: OutputSpec<P>,
-  opts: OutputOptions,
-  produce: () => Promise<P>,
-): Promise<RunOutputResult<P>> {
-  const resolved = resolveOutput(spec, opts);
-  const payload = await produce();
-
-  if (!spec.render) {
-    throw new OutputSpecError(
-      `OutputSpec for "${spec.command}" has no render() hook — cannot serialise payload`,
-    );
-  }
-  const body = spec.render(resolved.format, payload);
-
-  if (resolved.channel === "file") {
-    await Bun.write(resolved.path!, body);
-  } else {
-    process.stdout.write(body);
-    if (!body.endsWith("\n")) process.stdout.write("\n");
-  }
-
-  const exitCode = spec.exitCodePolicy ? spec.exitCodePolicy(payload) : 0;
-  return { resolved, payload, exitCode };
-}

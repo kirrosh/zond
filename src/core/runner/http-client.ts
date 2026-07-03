@@ -1,6 +1,34 @@
 import type { HttpRequest, HttpResponse } from "./types.ts";
 import { type RateLimiter, parseRetryAfter, parseRateLimitHeaders } from "./rate-limiter.ts";
 
+/**
+ * ARV-265: module-level audit hook for commands that don't drive their
+ * HTTP through the suite runner. Each `executeRequest` call fires the
+ * registered recorder with the final outcome (or the swallowed network
+ * error if the call exhausted its retry budget). Recorders MUST NOT
+ * throw — the http client treats them as fire-and-forget telemetry.
+ *
+ * Convention: a command sets the recorder before the live work begins,
+ * unsets it in a `finally` block. There can be at most one recorder at
+ * a time; nesting is a bug (we surface it on stderr but keep the inner
+ * recorder so the live command's results take precedence).
+ */
+export interface AuditRecord {
+  request: HttpRequest;
+  response?: HttpResponse;
+  durationMs: number;
+  error?: string;
+}
+
+let _auditRecorder: ((rec: AuditRecord) => void) | null = null;
+
+export function setHttpAuditRecorder(recorder: ((rec: AuditRecord) => void) | null): void {
+  if (recorder && _auditRecorder) {
+    process.stderr.write("zond: nested HTTP audit recorder — overriding the outer scope.\n");
+  }
+  _auditRecorder = recorder;
+}
+
 export interface FetchOptions {
   timeout: number;
   retries: number;
@@ -153,7 +181,7 @@ export async function executeRequest(
         }
       }
 
-      return {
+      const httpResp: HttpResponse = {
         status: response.status,
         headers,
         body: bodyText,
@@ -161,6 +189,11 @@ export async function executeRequest(
         duration_ms,
         network_retry_count: networkRetryCount,
       };
+      if (_auditRecorder) {
+        try { _auditRecorder({ request, response: httpResp, durationMs: duration_ms }); }
+        catch { /* recorder is fire-and-forget */ }
+      }
+      return httpResp;
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
       const isNet = isTransientNetworkError(lastError);
@@ -180,6 +213,10 @@ export async function executeRequest(
         networkAttempt++;
         await Bun.sleep(opts.retry_delay);
         continue;
+      }
+      if (_auditRecorder) {
+        try { _auditRecorder({ request, durationMs: 0, error: lastError.message }); }
+        catch { /* recorder is fire-and-forget */ }
       }
       throw lastError;
     }
