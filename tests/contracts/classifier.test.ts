@@ -122,6 +122,8 @@ const TABLE: Row[] = [
     ctx: { finding_class: "check:missing_required_header" }, expected: "add_required_header" },
   { name: "check:ignored_auth → fix_auth_config",
     ctx: { finding_class: "check:ignored_auth" }, expected: "fix_auth_config" },
+  { name: "check:rate_limit_headers_absent → report_backend_bug (ARV-304: not fix_auth_config)",
+    ctx: { finding_class: "check:rate_limit_headers_absent" }, expected: "report_backend_bug" },
   { name: "check:network_error 401 → fix_auth_config",
     ctx: { finding_class: "check:network_error", status: 401 }, expected: "fix_auth_config" },
   { name: "check:network_error 0 → fix_network_config",
