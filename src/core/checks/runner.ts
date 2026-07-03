@@ -197,6 +197,13 @@ export interface RunChecksOptions {
    *  `loadSeverityConfig()` and forwards it; tests can pass a literal
    *  MergedConfig (build with `mergeConfigs([{config, source}])`). */
   severityConfig?: MergedConfig;
+  /** ARV-328: fired after each operation finishes the response phase —
+   *  lets the CLI print a throttled progress line during long coverage
+   *  runs. `done`/`total` are operations (case count isn't known up
+   *  front); `cases` is HTTP cases executed so far.
+   *  ponytail: response phase only — stateful phase is short by
+   *  comparison; extend there if it ever dominates wall-clock. */
+  onProgress?: (progress: { done: number; total: number; cases: number }) => void;
 }
 
 export interface RunChecksResult {
@@ -929,7 +936,16 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   // sequential code path inside runPool — same microtask interleaving as
   // before, AC #4 backward-compat.
   const workers = opts.workers ?? 1;
-  const opReports = await runPool(ops, workers, processOperation);
+  // ARV-328: progress accounting rides on op completion.
+  let opsDone = 0;
+  let casesDone = 0;
+  const opReports = await runPool(ops, workers, async (op: EndpointInfo) => {
+    const report = await processOperation(op);
+    opsDone += 1;
+    casesDone += report.cases;
+    opts.onProgress?.({ done: opsDone, total: ops.length, cases: casesDone });
+    return report;
+  });
 
   let findings: CheckFinding[] = [];
   /** ARV-60: per-check accumulator for spec_findings rollup. Built from

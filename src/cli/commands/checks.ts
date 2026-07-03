@@ -666,6 +666,21 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     forceStatefulIfIncluded: includesStateful,
   });
 
+  // ARV-328: throttled progress line on stderr during long runs (CI jobs
+  // and subagents with wall-clock budgets had zero visibility — the only
+  // artifact was the growing ndjson file). stderr never corrupts stdout
+  // reports; 10s throttle keeps short runs silent.
+  const PROGRESS_INTERVAL_MS = 10_000;
+  let lastProgressAt = Date.now();
+  const onProgress = (p: { done: number; total: number; cases: number }) => {
+    const now = Date.now();
+    if (now - lastProgressAt < PROGRESS_INTERVAL_MS) return;
+    lastProgressAt = now;
+    try {
+      process.stderr.write(`zond: progress — ${p.done}/${p.total} operations, ${p.cases} case(s) run\n`);
+    } catch { /* ignore */ }
+  };
+
   try {
     const result = await runChecks({
       specPath: specRes.spec,
@@ -686,6 +701,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       operationFilter,
       onEvent: ndjsonOnEvent,
       onCase,
+      onProgress,
       // ARV-8: bounded concurrency at op-level + optional rate-limiter
       // gating. workers=1 (default) preserves the pre-ARV-8 sequential
       // path inside runPool — same observable behaviour.

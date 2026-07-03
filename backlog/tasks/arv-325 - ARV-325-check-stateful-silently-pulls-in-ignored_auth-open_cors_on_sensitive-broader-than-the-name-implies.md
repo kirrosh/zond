@@ -3,9 +3,10 @@ id: ARV-325
 title: >-
   ARV-325: --check stateful silently pulls in
   ignored_auth/open_cors_on_sensitive, broader than the name implies
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-03 07:42'
+updated_date: '2026-07-03 16:11'
 labels:
   - checks
 dependencies: []
@@ -20,6 +21,12 @@ Found on Stripe zond-audit run 20260703-100734 (raw/40-stateful.ndjson). 'zond c
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 --check stateful --help (or the checks reference doc) explicitly lists which checks the 'stateful' selector includes, so ignored_auth/open_cors_on_sensitive showing up isn't a surprise
-- [ ] #2 if the broad inclusion is unintended, ignored_auth/open_cors_on_sensitive are removed from the stateful category
+- [x] #1 --check stateful --help (or the checks reference doc) explicitly lists which checks the 'stateful' selector includes, so ignored_auth/open_cors_on_sensitive showing up isn't a surprise
+- [x] #2 if the broad inclusion is unintended, ignored_auth/open_cors_on_sensitive are removed from the stateful category
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Alias now excludes ignored_auth/open_cors_on_sensitive (STATEFUL_ALIAS_EXCLUDED in cli/commands/checks.ts); both remain runnable by explicit id. --check help lists full alias contents; zond.md/zond-checks.md skill templates updated + installed copies synced. Test: tests/cli/checks/stateful-alias.test.ts
+<!-- SECTION:NOTES:END -->
