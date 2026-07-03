@@ -24,6 +24,12 @@ export interface AutoInference {
   confidence: Confidence;
   rationale: string;
   patch: ResourcePatch;
+  /** ARV-329: set on a "couldn't produce anything" seed-body marker —
+   *  the resource has a create endpoint but the heuristic filled zero
+   *  fields (top-level union, no required, opaque body). The row exists
+   *  only so `--gap-report` surfaces it as agent-worklist instead of
+   *  silently dropping it; its empty patch must never be applied. */
+  unfillable?: true;
 }
 
 // ─── Pagination ──────────────────────────────────────────────────────
@@ -692,8 +698,31 @@ export function inferForAspect(
     case "pagination": return inferPagination(slice);
     case "lifecycle":  return inferLifecycle(slice);
     case "idempotency": return inferIdempotency(slice);
-    case "seed-bodies": return inferSeedBody(slice, env);
+    case "seed-bodies": return inferSeedBody(slice, env) ?? unfillableSeedMarker(slice);
   }
+}
+
+/**
+ * ARV-329: when `inferSeedBody` gives up on a resource that DOES have a
+ * create endpoint (Stripe `accounts`: top-level discriminated union, no
+ * fabricatable required fields), emit a low-confidence marker so
+ * `--gap-report` lists it as agent-worklist instead of dropping it
+ * silently. Returns null only when there's genuinely no create body to
+ * seed (nothing to flag). The marker's patch is intentionally empty and
+ * carries `unfillable` so `--auto-apply` never writes it to the overlay.
+ */
+function unfillableSeedMarker(slice: ResourceSlice): AutoInference | null {
+  const rb = slice.endpoints.create?.requestBody;
+  if (!rb || !rb.schema || typeof rb.schema !== "object") return null;
+  const reason = describeGap(rb.schema as Record<string, unknown>);
+  return {
+    resource: slice.resource,
+    aspect: "seed-bodies",
+    confidence: "low",
+    unfillable: true,
+    rationale: `heuristic produced no seed_body (${reason}); needs agent-authored overlay — \`zond api annotate dump --seed-bodies --only ${slice.resource} --with-last-attempt\``,
+    patch: { resource: slice.resource, seed_body: { content_type: rb.contentType, body: {} } },
+  };
 }
 
 export function inferAll(

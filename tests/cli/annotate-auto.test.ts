@@ -12,6 +12,7 @@ import {
   inferLifecycle,
   inferIdempotency,
   inferSeedBody,
+  inferForAspect,
   inferAll,
   meetsConfidence,
   extractEnumFromDescription,
@@ -791,6 +792,41 @@ describe("inferSeedBody (ARV-270)", () => {
     // other required field to anchor a partial body, the whole inference
     // collapses to null.
     expect(inferSeedBody(s)).toBeNull();
+  });
+});
+
+describe("unfillable seed marker (ARV-329)", () => {
+  const unionSlice: ResourceSlice = {
+    resource: "accounts",
+    basePath: "/v1/accounts",
+    itemPath: "/v1/accounts/{id}",
+    endpoints: {
+      create: {
+        method: "POST",
+        path: "/v1/accounts",
+        // Stripe Connect account: top-level discriminated union that
+        // inferSeedBody bails on (returns null).
+        requestBody: {
+          contentType: "application/x-www-form-urlencoded",
+          schema: { type: "object", oneOf_first: { properties: { type: { type: "string" } } } },
+        },
+      },
+    },
+  };
+
+  test("create endpoint the heuristic can't seed → low-confidence marker, not dropped", () => {
+    expect(inferSeedBody(unionSlice)).toBeNull();
+    const inf = inferForAspect("seed-bodies", unionSlice);
+    expect(inf).not.toBeNull();
+    expect(inf!.confidence).toBe("low");
+    expect(inf!.unfillable).toBe(true);
+    expect(inf!.rationale).toMatch(/no seed_body/);
+    expect((inf!.patch.seed_body!.body as Record<string, unknown>)).toEqual({});
+  });
+
+  test("no create endpoint → still null (nothing to flag)", () => {
+    const s = slice({ resource: "x", endpoints: {} });
+    expect(inferForAspect("seed-bodies", s)).toBeNull();
   });
 });
 
