@@ -364,9 +364,15 @@ zond generate apis/<name>/spec.json --output apis/<name>/tests [--tag <spec-tag>
 zond check tests apis/<name>/tests
 ```
 
-`generate` fills bodies with `{{$randomString}}`. Format-strict APIs
-reject many — that's a **test-fix**, not a backend bug. Pair with
-Phase 1 fixtures + Phase 2 annotation.
+`generate` fills bodies with typed generators (`{{$randomString}}` etc.).
+Format-strict APIs reject many — that's a **test-fix**, not a backend bug.
+Pair with Phase 1 fixtures + Phase 2 annotation.
+
+Required FK / reference body fields (`*_id`, unresolved `*Code` like
+`sequenceTypeCode`) are wired to `{{fixture}}` refs (ARV-45) — canonicalised
+(`sequence_type_code`) and listed in `.api-fixtures.yaml` as `source: body-fk`.
+Fill their real values once in `.env.yaml`; no more hand-editing generated
+tests. Blank fixture → the var is unbound and dependent tests skip.
 
 If a CRUD chain you expected is missing, run
 `zond generate <spec> --explain` — diagnostic table shows every POST

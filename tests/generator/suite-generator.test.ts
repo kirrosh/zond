@@ -159,6 +159,52 @@ describe("generateStep", () => {
     expect(step.json).toEqual({ name: "{{$randomName}}" });
   });
 
+  test("ARV-45: required FK/code body fields wire to {{fixture}} refs, not random junk", () => {
+    const ep = makeEndpoint({
+      path: "/sequences",
+      method: "POST",
+      requestBodySchema: {
+        type: "object",
+        required: ["sequenceTypeCode", "templateGroupCode", "audience_id", "country_code", "name"],
+        properties: {
+          sequenceTypeCode: { type: "string" },
+          templateGroupCode: { type: "string" },
+          audience_id: { type: "string" },
+          country_code: { type: "string" }, // heuristic resolves → not a fixture
+          name: { type: "string" },         // free-text → stays random
+        },
+      } as OpenAPIV3.SchemaObject,
+    });
+    const step = generateStep(ep, noSecurity) as any;
+    expect(step.json.sequenceTypeCode).toBe("{{sequence_type_code}}");
+    expect(step.json.templateGroupCode).toBe("{{template_group_code}}");
+    expect(step.json.audience_id).toBe("{{audience_id}}");
+    expect(step.json.country_code).toBe("US");
+    expect(step.json.name).toBe("{{$randomName}}");
+  });
+
+  test("ARV-45: FK wiring resolves allOf-wrapped bodies (.NET/Swagger norm)", () => {
+    const ep = makeEndpoint({
+      path: "/api/sequences/v30",
+      method: "POST",
+      requestBodySchema: {
+        allOf: [
+          {
+            type: "object",
+            required: ["code", "sequenceTypeCode"],
+            properties: {
+              code: { type: "string" },
+              sequenceTypeCode: { type: "string" },
+            },
+          },
+        ],
+      } as OpenAPIV3.SchemaObject,
+    });
+    const step = generateStep(ep, noSecurity) as any;
+    expect(step.json.sequenceTypeCode).toBe("{{sequence_type_code}}");
+    expect(step.json.code).toBe("{{$randomString}}"); // `code` (lowercase) is not an FK code
+  });
+
   test("adds auth header for bearer security", () => {
     const ep = makeEndpoint({
       path: "/pets",

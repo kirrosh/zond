@@ -488,10 +488,48 @@ describe("ARV-165 — format-aware helpers (country/currency/mcc/color)", () => 
     expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "bank_account_country")).toBe("US");
     expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "payout_currency")).toBe("USD");
   });
+  test("camelCase names canonicalise into snake_case heuristics", () => {
+    const s = { type: "string" } as OpenAPIV3.SchemaObject;
+    expect(generateFromSchema(s, "countryCode")).toBe("US");
+    expect(generateFromSchema(s, "currencyCode")).toBe("USD");
+    expect(generateFromSchema(s, "firstName")).toBe("{{$randomName}}");
+    expect(generateFromSchema(s, "userEmail")).toBe("{{$randomEmail}}");
+    expect(generateFromSchema(s, "replyTo")).toBe("{{$randomEmail}}");
+    expect(generateFromSchema(s, "webhookUrl")).toBe("{{$randomUrl}}");
+  });
   test("name=ip / tos_acceptance.ip → randomIpv4", () => {
     expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "ip")).toBe("{{$randomIpv4}}");
     expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "remote_ip")).toBe("{{$randomIpv4}}");
     expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "ip_address")).toBe("{{$randomIpv4}}");
+  });
+});
+
+import { isFkFixtureField } from "../../src/core/generator/data-factory.ts";
+
+describe("ARV-45 — isFkFixtureField (FK-aware body builder)", () => {
+  const str = { type: "string" } as OpenAPIV3.SchemaObject;
+  test("FK id suffixes are always fixtures", () => {
+    expect(isFkFixtureField("audience_id", str)).toBe(true);
+    expect(isFkFixtureField("issueId", str)).toBe(true);
+    expect(isFkFixtureField("thing_uuid", str)).toBe(true);
+  });
+  test("closed-vocab codes with no heuristic are fixtures", () => {
+    expect(isFkFixtureField("sequenceTypeCode", str)).toBe(true);
+    expect(isFkFixtureField("templateGroupCode", str)).toBe(true);
+    expect(isFkFixtureField("template_group_code", str)).toBe(true);
+  });
+  test("codes a heuristic resolves are NOT fixtures (snake AND camelCase)", () => {
+    expect(isFkFixtureField("country_code", str)).toBe(false);
+    expect(isFkFixtureField("currency_code", str)).toBe(false);
+    // camelCase now canonicalises → same heuristic → still not a fixture
+    expect(isFkFixtureField("countryCode", str)).toBe(false);
+    expect(isFkFixtureField("currencyCode", str)).toBe(false);
+  });
+  test("enum / example / non-reference names are NOT fixtures", () => {
+    expect(isFkFixtureField("someCode", { type: "string", enum: ["a"] } as OpenAPIV3.SchemaObject)).toBe(false);
+    expect(isFkFixtureField("groupCode", { type: "string", example: "g109" } as OpenAPIV3.SchemaObject)).toBe(false);
+    expect(isFkFixtureField("name", str)).toBe(false);
+    expect(isFkFixtureField("title", str)).toBe(false);
   });
 });
 
