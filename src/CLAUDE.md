@@ -53,7 +53,7 @@ zond — API hygiene scanner. **Dumb-tool**: умеет дёргать API, со
 
 ## db/
 
-SQLite на bun. `migrations/` — versioned migrations, `schema.ts` — текущий schema, `queries/` — типизированные SQL. Используется reporter'ами и `coverage` для исторических runs. Retention policy — ARV-266.
+SQLite на bun. `migrations/` — versioned migrations, `schema.ts` — текущий schema, `queries/` — типизированные SQL. Используется reporter'ами и `coverage` для исторических runs. Retention (ARV-266): `zond db stats` — счётчики строк per `run_kind`; `zond db prune` — opt-in удаление (per-kind defaults: check/probe/request/fixture старше 7d, `regular` — forever; `--older-than 30d` для uniform-cutoff), VACUUM после delete.
 
 ## Data-flow по фазам
 

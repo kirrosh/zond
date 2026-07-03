@@ -43,6 +43,9 @@ export {
   listRunsByCollectionFiltered,
   getLatestFailingRunId,
   getLatestRunId,
+  runKindStats,
+  deleteRunsOlderThan,
+  type RunKindStat,
 } from "./queries/runs.ts";
 
 export { listSessions, countSessions, listRunsBySession } from "./queries/sessions.ts";

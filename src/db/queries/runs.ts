@@ -223,6 +223,60 @@ export function deleteRun(runId: number): boolean {
   });
 }
 
+/** ARV-266: per-run_kind row counts so `zond db stats` can surface DB
+ *  growth. `results` counts the child rows that would be reclaimed. */
+export interface RunKindStat {
+  run_kind: string;
+  runs: number;
+  results: number;
+  oldest?: string;
+  newest?: string;
+}
+
+export function runKindStats(): RunKindStat[] {
+  const db = getDb();
+  const rows = db.query(`
+    SELECT r.run_kind AS run_kind,
+           COUNT(DISTINCT r.id) AS runs,
+           COUNT(res.id) AS results,
+           MIN(r.started_at) AS oldest,
+           MAX(r.started_at) AS newest
+    FROM runs r
+    LEFT JOIN results res ON res.run_id = r.id
+    GROUP BY r.run_kind
+    ORDER BY runs DESC
+  `).all() as Array<{ run_kind: string; runs: number; results: number; oldest: string | null; newest: string | null }>;
+  return rows.map((r) => ({
+    run_kind: r.run_kind,
+    runs: r.runs,
+    results: r.results,
+    ...(r.oldest ? { oldest: r.oldest } : {}),
+    ...(r.newest ? { newest: r.newest } : {}),
+  }));
+}
+
+/** ARV-266: delete runs (and their results) started strictly before
+ *  `cutoffIso`. When `kind` is given, only that run_kind is pruned.
+ *  Returns the number of runs + result rows removed. Caller VACUUMs. */
+export function deleteRunsOlderThan(
+  cutoffIso: string,
+  kind?: string,
+): { runs: number; results: number } {
+  const db = getDb();
+  return withDbRetry("deleteRunsOlderThan", () => {
+    const kindClause = kind ? "AND run_kind = ?" : "";
+    const selParams = kind ? [cutoffIso, kind] : [cutoffIso];
+    const ids = (db.query(
+      `SELECT id FROM runs WHERE started_at < ? ${kindClause}`,
+    ).all(...selParams) as Array<{ id: number }>).map((r) => r.id);
+    if (ids.length === 0) return { runs: 0, results: 0 };
+    const placeholders = ids.map(() => "?").join(",");
+    const res = db.prepare(`DELETE FROM results WHERE run_id IN (${placeholders})`).run(...ids);
+    db.prepare(`DELETE FROM runs WHERE id IN (${placeholders})`).run(...ids);
+    return { runs: ids.length, results: res.changes };
+  });
+}
+
 export function countRuns(filters?: RunFilters): number {
   const db = getDb();
   if (filters && Object.values(filters).some(Boolean)) {
