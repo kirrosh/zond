@@ -6,11 +6,12 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-18 15:26'
+updated_date: '2026-07-03 15:53'
 labels:
   - bug
   - zond-side
 dependencies: []
-priority: medium
+priority: high
 ---
 
 ## Description
