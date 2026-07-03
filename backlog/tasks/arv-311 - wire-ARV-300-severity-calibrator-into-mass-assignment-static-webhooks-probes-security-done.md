@@ -3,9 +3,10 @@ id: ARV-311
 title: >-
   wire ARV-300 severity calibrator into mass-assignment/static/webhooks probes
   (security done)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-02 14:07'
+updated_date: '2026-07-03 16:29'
 labels:
   - calibration
 dependencies: []
@@ -20,8 +21,14 @@ ARV-300 landed the reusable adapter (core/severity/probe-adapter.ts: calibratePr
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 mass-assignment probe findings pass through calibrateProbeSeverity
-- [ ] #2 static + webhooks probe findings pass through calibrateProbeSeverity
-- [ ] #3 each family recomputes its verdict rollup after calibration
-- [ ] #4 sentinel severities round-trip untouched (regression test per family)
+- [x] #1 mass-assignment probe findings pass through calibrateProbeSeverity
+- [x] #2 static + webhooks probe findings pass through calibrateProbeSeverity
+- [x] #3 each family recomputes its verdict rollup after calibration
+- [x] #4 sentinel severities round-trip untouched (regression test per family)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+mass-assignment + webhooks now load severityConfig and calibrate via calibrateProbeSeverity (ARV-300 adapter). mass-assignment: per-verdict rollup severity calibrated in place (finaliseSeverity is the rollup); webhooks: per-finding by kind, then severityCount/exit-code recompute. static is a generator with no severity output — AC#2's 'static' is N/A (documented in commit). Sentinel round-trip regression: tests/core/probe/probe-severity-calibration-families.test.ts (4 tests).
+<!-- SECTION:NOTES:END -->
