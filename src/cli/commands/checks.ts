@@ -369,9 +369,22 @@ function splitList(values: string[] | undefined): string[] | undefined {
 // instead of hand-listing cross_call_references, idempotency_replay, … —
 // matching the prior `--phase stateful` UX promise without overloading the
 // case-generation `--phase` flag.
-function expandStatefulAlias(ids: string[] | undefined): string[] | undefined {
+// ARV-325: `ignored_auth` / `open_cors_on_sensitive` live in the stateful
+// *registry* (they need the stateful harness to run), but semantically they
+// are auth/security checks. Users reading `--check stateful` expect
+// state-machine probes, not a full security pass — on Stripe the pair added
+// ~520 extra cases and turned a sub-minute run into ~10 minutes. Keep them
+// runnable by explicit id; just don't smuggle them in through the alias.
+const STATEFUL_ALIAS_EXCLUDED: ReadonlySet<string> = new Set([
+  "ignored_auth",
+  "open_cors_on_sensitive",
+]);
+
+export function expandStatefulAlias(ids: string[] | undefined): string[] | undefined {
   if (!ids) return ids;
-  const statefulIds = listStatefulChecks().map((c) => c.id);
+  const statefulIds = listStatefulChecks()
+    .map((c) => c.id)
+    .filter((id) => !STATEFUL_ALIAS_EXCLUDED.has(id));
   const out: string[] = [];
   for (const id of ids) {
     if (id === "stateful") out.push(...statefulIds);
@@ -898,7 +911,7 @@ function defineRun(parent: Command): void {
     .option("--api <name>", "Use the registered API's spec + .env.yaml")
     .option("--spec <path>", "Explicit OpenAPI spec path (overrides --api)")
     .option("--base-url <url>", "Base URL for requests (overrides --api env file)")
-    .option("--check <ids...>", "Only run these checks (comma-separated or repeated)")
+    .option("--check <ids...>", "Only run these checks (comma-separated or repeated). 'stateful' expands to the state-machine set: use_after_free, ensure_resource_availability, cross_call_references, idempotency_replay, pagination_invariants, lifecycle_transitions, cursor_boundary_fuzzing — NOT ignored_auth/open_cors_on_sensitive (run those by explicit id)")
     .option("--exclude-check <ids...>", "Skip these checks (comma-separated or repeated)")
     .option("--timeout <ms>", "Per-request timeout in ms", (v) => Number.parseInt(v, 10))
     .option("--db <path>", "SQLite path (for --api lookup)")

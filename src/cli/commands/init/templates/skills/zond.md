@@ -474,12 +474,18 @@ See `zond-checks` for per-check semantics.
 zond checks run --api <name> --check stateful --report ndjson
 ```
 
-5 m-20 stateful checks:
+`--check stateful` expands to the state-machine set (ARV-325):
 - `cross_call_references` — POST→GET drift (uses readback_diff overlay)
 - `idempotency_replay` — bit-identical replay on `Idempotency-Key`
 - `pagination_invariants` — `?limit=N` + `?after=last_id` non-overlap
 - `lifecycle_transitions` — declared state-machine validity
+- `use_after_free`, `ensure_resource_availability` — CRUD lifecycle
+- `cursor_boundary_fuzzing` — list-cursor edge values
 - `webhooks` (recipe-based, see `docs/recipes/webhook-receiver.md`)
+
+`ignored_auth` / `open_cors_on_sensitive` are **not** part of the alias —
+they're auth/security checks that roughly triple run time on wide APIs.
+Run them by explicit id: `--check ignored_auth,open_cors_on_sensitive`.
 
 **Iron rule**: don't run `--check stateful` without prior `api annotate`
 review. Defaults catch the obvious; quirks need declared config.
