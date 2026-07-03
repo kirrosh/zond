@@ -58,6 +58,15 @@ Pragmatic режим (default) — реалистичный для production AP
 
 ## Iron rules
 
+- **Safe by default (ARV-299).** `checks run` and the mutating probes
+  (`probe mass-assignment`, `probe security`) default to `--safe`: no
+  destructive traffic. For `checks run` that means the stateful CRUD
+  create-chains (`ensure_resource_availability`, `use_after_free`) self-skip
+  — read-only checks (conformance, pagination, observation-mode lifecycle)
+  still run. For probes it means plan-only (no live attack payloads). Pass
+  `--live` to opt into mutating traffic — **only against a throwaway/sandbox
+  account.** Same vocabulary as `zond audit --safe/--live`. `probe static`
+  only generates suites, so it's always safe (`--live` is a no-op there).
 - **NEVER hand-roll these checks in YAML.** The catalog encodes
   schemathesis V4 semantics 1-to-1 — replicating them in YAML drifts
   silently. `zond checks run` is the single source of truth.

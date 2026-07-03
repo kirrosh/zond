@@ -204,6 +204,13 @@ export interface RunChecksOptions {
    *  ponytail: response phase only — stateful phase is short by
    *  comparison; extend there if it ever dominates wall-clock. */
   onProgress?: (progress: { done: number; total: number; cases: number }) => void;
+  /** ARV-299: safe mode (CLI default). Mirrors `audit --safe`: no
+   *  destructive traffic. The stateful CRUD phase builds groups from
+   *  read-only ops only, so create/update/delete chains
+   *  (ensure_resource_availability, use_after_free) self-skip instead of
+   *  POSTing real resources. Read-only stateful checks (pagination,
+   *  observation-mode lifecycle) still run. `--live` sets this false. */
+  safe?: boolean;
 }
 
 export interface RunChecksResult {
@@ -1070,8 +1077,17 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     // self-skip via `applies(g)` — instead of leaking a live POST create
     // despite the GET-only filter. Read-only stateful checks (pagination
     // invariants, observation-mode lifecycle) still run on the list/read ops.
+    // ARV-299: in safe mode, feed only read-only ops to the CRUD builder so
+    // no group carries a create/update/delete — same self-skip path ARV-332
+    // uses for `--include method:GET`, but driven by the safe/live toggle.
+    const statefulOps = opts.safe
+      ? ops.filter((o) => {
+          const m = o.method.toUpperCase();
+          return m === "GET" || m === "HEAD";
+        })
+      : ops;
     const crudGroups = activeStateful.some((c) => c.phase === "crud")
-      ? augmentWithListOnlyGroups(detectCrudGroups(ops), ops)
+      ? augmentWithListOnlyGroups(detectCrudGroups(statefulOps), statefulOps)
       : [];
     summary.checks_run += activeStateful.length;
 
