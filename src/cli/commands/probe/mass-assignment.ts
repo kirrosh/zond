@@ -17,6 +17,7 @@ import { printMutationBanner, countCleanupFailures } from "../../../core/probe/s
 import { MassAssignmentProbe } from "../../../core/probe/mass-assignment-probe-class.ts";
 import { summarizeDryRun, formatDryRunDigest } from "../../../core/probe/dry-run-envelope.ts";
 import { compileOperationFilter } from "../../../core/selectors/operation-filter.ts";
+import { loadSeedBodyOverlays } from "./_seed-bodies.ts";
 import type { EndpointVerdict, MassAssignmentResult } from "../../../core/probe/mass-assignment-probe.ts";
 import type { ProbeEndpointResult, ProbeEndpointStatus, ProbeFindingSeverity } from "../../../core/probe/types.ts";
 
@@ -85,6 +86,17 @@ export interface ProbeMassAssignmentOptions {
    *  spec-extension support (x-zond-suspect-fields) is tracked in
    *  ARV-189. */
   suspectField?: string[];
+  /** ARV-265: collection name for audit-coverage attribution. Set by
+   *  the CLI when --api / current-api resolves; left undefined for
+   *  bare-spec invocations. */
+  apiName?: string;
+  /** ARV-302: cap the number of endpoints probed in this run (after
+   *  --include / --exclude / --tag filters). Used by `zond audit
+   *  --budget` so probe stages stay inside a wall-clock budget instead
+   *  of unbounded scanning (Stripe: 587 endpoints, 3.6k probes — silent
+   *  10+ min). When the cap trims the set, a warning is emitted so the
+   *  user knows the run was partial. */
+  maxEndpoints?: number;
 }
 
 export async function probeMassAssignmentCommand(
@@ -131,6 +143,23 @@ export async function probeMassAssignmentCommand(
       }
       endpoints = endpoints.filter(compiled.filter);
     }
+    // ARV-302: --max-endpoints cap — applied after include/exclude/tag
+    // filters so the user-visible filter intent is preserved. The cap
+    // is a coarse time-budget knob (`zond audit --budget standard` →
+    // 50 endpoints), not a sampling strategy: take the first N from
+    // the filtered list. A warning fires so partial output is obvious.
+    let cappedEndpoints = false;
+    if (typeof options.maxEndpoints === "number" && options.maxEndpoints > 0
+        && endpoints.length > options.maxEndpoints) {
+      const total = endpoints.length;
+      endpoints = endpoints.slice(0, options.maxEndpoints);
+      cappedEndpoints = true;
+      if (!options.json) {
+        process.stderr.write(
+          `zond: probe mass-assignment capped at ${options.maxEndpoints}/${total} endpoints (--max-endpoints) — pass --max-endpoints <N> or --budget full to widen.\n`,
+        );
+      }
+    }
 
     // Load env vars (base_url, auth_token, api_key, path-param overrides).
     let vars: Record<string, string> = {};
@@ -160,6 +189,24 @@ export async function probeMassAssignmentCommand(
         options: {},
       });
       const data = summarizeDryRun(plan);
+      // ARV-317: persist the planned inventory when --output is given, so it
+      // survives beyond stdout (an agent can read it back). --emit-tests is
+      // skipped on dry-run — there are no findings to turn into regression
+      // suites; the plan digest is the dry-run deliverable.
+      // ARV-321: say so explicitly. A silent no-op read as a bug on the live
+      // Stripe run (report-zond friction, 2026-07-02) — the target dir stayed
+      // empty with zero signal that --emit-tests was ignored.
+      if (options.emitTests) {
+        printWarning(`--emit-tests skipped: --dry-run has no live verdicts to lock in as regression suites. Re-run without --dry-run to emit ${options.emitTests}.`);
+      }
+      if (options.output) {
+        const payload = options.report === "json"
+          ? JSON.stringify(data, null, 2)
+          : formatDryRunDigest(plan);
+        await mkdir(join(options.output, "..").replace(/\/\.$/, ""), { recursive: true }).catch(() => {});
+        rotateOutputTarget(options.output, { overwrite: options.overwrite });
+        await writeFile(options.output, payload + "\n", "utf-8");
+      }
       if (options.json) {
         printJson(jsonOk("probe-mass-assignment", data));
       } else {
@@ -180,15 +227,54 @@ export async function probeMassAssignmentCommand(
     // is off — this banner is about the cleanup-pass, too.
     printMutationBanner("probe-mass-assignment", vars, { quiet: options.json === true });
 
-    const result = await runMassAssignmentProbes({
-      endpoints,
-      securitySchemes,
-      vars,
-      noCleanup: options.noCleanup,
-      timeoutMs: options.timeoutMs,
-      discover: !options.noDiscover,
-      extraSuspectFields: parseSuspectFieldFlags(options.suspectField),
-    });
+    // ARV-265: capture HTTP touches for audit-coverage. Dry-run never
+    // reaches this branch (early return above), so AC#5 holds.
+    const { withHttpAudit, beginAuditRun, finalizeAuditRun, auditRecordToCase, checksPersistEnabled } =
+      await import("../../../core/audit/persist.ts");
+    const auditEnabled = checksPersistEnabled();
+    // ARV-269: lift agent-authored `seed_body` overlays out of
+    // `.api-resources.local.yaml` so create-endpoint baselines win against
+    // strict validators. No-op when --api isn't set (raw --spec invocation).
+    const seedBodies = await loadSeedBodyOverlays(options.apiName);
+    const { value: result, records: auditRecords } = await withHttpAudit(async () =>
+      runMassAssignmentProbes({
+        endpoints,
+        securitySchemes,
+        vars,
+        noCleanup: options.noCleanup,
+        timeoutMs: options.timeoutMs,
+        discover: !options.noDiscover,
+        extraSuspectFields: parseSuspectFieldFlags(options.suspectField),
+        seedBodies,
+      }),
+    );
+
+    if (auditEnabled && auditRecords.length > 0) {
+      try {
+        const { getDb } = await import("../../../db/schema.ts");
+        const { findCollectionByNameOrId } = await import("../../../db/queries.ts");
+        const { readCurrentSession } = await import("../../../core/context/session.ts");
+        getDb();
+        const collectionId = options.apiName ? findCollectionByNameOrId(options.apiName)?.id : undefined;
+        const session = readCurrentSession();
+        const runId = beginAuditRun({
+          runKind: "probe",
+          ...(collectionId != null ? { collectionId } : {}),
+          ...(session?.id ? { sessionId: session.id } : {}),
+          tags: ["probe", "mass-assignment"],
+        });
+        const suiteFile = `apis/${options.apiName ?? "_"}/probes/mass-assignment.yaml`;
+        finalizeAuditRun(runId, auditRecords.map((rec) =>
+          auditRecordToCase(rec, {
+            suiteName: "probe/mass-assignment",
+            suiteFile,
+            testName: `mass-assignment::${rec.request.method.toUpperCase()} ${rec.request.url}`,
+          }),
+        ));
+      } catch (err) {
+        process.stderr.write(`zond: audit persistence failed (${(err as Error).message}).\n`);
+      }
+    }
 
     // ARV-252: filter verdicts for display under the evidence-chain
     // principle. Silently-ignored (correct framework behaviour) never
@@ -246,7 +332,12 @@ export async function probeMassAssignmentCommand(
             by_status: maByStatus(structuredEndpoints),
           },
           orphans,
-          warnings: result.warnings,
+          warnings: cappedEndpoints
+            ? [
+                ...result.warnings,
+                `--max-endpoints capped this run at ${options.maxEndpoints}; pass --max-endpoints <N> or --budget full to widen.`,
+              ]
+            : result.warnings,
           emittedTests: emittedSuites,
         }),
       );

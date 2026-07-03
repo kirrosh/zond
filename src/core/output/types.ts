@@ -83,13 +83,6 @@ export interface OutputSpec<Payload = unknown> {
    *  skill prompts ship it). Keys are flag values seen on the CLI;
    *  values are the resolved format name. */
   aliases?: Record<string, OutputFormat>;
-  /** Optional pre-validated render hook. Called by the runner once
-   *  the format is resolved. Receives the payload plus the resolved
-   *  format and returns the serialized output. */
-  render?: (format: OutputFormat, payload: Payload) => string;
-  /** Optional exit-code policy. Receives the payload after a
-   *  successful run; returns the process exit code (0 by default). */
-  exitCodePolicy?: (payload: Payload) => number;
 }
 
 /** Decision the runner makes after applying the spec to CLI flags. */

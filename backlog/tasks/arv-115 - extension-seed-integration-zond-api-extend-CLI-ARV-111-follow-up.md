@@ -4,6 +4,7 @@ title: extension --seed integration + zond api extend CLI (ARV-111 follow-up)
 status: To Do
 assignee: []
 created_date: '2026-05-11 09:38'
+updated_date: '2026-05-16 08:25'
 labels:
   - zond
   - cli
@@ -35,3 +36,25 @@ Follow-up of ARV-111 MVP (persistence + merge landed). Remaining scope:
 - [ ] #2 zond api extend add/list/remove CLI commands
 - [ ] #3 perTarget.sourceEndpoint annotated when value came via extension
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Re-scope (2026-05-16 strategy review): parts 2 + 3 are SUPERSEDED by features shipped post-ARV-111.
+
+ORIGINAL scope:
+1. --seed via extensions (requestBodyTemplate fallback)
+2. zond api extend add/list/remove CLI
+3. provenance marker in perTarget
+
+NEW scope (only part 1 survives):
+- requestBodyTemplate field in .api-resources.local.yaml — inline JSON body for endpoints whose create-endpoint is NOT in OpenAPI (e.g. Sentry POST /api/<project>/store/)
+- trySeed() consumes requestBodyTemplate as a fallback when ep.requestBodySchema is null
+- {{var}} interpolation from .env.yaml inside the template
+
+PARTS 2 + 3 — DROPPED:
+- Part 2 (zond api extend CLI) superseded by zond api annotate (ARV-187, m-20): 'annotate dump --resources' already surfaces orphan endpoints; 'annotate apply' writes to .api-resources.local.yaml. Per memory env_yaml_editable, the .local.yaml is hand-editable, so dedicated add/list/remove CLI brings little marginal value over hand-edit + annotate.
+- Part 3 (provenance) — niche, not requested in any recent feedback round.
+
+Down-scope to part 1 only. Keep MEDIUM (still real gap for write-only ingest endpoints).
+<!-- SECTION:NOTES:END -->

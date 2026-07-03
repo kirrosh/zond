@@ -6,6 +6,39 @@ All notable changes to this project will be documented in this file.
 
 (Empty — next development cycle.)
 
+## [0.24.0] — 2026-07-03
+
+m-22 validation sprint. No new milestone surface — this release hardens the
+0.23.0 depth-checks/probe/audit stack against real APIs. ~40 fixes (ARV-260..332)
+were found by running `zond audit`/`zond-scan` live against Stripe, GitHub,
+Resend and docgen-core, not by unit tests.
+
+### Safety & contracts
+- **Safe-mode leak closed (ARV-332):** `checks run --check stateful --include
+  method:GET` no longer fires POST create-chains — CRUD groups are built from
+  the filtered op set, so `ensure_resource_availability`/`use_after_free`
+  self-skip when no write is in scope. Critical for scanning APIs you don't own.
+- Exit-code contract hardened (ARV-303/307/308/309/310): audit judges stages on
+  `envelope.ok`, not raw exit code; budget-exhaust distinguished from network error.
+- `open_cors_on_sensitive` HIGH only on 2xx + ambient (cookie) credential
+  (ARV-312/316) — kills a class of false HIGHs.
+
+### Severity calibration
+- Probe-side severity calibrator (ARV-283/300): `SecuritySeverity ↔ Severity`
+  adapter with sentinel passthrough; wired into security probe. mass-assignment/
+  static/webhooks tracked in ARV-311.
+
+### Fixture / seed pipeline
+- FK-aware body builder wires reference fields to fixtures (ARV-45).
+- Topological seed order + body-FK deferral (ARV-324/327); gap-report flags
+  unfillable complex root resources instead of silently skipping (ARV-329/330).
+
+### Ops & workflow
+- `ZOND_WORKSPACE` honored; `zond-audit` workflow added for reproducible runs.
+- ndjson reporter stability (ARV-314/318/320/322); path-casing canonicalized
+  before workspace-root walk (ARV-315).
+- Repo-wide ponytail cleanup: dead code removed, probe monoliths deduped.
+
 ## [0.23.0] — 2026-05-15
 
 Big release covering m-15 → m-21 (155 ARV tickets across depth-checks,

@@ -3,9 +3,10 @@ id: ARV-225
 title: >-
   probe static --include semantics: class-list vs path-pattern inconsistency
   (R16/F30)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 10:11'
+updated_date: '2026-05-16 08:31'
 labels:
   - feedback-loop
   - api-github
@@ -34,3 +35,11 @@ Fix: either unify the semantics (selector across the board, add --include-class 
 
 Log: see feedback-16.md F30.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Renamed probe static --include/--exclude → --include-class/--exclude-class to disambiguate from selector-style --include on probe security / probe mass-assignment / checks run. Old --include/--exclude kept as deprecated aliases with stderr warning ('class-list, not a selector — collides with probe security / checks run; use --include-class').
+
+Selector grammar (path:/method:/tag:/operation-id:) for probe static itself is out of scope here — that would be a separate feature. ARV-225 is purely the naming/clarity fix.
+<!-- SECTION:NOTES:END -->

@@ -53,6 +53,7 @@ export function registerPrepareFixtures(program: Command): void {
     .option("--refresh", "Shortcut for --verify --apply (single-pass only). (TASK-281)")
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option("--max-passes <n>", "Cap on cascade passes (default 8; cascade only)", parsePositiveInt("--max-passes"))
+    .option("--check-staleness", "ARV-282: before cascade/seed, GET each pre-filled FK against its owner's read endpoint and clear values that 404. Catches stale FKs from prior sessions (test data wiped, throwaway account rotated) that would otherwise silently break every downstream seed. Adds 1 GET per pre-filled FK at session start.")
     .action(async (opts, cmd: Command) => {
       // ARV-53: --api resolution lives in cli/util/api-context.ts —
       // local opt > ancestor opt > ZOND_API_GLOBAL/ZOND_API/.zond/current-api.
@@ -101,21 +102,59 @@ export function registerPrepareFixtures(program: Command): void {
       const timeoutMs = resolveTimeoutMs(opts.timeout, envTimeout);
 
       if (cascade) {
-        process.exitCode = await bootstrapCommand({
+        // ARV-265 (B4): audit-coverage attribution for `prepare-fixtures
+        // --cascade`. Every list-call the cascade issues to discover
+        // path-param values flows through executeRequest, so wrapping
+        // the whole bootstrapCommand in `withHttpAudit` captures them
+        // without surgery on the cascade internals. Persisted with
+        // run_kind='fixture' so they're visible only to `coverage --scope
+        // audit`, not to the test-coverage metric.
+        const { withHttpAudit, beginAuditRun, finalizeAuditRun, auditRecordToCase, checksPersistEnabled } =
+          await import("../../core/audit/persist.ts");
+        const auditEnabled = checksPersistEnabled();
+        const bootstrapArgs = {
           specPath: resolved.spec,
           apiDir,
           envPath: opts.env,
           apply: opts.apply === true,
           seed: opts.seed === true,
           force: opts.force === true,
+          checkStaleness: opts.checkStaleness === true,
           timeoutMs,
           maxPasses: opts.maxPasses,
           json: globalJson(cmd),
-          // ARV-205 (R10/F6, R13/F19): surface the user-facing command name
-          // in the JSON envelope. Without this the user sees command="bootstrap"
-          // even though they typed `zond prepare-fixtures …`.
           commandName: "prepare-fixtures",
-        });
+        };
+        const { value: code, records } = auditEnabled
+          ? await withHttpAudit(() => bootstrapCommand(bootstrapArgs))
+          : { value: await bootstrapCommand(bootstrapArgs), records: [] };
+        if (auditEnabled && records.length > 0) {
+          try {
+            const { getDb } = await import("../../db/schema.ts");
+            const { findCollectionByNameOrId } = await import("../../db/queries.ts");
+            const { readCurrentSession } = await import("../../core/context/session.ts");
+            getDb();
+            const collectionId = apiName ? findCollectionByNameOrId(apiName)?.id : undefined;
+            const session = readCurrentSession();
+            const runId = beginAuditRun({
+              runKind: "fixture",
+              ...(collectionId != null ? { collectionId } : {}),
+              ...(session?.id ? { sessionId: session.id } : {}),
+              tags: ["prepare-fixtures", "cascade"],
+            });
+            const suiteFile = `apis/${apiName ?? "_"}/prepare-fixtures.yaml`;
+            finalizeAuditRun(runId, records.map((rec) =>
+              auditRecordToCase(rec, {
+                suiteName: "fixture/cascade",
+                suiteFile,
+                testName: `cascade::${rec.request.method.toUpperCase()} ${rec.request.url}`,
+              }),
+            ));
+          } catch (err) {
+            process.stderr.write(`zond: audit persistence failed (${(err as Error).message}).\n`);
+          }
+        }
+        process.exitCode = code;
         return;
       }
 

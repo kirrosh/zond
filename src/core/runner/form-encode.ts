@@ -29,23 +29,13 @@ export function encodeFormBody(body: Record<string, unknown>): string {
   return params.toString();
 }
 
-/** Flatten a nested JS object to a `Record<string, string>` using bracket
- *  notation, suitable for the YAML runner's `form:` step (which is typed
- *  as `Record<string, string>` and serialised via `URLSearchParams`). */
+/** Flatten a nested JS object to a `Record<string, string>` using the same
+ *  bracket-notation walk as `encodeFormBody`, suitable for the YAML
+ *  runner's `form:` step (which is typed as `Record<string, string>` and
+ *  serialised via `URLSearchParams`). */
 export function flattenToFormFields(body: unknown): Record<string, string> {
-  const out: Record<string, string> = {};
-  const walk = (value: unknown, key: string): void => {
-    if (value === null || value === undefined) return;
-    if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) walk(value[i], key ? `${key}[${i}]` : String(i));
-    } else if (typeof value === "object") {
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        walk(v, key ? `${key}[${k}]` : k);
-      }
-    } else if (key) {
-      out[key] = String(value);
-    }
-  };
-  if (body && typeof body === "object") walk(body, "");
-  return out;
+  if (!body || typeof body !== "object") return {};
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(body as Record<string, unknown>)) appendFormParam(params, k, v);
+  return Object.fromEntries(params.entries());
 }

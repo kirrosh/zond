@@ -21,7 +21,6 @@ const SPEC: OutputSpec<unknown> = {
     ndjson: { defaultChannel: "stdout" },
   },
   aliases: { ndjson: "ndjson" },
-  render: () => "",
 };
 
 describe("resolveOutput — defaults & format-policy fanout", () => {
@@ -101,7 +100,6 @@ describe("resolveOutput — error branches", () => {
       command: "broken",
       defaultFormat: "x",
       formats: { x: { defaultChannel: "file" } },
-      render: () => "",
     };
     expect(() => resolveOutput(broken, { report: "x" })).toThrow(OutputSpecError);
   });

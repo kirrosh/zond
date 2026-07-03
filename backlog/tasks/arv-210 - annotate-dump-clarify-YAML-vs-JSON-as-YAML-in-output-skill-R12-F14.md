@@ -1,13 +1,15 @@
 ---
 id: ARV-210
 title: 'annotate dump: clarify YAML vs JSON-as-YAML in output / skill (R12/F14)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 08:26'
+updated_date: '2026-05-16 11:20'
 labels:
   - feedback-loop
   - api-github
   - m-21
+  - polish-m-22
 dependencies: []
 priority: low
 ---
@@ -26,3 +28,9 @@ Impact: minor disambiguation for agent prompts; output is technically valid.
 
 Log: see feedback-12.md F14.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done 2026-05-16 (polish-m-22 batch-1): clarified in zond-checks skill (template) that annotate dump emits JSON (YAML-superset), while the response file the agent writes back is YAML.
+<!-- SECTION:NOTES:END -->

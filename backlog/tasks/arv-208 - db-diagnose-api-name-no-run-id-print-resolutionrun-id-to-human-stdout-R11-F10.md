@@ -3,13 +3,15 @@ id: ARV-208
 title: >-
   db diagnose --api <name> (no run-id): print resolution+run-id to human stdout
   (R11/F10)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-14 08:22'
+updated_date: '2026-05-16 11:20'
 labels:
   - feedback-loop
   - api-github
   - m-21
+  - polish-m-22
 dependencies: []
 priority: low
 ---
@@ -30,3 +32,9 @@ Actual: silent in non-JSON mode. zond-triage skill prompts assume the user/agent
 
 Log: see feedback-11.md F10.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done 2026-05-16 (polish-m-22 batch-1): db diagnose human stdout embeds {resolution, run_id} in the printed JSON detail (db.ts diagnose case). Stderr cue kept for interactive runs.
+<!-- SECTION:NOTES:END -->

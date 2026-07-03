@@ -4,6 +4,16 @@ import type { OpenAPIV3 } from "openapi-types";
  * Deep-clone an object, replacing circular references with the vendor-extension
  * sentinel `{ "x-circular": true }`. Uses WeakSet to track visited objects.
  *
+ * Trade-off (intentional): we mark the SECOND visit of any shared object
+ * (post-`dereference()` $ref-target reused under multiple parents) as
+ * circular, not just true cycles. The alternative — a DFS path stack —
+ * preserves every duplicate fresh, but blows the GitHub spec from 14 MB
+ * to 106 MB on disk because shared `per_page`/`page`/`owner` params and
+ * response schemas are re-cloned for every endpoint that references them.
+ * Downstream tools that need param/schema visibility on every endpoint
+ * (e.g. `zond api annotate auto`, ARV-262) handle this by re-reading the
+ * source spec themselves rather than relying on `apis/<name>/spec.json`.
+ *
  * Why a vendor extension and not `$ref`: the decycled doc is now written to
  * disk (apis/<name>/spec.json) and re-read by `@readme/openapi-parser` in
  * downstream commands (check spec, describe, generate). If the sentinel
@@ -24,6 +34,18 @@ export function decycleSchema(obj: unknown): unknown {
 
     const obj = value as Record<string, unknown>;
     if (seen.has(obj)) {
+      // ARV-262: parameter-shaped objects (have both `name` and `in`)
+      // appear post-`dereference()` as shared identities across every
+      // endpoint that $ref'd them — `per_page`, `page`, `owner`, etc.
+      // Past the first visit, the full `{"x-circular": true}` stub
+      // erases name+in and downstream tools (annotate auto, generator)
+      // can no longer tell what query/header that slot represented.
+      // Preserve name+in on revisit; schema/required/description still
+      // collapse so the bulk-size trade-off is unchanged (revisits
+      // grow by ~30 B each, vs. ~7×-blowup if we cloned everything).
+      if (typeof obj.name === "string" && typeof obj.in === "string") {
+        return { name: obj.name, in: obj.in };
+      }
       return { "x-circular": true };
     }
     seen.add(obj);

@@ -84,5 +84,11 @@ export interface TestRunResult {
   passed: number;
   failed: number;
   skipped: number;
+  /** ARV-318: steps whose status is "error" (couldn't execute — env_issue,
+   *  network, etc.). Previously counted in `total` but in none of
+   *  passed/failed/skipped, so `total === passed+failed+skipped` silently
+   *  broke and error steps reconciled into no bucket. Optional for back-compat
+   *  with older result literals; the runner always sets it. */
+  errored?: number;
   steps: StepResult[];
 }

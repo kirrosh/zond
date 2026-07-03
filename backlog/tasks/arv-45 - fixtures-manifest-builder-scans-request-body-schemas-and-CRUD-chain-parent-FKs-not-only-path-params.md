@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-05-10 18:43'
-updated_date: '2026-05-10 19:26'
+updated_date: '2026-07-03 15:20'
 labels:
   - m-17
   - fixtures
@@ -37,3 +37,9 @@ Source: feedback-13 F2 (medium). На resend: 14 fixtures в .api-fixtures.yaml,
 <!-- SECTION:PLAN:BEGIN -->
 1. core/generator/fixtures-builder.ts расширяет input: помимо extractEndpoints, проходит resourceMap (CRUD-chains + body parent-FK) и data-factory heuristic'и.\n2. Новый source 'body-fk' в FixtureSourceKind.\n3. Дедуп: одна var может появляться и в path, и в body — выбираем 'path' (более ограничивающий), affectedEndpoints мерджим.\n4. Тест tests/core/generator/fixtures-builder.test.ts: cases на body-fk, capture-chain, source-precedence.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+gen-side follow-up done 2026-07-03: generate now wires required FK/ref body fields to {{var}} refs (isFkFixtureField+wireBodyFkRefs). See git.
+<!-- SECTION:NOTES:END -->

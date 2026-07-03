@@ -89,16 +89,6 @@ export function parseStatusFilter(raw: string): StatusMatcher {
   return out;
 }
 
-/** True if `code` matches the parsed filter. Useful for in-memory filtering. */
-export function statusMatches(matcher: StatusMatcher, code: number | null | undefined): boolean {
-  if (code == null) return false;
-  if (matcher.exacts.includes(code)) return true;
-  for (const [lo, hi] of matcher.ranges) {
-    if (code >= lo && code <= hi) return true;
-  }
-  return false;
-}
-
 /**
  * Compile a `StatusMatcher` to a SQL `WHERE` fragment + bound parameters.
  * The fragment is wrapped in parentheses; combine with other conditions via

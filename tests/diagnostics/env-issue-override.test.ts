@@ -292,13 +292,20 @@ describe("ARV-101 (F6): diagnose payload aggregates by recommended_action enum",
       expect(validActions.has(k)).toBe(true);
     }
 
-    // Every bucket has bounded examples (cap = 5) shaped as <suite>/<test>.
+    // ARV-228: every bucket has bounded examples (cap = 5), each shaped
+    // as { suite, test, method, path, status, reason? } — full context so
+    // zond-triage skill can render its output template without cross-
+    // joining failures[].
     for (const bucket of Object.values(agg)) {
       expect(bucket.count).toBeGreaterThan(0);
       expect(bucket.examples.length).toBeGreaterThan(0);
       expect(bucket.examples.length).toBeLessThanOrEqual(5);
       for (const ex of bucket.examples) {
-        expect(ex).toMatch(/.+\/.+/);
+        expect(typeof ex.suite).toBe("string");
+        expect(typeof ex.test).toBe("string");
+        expect(typeof ex.method).toBe("string");
+        expect(typeof ex.path).toBe("string");
+        expect(typeof ex.status).toBe("number");
       }
     }
 

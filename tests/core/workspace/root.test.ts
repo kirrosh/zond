@@ -6,7 +6,6 @@ import { join } from "node:path";
 import {
   WORKSPACE_MARKERS,
   findWorkspaceRoot,
-  resolveWorkspacePath,
   _resetWorkspaceWarning,
 } from "../../../src/core/workspace/root.ts";
 
@@ -73,10 +72,20 @@ describe("findWorkspaceRoot", () => {
     expect(info.fromFallback).toBe(true);
   });
 
-  test("resolveWorkspacePath joins relative onto detected root", () => {
+  test("ZOND_WORKSPACE overrides walk-up and anchors at the given root", () => {
+    // Marker present in cwd, but env override points elsewhere — override wins.
     writeFileSync(join(root, "zond.config.yml"), "");
-    const sub = join(root, "x");
-    mkdirSync(sub);
-    expect(resolveWorkspacePath("zond.db", sub)).toBe(join(root, "zond.db"));
+    const other = mkdtempSync(join(tmpdir(), "zond-ws-ovr-"));
+    const prev = process.env.ZOND_WORKSPACE;
+    process.env.ZOND_WORKSPACE = other;
+    try {
+      const info = findWorkspaceRoot(root);
+      expect(info.root).toBe(other);
+      expect(info.fromFallback).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.ZOND_WORKSPACE;
+      else process.env.ZOND_WORKSPACE = prev;
+      rmSync(other, { recursive: true, force: true });
+    }
   });
 });

@@ -109,4 +109,96 @@ describe("buildMassAssignmentTemplate", () => {
       expect(r.kind).toBe("endpoint-not-found");
     });
   });
+
+  // ARV-198: Stripe-style form-only endpoints get a `form:` block with
+  // Content-Type header instead of `json:` — the previous default forced
+  // a node post-processing script to swap json→form on 15+ endpoints.
+  it("ARV-198: emits form: block + Content-Type header for x-www-form-urlencoded endpoints", async () => {
+    const FORM_SPEC = {
+      openapi: "3.0.3",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/v1/customers": {
+          post: {
+            operationId: "createCustomer",
+            requestBody: {
+              required: true,
+              content: {
+                "application/x-www-form-urlencoded": {
+                  schema: {
+                    type: "object",
+                    required: ["email"],
+                    properties: {
+                      email: { type: "string" },
+                      name: { type: "string" },
+                      account_balance: { type: "integer", readOnly: true },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+        "/v1/customers/{id}": {
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          get: { operationId: "getCustomer", responses: { "200": { description: "ok" } } },
+          delete: { operationId: "deleteCustomer", responses: { "200": { description: "ok" } } },
+        },
+      },
+    };
+    const dir = await mkdtemp(join(tmpdir(), "ma-tpl-form-"));
+    const path = join(dir, "spec.json");
+    try {
+      await writeFile(path, JSON.stringify(FORM_SPEC), "utf-8");
+      const r = await buildMassAssignmentTemplate({ specPath: path, method: "POST", path: "/v1/customers" });
+      expect(r.kind).toBe("ok");
+      if (r.kind !== "ok") return;
+      expect(r.chain).toBe("full");
+      expect(r.yaml).toContain("form:");
+      expect(r.yaml).not.toContain("    json:");
+      expect(r.yaml).toContain("Content-Type: application/x-www-form-urlencoded");
+      // Serializer (ARV-162) force-quotes form values to strings — verify
+      // booleans / numbers from SUSPECTED_FIELDS land as quoted strings.
+      expect(r.yaml).toMatch(/is_admin:\s*"true"/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("ARV-198: single-step PUT on form-only endpoint also emits form: block", async () => {
+    const SPEC2 = {
+      openapi: "3.0.3",
+      info: { title: "T", version: "1" },
+      paths: {
+        "/v1/charge/{id}": {
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+          put: {
+            operationId: "updateCharge",
+            requestBody: {
+              content: {
+                "application/x-www-form-urlencoded": {
+                  schema: { type: "object", properties: { description: { type: "string" } } },
+                },
+              },
+            },
+            responses: { "200": { description: "ok" } },
+          },
+        },
+      },
+    };
+    const dir = await mkdtemp(join(tmpdir(), "ma-tpl-form-single-"));
+    const path = join(dir, "spec.json");
+    try {
+      await writeFile(path, JSON.stringify(SPEC2), "utf-8");
+      const r = await buildMassAssignmentTemplate({ specPath: path, method: "PUT", path: "/v1/charge/{id}" });
+      expect(r.kind).toBe("ok");
+      if (r.kind !== "ok") return;
+      expect(r.chain).toBe("single");
+      expect(r.yaml).toContain("form:");
+      expect(r.yaml).toContain("Content-Type: application/x-www-form-urlencoded");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

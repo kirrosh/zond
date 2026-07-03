@@ -1,19 +1,8 @@
 /**
- * Unit tests for `pagination_invariants` (m-20 ARV-171).
+ * Unit tests for `pagination_invariants` (m-20 ARV-171, ARV-220 page-style).
  *
  * Stubbed harness drives [GET page A, GET page B] tuples so each
  * verdict is exercised deterministically.
- *
- *   1. opt-out: no yaml + no cursor query param → skip
- *   2. page-style yaml → skip (not implemented yet)
- *   3. honored: disjoint pages + has_more agrees → pass
- *   4. duplicate items between A and B → fail "duplicate_items"
- *   5. has_more=true on A but empty B without has_more=false → fail
- *   6. partial page A with has_more=true → fail
- *   7. broken baseline (4xx on page A or B) → skip
- *   8. empty page A → skip
- *   9. spec-detected: cursor query param ⇒ check runs with defaults
- *  10. custom items_field is honored
  */
 import { describe, test, expect } from "bun:test";
 import type { OpenAPIV3 } from "openapi-types";
@@ -89,8 +78,8 @@ describe("pagination_invariants — stateful check", () => {
     if (out.kind === "skip") expect(out.reason).toMatch(/no pagination config/);
   });
 
-  test("page-style yaml short-circuits with explicit reason (not implemented)", async () => {
-    const cfg = new Map([["customer", { pagination: { type: "page" } as PaginationConfig }]]);
+  test("offset-style yaml short-circuits with explicit reason (not implemented)", async () => {
+    const cfg = new Map([["customer", { pagination: { type: "offset" } as PaginationConfig }]]);
     const g = makeGroup(makeList());
     const h = stubHarness([], cfg);
     const out = await paginationInvariants.run(g, h);
@@ -191,6 +180,117 @@ describe("pagination_invariants — stateful check", () => {
     const out = await paginationInvariants.run(g, h);
     expect(out.kind).toBe("pass");
     expect(h.calls[1]!.req.url).toContain("cursor=b");
+  });
+
+  // ── ARV-220: page-number style (GitHub/GitLab/Atlassian) ────────
+
+  test("page-style: disjoint pages with per_page respected → pass", async () => {
+    const cfg = new Map([["customer", { pagination: { type: "page", defaultLimit: 2 } as PaginationConfig }]]);
+    const g = makeGroup(makeList({
+      parameters: [
+        { name: "page", in: "query", schema: { type: "integer" } } as OpenAPIV3.ParameterObject,
+        { name: "per_page", in: "query", schema: { type: "integer" } } as OpenAPIV3.ParameterObject,
+      ],
+    }));
+    const h = stubHarness([
+      r2xx([{ id: "i1" }, { id: "i2" }]),
+      r2xx([{ id: "i3" }, { id: "i4" }]),
+    ], cfg);
+    const out = await paginationInvariants.run(g, h);
+    expect(out.kind).toBe("pass");
+    expect(h.calls[0]!.req.url).toContain("page=1");
+    expect(h.calls[0]!.req.url).toContain("per_page=2");
+    expect(h.calls[1]!.req.url).toContain("page=2");
+  });
+
+  test("page-style: page 2 contains page 1 items → fail duplicate_items", async () => {
+    const cfg = new Map([["customer", { pagination: { type: "page", defaultLimit: 2 } as PaginationConfig }]]);
+    const g = makeGroup(makeList({
+      parameters: [{ name: "page", in: "query", schema: { type: "integer" } } as OpenAPIV3.ParameterObject],
+    }));
+    const h = stubHarness([
+      r2xx({ data: [{ id: "i1" }, { id: "i2" }] }),
+      r2xx({ data: [{ id: "i2" }, { id: "i3" }] }), // i2 reappears — off-by-one
+    ], cfg);
+    const out = await paginationInvariants.run(g, h);
+    expect(out.kind).toBe("fail");
+    if (out.kind === "fail") {
+      expect(out.evidence?.kind).toContain("duplicate_items");
+      expect(out.evidence?.style).toBe("page");
+      expect(out.evidence?.duplicates).toEqual(["i2"]);
+    }
+  });
+
+  test("page-style: server returns more than per_page → fail per_page_exceeded", async () => {
+    const cfg = new Map([["customer", { pagination: { type: "page", defaultLimit: 2 } as PaginationConfig }]]);
+    const g = makeGroup(makeList({
+      parameters: [{ name: "page", in: "query", schema: { type: "integer" } } as OpenAPIV3.ParameterObject],
+    }));
+    const h = stubHarness([
+      r2xx({ items: [{ id: "i1" }, { id: "i2" }, { id: "i3" }, { id: "i4" }, { id: "i5" }] }),
+      r2xx({ items: [{ id: "i6" }] }),
+    ], cfg);
+    const out = await paginationInvariants.run(g, h);
+    expect(out.kind).toBe("fail");
+    if (out.kind === "fail") {
+      expect(out.evidence?.kind).toContain("per_page_exceeded");
+      expect(out.evidence?.page_a_size).toBe(5);
+    }
+  });
+
+  test("page-style: empty page B (natural end of list) → pass", async () => {
+    const cfg = new Map([["customer", { pagination: { type: "page", defaultLimit: 2 } as PaginationConfig }]]);
+    const g = makeGroup(makeList({
+      parameters: [{ name: "page", in: "query", schema: { type: "integer" } } as OpenAPIV3.ParameterObject],
+    }));
+    const h = stubHarness([
+      r2xx([{ id: "i1" }, { id: "i2" }]),
+      r2xx([]),
+    ], cfg);
+    const out = await paginationInvariants.run(g, h);
+    expect(out.kind).toBe("pass");
+  });
+
+  test("page-style: start_page=0 honored for 0-based APIs", async () => {
+    const cfg = new Map([["customer", { pagination: { type: "page", startPage: 0, defaultLimit: 2 } as PaginationConfig }]]);
+    const g = makeGroup(makeList({
+      parameters: [{ name: "page", in: "query", schema: { type: "integer" } } as OpenAPIV3.ParameterObject],
+    }));
+    const h = stubHarness([
+      r2xx([{ id: "i1" }, { id: "i2" }]),
+      r2xx([{ id: "i3" }]),
+    ], cfg);
+    const out = await paginationInvariants.run(g, h);
+    expect(out.kind).toBe("pass");
+    expect(h.calls[0]!.req.url).toContain("page=0");
+    expect(h.calls[1]!.req.url).toContain("page=1");
+  });
+
+  test("page-style: auto-detects `page` query param without yaml", async () => {
+    const g = makeGroup(makeList({
+      parameters: [{ name: "page", in: "query", schema: { type: "integer" } } as OpenAPIV3.ParameterObject],
+    }));
+    const h = stubHarness([
+      r2xx([{ id: "a" }, { id: "b" }]),
+      r2xx([{ id: "c" }, { id: "d" }]),
+    ]);
+    const out = await paginationInvariants.run(g, h);
+    expect(out.kind).toBe("pass");
+    expect(h.calls[0]!.req.url).toContain("page=1");
+    expect(h.calls[0]!.req.url).toContain("per_page=2");
+  });
+
+  test("page-style: custom page_param + limit_param honored", async () => {
+    const cfg = new Map([["customer", { pagination: { type: "page", pageParam: "p", limitParam: "size", defaultLimit: 3 } as PaginationConfig }]]);
+    const g = makeGroup(makeList());
+    const h = stubHarness([
+      r2xx([{ id: "x1" }, { id: "x2" }, { id: "x3" }]),
+      r2xx([{ id: "x4" }]),
+    ], cfg);
+    const out = await paginationInvariants.run(g, h);
+    expect(out.kind).toBe("pass");
+    expect(h.calls[0]!.req.url).toContain("p=1");
+    expect(h.calls[0]!.req.url).toContain("size=3");
   });
 
   test("custom items_field is honored", async () => {

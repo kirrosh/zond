@@ -54,6 +54,14 @@ function hasMarker(dir: string): WorkspaceMarker | null {
  * cwd-mode.
  */
 export function findWorkspaceRoot(cwd?: string): WorkspaceInfo {
+  // Explicit override for headless/CI/workflow runs: skip walk-up entirely and
+  // anchor the workspace at ZOND_WORKSPACE. Lets each run own an isolated root
+  // (its own .zond/zond.db, apis/) without depending on cwd or a parent marker.
+  const override = process.env.ZOND_WORKSPACE?.trim();
+  if (override) {
+    return { root: resolve(override), marker: "", fromFallback: false };
+  }
+
   const start = resolve(cwd ?? process.cwd());
   const stop = resolve(homedir());
 
@@ -81,11 +89,6 @@ export function findWorkspaceRoot(cwd?: string): WorkspaceInfo {
     );
   }
   return { root: start, marker: "", fromFallback: true };
-}
-
-/** Resolve `relative` against the workspace root (auto-detected from `cwd`). */
-export function resolveWorkspacePath(relative: string, cwd?: string): string {
-  return resolve(findWorkspaceRoot(cwd).root, relative);
 }
 
 /** Test helper: reset the one-shot warning latch. */

@@ -1,8 +1,7 @@
-import Ajv2020 from "ajv/dist/2020.js";
 import Ajv from "ajv";
-import addFormats from "ajv-formats";
 import type { ErrorObject, ValidateFunction, AnySchema } from "ajv";
 import type { OpenAPIV3 } from "openapi-types";
+import { makeAjv } from "../util/ajv.ts";
 import { specPathToRegex } from "../generator/coverage-scanner.ts";
 import type { AssertionResult } from "./types.ts";
 
@@ -32,10 +31,7 @@ export function createSchemaValidator(doc: OpenAPIV3.Document): SchemaValidator 
   // OpenAPI 3.1 → JSON Schema Draft 2020-12; 3.0 → Draft 4/7-ish.
   // verbose:true exposes parentSchema on each error so humanize() can render
   // the full required-set alongside the missing field name (TASK-277).
-  const ajv = isV31
-    ? new (Ajv2020 as unknown as typeof Ajv)({ strict: false, allErrors: true, verbose: true })
-    : new Ajv({ strict: false, allErrors: true, verbose: true });
-  addFormats(ajv);
+  const ajv = makeAjv(isV31, { strict: false, allErrors: true, verbose: true });
   applyStrictFormats(ajv);
 
   const endpoints: EndpointEntry[] = [];

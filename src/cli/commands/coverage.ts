@@ -22,6 +22,12 @@ export interface CoverageOptions {
   /** ARV-28: list not-covered (and partial) endpoints inline so users
    *  don't need `--json | jq` to see what's missing. */
   verbose?: boolean;
+  /** ARV-265: which metric block(s) to render.
+   *   - 'test' — pass/hit coverage only (legacy single-block output)
+   *   - 'audit' — audit-coverage only (every HTTP touch, with source
+   *     breakdown). Useful when only `zond checks run` happened.
+   *   - 'both' (default) — both blocks side-by-side. */
+  scope?: "test" | "audit" | "both";
 }
 
 const RESET = "\x1b[0m";
@@ -103,6 +109,78 @@ export function bucketRows(matrix: CoverageMatrix): BucketBreakdown {
   return { covered2xx, coveredButNon2xx, unhit };
 }
 
+/**
+ * ARV-265: roll up the audit-coverage matrix per producer (`run_kind`).
+ * `reached` counts how many spec endpoints have at least one result row
+ * across any kind; `totalEvents` is the raw result count (one per HTTP
+ * touch). `bySource` keys are the run_kind values that actually appear
+ * in `cov.runs` — kinds with zero contribution are omitted from the
+ * map so the text reporter doesn't print empty rows.
+ *
+ * Endpoint attribution uses the same matrix engine output the loader
+ * already built (each `MatrixRow` cell carries the results that mapped
+ * to that endpoint), but the engine doesn't track which run produced
+ * each result. We re-walk the contributing runs and re-load their
+ * results to bucket by kind. For the 1184-endpoint github-spec scan
+ * this is O(N) over ~1500 result rows — negligible vs the run cost.
+ */
+function computeAuditBreakdown(cov: import("../../core/coverage/loader.ts").CoverageLoadResult): {
+  reached: number;
+  total: number;
+  percentage: number;
+  totalEvents: number;
+  bySource: Record<string, { endpoints: number; events: number }>;
+} {
+  const total = cov.matrix.rows.length;
+  // reached: endpoints with any result (cells with at least one entry).
+  let reached = 0;
+  for (const row of cov.matrix.rows) {
+    const cells = Object.values(row.cells);
+    if (cells.some((c) => c.results.length > 0)) reached += 1;
+  }
+  const totalEvents = cov.matrix.rows.reduce(
+    (sum, row) => sum + Object.values(row.cells).reduce((s, c) => s + c.results.length, 0),
+    0,
+  );
+  // Re-load per-run results to attribute counts to the producing kind.
+  const bySource: Record<string, { endpoints: Set<string>; events: number }> = {};
+  for (const run of cov.runs) {
+    const kind = run.run_kind;
+    const bucket = bySource[kind] ?? { endpoints: new Set<string>(), events: 0 };
+    const rows = getResultsByRunId(run.id);
+    for (const r of rows) {
+      // Skip pre-dispatch skips (max-requests cap, schema-gated) — they have
+      // no response and don't represent an actual HTTP touch.
+      if (r.response_status == null) continue;
+      bucket.events += 1;
+      if (typeof r.request_method === "string" && typeof r.request_url === "string") {
+        // The result table stores absolute URLs; the matrix engine uses
+        // the spec path-template regex to bucket them. For the by-source
+        // count we don't need that level of precision — pathname-only is
+        // close enough for "did this kind touch endpoint X" telemetry.
+        try {
+          const u = new URL(r.request_url);
+          bucket.endpoints.add(`${r.request_method.toUpperCase()} ${u.pathname}`);
+        } catch {
+          bucket.endpoints.add(`${r.request_method.toUpperCase()} ${r.request_url}`);
+        }
+      }
+    }
+    bySource[kind] = bucket;
+  }
+  const flatBySource: Record<string, { endpoints: number; events: number }> = {};
+  for (const [k, v] of Object.entries(bySource)) {
+    flatBySource[k] = { endpoints: v.endpoints.size, events: v.events };
+  }
+  return {
+    reached,
+    total,
+    percentage: total === 0 ? 0 : Math.round((reached / total) * 100),
+    totalEvents,
+    bySource: flatBySource,
+  };
+}
+
 function lastObservedStatus(results: { responseStatus: number | null }[]): number | null {
   for (let i = results.length - 1; i >= 0; i--) {
     const s = results[i]?.responseStatus;
@@ -133,23 +211,53 @@ export async function coverageCommand(options: CoverageOptions): Promise<number>
  */
 async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
   getDb();
-  const cov = await loadCoverage({
+  const scope = options.scope ?? "both";
+  const wantTest = scope === "test" || scope === "both";
+  const wantAudit = scope === "audit" || scope === "both";
+
+  const loaderArgs = {
     apiName: options.apiName!,
     ...(options.sessionId ? { sessionId: options.sessionId } : {}),
     ...(options.sinceIso ? { sinceIso: options.sinceIso } : {}),
     ...(options.tag ? { tag: options.tag } : {}),
     ...(options.runIds && options.runIds.length > 0 ? { runIds: options.runIds } : {}),
     ...(options.runId != null ? { runId: options.runId } : {}),
-  });
+  } as const;
+
+  // ARV-265: load the matrix twice when scope=both — once for the
+  // pass/hit "did our suites land 2xx" metric (`scope: 'test'`), and once
+  // for the "did zond touch the endpoint at all" audit metric
+  // (`scope: 'audit'`). Loader-level scoping keeps the matrix shape
+  // identical so both branches reuse classifyRows / bucketRows.
+  const covTest = wantTest ? await loadCoverage({ ...loaderArgs, scope: "test" }) : null;
+  const covAudit = wantAudit ? await loadCoverage({ ...loaderArgs, scope: "audit" }) : null;
+  // Pick whichever block is present as the canonical "cov" — we still
+  // need a matrix to enumerate endpoints + spec warnings.
+  const cov = covTest ?? covAudit!;
   const total = cov.matrix.rows.length;
   if (total === 0) {
     printError("No endpoints found in the OpenAPI spec");
     return 1;
   }
 
-  const { coveredRows, partialRows, uncoveredRows } = classifyRows(cov.matrix);
+  const { coveredRows, partialRows, uncoveredRows } = classifyRows((covTest ?? covAudit!).matrix);
   const coveredCount = coveredRows.length;
   const percentage = Math.round((coveredCount / total) * 100);
+
+  // ARV-303: envelope/exit-code contract. When the selector resolved to zero
+  // runs (closed session, --session-id with no runs, --union tag with no
+  // matches), there is no coverage data — that is the only command-level
+  // failure of the matrix path. Everything else (uncovered endpoints remain)
+  // is a data point, not a failure, so it must not gate the exit code.
+  const noRuns = (covTest ?? covAudit!).runs.length === 0;
+
+  // ARV-265: per-source breakdown for audit-coverage. Walks each
+  // contributing run, groups its results by (METHOD, path-template), and
+  // tallies distinct endpoints reached + raw event counts. The match is
+  // best-effort (uses the same endpoint regex the matrix engine does) so
+  // a run that hit URLs not declared in the spec is still counted by
+  // event-count even when no endpoint maps.
+  const auditBreakdown = covAudit ? computeAuditBreakdown(covAudit) : null;
 
   // TASK-270: two metrics, two intents:
   //   pass_coverage = endpoints with at least one passing 2xx (strict — what
@@ -181,48 +289,64 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
 
   if (!options.json) {
     const color = useColor();
+    const runsForLabel = covTest ?? covAudit!;
     let runLabel: string;
-    if (cov.runs.length === 0) {
-      runLabel = cov.unionMode
-        ? ` — no runs match --union ${cov.unionMode}`
+    if (runsForLabel.runs.length === 0) {
+      runLabel = runsForLabel.unionMode
+        ? ` — no runs match --union ${runsForLabel.unionMode}`
         : " — no runs yet";
     }
-    else if (cov.runs.length === 1) runLabel = ` — Run #${cov.runs[0]!.id}`;
+    else if (runsForLabel.runs.length === 1) runLabel = ` — Run #${runsForLabel.runs[0]!.id}`;
     else {
-      const modeLabel = cov.unionMode ? ` ${cov.unionMode}` : "";
-      runLabel = ` — union${modeLabel} of ${cov.runs.length} runs (#${cov.runs.map(r => r.id).join(", #")})`;
+      const modeLabel = runsForLabel.unionMode ? ` ${runsForLabel.unionMode}` : "";
+      runLabel = ` — union${modeLabel} of ${runsForLabel.runs.length} runs (#${runsForLabel.runs.map(r => r.id).join(", #")})`;
     }
-    // TASK-270: show both metrics on separate lines so CI/triage scripts
-    // and humans can pick the one they care about.
-    console.log(`Pass-coverage (passing 2xx): ${passCount}/${total} endpoints (${passPct}%)${runLabel}`);
-    console.log(`Hit-coverage  (any response): ${hitCount}/${total} endpoints (${hitPct}%)`);
-    // ARV-19: explicit gap-disclosure so users running `zond checks run`
-    // alongside don't assume probes contribute. Only `zond run` results
-    // land in the run table that coverage reads from.
-    console.log(`  ${color ? DIM : ""}(source: \`zond run\` results only — \`zond checks run\` probes are not counted)${color ? RESET : ""}`);
-    console.log("");
+    if (wantTest) {
+      // TASK-270: show both metrics on separate lines so CI/triage scripts
+      // and humans can pick the one they care about.
+      console.log(`test-coverage`);
+      console.log(`  Pass-coverage (passing 2xx): ${passCount}/${total} endpoints (${passPct}%)${runLabel}`);
+      console.log(`  Hit-coverage  (any response): ${hitCount}/${total} endpoints (${hitPct}%)`);
+      // ARV-265: clarified source line. Previously: "only zond run results — probes not counted".
+      // After ARV-265, audit-coverage IS the answer for "did checks run touch X" — point users at it.
+      console.log(`  ${color ? DIM : ""}(source: \`zond run\` results — for \`checks run\` / \`probe\` touches see audit-coverage below)${color ? RESET : ""}`);
+      console.log("");
 
-    if (passing > 0) {
-      console.log(`  ${color ? GREEN : ""}✅ ${passing} covered (passing 2xx)${color ? RESET : ""}`);
+      if (passing > 0) {
+        console.log(`  ${color ? GREEN : ""}✅ ${passing} covered (passing 2xx)${color ? RESET : ""}`);
+      }
+      if (apiError > 0) {
+        console.log(`  ${color ? YELLOW : ""}⚠️  ${apiError} returning 5xx (possibly broken API)${color ? RESET : ""}`);
+      }
+      if (testFailed > 0) {
+        console.log(`  ${color ? RED : ""}❌ ${testFailed} hit endpoint but assertions failed${color ? RESET : ""}`);
+      }
+      if (partialRows.length > 0 && testFailed === 0) {
+        console.log(`  ${color ? YELLOW : ""}◐ ${partialRows.length} partial (only non-2xx responses)${color ? RESET : ""}`);
+      }
+      if (uncoveredRows.length > 0) {
+        console.log(`  ${color ? DIM : ""}⬜ ${uncoveredRows.length} not covered${color ? RESET : ""}`);
+        // ARV-75 (feedback round-03 / F16): when some of the not-covered rows
+        // are deprecated, surface the count so a user reading "5% uncovered"
+        // can attribute the gap to deprecated endpoints (which generate skips
+        // by default) instead of suite regression.
+        const deprecatedUnhit = uncoveredRows.filter((r) => r.deprecated).length;
+        if (deprecatedUnhit > 0) {
+          console.log(`  ${color ? DIM : ""}↳ ${deprecatedUnhit} of those are deprecated (skipped by \`zond generate\` unless --include-deprecated)${color ? RESET : ""}`);
+        }
+      }
     }
-    if (apiError > 0) {
-      console.log(`  ${color ? YELLOW : ""}⚠️  ${apiError} returning 5xx (possibly broken API)${color ? RESET : ""}`);
-    }
-    if (testFailed > 0) {
-      console.log(`  ${color ? RED : ""}❌ ${testFailed} hit endpoint but assertions failed${color ? RESET : ""}`);
-    }
-    if (partialRows.length > 0 && testFailed === 0) {
-      console.log(`  ${color ? YELLOW : ""}◐ ${partialRows.length} partial (only non-2xx responses)${color ? RESET : ""}`);
-    }
-    if (uncoveredRows.length > 0) {
-      console.log(`  ${color ? DIM : ""}⬜ ${uncoveredRows.length} not covered${color ? RESET : ""}`);
-      // ARV-75 (feedback round-03 / F16): when some of the not-covered rows
-      // are deprecated, surface the count so a user reading "5% uncovered"
-      // can attribute the gap to deprecated endpoints (which generate skips
-      // by default) instead of suite regression.
-      const deprecatedUnhit = uncoveredRows.filter((r) => r.deprecated).length;
-      if (deprecatedUnhit > 0) {
-        console.log(`  ${color ? DIM : ""}↳ ${deprecatedUnhit} of those are deprecated (skipped by \`zond generate\` unless --include-deprecated)${color ? RESET : ""}`);
+
+    if (wantAudit && auditBreakdown) {
+      if (wantTest) console.log("");
+      console.log(`audit-coverage: ${auditBreakdown.reached}/${auditBreakdown.total} endpoints (${auditBreakdown.percentage}%, ${auditBreakdown.totalEvents} HTTP touches)`);
+      console.log(`  ${color ? DIM : ""}(any zond producer: run, checks, probe, request, fixture-cascade — ARV-265)${color ? RESET : ""}`);
+      const sources = Object.entries(auditBreakdown.bySource).filter(([, v]) => v.events > 0);
+      if (sources.length > 0) {
+        console.log(`  by source:`);
+        for (const [kind, v] of sources) {
+          console.log(`    ${kind.padEnd(8)} ${String(v.endpoints).padStart(4)} endpoints, ${String(v.events).padStart(5)} events`);
+        }
       }
     }
 
@@ -264,8 +388,14 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
     // fields (covered/uncovered/partial, coveredEndpoints/partialEndpoints/
     // uncoveredEndpoints) are kept as deprecated aliases pending full envelope-
     // policy unification (TASK-184).
-    const buckets = bucketRows(cov.matrix);
-    printJson(jsonOk("coverage", {
+    const buckets = bucketRows((covTest ?? covAudit!).matrix);
+    // ARV-265: dual-metric JSON envelope. `test_coverage` mirrors the
+    // pre-ARV-265 single-block shape (kept as the canonical
+    // pass/hit pair); `audit_coverage` is additive and only present
+    // when scope includes audit. Legacy top-level fields stay populated
+    // from the test block when present (back-compat with TASK-280
+    // consumers) so existing CI scripts don't break.
+    const json: Record<string, unknown> = {
       // Legacy aliases — DO NOT add new consumers; use `totals.*` and
       // `*Endpoints` arrays below instead.
       covered: coveredCount,
@@ -301,13 +431,46 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
       // by zond generate" without re-deriving from the spec.
       deprecated_unhit: uncoveredRows.filter((r) => r.deprecated).length,
       deprecated_total: cov.matrix.rows.filter((r) => r.deprecated).length,
-    }));
+      // ARV-265: dual-metric envelope.
+      test_coverage: wantTest ? {
+        pass: { covered: passCount, total, ratio: total === 0 ? 0 : Number((passCount / total).toFixed(4)) },
+        hit:  { covered: hitCount,  total, ratio: total === 0 ? 0 : Number((hitCount / total).toFixed(4)) },
+        runIds: covTest?.runs.map((r) => r.id) ?? [],
+      } : null,
+    };
+    if (auditBreakdown) {
+      json.audit_coverage = {
+        reached: auditBreakdown.reached,
+        total: auditBreakdown.total,
+        ratio: auditBreakdown.total === 0 ? 0 : Number((auditBreakdown.reached / auditBreakdown.total).toFixed(4)),
+        events: auditBreakdown.totalEvents,
+        by_source: auditBreakdown.bySource,
+        runIds: covAudit?.runs.map((r) => r.id) ?? [],
+      };
+    }
+    // ARV-303: surface the zero-runs case as ok:false so the non-zero exit
+    // lines up with the envelope shape, instead of an ok:true envelope
+    // alongside exit 1.
+    if (noRuns) {
+      const sel = cov.unionMode ?? "selection";
+      printJson(jsonError("coverage", [
+        `No runs match ${sel} — coverage cannot be computed against zero runs`,
+      ]));
+    } else {
+      printJson(jsonOk("coverage", json));
+    }
   }
 
+  // ARV-303: exit-code contract. ok:false (no runs) ⇒ exit 1. Otherwise the
+  // coverage was computed successfully (ok:true) ⇒ exit 0 by default — an
+  // orchestrator must be able to tell "coverage ran" from "command failed".
+  // "Uncovered endpoints remain" no longer gates the exit on its own; use
+  // --fail-on-coverage to opt into a threshold gate.
+  if (noRuns) return 1;
   if (options.failOnCoverage !== undefined) {
     return percentage < options.failOnCoverage ? 1 : 0;
   }
-  return uncoveredRows.length > 0 ? 1 : 0;
+  return 0;
 }
 
 /**
@@ -346,6 +509,13 @@ async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
       }
     }
   } else {
+    // TASK-250 + ARV-303: the spec-only path emits a shape-stable
+    // ok:true envelope even when there's no registered API. The
+    // legacy contract here is "we parsed the spec, here is 0% with a
+    // null runId" — agents and CI scripts depend on the key shape.
+    // ARV-303 only tightens the matrix-coverage path (no runs match
+    // --union / --session-id), which DID emit ok:true alongside exit
+    // 1; the spec-only path was intentionally informational.
     const unhit = allEndpoints.map((ep) => ({
       endpoint: `${ep.method.toUpperCase()} ${ep.path}`,
       method: ep.method.toUpperCase(),
@@ -366,8 +536,6 @@ async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
       covered2xxEndpoints: [],
       coveredButNon2xxEndpoints: [],
       unhitEndpoints: unhit,
-      // TASK-270: the spec-only path has no run results, so both metrics
-      // are zero. Surface them anyway for shape-stable JSON.
       pass_coverage: { covered: 0, total, ratio: 0 },
       hit_coverage: { covered: 0, total, ratio: 0 },
     }));
@@ -385,7 +553,7 @@ import { globalJson, resolveApiCollection } from "../resolve.ts";
 import { parseInteger, parsePercentage } from "../argv.ts";
 import { getApi } from "../util/api-context.ts";
 import { readCurrentSession } from "../../core/context/session.ts";
-import { listRunsBySession, getLatestRunByCollection, getRunById, findCollectionByNameOrId } from "../../db/queries.ts";
+import { listRunsBySession, getLatestRunByCollection, getRunById, findCollectionByNameOrId, listSessions, getResultsByRunId } from "../../db/queries.ts";
 
 /**
  * ARV-55: probe-run classification moved from path-regex heuristic into the
@@ -476,14 +644,16 @@ export function registerCoverage(program: Command): void {
     .command("coverage")
     .description(
       "Analyze API test coverage from stored run results. zond reports two " +
-      "metrics side-by-side (TASK-270):\n" +
-      "  pass-coverage  — endpoint had at least one passing 2xx response (strict; what CI usually wants)\n" +
-      "  hit-coverage   — endpoint received any response at all, including 5xx and assertion failures (loose; for breadth audits)\n" +
+      "metric blocks side-by-side (ARV-265):\n" +
+      "  test-coverage  — pass/hit from `zond run` (regular + probe runs only)\n" +
+      "    · pass-coverage — endpoint had at least one passing 2xx (strict; CI gate via --fail-on-coverage)\n" +
+      "    · hit-coverage  — endpoint received any response, incl. 5xx / assertion-fail (loose; breadth)\n" +
+      "  audit-coverage — any HTTP touch from any producer: `run`, `checks run`,\n" +
+      "    `probe`, `request`, `prepare-fixtures --cascade`. With by-source breakdown.\n" +
       "\n" +
-      "Source: only `zond run` results are aggregated (ARV-19). `zond checks " +
-      "run` probes hit the API but are not stored as run results, so they " +
-      "don't move either metric — generate suites with `zond generate` and " +
-      "execute them via `zond run` to grow coverage.\n" +
+      "Use --scope to print just one block: `--scope test` for legacy single-metric\n" +
+      "output, `--scope audit` to answer 'did the scan reach the API at all'.\n" +
+      "Producers opt out via ZOND_CHECKS_PERSIST=0 (default: persist on).\n" +
       "\n" +
       "Defaults to the latest stored run for the resolved API; pass " +
       "--run-id to pin a specific run, or --union <selector> to combine " +
@@ -510,10 +680,12 @@ export function registerCoverage(program: Command): void {
       "  zond run apis/<api>/probes\n" +
       "  zond coverage --api <api> --union session\n" +
       "\n" +
-      "Exit codes: 0 = every endpoint covered (or pass-coverage ≥ " +
-      "--fail-on-coverage when set); 1 = uncovered endpoints remain (or " +
-      "pass-coverage < --fail-on-coverage); 2 = bad input or read error. " +
-      "--fail-on-coverage gates pass-coverage, not hit-coverage.",
+      "Exit codes (ARV-303): 0 = coverage computed successfully (envelope " +
+      "ok:true — uncovered endpoints remaining is a data point, not a " +
+      "failure); 1 = coverage could not be computed (selector resolved to " +
+      "zero runs) or pass-coverage < --fail-on-coverage; 2 = bad input or " +
+      "read error. Uncovered endpoints only gate the exit when you opt in " +
+      "with --fail-on-coverage; that flag gates pass-coverage, not hit-coverage.",
     )
     .option("--api <name>", "Use API collection (auto-resolves spec; reads stored runs)")
     .option("--spec <path>", "Spec-only fallback when no API is registered (no run results)")
@@ -526,6 +698,12 @@ export function registerCoverage(program: Command): void {
     )
     .option("--db <path>", "Path to SQLite database file")
     .option("--verbose", "List not-covered (and partial) endpoints inline — same data as `--json` but human-readable")
+    .addOption(
+      new Option(
+        "--scope <scope>",
+        "ARV-265: which coverage block(s) to print. `test` = pass-coverage/hit-coverage only (legacy single block from `zond run` results). `audit` = audit-coverage only (every HTTP touch from `run` / `checks run` / `probe` / `request` / fixture-cascade, with by-source breakdown). `both` (default) = both side-by-side.",
+      ).choices(["test", "audit", "both"]).default("both"),
+    )
     // ARV-35: `--format json` matches the kubectl/gh/aws-cli convention many
     // users reach for first; until ARV-54 lands a workspace-wide alias layer
     // we accept it locally and forward to `--json`. Other values are rejected
@@ -566,7 +744,20 @@ export function registerCoverage(program: Command): void {
           if (parsed.kind === "session") {
             const current = readCurrentSession();
             if (!current) {
-              printError("--union session requires an active session (run 'zond session start' first), or pass --session-id <id>.");
+              // ARV-234: when there's no active session, peek at the most
+              // recent one — agents typically hit this right after
+              // `session end`. Surface its id in the error so the recovery
+              // path is one copy-paste instead of `db sessions`-spelunking.
+              let hint = "";
+              try {
+                const recent = listSessions(1, 0);
+                if (recent.length > 0) {
+                  const r = recent[0]!;
+                  const endedAt = r.finished_at ? ` (ended ${r.finished_at})` : "";
+                  hint = ` Most recent session: --session-id ${r.session_id}${endedAt}.`;
+                }
+              } catch { /* best effort */ }
+              printError(`--union session requires an active session (run 'zond session start' first), or pass --session-id <id>.${hint}`);
               process.exitCode = 2;
               return;
             }
@@ -604,12 +795,14 @@ export function registerCoverage(program: Command): void {
       // (the percentage already looked like a regression). Explicit
       // selectors win, --json keeps the envelope untouched.
       const noSelector = !opts.runId && !sessionId && !runIds && !sinceIso && !tag;
+      let promotedToSession = false;
       if (apiName && noSelector) {
         const current = readCurrentSession();
         if (current) {
           const sessRuns = listRunsBySession(current.id);
           if (sessRuns.length > 1) {
             sessionId = current.id;
+            promotedToSession = true;
             if (!globalJson(cmd)) {
               process.stderr.write(
                 `zond: active session has ${sessRuns.length} runs — defaulting to --union session (pass --run-id <N> for a single run).\n`,
@@ -634,10 +827,23 @@ export function registerCoverage(program: Command): void {
                 `For combined coverage, wrap your runs in 'zond session start/end' and pass '--union session' here.`;
               process.stderr.write(`zond: ${hint}\n`);
             }
+            // ARV-81: parity with the session-promotion footer above —
+            // when we *don't* promote to --union session (no session, or
+            // session has 1 run), tell the user which run they're seeing
+            // so the single-run snapshot can't be mistaken for a regression.
+            if (!promotedToSession && !globalJson(cmd)) {
+              const regular = getLatestRunByCollection(collection.id, { runKind: "regular" });
+              if (regular) {
+                process.stderr.write(
+                  `zond: using latest run #${regular.id}. For union, pass '--union since:<dur>' or '--union runs:<a,b,...>'.\n`,
+                );
+              }
+            }
           }
         } catch { /* DB inspection is best-effort, don't break coverage */ }
       }
 
+      const scope = (opts.scope === "test" || opts.scope === "audit") ? opts.scope : "both";
       process.exitCode = await coverageCommand({
         ...(apiName ? { apiName } : {}),
         ...(spec ? { spec } : {}),
@@ -649,6 +855,7 @@ export function registerCoverage(program: Command): void {
         ...(tag ? { tag } : {}),
         json: globalJson(cmd),
         verbose: opts.verbose === true,
+        scope,
       });
     });
 }

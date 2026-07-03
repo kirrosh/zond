@@ -52,34 +52,58 @@ describe("open_cors_on_sensitive (ARV-256)", () => {
     extensions: {},
   } as unknown as Parameters<typeof openCorsOnSensitive.run>[0]);
 
-  it("HIGH on Allow-Origin: * + Allow-Credentials: true", async () => {
+  // ARV-316: HIGH also requires an ambient (cookie) credential — the
+  // Set-Cookie here supplies it. Without one, bearer/token auth caps at LOW.
+  it("HIGH on Allow-Origin: * + Allow-Credentials: true (cookie auth)", async () => {
     const h = fakeHarness({
       status: 200,
       headers: {
         "access-control-allow-origin": "*",
         "access-control-allow-credentials": "true",
+        "set-cookie": "session=abc; HttpOnly",
       },
     });
     const outcome = await openCorsOnSensitive.run(ep(), h as never);
     expect(outcome.kind).toBe("fail");
     if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("high");
       expect(outcome.message).toMatch(/wildcard|cross-origin/i);
       expect(outcome.evidence?.variant).toBe("wildcard+credentials");
     }
   });
 
-  it("HIGH when server reflects attacker Origin + Allow-Credentials: true", async () => {
+  it("HIGH when server reflects attacker Origin + Allow-Credentials: true (cookie auth)", async () => {
     const h = fakeHarness({
       status: 200,
       headers: {
         "access-control-allow-origin": "https://evil.zond.test",
         "access-control-allow-credentials": "true",
+        "set-cookie": "session=abc; HttpOnly",
       },
     });
     const outcome = await openCorsOnSensitive.run(ep(), h as never);
     expect(outcome.kind).toBe("fail");
     if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("high");
       expect(outcome.evidence?.variant).toBe("reflected+credentials");
+    }
+  });
+
+  it("ARV-316: LOW (not HIGH) on bearer/token auth 2xx — no ambient cookie", async () => {
+    const h = fakeHarness({
+      status: 200,
+      headers: {
+        "access-control-allow-origin": "https://evil.zond.test",
+        "access-control-allow-credentials": "true",
+        // no Set-Cookie → bearer/header auth, reflection not exploitable
+      },
+    });
+    const outcome = await openCorsOnSensitive.run(ep(), h as never);
+    expect(outcome.kind).toBe("fail");
+    if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("low");
+      expect(outcome.evidence?.ambient_credential).toBe(false);
+      expect(outcome.message).toMatch(/exploitable|ambient/);
     }
   });
 
@@ -107,6 +131,62 @@ describe("open_cors_on_sensitive (ARV-256)", () => {
   it("does NOT apply to public endpoints (security: [])", () => {
     const publicOp = { ...ep(), security: [] };
     expect(openCorsOnSensitive.applies(publicOp)).toBe(false);
+  });
+
+  // ARV-312: HIGH requires a 2xx response (authed data actually exposed).
+  // On the Stripe live scan every finding fired on a 401-gated response
+  // that still reflected the Origin — 261 phantom HIGHs. Cap those at LOW
+  // and record the real status so `response_summary.status` isn't a
+  // phantom 0.
+  it("HIGH carries the real 2xx status via responseStatus", async () => {
+    const h = fakeHarness({
+      status: 200,
+      headers: {
+        "access-control-allow-origin": "https://evil.zond.test",
+        "access-control-allow-credentials": "true",
+        "set-cookie": "session=abc; HttpOnly",
+      },
+    });
+    const outcome = await openCorsOnSensitive.run(ep(), h as never);
+    expect(outcome.kind).toBe("fail");
+    if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("high");
+      expect(outcome.responseStatus).toBe(200);
+      expect(outcome.evidence?.response_status).toBe(200);
+    }
+  });
+
+  it("ARV-312: LOW (not HIGH) when reflection is on a 401 — no authed data exposed", async () => {
+    const h = fakeHarness({
+      status: 401,
+      headers: {
+        "access-control-allow-origin": "https://evil.zond.test",
+        "access-control-allow-credentials": "true",
+      },
+    });
+    const outcome = await openCorsOnSensitive.run(ep(), h as never);
+    expect(outcome.kind).toBe("fail");
+    if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("low");
+      expect(outcome.responseStatus).toBe(401);
+      expect(outcome.message).toMatch(/unproven/);
+    }
+  });
+
+  it("ARV-312: wildcard+credentials on 500 also caps at LOW", async () => {
+    const h = fakeHarness({
+      status: 500,
+      headers: {
+        "access-control-allow-origin": "*",
+        "access-control-allow-credentials": "true",
+      },
+    });
+    const outcome = await openCorsOnSensitive.run(ep(), h as never);
+    expect(outcome.kind).toBe("fail");
+    if (outcome.kind === "fail") {
+      expect(outcome.severity).toBe("low");
+      expect(outcome.evidence?.variant).toBe("wildcard+credentials");
+    }
   });
 });
 

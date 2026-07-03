@@ -74,15 +74,78 @@ Pragmatic режим (default) — реалистичный для production AP
 - **Auth headers are auto-derived from `--api <name>` `.env.yaml`**
   (`auth_token` → `Authorization: Bearer …`, `api_key` → `X-API-Key`).
   Add explicit ones with `--auth-header 'Name: value'` (repeatable).
+- **Prewarm a fresh workspace before `zond checks run`.** Right after
+  `zond add api <name>`, `.env.yaml` only has the auth skeleton — list
+  endpoints can return 401 until a `setup:` suite captures session
+  vars. Running `--check stateful` immediately surfaces dozens of
+  spurious `ignored_auth` / `report_backend_bug` findings (cold-state
+  race, F1/F18 in feedback loop). Fix: run one smoke pass first
+  (`zond run apis/<name>/tests --safe --report json` or `zond doctor
+  --api <name> --missing-only`), let `prepare-fixtures` warm
+  `.env.yaml`, then `zond checks run`.
+- **Treat per-check noise as fixture / generator drift, not a backend
+  bug.** Two checks are reliably noisy on production APIs and need a
+  pre-filter before triage:
+  - `positive_data_acceptance` — emits MEDIUM when a generated body is
+    rejected with 422. On APIs with **semantic validation** (Resend
+    domain ownership, Stripe currency vs country, …) this is almost
+    always `fix_generator` / `fix_fixture`, not `report_backend_bug`.
+    Inspect the 422 reason; if it mentions a business rule the
+    generator can't satisfy, file under `regenerate_suite` or annotate
+    `seed_body`.
+  - `response_schema_conformance` — HIGH on format-only mismatches
+    (`format: email` rejecting a free-form string the server returned)
+    is contract drift; HIGH on a field the server actually doesn't
+    persist is a backend bug. Use `cross_call_references` to
+    disambiguate before reporting.
+
+## In-spec `x-zond-*` extensions (ARV-189, m-21)
+
+Low-friction per-endpoint policy via OpenAPI vendor extensions —
+when a single operation needs an exception, avoid the round-trip
+through `.api-resources.local.yaml`. Implemented today:
+
+| Extension | Type | Effect |
+|---|---|---|
+| `x-zond-skip: [check_id, …]` (or single string) | string\[] | skip those checks for this op |
+| `x-zond-public: true` | boolean | shortcut: skip auth-class checks (`ignored_auth`, `missing_required_header`) |
+
+Place at operation level (preferred) or path-item level — operation
+wins on key collision.
+
+```yaml
+paths:
+  /v1/public/status:
+    get:
+      x-zond-public: true                       # public health route
+      responses: { '200': { description: ok } }
+  /v1/admin/raw-debug:
+    get:
+      x-zond-skip: [status_code_conformance]    # known 500-on-bad-input
+      responses: { '500': { description: 'debug 500' } }
+```
+
+Skipped runs surface in `--report` `skipped_outcomes` as
+`<check>: x-zond-skip listed "<id>" at the spec level` or
+`<check>: x-zond-public: true (auth check suppressed …)` so the
+operator can tell spec-level suppression apart from runtime skips.
+
+Priority (highest first): `.api-resources.local.yaml` overlay >
+`x-zond-*` extensions > `.api-resources.yaml` baseline > built-in
+defaults. For one-shots use extensions; for resource-wide policy
+(`idempotency.header`, `lifecycle.field`, …) use the overlay yaml.
+
+Not yet implemented: `x-zond-resource` / `x-zond-idempotent` /
+`x-zond-lifecycle-field` — these need deeper overlay-config wiring
+and are tracked separately. Use `annotate apply` for those today.
 
 ## Phase pre-0 — Annotation (mandatory for `--check stateful`)
 
-> **Heads-up for `pagination_invariants`:** only cursor-style pagination
-> is implemented in this milestone (`cursor`/`next`-token responses).
-> APIs with `type: page` / `type: offset` (GitHub, Linear, Resend, …)
-> are accepted by `annotate apply` but the check short-circuits with
-> "type not implemented" — annotating page-based pagination has **no
-> runtime effect**, skip the dump+apply step for those resources.
+> **Heads-up for `pagination_invariants`:** `cursor` (Stripe-style) and
+> `page` (GitHub/GitLab/Atlassian/Notion-style `?page=N&per_page=M`)
+> are implemented. `offset` / `token` annotations parse but the check
+> short-circuits with "type not implemented" — skip dump+apply for
+> those resources until later milestones.
 
 m-20 stateful checks rely on per-resource config in
 `.api-resources.local.yaml` (overlay that survives `refresh-api`).
@@ -103,6 +166,12 @@ zond api annotate dump --api <name> --resources     > /tmp/orphans.json  # optio
 ```
 
 Restrict scope with `--only r1,r2,r3` on any dump.
+
+`annotate dump` emits **JSON** (a top-level array of per-resource
+slices). YAML is a JSON superset, so the file parses either way — when
+piping into a YAML-aware reader, treat it as a list of objects with the
+same shape documented below. The corresponding response file the agent
+writes back is **YAML** (more comments-friendly).
 
 Agent reads each dump and writes a YAML response file (top-level list
 of entries — see per-check schemas below for the block shape).
@@ -139,6 +208,28 @@ zond api annotate apply --api <name> --idempotency --input /tmp/idem.yaml --yes
 
 Each block's YAML format is documented under the per-check section below.
 
+**Heuristic shortcut (large APIs):** `zond api annotate auto` skips the
+agent loop and applies pure spec-pattern heuristics for `pagination`,
+`lifecycle`, and `idempotency`. Useful when a 1000+-endpoint spec makes
+hand-authoring per-resource YAML impractical. Only emits
+`confidence: high` inferences — ambiguous cases stay null and still
+need the agent overlay path (`dump` → `apply`).
+
+```bash
+zond api annotate auto --api <name> --aspect all                # dry-run + diff (all 3 aspects)
+zond api annotate auto --api <name> --aspect pagination          # one aspect only
+zond api annotate auto --api <name> --aspect all --auto-apply    # write to overlay
+zond api annotate auto --api <name> --aspect all --only issues,repos  # scope to N resources
+```
+
+Heuristics (each ⇒ `confidence: high`):
+- **pagination**: list endpoint has `page` + `per_page`/`page_size`/`limit` → `type: page`;
+  or `cursor`/`starting_after`/`after`/`page_token` → `type: cursor`.
+- **lifecycle**: read/list/create response has a `state` or `status` enum
+  with ≥2 values → observation-mode `{ field, states, transitions: [], actions: {} }`.
+- **idempotency**: create endpoint declares a header with `idempotency`
+  in its name → `{ header: <name> }`.
+
 ## Reading findings
 
 Every finding carries a closed-enum `recommended_action` so the agent
@@ -155,15 +246,55 @@ can route without parsing free-form messages:
 | `wontfix_known_limitation` | Known accepted gap. Don't retry, don't file a bug. |
 
 Triage by `recommended_action` first, then by severity. HIGH/CRITICAL
-gates exit-code 1; LOW/MEDIUM is informational.
+gates exit-code 1; LOW/MEDIUM is informational. In an orchestrator/CI
+that must tell "found drift" from "command crashed", pass
+`--no-fail-on-findings` (alias `--advisory`, ARV-308): exit 0 even with
+HIGH/CRITICAL findings — the findings are still in the envelope. Mirrors
+`zond run --no-fail-on-failures`. Exit 2 stays reserved for real failures.
+
+### Spec-level rollup (ARV-60)
+
+When a single spec-level gap manifests on many operations (`401 not
+declared in spec` × 83 sites; `no JSON Schema on this response branch` ×
+all skipped cases; `use_after_free` ran 0 cases because there's no
+DELETE+GET pair in the spec), the runner emits a single `spec_finding`
+instead of N per-op rows. Threshold: ≥80% of the check's applicable
+operations sharing one root cause.
+
+Each `spec_finding` has:
+
+| Field | Meaning |
+|---|---|
+| `kind` | `status_drift` / `missing_declaration` / `no_detector` / `broken_baseline` / `other` |
+| `reason` | One-line root cause statement |
+| `fix_hint` | Actionable next step (spec edit / tolerate flag / annotate command) |
+| `affected_operations` | Operations covered (empty for skip/no-detector clusters) |
+| `count` / `applicable` | Cluster size + the population it was measured against |
+
+`broken_baseline` (ARV-307) is special: when the positive/success probes
+overwhelmingly failed (>90% non-2xx — e.g. a fully auth-rejected scan),
+`status_code_conformance` / `content_type_conformance` findings are baseline
+artifacts, so they're removed from `findings[]` and rolled into this one
+row. Fix the baseline (auth + path-param fixtures) and re-run before trusting
+conformance — undeclared statuses on an all-4xx scan are not real drift.
+
+Triage spec_findings first — they collapse 1×N noise into one decision.
+Per-op findings still live in `data.findings`; `--verbose` brings the
+full unaggregated list back to stdout. SARIF + JSON envelope always
+carry both layers.
+
+```bash
+zond checks run --api myapi --json | jq '.data.spec_findings'
+zond checks run --api myapi --report ndjson | jq -c 'select(.type == "spec_finding")'
+```
 
 ## Output formats
 
 ```bash
-zond checks run --api myapi --json                 # one envelope: findings[] + summary
+zond checks run --api myapi --json                 # one envelope: findings[] + spec_findings[] + summary
 zond checks run --api myapi --report sarif --output zond.sarif
                                                     # SARIF v2.1.0 for github/codeql-action/upload-sarif@v3
-zond checks run --api myapi --report ndjson | jq -c '.'   # streaming events: check_start, check_result, finding, summary
+zond checks run --api myapi --report ndjson | jq -c '.'   # streaming events: check_start | check_result | finding | spec_finding | summary
 ```
 
 NDJSON event schema is published at `docs/json-schema/ndjson-events.schema.json`
@@ -183,12 +314,39 @@ zond checks run --api myapi --mode positive       # contract verification only
 zond checks run --api myapi --mode negative       # malicious-input probes only
 
 # Pick a phase
-zond checks run --api myapi --phase coverage      # deterministic boundary values
-zond checks run --api myapi --phase examples      # default — one positive + one negative per op
+zond checks run --api myapi --phase coverage      # ~×1.75 cases per op; real bug-hunt phase
+zond checks run --api myapi --phase examples      # default — 1 positive + 1 negative per op (smoke)
 ```
+
+**`--phase examples` is smoke, not depth.** It runs one positive + one
+negative example per operation, finishes ~3× faster, but routinely
+returns zero HIGH findings on well-formed APIs because boundary
+mutations never fire. For an actual bug-hunt sweep, pass
+`--phase coverage` — it expands each operation to ~×1.75 cases with
+deterministic boundary values (min/max ints, empty strings, length
+overflows, RFC-3339 edge dates, …). Use `examples` only for fast
+gate-keeping in CI; use `coverage` once before sign-off.
 
 `--allow-x00` adds the NUL byte (`\x00`) to string boundaries during
 coverage — off by default (some HTTP/JSON stacks panic on it).
+
+## Contribution to audit-coverage (ARV-265)
+
+Every case `checks run` dispatches is now written to `runs`/`results`
+with `run_kind = 'check'`. This means `zond coverage` picks it up in
+its **audit-coverage** block — answering "did the scan touch endpoint
+X?" without requiring a separate `zond run`. The test-coverage block
+(pass/hit) is unaffected — `checks run` does not produce passing test
+suites, so it doesn't contribute to `pass-coverage`.
+
+```bash
+zond checks run --api myapi             # touches every endpoint at least once
+zond coverage --api myapi --scope audit # 100% audit-coverage on the GET surface
+zond coverage --api myapi               # default dual output: test + audit blocks
+```
+
+Opt-out: `ZOND_CHECKS_PERSIST=0 zond checks run …` skips the
+persistence step (matches pre-ARV-265 behaviour).
 
 ## Concurrency
 
@@ -304,52 +462,70 @@ resources:
 Anti-FP: 429/409 on the 2nd POST → skip with cleanup. No DELETE on the
 group → finding still fires, evidence carries `cleanup_warning`.
 
-## Pagination invariants (m-20 ARV-171)
+## Pagination invariants (m-20 ARV-171, m-21 ARV-220)
 
-`pagination_invariants` — fetch two consecutive cursor pages and assert
-the contract holds:
+`pagination_invariants` — fetch two consecutive pages and assert the
+contract holds. Two styles implemented:
+
+**Cursor style** (Stripe / Notion / Linear, default when
+`starting_after` / `cursor` / `after` / `page_token` query param is
+detected):
 
 - **duplicate_items** — an item id appears on both page A and page B
   (off-by-one / cursor stops one short). HIGH-signal.
 - **has_more_inconsistent** — page A said `has_more=true`, but page B is
-  empty and doesn't flip to `has_more=false`. Surfaces broken end-of-list
-  signalling.
+  empty and doesn't flip to `has_more=false`. Broken end-of-list signal.
 - **partial_page_with_has_more** — page A returns fewer items than the
-  requested limit *yet* advertises `has_more=true`. Means the cursor is
-  prematurely truncating responses.
+  requested limit *yet* advertises `has_more=true`. Cursor truncates.
 
-Cursor-style only in this milestone (Stripe / GitHub / Resend / Linear
-pattern). `page` / `offset` / `token` declarations parse but the check
-short-circuits with a "type not implemented" reason so the yaml block
-stays a stable schema.
+**Page-number style** (GitHub / GitLab / Atlassian / Notion, default
+when `page` / `page_number` query param is detected):
 
-Auto-detect: if the list endpoint declares `starting_after` / `cursor` /
-`after` / `page_token` as a query parameter, the check runs with
-defaults (`cursor_field=id`, `items_field=data|items|results`,
-`has_more_field=has_more`, `limit=2`).
+- **duplicate_items** — items overlap across pages N and N+1.
+- **per_page_exceeded** — server returned more items than `per_page=N`
+  (e.g. asked for 2, got 5). `has_more` is NOT enforced — most APIs in
+  this family signal end-of-list via Link headers / `total_pages`.
+
+`offset` / `token` declarations parse but the check short-circuits with
+a "type not implemented" reason so the yaml block stays a stable schema.
+
+Defaults: `cursor_field=id`, `items_field=data|items|results|value`,
+`has_more_field=has_more`, `limit=2`. Page-style adds `page_param=page`,
+`start_page=1`, `limit_param=per_page`.
 
 Per-resource yaml override (author via Phase pre-0
 `annotate dump --pagination` → agent → `apply`):
 
 ```yaml
 resources:
-  - resource: customer
-    # … existing fields …
+  - resource: customer            # Stripe-style cursor
     pagination:
-      type: cursor                   # only cursor supported today
-      cursor_param: starting_after   # Stripe-style; "after" / "cursor" / "page_token" also work
-      cursor_field: id               # field on each item that feeds the next cursor
-      has_more_field: has_more       # response field that flips on end-of-list
-      limit_param: limit             # query param for page size
-      default_limit: 2               # probe page size — small on purpose
-      items_field: data              # array container (falls back to items / results / value)
+      type: cursor
+      cursor_param: starting_after  # Stripe; "after" / "cursor" / "page_token" also work
+      cursor_field: id              # field on each item that feeds the next cursor
+      has_more_field: has_more      # response field that flips on end-of-list
+      limit_param: limit
+      default_limit: 2
+      items_field: data             # array container (falls back to items / results / value)
+
+  - resource: issue               # GitHub-style page
+    pagination:
+      type: page
+      page_param: page              # query param carrying page number (default `page`)
+      start_page: 1                 # 1-based on GitHub/GitLab; 0 for some APIs
+      limit_param: per_page         # default `per_page` for page-style
+      default_limit: 2
+      cursor_field: id              # dedupe key across pages
+      items_field: data             # omit if response is a bare array
 ```
 
-## Lifecycle transitions (m-20 ARV-172)
+## Lifecycle transitions (m-20 ARV-172, m-21 ARV-219)
 
-`lifecycle_transitions` — declare a state machine in
-`.api-resources.yaml`, the check creates a resource and walks the
-named actions, asserting:
+`lifecycle_transitions` runs in one of two modes based on the
+`actions:` field of the yaml manifest:
+
+**Action-driven mode** (preferred — needs create + read endpoints):
+The check creates a resource and walks the named actions, asserting:
 
 - **undeclared_state** — observed state isn't in declared `states[]`.
 - **wrong_expected_state** — action landed the resource in a state other
@@ -363,6 +539,28 @@ named actions, asserting:
 - **action_rejected** — first-call non-2xx (server-side gating). Not a
   contract bug per se, surfaced as INCONCLUSIVE-class info.
 
+**Observation mode** (ARV-219 — read-only state machines): when
+`actions: {}` (or omitted) AND the resource has a list endpoint, the
+check GETs the list once and asserts every observed `field` value is
+in `states[]`. Reports `undeclared_state` with sample item ids for
+each unexpected value.
+
+When to use observation mode:
+- The API exposes a status enum the agent enumerated from the spec,
+  but the auth scope is read-only and cannot drive mutations (GitHub
+  Issues with a read PAT, public-read endpoints).
+- You want to detect contract-doc drift (spec says `enum: [open,
+  closed]`, prod returns `archived`).
+
+Observation mode cannot verify the `transitions` graph (no time
+series in a single list call) — the transition arrows stay purely
+documentation. If write scope is available, prefer action mode for
+the full guarantee surface.
+
+Skip reasons unique to observation mode: `list returned <code>` (broken
+baseline), `list empty — no data to observe`, `state field "<x>"
+missing on all N observed items — yaml mismatch or nested field`.
+
 Manifest validation runs at yaml load (catches cycles, unreachable
 states, missing terminal, actions referencing undeclared states)
 before any HTTP call goes out.
@@ -370,12 +568,12 @@ before any HTTP call goes out.
 Author via Phase pre-0 `annotate dump --lifecycle` → agent → `apply`.
 The dump emits action-endpoint candidates (POST `/{resource}/{id}/cancel`,
 PATCH `/{resource}/{id}/status` etc.); agent decides the state machine
-graph.
+graph. For observation-only resources, return `actions: {}` and the
+check picks the observation path automatically.
 
 ```yaml
 resources:
-  - resource: subscription
-    # … existing fields …
+  - resource: subscription           # action-driven mode
     lifecycle:
       field: status
       states: [pending, active, cancelled]
@@ -390,6 +588,17 @@ resources:
         cancel:
           endpoint: POST /v1/subscriptions/{id}/cancel
           expected_state: cancelled
+
+  - resource: issue                  # observation mode
+    lifecycle:
+      field: state
+      states: [open, closed]
+      transitions:
+        - from: open
+          to: [closed]
+        - from: closed
+          to: []
+      actions: {}                    # no actions → check observes via GET /issues
 ```
 
 Action endpoints accept the `{id}` placeholder (replaced with the
