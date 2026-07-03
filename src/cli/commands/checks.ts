@@ -30,6 +30,7 @@ import type { ReadbackDiffConfig, IdempotencyConfig, PaginationConfig, Lifecycle
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
+import { readFixtureGaps, gapIndex } from "../../core/workspace/fixture-gaps.ts";
 import { getApi } from "../util/api-context.ts";
 import { VERSION } from "../version.ts";
 import { resolveOutput, OutputSpecError, type OutputSpec, type ResolvedOutput } from "../../core/output/index.ts";
@@ -257,6 +258,19 @@ async function derivePathVarsFromApi(apiName: string | undefined, dbPath: string
   }
 }
 
+/** ARV-324: load `.fixture-gaps.yaml` (written by a prior prepare-fixtures/
+ *  discover run) so findings on a known-empty/inaccessible operation get
+ *  `fix_fixture` instead of `report_backend_bug`. Undefined (not an empty
+ *  Set) when there's no API context or no gaps file, so the classifier
+ *  can tell "nothing to check" apart from "checked, no gaps". */
+async function deriveFixtureGapsFromApi(apiName: string | undefined, dbPath: string | undefined): Promise<Set<string> | undefined> {
+  if (!apiName) return undefined;
+  const col = resolveApiCollection(apiName, dbPath);
+  if ("error" in col || !col.baseDir) return undefined;
+  const gaps = await readFixtureGaps(col.baseDir);
+  return gaps.length > 0 ? gapIndex(gaps) : undefined;
+}
+
 async function deriveAuthHeadersFromApi(apiName: string | undefined, dbPath: string | undefined): Promise<Record<string, string>> {
   if (!apiName) return {};
   const col = resolveApiCollection(apiName, dbPath);
@@ -466,6 +480,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   // rounds and CI can't distinguish "spec stable" from "checks ignored deltas").
   const pathVars = await derivePathVarsFromApi(apiName, opts.db);
   const resourceConfigs = await deriveResourceConfigsFromApi(apiName, opts.db);
+  const fixtureGaps = await deriveFixtureGapsFromApi(apiName, opts.db);
 
   const phaseRaw = typeof opts.phase === "string" ? opts.phase : "examples";
   if (phaseRaw !== "examples" && phaseRaw !== "coverage" && phaseRaw !== "all") {
@@ -636,6 +651,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       timeoutMs: typeof opts.timeout === "number" ? opts.timeout : undefined,
       authHeaders: Object.keys(authHeaders).length > 0 ? authHeaders : undefined,
       pathVars: Object.keys(pathVars).length > 0 ? pathVars : undefined,
+      fixtureGaps,
       resourceConfigs,
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed === true,
       phase: phaseRaw as "examples" | "coverage" | "all",

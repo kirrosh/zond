@@ -45,6 +45,7 @@ import { calibrate } from "../severity/calibrator.ts";
 import { runPool } from "../runner/async-pool.ts";
 import type { RateLimiter } from "../runner/rate-limiter.ts";
 import { recommendForCheck } from "./recommended-action.ts";
+import { gapKey } from "../workspace/fixture-gaps.ts";
 import { endpointSkipsCheck, reasonForSkip } from "./zond-extensions.ts";
 import {
   emptySummary,
@@ -171,6 +172,12 @@ export interface RunChecksOptions {
    *  vars are filled. Keyed by path-param name (e.g. `issue_id`); falls back
    *  to the legacy schema-driven placeholder when the name isn't in the map. */
   pathVars?: Record<string, string>;
+  /** ARV-324: operations `.fixture-gaps.yaml` already confirmed as a
+   *  known-empty/inaccessible resource (keyed by `"METHOD /path"` via
+   *  `gapKey()`). A finding on one of these operations gets
+   *  `recommended_action: fix_fixture` instead of `report_backend_bug` —
+   *  it's a known gap in our own test data, not new backend evidence. */
+  fixtureGaps?: Set<string>;
   /** ARV-227: hard cap on outbound HTTP requests for the entire run.
    *  Once `used >= limit`, every subsequent case short-circuits and the
    *  summary surfaces the cap via `summary.skipped_outcomes
@@ -563,8 +570,11 @@ function recordFinding(
    *  evidence (e.g. negative_data_rejection LOW for additionalProperties,
    *  HIGH for 5xx response). */
   outcomeSeverity?: Severity,
+  /** ARV-324: known-gap index, see `RunChecksOptions.fixtureGaps`. */
+  fixtureGaps?: Set<string>,
 ): void {
-  const action = recommendForCheck(check.id, resp.status);
+  const unresolvedFixture = fixtureGaps?.has(gapKey(c.operation.method, c.operation.path)) ?? false;
+  const action = recommendForCheck(check.id, resp.status, unresolvedFixture);
   const finding: CheckFinding = {
     check: check.id,
     severity: outcomeSeverity ?? check.severity,
@@ -861,7 +871,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           options: checkRuntimeOptions,
         });
         if (outcome.kind === "fail") {
-          recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent, opts.severityConfig, outcome.severity);
+          recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent, opts.severityConfig, outcome.severity, opts.fixtureGaps);
         }
         if (outcome.kind === "skip") {
           // ARV-26: bucket skips by check+reason so the summary can surface

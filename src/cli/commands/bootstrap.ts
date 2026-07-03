@@ -34,6 +34,7 @@ import { liveAuthHeaders } from "../../core/probe/shared.ts";
 import { executeRequest } from "../../core/runner/http-client.ts";
 import {
   collectTargets,
+  gapsFromItems,
   isPlaceholder,
   probeOne,
   readFixtureManifest,
@@ -46,6 +47,7 @@ import {
 import { printError, printSuccess, printWarning } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import type { EndpointInfo, SecuritySchemeInfo } from "../../core/generator/types.ts";
+import { writeFixtureGaps } from "../../core/workspace/fixture-gaps.ts";
 
 export interface BootstrapOptions {
   specPath: string;
@@ -168,6 +170,52 @@ function findOwnerResourceForSeed(
   return undefined;
 }
 
+/**
+ * ARV-327: order seed targets so a resource's own dependencies (per
+ * `fkDependencies` — both path *and* body edges) are attempted before the
+ * resource itself. Without this, a child (e.g. `card`, needing a
+ * `cardholder`) fires its POST in the same pass as its still-unseeded
+ * parent and 400s for a reason ordering alone would have fixed.
+ *
+ * Because `env` is mutated in place as the seed loop walks its target
+ * list (each `trySeed` call re-reads current env values), a topological
+ * order lets a multi-level chain (`account` → `cardholder` → `card`)
+ * resolve within a *single* pass instead of needing one outer
+ * seed↔cascade pass per level of depth.
+ *
+ * Best-effort: falls back to the incoming relative order for ties,
+ * cycles, or unresolvable owners — the outer seed↔cascade loop already
+ * retries next pass regardless, so a suboptimal order here costs a
+ * wasted attempt, not correctness.
+ */
+function topoSortSeedTargets(targets: FkTarget[], resources: ResourceYaml[]): FkTarget[] {
+  const indexByVar = new Map(targets.map((t, i) => [t.varName, i] as const));
+  // varName -> other *scheduled* varNames its create endpoint needs first.
+  const dependsOn = new Map<string, Set<string>>();
+  for (const t of targets) {
+    const owner = findOwnerResourceForSeed(t.varName, resources);
+    const need = new Set<string>();
+    for (const dep of owner?.fkDependencies ?? []) {
+      if (dep.var !== t.varName && indexByVar.has(dep.var)) need.add(dep.var);
+    }
+    dependsOn.set(t.varName, need);
+  }
+  const done = new Set<string>();
+  const inProgress = new Set<string>();
+  const ordered: FkTarget[] = [];
+  const visit = (varName: string): void => {
+    if (done.has(varName) || inProgress.has(varName)) return; // cycle → leave for incoming order
+    inProgress.add(varName);
+    for (const dep of dependsOn.get(varName) ?? []) visit(dep);
+    inProgress.delete(varName);
+    done.add(varName);
+    const idx = indexByVar.get(varName);
+    if (idx !== undefined) ordered.push(targets[idx]!);
+  };
+  for (const t of targets) visit(t.varName);
+  return ordered;
+}
+
 /** ARV-47: build a one-line `curl` invocation that reproduces the failed
  *  seed request. Headers carrying secrets (Authorization, X-API-Key) are
  *  redacted to a `<REDACTED>` placeholder so the repro can ship in stderr
@@ -271,6 +319,27 @@ async function trySeed(
       status: "skip-no-create",
       reason: `parent fixtures missing for create path: ${missing.join(", ")}`,
     };
+  }
+  // ARV-327: the generator path (no overlay) has no way to invent a real
+  // parent id for a required body-FK field — it either echoes a known
+  // fixture or falls back to a schema-derived placeholder that 400s on a
+  // real API. Defer the same way the path-param check above already does,
+  // instead of burning a live POST we know can't succeed. Overlay bodies
+  // are hand/agent-authored and trusted as-is (unchanged behavior).
+  if (!hasOverlay) {
+    const missingBodyDeps = (owner.fkDependencies ?? [])
+      .filter(dep => dep.in === "body")
+      .map(dep => dep.var)
+      .filter(v => isPlaceholder(vars[v]));
+    if (missingBodyDeps.length > 0) {
+      return {
+        varName,
+        resource: owner.resource,
+        createPath: parsed.path,
+        status: "skip-no-create",
+        reason: `parent fixtures missing for create body: ${missingBodyDeps.join(", ")}`,
+      };
+    }
   }
   // ARV-47: spec-aware body builder substitutes parent-FK fields with
   // values already in env (audience_id ↔ env["audience_id"]) before the
@@ -573,8 +642,10 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
       // is made — whichever comes first.
       let outer = 0;
       for (; outer < maxPasses; outer++) {
-        const stillEmpty = targets.filter(t => isPlaceholder(env[t.varName]));
-        if (stillEmpty.length === 0) { seedStop = "stable"; break; }
+        const stillEmptyUnordered = targets.filter(t => isPlaceholder(env[t.varName]));
+        if (stillEmptyUnordered.length === 0) { seedStop = "stable"; break; }
+        // ARV-327: parents before children — see topoSortSeedTargets doc.
+        const stillEmpty = topoSortSeedTargets(stillEmptyUnordered, resourceMap.resources);
 
         let progressed = false;
         for (const t of stillEmpty) {
@@ -724,6 +795,10 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
         ...(sourceEndpoint ? { sourceEndpoint } : {}),
       });
     }
+
+    // ARV-324: same persistence as plain `discover` — see discover.ts for
+    // rationale. Rewritten wholesale so a since-fixed gap doesn't linger.
+    await writeFixtureGaps(options.apiDir, gapsFromItems(passes.flatMap(p => p.items)));
 
     const noOp = totalFkVars > 0 && filledFkVars === totalFkVars && writes.size === 0 && seeds.length === 0;
     const mode: "exec" | "plan" = options.apply ? "exec" : "plan";
