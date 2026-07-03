@@ -138,6 +138,47 @@ export function getRecentFixturePosts(
   return rows;
 }
 
+/**
+ * ARV-330: like `getRecentFixturePosts` but across ALL run kinds
+ * (`check`/`probe`/`run`/`request`/`fixture`). A root resource with no
+ * seed_body is `skip-no-create` by prepare-fixtures, so it never records
+ * a fixture-kind POST — yet a depth-check or probe may have POSTed the
+ * same create-path and captured the account-level capability error. The
+ * hard-blocked classifier reads this wider source so it can still
+ * diagnose the gate. Caller is responsible for filtering auth-probe
+ * noise (deliberately-broken-cred 401/403s).
+ */
+export function getRecentCreatePosts(
+  urlLikePattern: string,
+  limit: number,
+  excludeLikePattern?: string,
+): LastFixtureAttempt[] {
+  if (!Number.isFinite(limit) || limit <= 0) return [];
+  const db = getDb();
+  // `excludeLikePattern` filters out child sub-resource POSTs in SQL (e.g.
+  // `%/v1/accounts/%` drops `/v1/accounts/{id}/reject`); without it the
+  // loose trailing wildcard lets a burst of probe sub-calls monopolize the
+  // LIMIT window and starve the real create-path attempts (ARV-330).
+  const rows = excludeLikePattern
+    ? db.query(`
+        SELECT r.request_method AS request_method, r.request_url AS request_url,
+               r.request_body AS request_body, r.response_status AS response_status,
+               r.response_body AS response_body, ru.started_at AS attempted_at
+        FROM results r JOIN runs ru ON r.run_id = ru.id
+        WHERE r.request_method = 'POST' AND r.request_url LIKE ? AND r.request_url NOT LIKE ?
+        ORDER BY ru.started_at DESC, r.id DESC LIMIT ?
+      `).all(urlLikePattern, excludeLikePattern, Math.floor(limit))
+    : db.query(`
+        SELECT r.request_method AS request_method, r.request_url AS request_url,
+               r.request_body AS request_body, r.response_status AS response_status,
+               r.response_body AS response_body, ru.started_at AS attempted_at
+        FROM results r JOIN runs ru ON r.run_id = ru.id
+        WHERE r.request_method = 'POST' AND r.request_url LIKE ?
+        ORDER BY ru.started_at DESC, r.id DESC LIMIT ?
+      `).all(urlLikePattern, Math.floor(limit));
+  return rows as LastFixtureAttempt[];
+}
+
 export function getFilteredResults(
   runId: number,
   filters: {
