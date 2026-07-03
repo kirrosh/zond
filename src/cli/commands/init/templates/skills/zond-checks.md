@@ -61,6 +61,11 @@ Pragmatic режим (default) — реалистичный для production AP
 - **NEVER hand-roll these checks in YAML.** The catalog encodes
   schemathesis V4 semantics 1-to-1 — replicating them in YAML drifts
   silently. `zond checks run` is the single source of truth.
+- **`--check stateful` = state-machine set only (ARV-325):**
+  cross_call_references, idempotency_replay, pagination_invariants,
+  lifecycle_transitions, use_after_free, ensure_resource_availability,
+  cursor_boundary_fuzzing. `ignored_auth` / `open_cors_on_sensitive` are
+  NOT included — run them by explicit id when you want the security pair.
 - **NEVER run `--check stateful` without prior `api annotate` review.**
   m-20 stateful checks (cross_call_references, idempotency_replay,
   pagination_invariants, lifecycle_transitions) read `.api-resources.local.yaml`
@@ -77,7 +82,8 @@ Pragmatic режим (default) — реалистичный для production AP
 - **Prewarm a fresh workspace before `zond checks run`.** Right after
   `zond add api <name>`, `.env.yaml` only has the auth skeleton — list
   endpoints can return 401 until a `setup:` suite captures session
-  vars. Running `--check stateful` immediately surfaces dozens of
+  vars. Running checks cold (e.g. `--check ignored_auth` or a full
+  run) immediately surfaces dozens of
   spurious `ignored_auth` / `report_backend_bug` findings (cold-state
   race, F1/F18 in feedback loop). Fix: run one smoke pass first
   (`zond run apis/<name>/tests --safe --report json` or `zond doctor
