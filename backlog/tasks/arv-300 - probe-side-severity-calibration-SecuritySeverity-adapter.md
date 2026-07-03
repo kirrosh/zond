@@ -1,10 +1,10 @@
 ---
 id: ARV-300
 title: 'probe-side severity calibration: SecuritySeverity adapter'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-18 14:23'
-updated_date: '2026-07-02 14:07'
+updated_date: '2026-07-03 15:53'
 labels:
   - severity
   - calibration
@@ -24,9 +24,9 @@ ARV-283 Phase A wired calibrate() в core/checks/runner.ts для checks-side. �
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [ ] #1 Probe findings проходят через calibrator до записи в JSON envelope / ndjson
-- [ ] #2 Sentinel severity (info/inconclusive/skipped/ok) переживают round-trip без mutation
-- [ ] #3 severity.yaml suppression с when.finding.check: ssrf подавляет соответствующие probe findings (integration test)
-- [ ] #4 bun test + bun run check проходят
+- [x] #2 Sentinel severity (info/inconclusive/skipped/ok) переживают round-trip без mutation
+- [x] #3 severity.yaml suppression с when.finding.check: ssrf подавляет соответствующие probe findings (integration test)
+- [x] #4 bun test + bun run check проходят
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -34,3 +34,9 @@ ARV-283 Phase A wired calibrate() в core/checks/runner.ts для checks-side. �
 <!-- SECTION:NOTES:BEGIN -->
 Security-probe slice done (commit pending): core/severity/probe-adapter.ts (calibrateProbeSeverity — sentinel passthrough, string-keyed so enum-agnostic), rollupSecuritySeverity exported from security/orchestrator.ts, calibrateSecurityVerdicts wired in cli/commands/probe/security.ts after result. AC#2 (sentinel round-trip) + AC#3 (when.finding.check: ssrf suppression) covered by tests/core/probe/probe-severity-calibration.test.ts (5/5). AC#1 met for security only — mass-assignment/static/webhooks carried to ARV-311. bun run check + full suite green (2484/0).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Security-probe slice shipped: core/severity/probe-adapter.ts (calibrateProbeSeverity, sentinel passthrough, enum-agnostic), wired in cli/commands/probe/security.ts. Tests 5/5, suite 2484/0. AC#1 met for security only; mass-assignment/static/webhooks calibration carried to ARV-311.
+<!-- SECTION:FINAL_SUMMARY:END -->

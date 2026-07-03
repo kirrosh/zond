@@ -7,7 +7,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-07-03 10:57'
-updated_date: '2026-07-03 11:05'
+updated_date: '2026-07-03 15:53'
 labels:
   - annotate
   - gap-report
@@ -35,3 +35,9 @@ Discovered while spot-testing ARV-329's fix on live Stripe. classifyHardBlocked 
 <!-- SECTION:NOTES:BEGIN -->
 Implemented + verified live. getRecentCreatePosts (src/db/queries/results.ts) — any-run_kind POST source with optional SQL child-exclude pattern so a burst of probe sub-calls (/v1/accounts/{id}/reject|persons) can't starve the LIMIT window. classifyAttempts + urlMatchesCreatePath (annotate/index.ts) — pure, unit-tested: drops auth-probe noise (401/403 + 'invalid API key' bodies), segment-exact create-path match, tags account_capability_missing on no-2xx + >=1 capability hit (relaxed from all-match since the gate is deterministic). Added 'signed up for connect' to HARD_BLOCKED_PATTERNS. Both classifyHardBlocked and --explain now share the widened source. Verified on live Stripe workspace: accounts flips null -> account_capability_missing, gap-report shows '1 flagged hard-blocked'. Tests: annotate-arv-278-282 (classifyAttempts x7, urlMatchesCreatePath x4), last-fixture-post (getRecentCreatePosts x2). Full cli+db suite 599 pass.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Capability-gated root resources that never seed are now diagnosed and surfaced in the gap-report instead of silently skipping. Code complete; downstream overlay-authoring is agent-loop work (zond stays LLM-free).
+<!-- SECTION:FINAL_SUMMARY:END -->

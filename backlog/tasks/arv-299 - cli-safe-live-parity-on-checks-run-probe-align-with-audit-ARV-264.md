@@ -4,6 +4,7 @@ title: 'cli: --safe/--live parity on checks run + probe (align with audit ARV-26
 status: To Do
 assignee: []
 created_date: '2026-05-18 12:56'
+updated_date: '2026-07-03 15:53'
 labels:
   - cli
   - ux
@@ -11,7 +12,7 @@ labels:
   - m-23
 dependencies:
   - ARV-264
-priority: medium
+priority: high
 ---
 
 ## Description
