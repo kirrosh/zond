@@ -1047,8 +1047,15 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
         },
       };
     }
+    // ARV-332: build CRUD groups from the *filtered* op set (`ops`), not
+    // `allOps`. Under a read-only scope (`--include method:GET`) the filter
+    // strips POST/PUT/PATCH, so no group carries a `create`/`update` and the
+    // mutating stateful checks (ensure_resource_availability, use_after_free)
+    // self-skip via `applies(g)` — instead of leaking a live POST create
+    // despite the GET-only filter. Read-only stateful checks (pagination
+    // invariants, observation-mode lifecycle) still run on the list/read ops.
     const crudGroups = activeStateful.some((c) => c.phase === "crud")
-      ? augmentWithListOnlyGroups(detectCrudGroups(allOps), allOps)
+      ? augmentWithListOnlyGroups(detectCrudGroups(ops), ops)
       : [];
     summary.checks_run += activeStateful.length;
 
