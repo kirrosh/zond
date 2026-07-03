@@ -1296,6 +1296,13 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       summary.findings -= 1;
       summary.by_severity[f.severity] -= 1;
       if (f.category) summary.by_category[f.category] -= 1;
+      // ARV-322: the finding event already streamed to NDJSON before the
+      // guard fired, so a consumer counting `type:finding` records would
+      // see one more than `summary.findings`. Route the removal through
+      // `summary.suppressed` (same bucket as ARV-283 calibration
+      // suppressions) so `findings + suppressed` always reconciles with
+      // the stream instead of silently diverging.
+      summary.suppressed = (summary.suppressed ?? 0) + 1;
     }
     const reasonKey = `status_code_conformance: broken-baseline (${baselineGuard.removed.length} conformance finding(s) suppressed)`;
     summary.skipped_outcomes[reasonKey] = (summary.skipped_outcomes[reasonKey] ?? 0) + baselineGuard.removed.length;
