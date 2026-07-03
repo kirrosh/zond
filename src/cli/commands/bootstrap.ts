@@ -443,7 +443,21 @@ interface BootstrapResult {
 /** TASK-271: explicit reason the cascade stopped iterating, surfaced in the
  *  summary so users can tell `nothing-to-do` apart from `we ran out of
  *  budget`. */
-export type CascadeStopReason = "stable" | "max-passes" | "no-targets";
+export type CascadeStopReason = "stable" | "max-passes" | "no-targets" | "auth-broken";
+
+/** ARV-326: fast-fail thresholds for a dead/scoped-wrong token. Once at
+ *  least MIN probes ran and a RATIO majority came back 401/403, the token
+ *  clearly can't read the API — finishing the remaining resources (92 on
+ *  Stripe) just repeats the same rejection. */
+const AUTH_ABORT_MIN_PROBES = 10;
+const AUTH_ABORT_RATIO = 0.5;
+
+// ponytail: reason-string sniffing — probeOne doesn't expose the numeric
+// status; parse "→ 401"/"→ 403" out of the reason it formats. Add a
+// numeric field to DiscoveryItem if this ever needs to be exact.
+function isAuthRejection(item: DiscoveryItem): boolean {
+  return item.status === "miss-status" && /→ 40[13]\b/.test(item.reason ?? "");
+}
 
 /**
  * ARV-282: validate each pre-filled FK var is still alive by GET'ing
@@ -542,6 +556,10 @@ async function runCascade(
   for (let pass = 0; pass < maxPasses; pass++) {
     const items: DiscoveryItem[] = [];
     const newWrites: string[] = [];
+    // ARV-326: probed/authFails tracked mid-pass so a dead token aborts
+    // after ~10 probes instead of after all 92 resources.
+    let probed = 0;
+    let authFails = 0;
     for (const target of targets) {
       const current = env[target.varName];
       if (!isPlaceholder(current)) continue;
@@ -551,6 +569,12 @@ async function runCascade(
         env[target.varName] = item.discovered;
         writes.set(target.varName, item.discovered);
         newWrites.push(target.varName);
+      }
+      probed += 1;
+      if (isAuthRejection(item)) authFails += 1;
+      if (probed >= AUTH_ABORT_MIN_PROBES && authFails / probed >= AUTH_ABORT_RATIO) {
+        passesOut.push({ index: startIndex + pass, items, newWrites });
+        return "auth-broken";
       }
     }
     passesOut.push({ index: startIndex + pass, items, newWrites });
@@ -635,7 +659,9 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
 
     const seeds: SeedAttempt[] = [];
     let seedStop: "stable" | "max-passes" | "no-progress" | "not-run" = "not-run";
-    if (options.seed) {
+    // ARV-326: a dead token that can't LIST won't POST either — don't burn
+    // the seed budget on the same 401s.
+    if (options.seed && lastCascadeStop !== "auth-broken") {
       // Two-phase seed: a seed unlocks parents, which can let cascade fill
       // children in the next pass. We loop seed→cascade until either
       // (a) no remaining empty FK has a viable owner, or (b) no progress
@@ -866,6 +892,17 @@ export async function bootstrapCommand(options: BootstrapOptions): Promise<numbe
         }
         if (passes.length > 0) {
           console.log(`Cascade stopped after ${passes.length} pass(es): ${lastCascadeStop}.`);
+        }
+        // ARV-326: dead/scoped-wrong token — say so loudly instead of
+        // letting the user scroll through 90 identical 401 lines.
+        if (lastCascadeStop === "auth-broken") {
+          const lastPass = passes.at(-1);
+          const rejected = lastPass?.items.filter(isAuthRejection).length ?? 0;
+          console.error(
+            `auth appears broken — stopping cascade early: ${rejected}/${lastPass?.items.length ?? 0} ` +
+            `discovery probes returned 401/403. Check the token/scopes in ${envPath} ` +
+            `(zond doctor --api <name>), then re-run.`,
+          );
         }
         if (seeds.length > 0) {
           console.log("");

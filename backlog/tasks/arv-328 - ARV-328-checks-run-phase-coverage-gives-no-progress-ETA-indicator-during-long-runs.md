@@ -3,9 +3,10 @@ id: ARV-328
 title: >-
   ARV-328: checks run --phase coverage gives no progress/ETA indicator during
   long runs
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-03 08:26'
+updated_date: '2026-07-03 16:13'
 labels:
   - checks
 dependencies: []
@@ -20,5 +21,11 @@ Found on Stripe zond-audit run 20260703-103831 (raw/30-checks.ndjson). 'zond che
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 a long checks run --phase coverage run periodically reports progress (cases run / total) somewhere observable (stderr or a dedicated ndjson event type), without breaking the existing event schema for consumers keying on type
+- [x] #1 a long checks run --phase coverage run periodically reports progress (cases run / total) somewhere observable (stderr or a dedicated ndjson event type), without breaking the existing event schema for consumers keying on type
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+onProgress callback in runChecks (per-op completion, response phase); CLI writes throttled (10s) progress to stderr — no new ndjson event type, schema untouched. Total = operations (case total unknown up front); cases run reported cumulatively. Test: tests/cli/checks/progress-callback.test.ts
+<!-- SECTION:NOTES:END -->
