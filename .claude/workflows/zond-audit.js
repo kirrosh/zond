@@ -30,12 +30,14 @@ const authFrom = a.authFrom ? String(a.authFrom) : ''
 
 const RUN_SCHEMA = {
   type: 'object',
-  required: ['runDir', 'wsDir', 'authSet'],
+  required: ['runDir', 'wsDir', 'authSet', 'authVerified'],
   additionalProperties: false,
   properties: {
     runDir: { type: 'string', description: 'абсолютный путь до <out>/<slug>/<timestamp>' },
     wsDir: { type: 'string', description: 'абсолютный путь до эфемерного workspace прогона' },
     authSet: { type: 'boolean', description: 'true если auth_token записан из ZOND_TEST_API_KEY' },
+    authVerified: { type: 'boolean', description: 'true если 1-2 smoke-запроса вернули НЕ 401/403' },
+    authNote: { type: 'string', description: 'что показал smoke-check (статусы, какие пути пробовали)' },
     note: { type: 'string' },
   },
 }
@@ -80,14 +82,22 @@ const setup = await agent(
    a) Если env \\$ZOND_TEST_API_KEY непустой — запиши его как auth_token по конвенции zond (прочти .claude/skills/zond/SKILL.md — правило про секреты). Безопасно: printf 'auth_token: "%s"\\n' "\\$ZOND_TEST_API_KEY" >> apis/${slug}/.secrets.yaml (значение не в тексте команды). authSet=true.
    b) Иначе если задан authFrom="${authFrom || ''}" — скопируй файл целиком в новый workspace БЕЗ чтения содержимого: cp "${authFrom}" apis/${slug}/.secrets.yaml (copy, значение не светится). authSet=true.
    c) Иначе authSet=false, продолжай (валидный прогон на 401).
-5. zond session start --label "audit-$TS" 2>&1 | tee -a "$RUN/raw/00-init.log"
+5. AUTH SMOKE-CHECK (до дорогого depth-pass — не жги 20+ минут coverage-фазы на мёртвом токене):
+   a. Прочитай apis/${slug}/.api-catalog.yaml (Read tool). Выбери 1-2 GET-эндпоинта БЕЗ path-параметров (path без "{"), БЕЗ обязательных query-параметров, и такие, что этот path не встречается у других методов (чтобы --include по path не задел заодно POST/DELETE и не дал побочный эффект). Предпочитай "retrieve self"/"list" эндпоинты (account, balance, health, ping, customers...).
+   b. zond checks run --api ${slug} --include 'path:^<path1>$' --include 'path:^<path2>$' --phase examples --mode positive --workers 1 --rate-limit 5 --report json --output "$RUN/raw/01-auth-smoke.json" 2>&1 | tee -a "$RUN/raw/00-init.log"
+   c. Прочитай "$RUN/raw/01-auth-smoke.json", посмотри HTTP-статусы фактических ответов. Если ВСЕ смоук-запросы вернули 401/403 → authVerified=false (токен либо не задан, либо протух/неверный scope — не важно что говорит authSet). Если хотя бы один запрос НЕ 401/403 (честный 404 на выдуманном ID — это НЕ auth-провал, тоже считается success) → authVerified=true. Кратко опиши статусы в authNote.
+   d. Если каталог не даёт подходящего кандидата (все GET с обязательными параметрами) — возьми любой GET и смягчи regex; если и это невозможно, authVerified=authSet (best effort), authNote="skip: no smoke-candidate in catalog".
+6. zond session start --label "audit-$TS" 2>&1 | tee -a "$RUN/raw/00-init.log"
 
 ЖЁСТКО: никогда не читай/не эхой .secrets.yaml; не вызывай curl/wget/httpie (iron rule zond).
-Верни JSON: runDir=$RUN, wsDir=$WS, authSet=(true/false).`,
+Верни JSON: runDir=$RUN, wsDir=$WS, authSet=(true/false), authVerified=(true/false), authNote.`,
   { label: `setup:${slug}`, phase: 'Setup', schema: RUN_SCHEMA },
 )
 if (!setup) throw new Error('setup-стадия провалилась')
-log(`workspace: ${setup.wsDir} | auth: ${setup.authSet ? 'set' : 'MISSING (прогон пойдёт на 401)'}`)
+log(`workspace: ${setup.wsDir} | auth: ${setup.authSet ? 'set' : 'MISSING'} | smoke-check: ${setup.authVerified ? 'OK' : 'FAILED'}${setup.authNote ? ` (${setup.authNote})` : ''}`)
+if (!setup.authVerified) {
+  throw new Error(`Auth smoke-check провалился — ${setup.authNote || 'все пробные запросы вернули 401/403'}. Depth-фаза (20+ мин на большом API) не запущена, почини auth (env ZOND_TEST_API_KEY или authFrom) и перезапусти.`)
+}
 
 // --- Phase 2: Depth (детерминированный pass) --------------------------------
 phase('Depth')
@@ -100,11 +110,11 @@ await agent(
 RUN="${setup.runDir}"; RAW="$RUN/raw"; MODE=${mode}
 
 Шаги:
-1. Fixtures: ${safe
+1. Annotate (heuristic, без агента, ДО fixtures — генерирует seed_body overlay, который --seed ниже должен прочитать): zond api annotate auto --api ${slug} --aspect all --confidence high --auto-apply 2>&1 | tee "$RAW/10-annotate.log"
+2. Fixtures: ${safe
     ? `zond prepare-fixtures --api ${slug} --apply --cascade 2>&1 | tee "$RAW/02-fixtures.log"  (БЕЗ --seed: safe-mode)`
     : `zond prepare-fixtures --api ${slug} --apply --cascade --seed 2>&1 | tee "$RAW/02-fixtures.log"`}
    zond doctor --api ${slug} --json > "$RAW/03-doctor.json"
-2. Annotate (heuristic, без агента): zond api annotate auto --api ${slug} --aspect all --confidence high --auto-apply 2>&1 | tee "$RAW/10-annotate.log"
 3. Generate suites: zond generate --api ${slug} ${safe ? "--include 'method:GET'" : ''} --output apis/${slug}/tests --force 2>&1 | tee "$RAW/15-generate.log"
 4. Static spec audit: zond check spec --api ${slug} --json > "$RAW/20-check-spec.json"
 5. Depth checks: ${safe
