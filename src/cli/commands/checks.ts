@@ -564,7 +564,14 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
             writeSync(ndjsonFd!, `${JSON.stringify(ev)}\n`);
             ndjsonLastFullyWritten = true;
           }
-        : emitToStdout)
+        // ARV-323: count stdout-channel events too — the SIGTERM handler
+        // reports `ndjsonEventCount`, and with a shell-redirected stdout
+        // stream it claimed "0 event(s) flushed" while the redirect target
+        // already held thousands of lines.
+        : (ev: import("../../core/reporter/ndjson.ts").NdjsonEvent) => {
+            ndjsonEventCount += 1;
+            emitToStdout(ev);
+          })
     : undefined;
 
   // ARV-230: clean SIGTERM/SIGINT shutdown for NDJSON streams. Without
@@ -585,7 +592,11 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
           ndjsonFd = undefined;
         }
       } catch { /* swallow; we're tearing down */ }
-      try { process.stderr.write(`zond: NDJSON run interrupted (signal ${signo}); ${ndjsonEventCount} event(s) flushed.\n`); } catch { /* ignore */ }
+      // ARV-323: "emitted" not "flushed" — on the stdout channel the last
+      // few lines may still sit in the pipe buffer, so the count is a
+      // lower bound of what the consumer/file will contain, never an
+      // excuse to discard a partial-but-real stream.
+      try { process.stderr.write(`zond: NDJSON run interrupted (signal ${signo}); ${ndjsonEventCount} event(s) emitted before interrupt (partial stream is usable).\n`); } catch { /* ignore */ }
       process.exit(128 + signo);
     };
     const onTerm = () => shutdown(15);
