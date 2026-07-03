@@ -3,10 +3,10 @@ id: ARV-266
 title: >-
   retention policy for runs/results: ARV-265 follow-up (DB growth from
   checks/probe persistence)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17 11:44'
-updated_date: '2026-05-18 13:02'
+updated_date: '2026-07-03 16:34'
 labels:
   - db
   - coverage
@@ -37,14 +37,21 @@ A built-in way to bound DB growth without forcing users to remember `zond db cle
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Some retention knob exists (CLI `zond db prune --older-than 30d` and/or config `db.retention_days`)
-- [ ] #2 Default behavior unchanged (no silent data loss for users on current zond)
-- [ ] #3 Per-kind defaults documented (e.g. checks/probe/fixture retained 7d, regular forever)
-- [ ] #4 `zond db stats` (or equivalent) surfaces row counts per run_kind so users see growth
+- [x] #1 Some retention knob exists (CLI `zond db prune --older-than 30d` and/or config `db.retention_days`)
+- [x] #2 Default behavior unchanged (no silent data loss for users on current zond)
+- [x] #3 Per-kind defaults documented (e.g. checks/probe/fixture retained 7d, regular forever)
+- [x] #4 `zond db stats` (or equivalent) surfaces row counts per run_kind so users see growth
 
 ## Out of scope
 
 - Cross-DB sharding / archival
 - Encrypted backups
 <!-- SECTION:DESCRIPTION:END -->
+
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+CLI-based retention (AC#1 'and/or config' → chose explicit CLI, no silent loss per AC#2). db prune: per-kind defaults (check/probe/request/fixture 7d, regular forever) or --older-than uniform cutoff; --kind, --dry-run; VACUUM after delete. db stats surfaces per-run_kind counts + retention (AC#4). Defaults documented in --help, db stats output, and src/CLAUDE.md (AC#3). Skipped config db.retention_days auto-prune (would need a background trigger; explicit prune covers the need). Tests: tests/db/retention-prune.test.ts (4).
+<!-- SECTION:NOTES:END -->

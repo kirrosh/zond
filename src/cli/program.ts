@@ -24,6 +24,7 @@ import { registerUse } from "./commands/use.ts";
 import { registerSession } from "./commands/session.ts";
 import { registerDoctor } from "./commands/doctor.ts";
 import { registerRefreshApi } from "./commands/refresh-api.ts";
+import { registerSchemaFromRuns } from "./commands/schema-from-runs.ts";
 import { registerAdd } from "./commands/add-api.ts";
 import { registerRemove } from "./commands/remove-api.ts";
 import { registerAudit } from "./commands/audit.ts";
@@ -84,6 +85,7 @@ export function buildProgram(): Command {
 
   registerUse(program);
   registerRefreshApi(program);
+  registerSchemaFromRuns(program);
   registerDoctor(program);
 
   registerSession(program);
