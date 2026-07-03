@@ -501,6 +501,7 @@ function defineProbeWebhooks(parent: Command, name: string): void {
       report: rep.report,
       output: rep.output,
       json,
+      apiName,
     });
   });
 }
