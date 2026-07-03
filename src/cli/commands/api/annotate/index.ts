@@ -183,6 +183,16 @@ export function createUrlLikePattern(createPath: string): string {
   return `%${collapsed}%`;
 }
 
+/**
+ * ARV-330: companion NOT-LIKE pattern that excludes child sub-resource
+ * POSTs (`/v1/accounts/{id}/reject`, `.../persons`) from a create-path
+ * match. Pairs with `createUrlLikePattern` in `getRecentCreatePosts`.
+ */
+export function childExcludePattern(createPath: string): string {
+  const collapsed = createPath.replace(/\{[^}]+\}/g, "%");
+  return `%${collapsed}/%`;
+}
+
 function buildDumpBundles(
   kind: SubcommandKind,
   slices: ResourceSlice[],
@@ -771,12 +781,69 @@ const HARD_BLOCKED_PATTERNS = [
   /\bnot\s+onboarded\b/i,
   /raw[- ]card[- ]data\s+(api|access)/i,
   /you do not have access/i,
+  /signed up for connect/i,
 ];
 
-/** Minimum recent attempts that must all match before we tag the
- *  resource as hard-blocked. Below this, last_attempt could still be a
- *  transient first-validation-order error (see dogfooding edge case). */
-const HARD_BLOCKED_MIN_ATTEMPTS = 2;
+/**
+ * ARV-330: replies from security/auth probes that POST with deliberately
+ * broken credentials. Their 401/403s say nothing about whether the
+ * resource is capability-blocked, so the classifier drops them before
+ * judging.
+ */
+const AUTH_NOISE_PATTERNS = [
+  /invalid api key/i,
+  /did not provide an api key/i,
+  /no api key provided/i,
+  /provided key '/i,
+];
+
+/**
+ * ARV-330: verdict on a resource's create-path POST history. Pure so it
+ * can be unit-tested without a DB. Returns `account_capability_missing`
+ * when the account-level gate is the blocker, else null.
+ *
+ * Logic:
+ *  1. Drop auth-probe noise (broken-cred 401/403s) — not about the resource.
+ *  2. Any 2xx among valid attempts → the resource IS seedable, never blocked.
+ *  3. A capability/onboarding gate is account-level and deterministic: one
+ *     hit on a valid-key attempt (with no success) is enough. We don't
+ *     require ALL attempts to match, because a generic-generator body can
+ *     trigger a data-shaped 400 on one attempt while a leaner body hits
+ *     the gate on another (the ARV-330 chicken-and-egg case).
+ */
+/**
+ * ARV-330: guard the loose `createUrlLikePattern` LIKE from counting
+ * child sub-resource POSTs. `%/v1/accounts%` also matches
+ * `/v1/accounts/{id}/reject` and `.../persons` — POSTs to *different*
+ * endpoints (often auth-probe noise) that would drown out the real
+ * create-path attempt. Match the recorded URL's path segment-for-segment
+ * against the create-path (`{param}` matches any single segment).
+ */
+export function urlMatchesCreatePath(requestUrl: string, createPath: string): boolean {
+  let path: string;
+  try { path = new URL(requestUrl).pathname; } catch { return false; }
+  const want = createPath.split("/").filter(Boolean);
+  const got = path.split("/").filter(Boolean);
+  if (want.length !== got.length) return false;
+  return want.every((seg, i) => seg.startsWith("{") || seg === got[i]);
+}
+
+export function classifyAttempts(
+  attempts: Array<{ response_status: number | null; response_body: string | null }>,
+): "account_capability_missing" | null {
+  const valid = attempts.filter((a) => {
+    if (a.response_status === 401 || a.response_status === 403) return false;
+    const msg = extractMessage(a.response_body);
+    return !(msg !== null && AUTH_NOISE_PATTERNS.some((re) => re.test(msg)));
+  });
+  if (valid.length === 0) return null;
+  if (valid.some((a) => a.response_status !== null && a.response_status >= 200 && a.response_status < 300)) return null;
+  const capabilityHit = valid.some((a) => {
+    const msg = extractMessage(a.response_body);
+    return msg !== null && HARD_BLOCKED_PATTERNS.some((re) => re.test(msg));
+  });
+  return capabilityHit ? "account_capability_missing" : null;
+}
 
 async function renderGapReport(
   opts: AutoOptions,
@@ -873,10 +940,12 @@ async function classifyHardBlocked(
 ): Promise<Map<string, "account_capability_missing" | "data_dependency" | null>> {
   const out = new Map<string, "account_capability_missing" | "data_dependency" | null>();
   if (rows.length === 0) return out;
-  let getRecentFixturePosts: (pat: string, limit: number) => Array<{ response_body: string | null }>;
+  // ARV-330: widen source to any-run_kind POST so check/probe evidence
+  // counts for root resources that prepare-fixtures skip-no-creates.
+  let getRecentCreatePosts: (pat: string, limit: number, exclude?: string) => Array<{ request_url: string; response_status: number | null; response_body: string | null }>;
   try {
     const mod = await import("../../../../db/queries/results.ts");
-    getRecentFixturePosts = mod.getRecentFixturePosts;
+    getRecentCreatePosts = mod.getRecentCreatePosts;
   } catch {
     return out;
   }
@@ -889,17 +958,17 @@ async function classifyHardBlocked(
     const slice = byResource.get(inf.resource);
     const createPath = slice?.endpoints.create?.path;
     if (!createPath) continue;
-    let attempts: Array<{ response_body: string | null }>;
+    let attempts: Array<{ request_url: string; response_status: number | null; response_body: string | null }>;
     try {
-      attempts = getRecentFixturePosts(createUrlLikePattern(createPath), 5);
+      // Exclude child sub-paths in SQL (so they don't starve the LIMIT
+      // window), then keep only exact create-path POSTs.
+      attempts = getRecentCreatePosts(createUrlLikePattern(createPath), 10, childExcludePattern(createPath))
+        .filter((a) => urlMatchesCreatePath(a.request_url, createPath));
     } catch {
       continue;
     }
-    if (attempts.length < HARD_BLOCKED_MIN_ATTEMPTS) continue;
-    const matched = attempts.filter((a) => extractMessage(a.response_body) !== null && HARD_BLOCKED_PATTERNS.some((re) => re.test(extractMessage(a.response_body)!)));
-    if (matched.length === attempts.length) {
-      out.set(inf.resource, "account_capability_missing");
-    }
+    const verdict = classifyAttempts(attempts);
+    if (verdict) out.set(inf.resource, verdict);
   }
   return out;
 }
@@ -990,19 +1059,18 @@ async function renderGapExplain(
     attempted_at: string;
   }> = [];
   try {
-    const { getRecentFixturePosts } = await import("../../../../db/queries/results.ts");
+    // ARV-330: same widened any-run_kind source as classifyHardBlocked so
+    // --explain agrees with the gap-report block_class column.
+    const { getRecentCreatePosts } = await import("../../../../db/queries/results.ts");
     const createPath = slice.endpoints.create?.path;
-    if (createPath) attempts = getRecentFixturePosts(createUrlLikePattern(createPath), 5);
+    if (createPath) {
+      attempts = getRecentCreatePosts(createUrlLikePattern(createPath), 10, childExcludePattern(createPath))
+        .filter((a) => urlMatchesCreatePath(a.request_url, createPath));
+    }
   } catch {
     // best-effort
   }
-  const blockClass = attempts.length >= HARD_BLOCKED_MIN_ATTEMPTS
-    && attempts.every((a) => {
-      const msg = extractMessage(a.response_body);
-      return msg !== null && HARD_BLOCKED_PATTERNS.some((re) => re.test(msg));
-    })
-    ? "account_capability_missing" as const
-    : null;
+  const blockClass = classifyAttempts(attempts);
 
   const explain = {
     resource,
