@@ -29,6 +29,7 @@ import { readResourceMap } from "./discover.ts";
 import type { ReadbackDiffConfig, IdempotencyConfig, PaginationConfig, LifecycleConfig, SeedBodyConfig } from "../../core/generator/resources-builder.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
+import { SAFE_HELP, LIVE_HELP, resolveLive } from "../safe-live.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
 import { readFixtureGaps, gapIndex } from "../../core/workspace/fixture-gaps.ts";
 import { getApi } from "../util/api-context.ts";
@@ -135,6 +136,10 @@ interface ChecksRunOptions {
   failOnFindings?: boolean;
   /** ARV-308: `--advisory` alias for --no-fail-on-findings. */
   advisory?: boolean;
+  /** ARV-299: safe/live parity with `audit`. Default safe — mutating
+   *  stateful create-chains self-skip; `--live` runs them. */
+  safe?: boolean;
+  live?: boolean;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -710,6 +715,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       maxRequests: budgetResolved.maxRequests,
       skipStateful: budgetResolved.skipStateful,
       severityConfig,
+      safe: !resolveLive(opts),
     });
 
     // ARV-265: persist the accumulated cases as a `run_kind='check'` run
@@ -1010,6 +1016,8 @@ function defineRun(parent: Command): void {
       "--advisory",
       "ARV-308: alias for --no-fail-on-findings.",
     )
+    .option("--safe", SAFE_HELP)
+    .option("--live", LIVE_HELP)
     .action(checksRunAction);
 }
 

@@ -471,8 +471,15 @@ After Phase 2 annotation is applied, run the cross-call invariants.
 See `zond-checks` for per-check semantics.
 
 ```bash
-zond checks run --api <name> --check stateful --report ndjson
+zond checks run --api <name> --check stateful --report ndjson --live   # CRUD create-chains need --live
 ```
+
+**Safe by default (ARV-299)**: without `--live`, `checks run` skips the
+stateful CRUD create-chains (`ensure_resource_availability`,
+`use_after_free`) — they'd POST real resources. Read-only stateful checks
+(pagination, observation-mode lifecycle, cross-call GET diff) still run.
+Add `--live` **only against a throwaway/sandbox account** to exercise the
+create-chains.
 
 `--check stateful` expands to the state-machine set (ARV-325):
 - `cross_call_references` — POST→GET drift (uses readback_diff overlay)
@@ -493,12 +500,17 @@ review. Defaults catch the obvious; quirks need declared config.
 ## Phase 7 — Proactive bug hunting (probes)
 
 ```bash
-zond probe static --api <name>                # validation + methods (defaults)
-zond probe mass-assignment --api <name> --emit-tests apis/<name>/probes/mass-assignment
-zond probe security ssrf,crlf,open-redirect,prompt-injection --api <name> \
+zond probe static --api <name>                # validation + methods (defaults; generator, always safe)
+zond probe mass-assignment --api <name> --live --emit-tests apis/<name>/probes/mass-assignment
+zond probe security ssrf,crlf,open-redirect,prompt-injection --api <name> --live \
   --emit-tests apis/<name>/probes/security
 zond run apis/<name>/probes --report json
 ```
+
+**Safe by default (ARV-299)**: `probe mass-assignment` / `probe security`
+without `--live` plan only (no live attack payloads) — same as `--dry-run`.
+Add `--live` **only against a throwaway/sandbox account** to send probes.
+`probe static` just generates suites, so it's always safe.
 
 Flag: 5xx on null/empty/wrong-type body → missing validation. 2xx on
 undeclared method → contract drift. `is_admin: true` echoed in response
@@ -530,8 +542,8 @@ round-trip GET → **HIGH**, file via `report bundle --include case-study`.
 ### 7.2 — Security probes
 
 ```bash
-zond probe security ssrf,crlf --api <name> --dry-run         # first run: which (endpoint, field)
-zond probe security ssrf,crlf,open-redirect,prompt-injection --api <name>
+zond probe security ssrf,crlf --api <name> --dry-run         # first run: which (endpoint, field) — same as default --safe
+zond probe security ssrf,crlf,open-redirect,prompt-injection --api <name> --live   # send, sandbox only
 ```
 
 **Targeting** (two filters; an endpoint must pass BOTH to be planned):

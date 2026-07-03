@@ -26,7 +26,8 @@ import { getApi } from "../util/api-context.ts";
 import { existsSync } from "fs";
 import { join, dirname } from "node:path";
 import { parsePositiveInt } from "../argv.ts";
-import { printError } from "../output.ts";
+import { printError, printWarning } from "../output.ts";
+import { SAFE_HELP, LIVE_HELP, resolveLive } from "../safe-live.ts";
 import { jsonError, printJson } from "../json-envelope.ts";
 import { loadEnvMeta } from "../../core/parser/variables.ts";
 import { resolveTimeoutMs } from "../../core/workspace/config.ts";
@@ -199,7 +200,15 @@ function defineProbeStatic(parent: Command, name: string): void {
     .option("--exclude-class <classes>", "Comma-separated subset to skip (mutually exclusive with --include-class)")
     .option("--include <classes>", "[deprecated, use --include-class] Comma-separated subset of {validation, methods}")
     .option("--exclude <classes>", "[deprecated, use --exclude-class] Comma-separated subset to skip")
+    // ARV-299: static only *generates* probe suites (it never sends live
+    // traffic), so it is always safe. The flags exist for vocabulary parity
+    // with the sibling subcommands; --live is a no-op here and says so.
+    .option("--safe", SAFE_HELP)
+    .option("--live", LIVE_HELP)
     .action(async (specPos: string | undefined, optsArg, cmdRef: Command) => {
+      if (optsArg.live === true) {
+        printWarning("probe static only generates suites and never sends live traffic — --safe/--live have no effect here. Run the emitted suites with `zond run … --live` to execute them.");
+      }
       // ARV-33: see resolveProbeApi — keep the chain consistent with the
       // sibling subcommands (mass-assignment, security).
       const apiName = resolveProbeApi(optsArg.api, cmdRef);
@@ -270,7 +279,9 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
     .option("--list-tags", "List available tags from spec and exit")
     .option("--no-cleanup", "Skip follow-up DELETE for resources accidentally created by 2xx probes")
     .option("--no-discover", "Disable auto-discovery of path-param fixtures via GET-on-list (TASK-92)")
-    .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests (m-17 ARV-52)")
+    .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests (m-17 ARV-52). Equivalent to the default --safe mode.")
+    .option("--safe", SAFE_HELP)
+    .option("--live", LIVE_HELP)
     .option(
       "--include <selector>",
       "Filter operations (m-15 ARV-9 grammar: path:/users/.* | tag:Webhooks | method:POST,PATCH | operation-id:create.*). Repeatable.",
@@ -317,11 +328,20 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         return;
       }
 
+      // ARV-299: safe (default) → plan only, no live mutating traffic. The
+      // proven --dry-run path IS the safe path, so we just force it on when
+      // --live is absent (and say so, unless the user already asked for a
+      // dry-run explicitly).
+      const live = resolveLive(opts);
+      const effectiveDryRun = opts.dryRun === true || !live;
+      if (!live && opts.dryRun !== true && !opts.listTags) {
+        printWarning("probe mass-assignment: safe mode (default) — planning only, no live attack traffic. Re-run with --live against a throwaway/sandbox account to send probes.");
+      }
       // m-17 / ARV-52 + ARV-58: dry-run and list-tags paths tolerate a
       // missing env file the way probe-security does — the user wants
       // to inspect the plan / available tags, not hit a live API.
       const envFile = resolveProbeEnv(opts.env, apiName, opts.db, {
-        tolerateMissing: opts.dryRun === true || opts.listTags === true,
+        tolerateMissing: effectiveDryRun || opts.listTags === true,
       });
       if ("error" in envFile) { printError(envFile.error); process.exitCode = 2; return; }
       const timeoutMs = await resolveProbeTimeout(opts.timeout, apiName, envFile.env);
@@ -341,7 +361,7 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
         timeoutMs,
         overwrite: opts.overwrite === true,
         json,
-        dryRun: opts.dryRun === true,
+        dryRun: effectiveDryRun,
         include: Array.isArray(opts.include) && opts.include.length > 0 ? opts.include : undefined,
         exclude: Array.isArray(opts.exclude) && opts.exclude.length > 0 ? opts.exclude : undefined,
         report: rep.report,
@@ -383,7 +403,9 @@ function defineProbeSecurity(parent: Command, name: string): void {
       (v: string, prev: string[] = []) => prev.concat(v),
       [] as string[],
     )
-    .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests")
+    .option("--dry-run", "Print which endpoints/fields would be attacked without sending requests. Equivalent to the default --safe mode.")
+    .option("--safe", SAFE_HELP)
+    .option("--live", LIVE_HELP)
     .option("--timeout <ms>", "Per-request timeout in ms (overrides apis/<name>/.env.yaml `timeoutMs` and zond.config.yml `defaults.timeout_ms`; default 30000)", parsePositiveInt("--timeout"))
     .option(
       "--verbose",
@@ -407,6 +429,12 @@ function defineProbeSecurity(parent: Command, name: string): void {
       const apiName = resolveProbeApi(opts.api, cmd);
       const resolved = resolveSpecArg(specPos, apiName, opts.db);
       if ("error" in resolved) { printError(resolved.error); process.exitCode = 2; return; }
+      // ARV-299: safe (default) forces plan-only; live attack traffic needs --live.
+      const live = resolveLive(opts);
+      const effectiveDryRun = opts.dryRun === true || !live;
+      if (!live && opts.dryRun !== true && !opts.listTags) {
+        printWarning("probe security: safe mode (default) — planning only, no live attack traffic. Re-run with --live against a throwaway/sandbox account to send probes.");
+      }
       // probe-security tolerates a missing env (--dry-run path), so don't
       // fail when --api is given but the env file isn't on disk yet.
       const envFile = resolveProbeEnv(opts.env, apiName, opts.db, { tolerateMissing: true });
@@ -424,7 +452,7 @@ function defineProbeSecurity(parent: Command, name: string): void {
         tag: opts.tag,
         listTags: opts.listTags,
         noCleanup: opts.cleanup === false,
-        dryRun: opts.dryRun === true,
+        dryRun: effectiveDryRun,
         timeoutMs,
         overwrite: opts.overwrite === true,
         json,

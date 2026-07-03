@@ -95,4 +95,17 @@ describe("ARV-332 — GET-only scope gates stateful create-chains", () => {
     });
     expect(postCount).toBeGreaterThan(0);
   });
+
+  // ARV-299: the same read-only gating, driven by the safe/live toggle
+  // instead of an explicit method:GET selector.
+  test("safe: true fires no POST even without a scope filter", async () => {
+    postCount = 0;
+    await runChecks({
+      specPath,
+      baseUrl,
+      include: ["ensure_resource_availability"],
+      safe: true,
+    });
+    expect(postCount).toBe(0);
+  });
 });
