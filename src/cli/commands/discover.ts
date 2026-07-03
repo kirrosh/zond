@@ -29,6 +29,7 @@ import {
 } from "../../core/spec/layers.ts";
 import { liveAuthHeaders } from "../../core/probe/shared.ts";
 import { executeRequest } from "../../core/runner/http-client.ts";
+import { writeFixtureGaps, type FixtureGap } from "../../core/workspace/fixture-gaps.ts";
 
 /**
  * Suffix-aware field extraction. For var `project_slug` we prefer the
@@ -271,6 +272,29 @@ export function toManifestStatus(status: DiscoveryItem["status"]): ManifestStatu
     default:
       return "failed:no-list-endpoint";
   }
+}
+
+/** ARV-324: project confirmed-empty/inaccessible list-probes into the
+ *  `.fixture-gaps.yaml` shape. Only `miss-status` (list endpoint rejected
+ *  the request) and `miss-empty` (200 with an empty collection) carry an
+ *  actual observed response worth cross-referencing against a later
+ *  `checks run` — the other miss-* statuses mean "we never even sent a
+ *  request" (no list endpoint / no owner resource). De-dupes by
+ *  (method, path); a later pass's entry for the same var wins. */
+export function gapsFromItems(items: DiscoveryItem[]): FixtureGap[] {
+  const byKey = new Map<string, FixtureGap>();
+  for (const item of items) {
+    if (item.status !== "miss-status" && item.status !== "miss-empty") continue;
+    if (!item.listPath) continue;
+    byKey.set(`GET ${item.listPath}`, {
+      method: "GET",
+      path: item.listPath,
+      resource: item.resource,
+      var: item.varName,
+      reason: item.reason ?? item.status,
+    });
+  }
+  return [...byKey.values()];
 }
 
 export function isPlaceholder(value: string | undefined): boolean {
@@ -1113,6 +1137,12 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
         k => !manifestNames.has(k) && !AUTO_MANAGED_KEYS.has(k),
       );
     }
+
+    // ARV-324: persist confirmed empty/inaccessible operations so a later,
+    // separate `checks run` invocation can tell "known fixture gap" apart
+    // from "new backend bug" instead of mislabeling both report_backend_bug.
+    // Rewritten wholesale every run so a since-fixed gap doesn't linger.
+    await writeFixtureGaps(options.apiDir, gapsFromItems(items));
 
     const requiredManifestCount = manifest
       ? manifest.fixtures.filter(f => f.required).length

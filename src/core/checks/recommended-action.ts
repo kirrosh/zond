@@ -47,10 +47,13 @@ const CHECK_ID_TO_CLASS: Record<string, FindingClass> = {
 export function recommendForCheck(
   checkId: string,
   status?: number,
+  /** ARV-324: true when `.fixture-gaps.yaml` already confirmed this
+   *  operation as a known-empty/inaccessible resource. */
+  unresolvedFixture?: boolean,
 ): RecommendedAction | undefined {
   const findingClass = CHECK_ID_TO_CLASS[checkId];
   if (!findingClass) return undefined;
-  return classify({ finding_class: findingClass, status: status ?? null });
+  return classify({ finding_class: findingClass, status: status ?? null, unresolved_fixture: unresolvedFixture });
 }
 
 /** Test-only export — keeps the unit table authoritative without

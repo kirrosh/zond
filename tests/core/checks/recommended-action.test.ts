@@ -83,3 +83,31 @@ describe("ARV-11 AC #1: recommended_action table", () => {
     }
   });
 });
+
+describe("ARV-324: unresolved_fixture downgrades report_backend_bug → fix_fixture", () => {
+  const downgradable = [
+    "unsupported_method",
+    "positive_data_acceptance",
+    "use_after_free",
+    "ensure_resource_availability",
+    "cross_call_references",
+    "idempotency_replay",
+    "pagination_invariants",
+    "lifecycle_transitions",
+    "cursor_boundary_fuzzing",
+  ];
+
+  for (const check of downgradable) {
+    test(`${check}: unresolved_fixture=true → fix_fixture`, () => {
+      expect(recommendForCheck(check, 400, true)).toBe("fix_fixture");
+    });
+    test(`${check}: unresolved_fixture=false/undefined → report_backend_bug (unchanged)`, () => {
+      expect(recommendForCheck(check, 400, false)).toBe("report_backend_bug");
+      expect(recommendForCheck(check, 400)).toBe("report_backend_bug");
+    });
+  }
+
+  test("not_a_server_error stays report_backend_bug even when unresolved_fixture=true (a 5xx is always worth flagging)", () => {
+    expect(recommendForCheck("not_a_server_error", 500, true)).toBe("report_backend_bug");
+  });
+});

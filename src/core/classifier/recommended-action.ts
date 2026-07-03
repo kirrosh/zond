@@ -106,6 +106,13 @@ export interface ClassifierContext {
    *  fix_test_logic. Producers (db-analysis) set this after walking the
    *  step's assertions array. */
   schema_violation?: boolean;
+  /** ARV-324: true when `prepare-fixtures`/`discover` already confirmed
+   *  this exact operation returns a client error / empty list while
+   *  hunting for fixture values (`.fixture-gaps.yaml`) — e.g. an empty
+   *  test account. Same shape of problem `probe:mass_assignment`'s
+   *  `inconclusive-baseline` branch already solves below: a finding
+   *  caused by our own missing test data isn't a backend bug. */
+  unresolved_fixture?: boolean;
 }
 
 /**
@@ -153,6 +160,10 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
       return "fix_spec";
 
     case "check:not_a_server_error":
+      // A 5xx on this operation is worth flagging regardless of fixture
+      // state — even a synthetic/garbage id shouldn't crash the server.
+      return "report_backend_bug";
+
     case "check:unsupported_method":
     case "check:positive_data_acceptance":
     case "check:use_after_free":
@@ -162,6 +173,11 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
     case "check:pagination_invariants":
     case "check:lifecycle_transitions":
     case "check:cursor_boundary_fuzzing":
+      // ARV-324: same treatment as probe:mass_assignment's
+      // inconclusive-baseline branch below — a finding on an operation
+      // we already know is an unresolved fixture gap isn't new evidence
+      // of a backend defect.
+      if (ctx.unresolved_fixture) return "fix_fixture";
       return "report_backend_bug";
 
     case "check:negative_data_rejection":
