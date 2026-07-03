@@ -7,6 +7,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-03 10:08'
+updated_date: '2026-07-03 10:22'
 labels:
   - annotate
   - seed-body
@@ -23,6 +24,12 @@ Found on Stripe zond-audit live run 20260703-115146, AFTER both ARV-324 (fixture
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond api annotate auto --api stripe --aspect seed-bodies --gap-report flags 'accounts' as a resource it couldn't produce a seed_body for (not silently skipped)
+- [x] #1 zond api annotate auto --api stripe --aspect seed-bodies --gap-report flags 'accounts' as a resource it couldn't produce a seed_body for (not silently skipped)
 - [ ] #2 POST /v1/accounts succeeds end-to-end on a live Stripe test-mode account after either an improved heuristic or an LLM-authored overlay for this resource, unblocking the downstream nested tree
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+AC#1 done (code): inferForAspect now emits a low-confidence 'unfillable' seed-body marker when a resource HAS a create endpoint but the heuristic filled zero fields — src/cli/commands/api/annotate/auto.ts:unfillableSeedMarker. Marker carries unfillable:true so --auto-apply never writes its empty seed_body (index.ts patches filter). Verified on the exact audit workspace (zond-runs/stripe/20260703-115146): 'accounts' now surfaces at the TOP of --gap-report (low / 10 downstream blocked) instead of being silently dropped; ~55 Stripe resources total now flagged. Unit test: tests/cli/annotate-auto.test.ts 'unfillable seed marker (ARV-329)'. AC#2 (live POST /v1/accounts success) is NOT a zond-code fix — zond is a dumb-tool (no LLM). The gap-report now hands the agent-loop the exact dump command to author the discriminated-union overlay; making the POST green is agent-authoring work in the next zond-audit run, not annotate heuristic.
+<!-- SECTION:NOTES:END -->

@@ -663,7 +663,9 @@ export async function autoCommand(opts: AutoOptions): Promise<number> {
     return renderGapReport(opts, col.baseDir, inferences, slices.length);
   }
 
-  const patches = inferences.map((i) => i.patch);
+  // ARV-329: unfillable markers exist only for --gap-report visibility;
+  // their empty seed_body must never be written to the overlay.
+  const patches = inferences.filter((i) => !i.unfillable).map((i) => i.patch);
   const overlay = await readLocalOverlay(col.baseDir);
   const existing = (overlay.patches ?? []) as ResourcePatch[];
   const merge = mergePatches(existing, patches, { force: opts.force === true });
