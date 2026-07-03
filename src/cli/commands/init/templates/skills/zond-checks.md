@@ -113,6 +113,13 @@ Pragmatic режим (default) — реалистичный для production AP
     is contract drift; HIGH on a field the server actually doesn't
     persist is a backend bug. Use `cross_call_references` to
     disambiguate before reporting.
+    - **No response schema declared** (Sentry-style specs where the
+      check skips 200+ endpoints): mine schemas from a real run and
+      patch them in — `zond schema-from-runs --api <name>` writes
+      `patch.schema.json` from the run's 2xx bodies, then
+      `zond refresh-api --api <name> --merge-schema patch.schema.json`
+      folds them into `.api-schema.local.yaml` (survives refresh) and
+      re-runs conformance with real schemas (ARV-175/176).
 
 ## In-spec `x-zond-*` extensions (ARV-189, m-21)
 

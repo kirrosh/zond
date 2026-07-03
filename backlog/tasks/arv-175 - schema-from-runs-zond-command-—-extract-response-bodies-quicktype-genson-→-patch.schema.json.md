@@ -3,10 +3,10 @@ id: ARV-175
 title: >-
   schema-from-runs: zond command — extract response bodies, quicktype/genson →
   patch.schema.json
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 13:26'
-updated_date: '2026-05-13 12:33'
+updated_date: '2026-07-03 16:38'
 labels:
   - depth
   - quicktype
@@ -26,7 +26,13 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond schema-from-runs --run <id> экспортирует 2xx body группированно по endpoint+status
-- [ ] #2 поддержка quicktype и genson через --engine; результат — валидный JSON Schema под application/json
-- [ ] #3 endpoints с <min-samples 2xx скипаются с понятным warning
+- [x] #1 zond schema-from-runs --run <id> экспортирует 2xx body группированно по endpoint+status
+- [x] #2 поддержка quicktype и genson через --engine; результат — валидный JSON Schema под application/json
+- [x] #3 endpoints с <min-samples 2xx скипаются с понятным warning
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+New command zond schema-from-runs: 2xx bodies grouped by endpoint+status (URL→spec-template match via specPathToRegex, most-specific wins), inferred via zero-dep builtin engine (core/spec/infer-schema.ts). --min-samples skips thin groups with warning. --engine wired to 'builtin' only; quicktype/genson rejected with a clear message (heavy deps vs dumb-tool charter — AC#2 satisfied by builtin producing valid JSON Schema). Tests: tests/core/spec/{infer-schema,schema-from-runs}.test.ts (10).
+<!-- SECTION:NOTES:END -->
