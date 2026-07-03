@@ -18,8 +18,47 @@ import { MassAssignmentProbe } from "../../../core/probe/mass-assignment-probe-c
 import { summarizeDryRun, formatDryRunDigest } from "../../../core/probe/dry-run-envelope.ts";
 import { compileOperationFilter } from "../../../core/selectors/operation-filter.ts";
 import { loadSeedBodyOverlays } from "./_seed-bodies.ts";
+import { findWorkspaceRoot } from "../../../core/workspace/root.ts";
+import { loadSeverityConfig, SeverityConfigError } from "../../../core/severity/loader.ts";
+import { calibrateProbeSeverity } from "../../../core/severity/probe-adapter.ts";
+import type { MergedConfig } from "../../../core/severity/config.ts";
 import type { EndpointVerdict, MassAssignmentResult } from "../../../core/probe/mass-assignment-probe.ts";
+import type { Severity as MaSeverity } from "../../../core/probe/mass-assignment/types.ts";
 import type { ProbeEndpointResult, ProbeEndpointStatus, ProbeFindingSeverity } from "../../../core/probe/types.ts";
+
+/** ARV-311: calibrate each verdict's severity in-place through the shared
+ *  probe adapter (ARV-300). Mass-assignment's `severity` IS the per-endpoint
+ *  rollup (finaliseSeverity already folded the field verdicts into it), so
+ *  calibrating that value is the whole job — sentinels
+ *  (inconclusive-baseline/-5xx/ok/skipped) round-trip untouched via the
+ *  adapter's core-severity gate. No-op when `config` is empty. */
+function calibrateMassAssignmentVerdicts(
+  verdicts: EndpointVerdict[],
+  config: MergedConfig | undefined,
+): void {
+  if (!config) return;
+  for (const v of verdicts) {
+    const cal = calibrateProbeSeverity(
+      {
+        check: "mass_assignment",
+        severity: v.severity,
+        recommendedAction: v.recommended_action,
+        context: {
+          finding: {
+            check: "mass_assignment",
+            recommended_action: v.recommended_action,
+            message: v.summary,
+          },
+          operation: { method: v.method.toUpperCase(), path: v.path },
+          response: { status: v.response?.status ?? 0, headers: {} },
+        },
+      },
+      config,
+    );
+    v.severity = cal.severity as MaSeverity;
+    if (cal.suppressed_by) (v as { suppressed_by?: typeof cal.suppressed_by }).suppressed_by = cal.suppressed_by;
+  }
+}
 
 interface BucketCounts {
   high: number;
@@ -248,6 +287,24 @@ export async function probeMassAssignmentCommand(
         seedBodies,
       }),
     );
+
+    // ARV-311: calibrate verdict severities through `.zond/severity.yaml`
+    // before persistence / display / tally so every downstream consumer
+    // sees the same calibrated value. Same treatment security got in ARV-300.
+    let severityConfig: MergedConfig | undefined;
+    try {
+      const ws = findWorkspaceRoot();
+      severityConfig = loadSeverityConfig({ workspaceRoot: ws.root, api: options.apiName });
+    } catch (err) {
+      if (err instanceof SeverityConfigError) {
+        const msgs = err.errors.map((e) => `${e.source}: ${e.keyPath}: ${e.message}`);
+        if (options.json) printJson(jsonError("probe-mass-assignment", msgs));
+        else for (const m of msgs) printError(m);
+        return 2;
+      }
+      throw err;
+    }
+    calibrateMassAssignmentVerdicts(result.verdicts, severityConfig);
 
     if (auditEnabled && auditRecords.length > 0) {
       try {
