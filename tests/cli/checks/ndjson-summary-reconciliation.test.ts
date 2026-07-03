@@ -12,7 +12,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import { runChecks } from "../../../src/core/checks/index.ts";
-import type { NdjsonEvent } from "../../../src/core/checks/types.ts";
+import type { NdjsonEvent } from "../../../src/core/reporter/ndjson.ts";
 
 describe("ndjson summary reconciliation (ARV-322)", () => {
   let server: ReturnType<typeof Bun.serve>;
