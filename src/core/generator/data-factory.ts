@@ -329,7 +329,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  *  email mapping. */
 function isEmailContextName(name?: string): boolean {
   if (!name) return false;
-  const lower = name.toLowerCase();
+  // Canonical snake_case so camelCase (`replyTo`, `userEmail`) matches the
+  // same rules as `reply_to` / `user_email`.
+  const lower = canonicalVarName(name);
   return (
     lower === "email" ||
     lower === "from" ||
@@ -339,9 +341,7 @@ function isEmailContextName(name?: string): boolean {
     lower === "sender" ||
     lower === "recipient" ||
     lower === "reply_to" ||
-    lower === "replyto" ||
     lower.endsWith("_email") ||
-    lower.endsWith("Email") ||
     lower.endsWith("_reply_to") ||
     lower.endsWith("_from") ||
     lower.endsWith("_to") ||
@@ -458,7 +458,7 @@ export function classifyFieldSource(
       return "heuristic:domain-from-description";
     }
     if (propertyName) {
-      const lower = propertyName.toLowerCase();
+      const lower = canonicalVarName(propertyName);
       if (lower === "slug" || lower.endsWith("_slug")) return "heuristic:slug";
       if (lower === "domain" || lower === "hostname" || lower === "fqdn" || lower.endsWith("_domain")) return "heuristic:domain";
       if (lower === "platform") return "heuristic:platform";
@@ -472,13 +472,13 @@ export function classifyFieldSource(
       if (
         lower === "email" || lower === "from" || lower === "to" || lower === "cc" ||
         lower === "bcc" || lower === "sender" || lower === "recipient" ||
-        lower === "reply_to" || lower === "replyto" ||
-        lower.endsWith("_email") || lower.endsWith("Email") ||
+        lower === "reply_to" ||
+        lower.endsWith("_email") ||
         lower.endsWith("_reply_to") || lower.endsWith("_from") ||
         lower.endsWith("_to") || lower.endsWith("_cc") || lower.endsWith("_bcc")
       ) return "heuristic:email";
       if (lower === "id" || lower === "uuid" || lower.endsWith("_id") || lower.endsWith("id")) return "heuristic:id";
-      if (lower === "name" || lower.endsWith("_name") || lower.endsWith("Name")) return "heuristic:name";
+      if (lower === "name" || lower.endsWith("_name")) return "heuristic:name";
       if (lower === "url" || lower.endsWith("_url") || lower === "uri" || lower === "href" || lower === "website") return "heuristic:url";
       if (lower === "password" || lower.endsWith("_password")) return "heuristic:password";
       if (lower === "phone" || lower === "telephone" || lower.endsWith("_phone")) return "heuristic:phone";
@@ -494,6 +494,83 @@ export function classifyFieldSource(
 
   if (t === "number" || t === "boolean") return "default";
   return "default";
+}
+
+/**
+ * ARV-138: canonicalise a body field name to a manifest/fixture var name.
+ * Converts camelCase → snake_case + lowercase so spec body fields
+ * (`issueId`, `sequenceTypeCode`) collapse onto the same var as the
+ * path-param spelling. Idempotent on already-snake_case input. The HTTP
+ * request still sends the raw field name — only the {{var}} namespace is
+ * normalised. Lives here (leaf module) so both fixtures-builder and
+ * suite-generator can share it without an import cycle.
+ */
+export function canonicalVarName(name: string): string {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .toLowerCase();
+}
+
+const FK_ID_SUFFIX = /(?:_id|Id|_uuid)$/;
+const CODE_REF_SUFFIX = /(?:_code|Code)$/;
+
+/**
+ * ARV-45: a required request-body field that is a foreign-key / closed-
+ * vocabulary reference the generator can't synthesise a valid value for —
+ * so the generated test should reference a `{{fixture}}` the user fills in
+ * `.env.yaml`, not random junk that 400s and kills the CRUD chain at step 1.
+ *
+ *  - `*_id` / `*Id` / `*_uuid`: always an FK. `generateFromSchema` emits
+ *    `{{$uuid}}` here — a random id that 404/422s on a live API.
+ *  - `*_code` / `*Code`: a reference code ONLY when no heuristic resolves
+ *    it. `countryCode`/`currencyCode`/`mcc`… already map to real literals
+ *    via `guessStringPlaceholder`, so they're excluded; the domain codes
+ *    that motivated this (`sequenceTypeCode`, `templateGroupCode`) fall
+ *    through to `{{$randomString}}` → 400.
+ *
+ * Enum/format/example-backed fields are never FK fixtures — the spec
+ * already told us a valid value.
+ */
+export function isFkFixtureField(name: string, schema: OpenAPIV3.SchemaObject): boolean {
+  if (schema.enum && schema.enum.length > 0) return false;
+  if (pickExampleValue(schema) !== undefined) return false;
+  if (FK_ID_SUFFIX.test(name)) return true;
+  if (CODE_REF_SUFFIX.test(name)) {
+    return generateFromSchema(schema, name) === "{{$randomString}}";
+  }
+  return false;
+}
+
+/**
+ * Flatten a request-body schema to its effective `{properties, required}`,
+ * merging `allOf` branches. .NET / Swagger-gen specs wrap almost every model
+ * in `allOf: [{...}]` (inheritance), so a direct `schema.properties` read sees
+ * nothing — `generateFromSchema` already merges allOf when producing the body,
+ * and FK wiring / the manifest must resolve the same shape or they silently
+ * miss every FK field on these specs. Recurses through nested allOf; ignores
+ * oneOf/anyOf (the generator picks one variant there, out of scope for FK
+ * wiring until a real spec needs it).
+ */
+export function effectiveObjectShape(
+  schema: OpenAPIV3.SchemaObject,
+): { properties: Record<string, OpenAPIV3.SchemaObject>; required: Set<string> } {
+  const properties: Record<string, OpenAPIV3.SchemaObject> = {};
+  const required = new Set<string>();
+  const visit = (s: OpenAPIV3.SchemaObject | undefined) => {
+    if (!s || typeof s !== "object") return;
+    if (Array.isArray(s.allOf)) {
+      for (const sub of s.allOf) visit(sub as OpenAPIV3.SchemaObject);
+    }
+    if (s.properties) {
+      for (const [k, v] of Object.entries(s.properties)) {
+        properties[k] = v as OpenAPIV3.SchemaObject;
+      }
+    }
+    if (Array.isArray(s.required)) for (const r of s.required) required.add(r);
+  };
+  visit(schema);
+  return { properties, required };
 }
 
 /**
@@ -593,9 +670,12 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
     return "{{$randomDomain}}";
   }
 
-  // Name-based heuristics
+  // Name-based heuristics. Match on the canonical snake_case form so
+  // camelCase fields (`countryCode`, `firstName`, `userEmail`) hit the same
+  // rules as their snake_case spelling — otherwise they fall through to
+  // {{$randomString}} and 400 on closed-vocab/format-strict APIs.
   if (name) {
-    const lower = name.toLowerCase();
+    const lower = canonicalVarName(name);
     if (lower === "slug" || lower.endsWith("_slug")) {
       return "{{$randomSlug}}";
     }
@@ -635,9 +715,7 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
       lower === "sender" ||
       lower === "recipient" ||
       lower === "reply_to" ||
-      lower === "replyto" ||
       lower.endsWith("_email") ||
-      lower.endsWith("Email") ||
       lower.endsWith("_reply_to") ||
       lower.endsWith("_from") ||
       lower.endsWith("_to") ||
@@ -649,7 +727,7 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
     if (lower === "id" || lower === "uuid" || lower.endsWith("_id") || lower.endsWith("id")) {
       return "{{$uuid}}";
     }
-    if (lower === "name" || lower.endsWith("_name") || lower.endsWith("Name")) {
+    if (lower === "name" || lower.endsWith("_name")) {
       return "{{$randomName}}";
     }
     if (lower === "url" || lower.endsWith("_url") || lower === "uri" || lower === "href" || lower === "website") {

@@ -2,7 +2,7 @@ import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, SecuritySchemeInfo, CrudGroup } from "./types.ts";
 import type { RawSuite, RawStep } from "./serializer.ts";
 import type { SourceMetadata } from "../parser/types.ts";
-import { generateFromSchema, generateMultipartFromSchema } from "./data-factory.ts";
+import { generateFromSchema, generateMultipartFromSchema, isFkFixtureField, canonicalVarName, effectiveObjectShape } from "./data-factory.ts";
 import { groupEndpointsByTag } from "./chunker.ts";
 import { getAuthHeaders as sharedGetAuthHeaders } from "../probe/shared.ts";
 import { flattenToFormFields } from "../runner/form-encode.ts";
@@ -348,6 +348,42 @@ export function buildOpenApiSuiteSource(specPath?: string): SourceMetadata | und
 // Public API
 // ──────────────────────────────────────────────
 
+/**
+ * ARV-45: swap FK-shaped required body fields for `{{fixture}}` references so
+ * their values come from `.env.yaml` instead of `{{$randomString}}`/`{{$uuid}}`
+ * junk that 400s and kills the CRUD chain at step 1. Field names that motivated
+ * this — `sequenceTypeCode`, `templateGroupCode` — are closed-vocab codes the
+ * generator can't guess. The var name is canonicalised (`sequence_type_code`)
+ * to match the manifest entry (fixtures-builder step 5); the HTTP body key
+ * keeps the raw spec spelling. Recurses into nested objects for nested FKs.
+ *
+ * Keep the detection predicate (`isFkFixtureField`) in lockstep with the
+ * manifest builder — every var the tests reference must appear in the manifest
+ * (decision-7).
+ */
+export function wireBodyFkRefs(schema: OpenAPIV3.SchemaObject, body: unknown): unknown {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+  // `effectiveObjectShape` merges allOf so allOf-wrapped bodies (the .NET/
+  // Swagger norm) resolve their properties — a direct schema.properties read
+  // misses every FK on those specs.
+  const { properties, required } = effectiveObjectShape(schema);
+  const out = body as Record<string, unknown>;
+  for (const [name, propSchema] of Object.entries(properties)) {
+    if (!(name in out)) continue;
+    if (required.has(name) && isFkFixtureField(name, propSchema)) {
+      out[name] = `{{${canonicalVarName(name)}}}`;
+    } else if (out[name] && typeof out[name] === "object" && !Array.isArray(out[name])) {
+      out[name] = wireBodyFkRefs(propSchema, out[name]);
+    }
+  }
+  return out;
+}
+
+/** Generate a request body from a schema with FK fields wired to fixtures. */
+function generateBody(schema: OpenAPIV3.SchemaObject): unknown {
+  return wireBodyFkRefs(schema, generateFromSchema(schema));
+}
+
 /** Generate a single test step from an EndpointInfo */
 export function generateStep(
   ep: EndpointInfo,
@@ -379,9 +415,9 @@ export function generateStep(
       // the runner posts URL-encoded bodies with bracket notation. Without
       // this, generate baked `json:` blocks and every POST 400'd with
       // "wrong content type".
-      step.form = flattenToFormFields(generateFromSchema(ep.requestBodySchema));
+      step.form = flattenToFormFields(generateBody(ep.requestBodySchema));
     } else {
-      step.json = generateFromSchema(ep.requestBodySchema);
+      step.json = generateBody(ep.requestBodySchema);
     }
   }
 
@@ -653,7 +689,7 @@ export function generateCrudSuite(
       step.headers = { "If-Match": `"{{${etagVar}}}"` };
     }
     if (group.update.requestBodySchema) {
-      step.json = generateFromSchema(group.update.requestBodySchema);
+      step.json = generateBody(group.update.requestBodySchema);
     }
     tests.push(step);
   }
