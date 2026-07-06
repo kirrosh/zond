@@ -3,10 +3,10 @@ id: ARV-355
 title: >-
   Agent-orchestrated auto-seed: autonomous fixture creation (agent reasons, zond
   executes)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 13:15'
-updated_date: '2026-07-06 13:28'
+updated_date: '2026-07-06 14:04'
 labels:
   - project
   - fixtures
@@ -41,5 +41,9 @@ HONEST CEILING: auto-seed only what is self-contained in the API; fixtures needi
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Folds in ARV-347: agent seed_body authoring must also honor PROSE-encoded mutual exclusion (Stripe 'you may only specify one of A, B' — 80 such 400s in run 20260706-150730). No machine-readable oneOf in spec; agent reads the description / the 400 message and drops the conflicting member on retry (AC#2 feedback loop). This is the correct home for it — deterministic zond can't NL-parse prose.
+Done (commit 928763e). Two deliverables per litmus split:
+CORE PRIMITIVE (AC#1/#5): 'zond request --json-path <f> --capture <var> --api <name>' writes extracted scalar to apis/<name>/.env.yaml (upsert+.bak), gated to 2xx; non-2xx = skip note so agent revises. No seed engine in core.
+SKILL (AC#2/#3/#4): new zond-seed.md (installed by zond init) — read gaps (prepare-fixtures unseededRoots / db diagnose cascade_skips) -> order parent-first by fkDependencies -> author body (annotate dump --seed-bodies --with-last-attempt) -> request POST --capture -> on 4xx read/revise/retry(~3) -> cascade -> cleanup + report un-seedable. Folds ARV-347 prose-exclusion into retry rules.
+DESIGN NOTE: intentionally did NOT add a topological 'seed-plan dump' primitive (AC#1 listed it as an example). YAGNI/litmus: create-order is agent reasoning over the fkDependencies graph (it also decides cycles/externals); topo-sort alone isn't worth a core command. All the ordering inputs exist.
+VALIDATION: 21 request tests (guard/2xx-write/non-2xx-skip), skill-examples contract test validates every skill command+flag vs registered CLI, full suite 2405 pass. Live seed run against a sandbox = the natural next 'прогон' to measure depth lift.
 <!-- SECTION:NOTES:END -->

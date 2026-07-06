@@ -252,9 +252,17 @@ can route without parsing free-form messages:
 | `fix_network_config` | Transport-level error (timeout / DNS / refused). Verify `base_url` and reachability before re-running. |
 | `wontfix_known_limitation` | Known accepted gap. Don't retry, don't file a bug. |
 
-Triage by `recommended_action` first, then by severity. HIGH/CRITICAL
-gates exit-code 1; LOW/MEDIUM is informational. In an orchestrator/CI
-that must tell "found drift" from "command crashed", pass
+**Severity is a coarse deterministic CI-gate default, not a priority signal
+(ARV-346).** zond stamps each check a fixed severity so the exit code
+(`high_or_critical`) and SARIF mapping are reproducible — it is NOT a judgment
+about which finding matters most on *your* API. You (the agent) prioritize
+from `recommended_action` + the raw evidence, not from zond's severity number:
+route by the closed enum first, read the response body, decide impact. The
+severity field only answers "does this trip the CI gate?", nothing more. (This
+is the deterministic per-check default — not the removed ARV-337 calibrator.)
+
+HIGH/CRITICAL gates exit-code 1; LOW/MEDIUM is informational. In an
+orchestrator/CI that must tell "found drift" from "command crashed", pass
 `--no-fail-on-findings` (alias `--advisory`, ARV-308): exit 0 even with
 HIGH/CRITICAL findings — the findings are still in the envelope. Mirrors
 `zond run --no-fail-on-failures`. Exit 2 stays reserved for real failures.

@@ -3,9 +3,10 @@ id: ARV-340
 title: >-
   not_a_server_error blind to input-triggered 5xx (defaults to positive-only
   caseKinds)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 10:51'
+updated_date: '2026-07-06 14:06'
 labels:
   - zond-bug
   - checks
@@ -29,3 +30,9 @@ Fix: not_a_server_error.caseKinds = ["positive","negative_data","missing_require
 - [ ] #2 a 5xx from a negative_data case produces a HIGH finding
 - [ ] #3 unsupported_method cases still excluded (no 501 noise)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Landed earlier (see git log: 8f8846a ARV-340/341, 513ad26 ARV-342). Backlog status was stale; marking Done.
+<!-- SECTION:NOTES:END -->

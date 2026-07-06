@@ -3,9 +3,10 @@ id: ARV-341
 title: >-
   positive_data_acceptance recommends report_backend_bug for self-generated
   bodies
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 10:51'
+updated_date: '2026-07-06 14:06'
 labels:
   - zond-bug
   - triage
@@ -28,3 +29,9 @@ Fix: classifier check:positive_data_acceptance -> fix_spec (align the spec with 
 - [ ] #1 check:positive_data_acceptance classifies to fix_spec
 - [ ] #2 RECOMMENDED_ACTION_TABLE test updated
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Landed earlier (see git log: 8f8846a ARV-340/341, 513ad26 ARV-342). Backlog status was stale; marking Done.
+<!-- SECTION:NOTES:END -->
