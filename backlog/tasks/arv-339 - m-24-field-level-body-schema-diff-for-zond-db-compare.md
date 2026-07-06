@@ -1,9 +1,10 @@
 ---
 id: ARV-339
 title: 'm-24: field-level body/schema diff for zond db compare'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 08:45'
+updated_date: '2026-07-06 08:52'
 labels:
   - m-24
 dependencies: []
