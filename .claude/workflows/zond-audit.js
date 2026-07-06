@@ -169,8 +169,8 @@ await agent(
   `Ты — finish-стадия. Выполни РОВНО эти команды по порядку (Bash, каждую live-команду с timeout 600000). Не прерывайся на ошибке одного шага — логируй и иди дальше; странности пиши в "${raw}/99-zond-friction.md" (### команда — ожидал/вышло/raw).
 ${envLine}
 mkdir -p apis/${slug}/probes/mass-assignment apis/${slug}/probes/security
-zond probe mass-assignment --api ${slug} ${safe ? '--dry-run' : ''} --emit-tests apis/${slug}/probes/mass-assignment --output apis/${slug}/probes/ma-digest.md > "${raw}/50-probe-ma.log" 2>&1
-zond probe security ssrf,crlf,open-redirect --api ${slug} ${safe ? '--dry-run' : ''} --emit-tests apis/${slug}/probes/security > "${raw}/51-probe-sec.log" 2>&1
+zond probe mass-assignment --api ${slug} ${safe ? '--dry-run' : `--live --emit-tests apis/${slug}/probes/mass-assignment`} --output apis/${slug}/probes/ma-digest.md > "${raw}/50-probe-ma.log" 2>&1
+zond probe security ssrf,crlf,open-redirect --api ${slug} ${safe ? '--dry-run' : `--live --emit-tests apis/${slug}/probes/security`} > "${raw}/51-probe-sec.log" 2>&1
 ${safe ? '# safe: probes dry-run only' : `zond run apis/${slug}/probes/mass-assignment --report json --output "${raw}/52-run-ma.json"\nzond run apis/${slug}/probes/security --report json --output "${raw}/53-run-sec.json"`}
 zond run apis/${slug}/tests --rate-limit ${safe ? '5' : 'auto'} --sequential --validate-schema --report json --output "${raw}/60-run.json"; RUN_A=$(zond db runs --json | jq -r '.data.runs[0].id')
 zond run apis/${slug}/tests --rate-limit ${safe ? '5' : 'auto'} --sequential --validate-schema --report json --output "${raw}/60-run-b.json"; RUN_B=$(zond db runs --json | jq -r '.data.runs[0].id')
