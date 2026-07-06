@@ -126,6 +126,9 @@ interface ChecksRunOptions {
   strict405?: boolean;
   strict401?: boolean;
   maxRequests?: number;
+  /** ARV-342: operation-window for bounded/resumable sweeps of large specs. */
+  maxOps?: number;
+  skipOps?: number;
   budget?: string;
   showSuppressed?: boolean;
   /** ARV-308: `--no-fail-on-findings` sets this to false (commander default
@@ -695,6 +698,8 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       rateLimiter,
       maxRequests: budgetResolved.maxRequests,
       skipStateful: budgetResolved.skipStateful,
+      maxOps: opts.maxOps,
+      skipOps: opts.skipOps,
       safe: !resolveLive(opts),
     });
 
@@ -978,6 +983,16 @@ function defineRun(parent: Command): void {
     .option(
       "--max-requests <n>",
       "ARV-227: hard cap on outbound HTTP requests for the whole run (per-response + stateful share the same budget). Once reached, remaining cases short-circuit with `max-requests-cap-reached` in summary.skipped_outcomes. Always wins over the --budget tier cap.",
+      (v) => Number.parseInt(v, 10),
+    )
+    .option(
+      "--max-ops <n>",
+      "ARV-342: cap this run to N operations (deterministic op-window). Pair with --skip-ops to sweep a large spec in bounded, resumable slices that each finish in a short budget. A window whose summary.operations < N is the last slice.",
+      (v) => Number.parseInt(v, 10),
+    )
+    .option(
+      "--skip-ops <n>",
+      "ARV-342: skip the first N operations (post-filter, deterministic order) before applying --max-ops. Resume token for windowed sweeps: skip 0, skip 50, skip 100, …",
       (v) => Number.parseInt(v, 10),
     )
     .option(
