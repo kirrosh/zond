@@ -134,25 +134,6 @@ describe("audit HTML drill-down (ARV-158)", () => {
     expect(idxAuth).toBeGreaterThan(idxBackend);
   });
 
-  test("env_issue surfaces as warning banner inside the run's <details>", async () => {
-    const input = baseInput([
-      {
-        run: { id: 42, failed: 3, total: 10, passed: 7 },
-        diagnose: makeDiagnose({
-          env_issue: {
-            message: "base_url not reachable",
-            scope: "run",
-            affected_suites: [],
-            symptoms: {},
-          },
-        }),
-      },
-    ]);
-    await writeAuditReport(outPath, input);
-    const html = await readFile(outPath, "utf-8");
-    expect(html).toContain("env_issue (run): base_url not reachable");
-  });
-
   test("multiple failed runs → multiple <details> blocks", async () => {
     const input = baseInput([
       { run: { id: 10, failed: 1, total: 5, passed: 4 }, diagnose: makeDiagnose() },

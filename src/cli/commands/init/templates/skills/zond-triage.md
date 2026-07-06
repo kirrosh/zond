@@ -34,9 +34,6 @@ scenarios; this one only reads.
   command — don't pad with "consider checking...".
 - **`report_backend_bug` / 5xx → STOP, surface, do not edit `expect:`.**
   Same iron rule as the parent `zond` skill.
-- **`fix_env` overrides `fix_test_logic` at the suite level.** `db
-  diagnose` already does this collapse (TASK-70/98) — trust the field
-  it returns, don't merge again client-side.
 - **Never read raw response bodies past 8 KB.** The diagnose envelope
   truncates by default; pass `--no-body-cap` only if the user is
   triaging body-shape bugs.
@@ -78,6 +75,7 @@ If `trigger=ci`, mention the CI build in the summary. If the user said
 zond db diagnose --json              # last failing run (default — TASK-266)
 zond db diagnose <run-id> --json     # explicit run
 zond db diagnose --latest --json     # last run, even if it passed
+zond db diagnose --report yaml       # same payload as YAML (ARV-338) — for run snapshots you keep/diff as text
 ```
 
 The shape (relevant fields only):
@@ -88,7 +86,6 @@ The shape (relevant fields only):
   "data": {
     "run_id": 42,
     "summary": { "passed": 18, "failed": 7, "errored": 1 },
-    "env_issue": { "scope": "suite", "affected_suites": [...], "message": "..." },
     "failures": [
       {
         "suite_name": "crud-projects",
@@ -97,9 +94,7 @@ The shape (relevant fields only):
         "recommended_action": "report_backend_bug",
         "request_method": "POST",
         "request_url": "...",
-        "response_status": 500,
-        "hint": "...",
-        "schema_hint": "..."
+        "response_status": 500
       }
     ]
   }
@@ -115,8 +110,9 @@ priority first):
    then `zond refresh-api <name>`.
 3. `fix_auth_config` — 401/403 cluster. Check `auth_token` scope (or run
    `zond doctor --api <name> --missing-only`).
-4. `fix_env` — env_issue cluster. Print `env_issue.message` verbatim;
-   point at `.env.yaml` (path is in the envelope).
+4. `fix_env` — unresolved variables / broken base_url. Point at
+   `.env.yaml` and the failing `request_url` values (unresolved
+   `{{var}}` placeholders are visible right in them).
 5. `fix_fixture` — `prepare-fixtures` miss-* or inconclusive-baseline
    from mass-assignment. Run `zond prepare-fixtures --api <name> --apply`
    (single-pass); fill any remaining gaps by hand (`fixtures add` /
@@ -210,7 +206,7 @@ Pass <N>  Fail <M>  Error <K>  Coverage <pct>%
   · 4 suites all 401 — check auth_token scope
     next: zond doctor --api <name> --missing-only
 🌐 fix_env  ×<n>
-  · base_url unset (env_issue.scope=run)
+  · base_url unset — request_url resolved to "/v1/projects"
     next: edit apis/<name>/.env.yaml → base_url
 📥 fix_fixture  ×<n>
   · {{audience_id}} unresolved
@@ -226,9 +222,9 @@ say "all green" and exit — don't invent work.
 ## When to escalate
 
 - **Mixed recommended_action inside one suite (>3 distinct enums):**
-  the run was probably aborted mid-setup. Check `env_issue` first; if
-  not set, the run hit a fatal early failure — `zond db run <id>
-  --status 500 --first-only --json` to find it.
+  the run was probably aborted mid-setup. Look for unresolved `{{var}}`
+  in `request_url` first; if none, the run hit a fatal early failure —
+  `zond db run <id> --status 500 --first-only --json` to find it.
 - **Cleanup failures from `probe security`:** call out at the **top** —
   this means probe mutated state it could not restore. Treat as
   blocking; do not run more probes against the same env until the

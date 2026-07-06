@@ -7,7 +7,6 @@ function makeFailure(overrides: Partial<{
   test_name: string;
   failure_type: string;
   recommended_action: RecommendedAction;
-  hint: string;
   response_status: number | null;
 }> = {}) {
   return {
@@ -15,7 +14,6 @@ function makeFailure(overrides: Partial<{
     test_name: overrides.test_name ?? "test",
     failure_type: overrides.failure_type ?? "assertion_failed",
     recommended_action: overrides.recommended_action ?? ("fix_test_logic" as RecommendedAction),
-    hint: overrides.hint,
     response_status: overrides.response_status ?? null,
   };
 }
@@ -37,7 +35,6 @@ describe("groupFailures", () => {
         test_name: `test_${i}`,
         response_status: 401,
         failure_type: "assertion_failed",
-        hint: "Auth failure",
       })
     );
     const result = groupFailures(failures);
@@ -89,19 +86,6 @@ describe("groupFailures", () => {
     const result = groupFailures(failures);
     expect(result.grouped_failures).toBeUndefined();
     expect(result.compactFailures).toHaveLength(6);
-  });
-
-  test("includes hint from first failure in group", () => {
-    const failures = Array.from({ length: 6 }, (_, i) =>
-      makeFailure({
-        test_name: `test_${i}`,
-        response_status: 429,
-        failure_type: "assertion_failed",
-        hint: "Rate limited — too many requests",
-      })
-    );
-    const result = groupFailures(failures);
-    expect(result.grouped_failures![0]!.hint).toBe("Rate limited — too many requests");
   });
 
   test("grouped api_error failures carry report_backend_bug action", () => {

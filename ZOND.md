@@ -1348,37 +1348,22 @@ does not. Error codes follow the `ZondErrorCode` enum (see
 `--report json`. Use `--report json` for the report payload; `--report-out
 <file>` writes it to disk.
 
-### `db diagnose` envelope — `env_issue`
+### `db run` / `db diagnose` / `db compare` — `--report yaml` (ARV-338)
 
-When the diagnose detector decides that environment misconfiguration (not test
-logic, not a backend bug) is the root cause of failures, it surfaces the
-finding as a structured `env_issue` field in the `data` payload:
+Without `--json`, these commands print their payload as plain JSON to stdout.
+Pass `--report yaml` to get the same payload as YAML — an agent-friendly run
+snapshot you can commit next to suite YAMLs and diff between runs as text:
 
-```jsonc
-{
-  "env_issue": {
-    "message": "Suite \"payments\" looks env-broken (missing_var=2) — check .env.yaml",
-    "scope": "suite:payments",          // "run" or "suite:<name>"
-    "affected_suites": ["payments"],    // suites that were re-classified to fix_env
-    "symptoms": {                       // histogram of root-cause classes
-      "missing_var": 2,                 // unresolved {{var}} in URL/body/headers
-      "base_url": 0,                    // base_url unset or empty
-      "url_malformed": 0,               // computed URL is not parseable
-      "auth_expired": 0                 // 401/403 with auth-header reference
-    }
-  }
-}
+```bash
+zond db run 42 --report yaml > runs/42.yaml
+zond db diagnose --report yaml            # dev summary of the last failing run
+zond db compare 41 42 --report yaml       # status-level regression diff
 ```
 
-`scope` semantics:
-- `run` — multiple suites tripped the detector; the run as a whole is
-  env-broken. Often paired with a "missing base_url"/expired-token symptom
-  set.
-- `suite:<name>` — only one suite tripped the detector. The other suites'
-  failures keep their original `recommended_action` (e.g. `fix_test_logic`).
-
-5xx failures are **never** rewritten to `fix_env` — `report_backend_bug` wins
-even when the surrounding suite is otherwise env-broken.
+`--report yaml` and `--json` are mutually exclusive. Prose hint fields
+(`env_issue`, `auth_hint`, `agent_directive`, per-failure `hint`) were removed
+from the diagnose payload in ARV-338 — route on the `recommended_action` enum
+and raw evidence instead.
 
 ---
 

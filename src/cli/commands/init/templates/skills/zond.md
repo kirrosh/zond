@@ -64,8 +64,9 @@ For triage of a failing run — see `zond-triage`.
   In autonomous / loop / audit-sweep mode (no user-in-the-loop), log to
   `api-bugs-<NN>.md`, continue the sweep — bailing on bug #1 forfeits #2..N.
 - **CRUD-run ≥80% 401/403 / `permission_denied` → `env_issue`, not bug.**
-  Token scope issue. Confirm via `zond db diagnose <run-id> --env-only`;
-  do not generate case-studies, do not `expect:`-mask.
+  Token scope issue. Confirm via `zond db diagnose <run-id> --json`
+  (401/403 dominate `by_recommended_action`); do not generate
+  case-studies, do not `expect:`-mask.
 - **MUST run `zond doctor --api <name> --missing-only` before generating
   fixtures or touching `.env.yaml`** — identifies unfilled keys early.
 - **`prepare-fixtures` is single-pass and never POST-creates** — it fills
@@ -765,6 +766,7 @@ zond db runs --limit 5 --json
 zond db diagnose <run-id> --json              # grouped by root_cause
 zond db run <id> --status 500 --json
 zond db compare <idA> <idB> --json            # regression diff
+zond db run <id> --report yaml                # run snapshot as YAML (ARV-338) — keep/diff as text
 ```
 
 > **db --json envelope shape** (consistent across siblings): the array

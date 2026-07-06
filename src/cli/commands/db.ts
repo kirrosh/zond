@@ -1,3 +1,4 @@
+import { stringify as stringifyYaml } from "yaml";
 import { getCollections, getRuns, getRunDetail, diagnoseRun, compareRuns } from "../../core/diagnostics/db-analysis.ts";
 import { getFilteredResults, getLatestFailingRunId, getLatestRunId, runKindStats, deleteRunsOlderThan } from "../../db/queries.ts";
 import { getDb } from "../../db/schema.ts";
@@ -31,6 +32,14 @@ export interface DbOptions {
   kind?: string;
   /** ARV-266: show what would be deleted without deleting. */
   dryRun?: boolean;
+  /** ARV-338: `--report yaml` — emit the same payload as YAML instead of
+   *  JSON, so agents can drop it next to suite YAMLs and diff runs as text. */
+  report?: string;
+}
+
+/** ARV-338: shared stdout emitter for run/diagnose/compare payloads. */
+function emitPayload(payload: unknown, format?: string): void {
+  console.log(format === "yaml" ? stringifyYaml(payload).trimEnd() : JSON.stringify(payload, null, 2));
 }
 
 /** ARV-266: per-run_kind default retention. Noise kinds (check/probe/
@@ -63,6 +72,18 @@ function cutoffIso(days: number, now: Date): string {
 
 export async function dbCommand(options: DbOptions): Promise<number> {
   const { subcommand, positional, json } = options;
+
+  if (options.report !== undefined && options.report !== "yaml" && options.report !== "json") {
+    const msg = `Invalid --report format: ${options.report}. Supported: json, yaml`;
+    if (json) printJson(jsonError(`db ${subcommand}`, [msg]));
+    else printError(msg);
+    return 2;
+  }
+  if (options.report === "yaml" && json) {
+    const msg = "--report yaml and --json are mutually exclusive — pick one output format";
+    printJson(jsonError(`db ${subcommand}`, [msg]));
+    return 2;
+  }
 
   try {
     switch (subcommand) {
@@ -130,14 +151,14 @@ export async function dbCommand(options: DbOptions): Promise<number> {
           if (json) {
             printJson(jsonOk("db run", { run_id: id, count: results.length, results }));
           } else {
-            console.log(JSON.stringify({ run_id: id, count: results.length, results }, null, 2));
+            emitPayload({ run_id: id, count: results.length, results }, options.report);
           }
         } else {
           const detail = getRunDetail(id, options.verbose, options.dbPath);
           if (json) {
             printJson(jsonOk("db run", detail));
           } else {
-            console.log(JSON.stringify(detail, null, 2));
+            emitPayload(detail, options.report);
           }
         }
         return 0;
@@ -187,7 +208,7 @@ export async function dbCommand(options: DbOptions): Promise<number> {
               printJson(jsonOk("db diagnose", { ...result, resolution: "latest-no-failures", run_id: fallback }, [warning]));
             } else {
               process.stderr.write(`zond: ${warning}\n`);
-              console.log(JSON.stringify({ ...result, resolution: "latest-no-failures", run_id: fallback }, null, 2));
+              emitPayload({ ...result, resolution: "latest-no-failures", run_id: fallback }, options.report);
             }
             return 0;
           }
@@ -214,7 +235,7 @@ export async function dbCommand(options: DbOptions): Promise<number> {
                 : `run #${id}`;
             process.stderr.write(`zond: diagnosing ${label}\n`);
           }
-          console.log(JSON.stringify({ ...result, resolution, run_id: id }, null, 2));
+          emitPayload({ ...result, resolution, run_id: id }, options.report);
         }
         return 0;
       }
@@ -232,7 +253,7 @@ export async function dbCommand(options: DbOptions): Promise<number> {
         if (json) {
           printJson(jsonOk("db compare", result));
         } else {
-          console.log(JSON.stringify(result, null, 2));
+          emitPayload(result, options.report);
         }
         return 0;
       }
@@ -388,6 +409,7 @@ export function registerDb(program: Command): void {
       "--status <expr>",
       "Filter by HTTP status. Accepts: exact code (502), class (5xx), range (500-599), comparison (>=500, <400), or comma-separated mix (5xx,429).",
     )
+    .option("--report <format>", "Output format: json (default) or yaml (ARV-338: agent-friendly run snapshot)")
     .option("--db <path>", "Path to SQLite database file")
     .action(async (id: string, opts, cmd: Command) => {
       process.exitCode = await dbCommand({
@@ -396,6 +418,7 @@ export function registerDb(program: Command): void {
         verbose: opts.verbose === true,
         method: opts.method,
         status: opts.status,
+        report: opts.report,
         dbPath: opts.db,
         json: globalJson(cmd),
       });
@@ -408,6 +431,7 @@ export function registerDb(program: Command): void {
     .option("--run-id <N>", "Explicit run id override (same as positional [id]; preferred form for agents)", parsePositiveInt("--run-id"))
     .option("--limit <N>", "Examples per failure group", parsePositiveInt("--limit"))
     .option("--verbose", "Show all examples (not grouped)")
+    .option("--report <format>", "Output format: json (default) or yaml (ARV-338: agent-friendly summary)")
     .option("--db <path>", "Path to SQLite database file")
     .action(async (id: string | undefined, opts, cmd: Command) => {
       process.exitCode = await dbCommand({
@@ -417,6 +441,7 @@ export function registerDb(program: Command): void {
         verbose: opts.verbose === true,
         latest: opts.latest === true,
         runId: opts.runId,
+        report: opts.report,
         dbPath: opts.db,
         json: globalJson(cmd),
       });
@@ -425,11 +450,13 @@ export function registerDb(program: Command): void {
   db
     .command("compare <idA> <idB>")
     .description("Compare two runs")
+    .option("--report <format>", "Output format: json (default) or yaml (ARV-338: agent-friendly diff)")
     .option("--db <path>", "Path to SQLite database file")
     .action(async (idA: string, idB: string, opts, cmd: Command) => {
       process.exitCode = await dbCommand({
         subcommand: "compare",
         positional: [idA, idB],
+        report: opts.report,
         dbPath: opts.db,
         json: globalJson(cmd),
       });
