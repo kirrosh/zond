@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, afterEach } from "bun:test";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { requestCommand } from "../../src/cli/commands/request.ts";
 import { setupApi } from "../../src/core/setup-api.ts";
 import { closeDb } from "../../src/db/schema.ts";
@@ -538,5 +539,68 @@ describe("requestCommand", () => {
     });
     expect(output.err).toMatch(/did not resolve/);
     expect(output.err).not.toMatch(/extracts from the response body/);
+  });
+
+  // ARV-355: create+capture primitive.
+  test("--capture without --json-path/--api errors (guard)", async () => {
+    output = captureOutput({ console: true });
+    const code = await requestCommand({
+      method: "POST",
+      url: "http://example.com/x",
+      capture: "account",
+      json: true,
+    });
+    expect(code).toBe(2);
+    expect(output.err).toMatch(/--capture requires --json-path/);
+  });
+
+  test("--capture writes the json-path scalar into .env.yaml on 2xx", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-cap-", marker: "config", chdir: true });
+    try {
+      await setupApi({ name: "jp", envVars: { base_url: "https://example.com" }, dbPath: join(ws.path, "zond.db") });
+      closeDb();
+      globalThis.fetch = mock(async () =>
+        new Response(JSON.stringify({ id: "acct_1" }), { status: 201, headers: { "Content-Type": "application/json" } }),
+      ) as unknown as typeof fetch;
+      output = captureOutput({ console: true });
+
+      const code = await requestCommand({
+        method: "POST", url: "/v1/accounts", api: "jp", dbPath: join(ws.path, "zond.db"),
+        jsonPath: "id", capture: "account",
+      });
+
+      expect(code).toBe(0);
+      const env = readFileSync(join(ws.path, "apis/jp/.env.yaml"), "utf-8");
+      expect(env).toMatch(/account:\s*["']?acct_1["']?/);
+      expect(output.err).toMatch(/captured account=acct_1/);
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
+  });
+
+  test("--capture skips write on non-2xx (revise-and-retry, no bad id)", async () => {
+    const ws = makeWorkspace({ prefix: "zond-req-cap4xx-", marker: "config", chdir: true });
+    try {
+      await setupApi({ name: "jp", envVars: { base_url: "https://example.com" }, dbPath: join(ws.path, "zond.db") });
+      closeDb();
+      globalThis.fetch = mock(async () =>
+        new Response(JSON.stringify({ error: "bad" }), { status: 400, headers: { "Content-Type": "application/json" } }),
+      ) as unknown as typeof fetch;
+      output = captureOutput({ console: true });
+
+      const code = await requestCommand({
+        method: "POST", url: "/v1/accounts", api: "jp", dbPath: join(ws.path, "zond.db"),
+        jsonPath: "id", capture: "account",
+      });
+
+      expect(code).toBe(0); // the request itself ran; capture is a side-channel
+      const env = readFileSync(join(ws.path, "apis/jp/.env.yaml"), "utf-8");
+      expect(env).not.toMatch(/account:\s*["']?\w/);
+      expect(output.err).toMatch(/--capture account skipped/);
+    } finally {
+      closeDb();
+      ws.cleanup();
+    }
   });
 });

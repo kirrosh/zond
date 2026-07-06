@@ -216,6 +216,11 @@ values invented, no auto-seed (ARV-349/350):
 - **`undefinedVars`** — suite `{{vars}}` no manifest entry, capture, or param
   produces (`{{bank_code}}`, `{{tax_id}}`). Supply by hand.
 
+To fill `unseededRoots` autonomously — author create-bodies, POST them, and
+capture the returned ids — hand off to **`zond-seed`** (agent reasons, zond
+executes via `request … --capture`). It seeds only what the API self-serves
+and reports external-input gaps honestly.
+
 When a var stays UNSET after `--apply`, read the per-target reason in the
 output, then fill the gap directly:
 
