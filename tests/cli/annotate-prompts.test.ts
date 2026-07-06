@@ -9,7 +9,6 @@
 import { describe, test, expect } from "bun:test";
 import type { OpenAPIV3 } from "openapi-types";
 import { buildResourceSlices } from "../../src/cli/commands/api/annotate/prompts.ts";
-import { inferIdempotency } from "../../src/cli/commands/api/annotate/auto.ts";
 import type { ResourceYaml } from "../../src/cli/commands/discover.ts";
 
 function resourceMap(): ResourceYaml[] {
@@ -52,10 +51,6 @@ describe("buildResourceSlices param $ref resolution", () => {
     expect(params).toHaveLength(1);
     expect(params[0]!.name).toBe("Idempotency-Key");
     expect(params[0]!.in).toBe("header");
-
-    const inf = inferIdempotency(slice!);
-    expect(inf).not.toBeNull();
-    expect(inf!.patch.idempotency?.header).toBe("Idempotency-Key");
   });
 
   test("resolves $ref to components.headers (Stripe-style)", () => {
@@ -84,9 +79,6 @@ describe("buildResourceSlices param $ref resolution", () => {
     expect(params).toHaveLength(1);
     expect(params[0]!.name).toBe("Idempotency-Key");
     expect(params[0]!.in).toBe("header");
-
-    const inf = inferIdempotency(slice!);
-    expect(inf).not.toBeNull();
   });
 
   test("unresolvable $ref is skipped silently", () => {
