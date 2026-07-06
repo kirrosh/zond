@@ -154,3 +154,40 @@ describe("groupFailures", () => {
     expect(result.compactFailures).toHaveLength(9);
   });
 });
+
+// ARV-339: field-level body/schema diff for `zond db compare`.
+import { diffBodyShapes } from "../../src/core/diagnostics/db-analysis.ts";
+
+describe("diffBodyShapes", () => {
+  test("detects added, removed and type-changed fields", () => {
+    const before = JSON.stringify({ id: 1, name: "a", legacy: true, tags: ["x"] });
+    const after = JSON.stringify({ id: "1", name: "a", email: "a@b.c", tags: ["x"] });
+    const changes = diffBodyShapes(before, after);
+    expect(changes).toEqual([
+      { field: "email", change: "added", after: "string" },
+      { field: "id", change: "type_changed", before: "number", after: "string" },
+      { field: "legacy", change: "removed", before: "boolean" },
+    ]);
+  });
+
+  test("collapses array elements — item count/order is not a shape change", () => {
+    const before = JSON.stringify({ items: [{ id: 1 }, { id: 2 }] });
+    const after = JSON.stringify({ items: [{ id: 3 }] });
+    expect(diffBodyShapes(before, after)).toEqual([]);
+  });
+
+  test("reports nested field paths through arrays", () => {
+    const before = JSON.stringify({ items: [{ id: 1 }] });
+    const after = JSON.stringify({ items: [{ id: 1, price: 9.5 }] });
+    expect(diffBodyShapes(before, after)).toEqual([
+      { field: "items[].price", change: "added", after: "number" },
+    ]);
+  });
+
+  test("returns [] for missing, identical or non-JSON bodies", () => {
+    expect(diffBodyShapes(null, '{"a":1}')).toEqual([]);
+    expect(diffBodyShapes('{"a":1}', '{"a":1}')).toEqual([]);
+    expect(diffBodyShapes("<html>", '{"a":1}')).toEqual([]);
+    expect(diffBodyShapes('"plain string"', '{"a":1}')).toEqual([]);
+  });
+});

@@ -1357,13 +1357,32 @@ snapshot you can commit next to suite YAMLs and diff between runs as text:
 ```bash
 zond db run 42 --report yaml > runs/42.yaml
 zond db diagnose --report yaml            # dev summary of the last failing run
-zond db compare 41 42 --report yaml       # status-level regression diff
+zond db compare 41 42 --report yaml       # status + field-level regression diff
 ```
 
 `--report yaml` and `--json` are mutually exclusive. Prose hint fields
 (`env_issue`, `auth_hint`, `agent_directive`, per-failure `hint`) were removed
 from the diagnose payload in ARV-338 — route on the `recommended_action` enum
 and raw evidence instead.
+
+### `db compare` — field-level body diff (ARV-339)
+
+Beyond status transitions, `db compare` diffs the stored response bodies of
+every test present in both runs and reports how the response shape moved:
+
+```yaml
+body_changes:
+  - suite: users
+    test: get user
+    changes:
+      - { field: email, change: added, after: string }
+      - { field: id, change: type_changed, before: number, after: string }
+      - { field: legacy, change: removed, before: boolean }
+```
+
+Fields are dot-paths; array elements collapse under `[]` (`items[].price`),
+so item count/order is not a change. Non-JSON or missing bodies are skipped.
+`summary.bodyChanges` counts affected tests.
 
 ---
 
