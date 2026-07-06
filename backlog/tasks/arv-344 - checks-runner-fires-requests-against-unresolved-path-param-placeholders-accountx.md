@@ -3,10 +3,10 @@ id: ARV-344
 title: >-
   checks runner fires requests against unresolved path-param placeholders
   (account=x)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 10:52'
-updated_date: '2026-07-06 11:07'
+updated_date: '2026-07-06 14:25'
 labels:
   - zond-bug
   - checks
@@ -32,5 +32,5 @@ SCOPE fix (deterministic): an op with an unresolved REQUIRED path param should s
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-CONSTRAINT (src/CLAUDE.md litmus): deterministic skip only (required path-param unresolved -> skip + skipped_outcomes reason). MUST NOT become "zond heuristically decides which ops are worth testing" — no judgment about value/severity/likelihood. Same shape as ARV-141 fixture-driven substitution, just the skip side.
+Done (6a6bd16). checks/runner.ts: hasUnresolvedRequiredPathParam() gates POST/PUT/PATCH — unresolved required path param -> skip + fixture-gap bucket, not a live request against synthetic '/x/' parent. GET/HEAD/DELETE keep ARV-141 synthetic-404. Unit-tested.
 <!-- SECTION:NOTES:END -->

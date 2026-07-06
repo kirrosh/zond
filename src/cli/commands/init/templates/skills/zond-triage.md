@@ -71,6 +71,13 @@ If `trigger=ci`, mention the CI build in the summary. If the user said
 status transitions, the payload carries `.data.body_changes[]` (ARV-339) —
 per-test field-level response-shape diff (`added` / `removed` /
 `type_changed`), i.e. how the contract moved even where status stayed green.
+Each change carries `scope` (ARV-352): `container` = response envelope /
+pagination skeleton (real drift), `element` = a field inside a collection
+item (path crosses `[]`). On list/log endpoints two runs return DIFFERENT
+objects, so `element`-scoped changes are schema-of-union variance across the
+re-sampled set — NOT contract drift. `summary.bodyChangesContainer` /
+`bodyChangesElement` split the count so you can tell "12 field diffs, all
+element-scope on /v1/events" (data variance) from real envelope drift.
 
 ## Phase 2 — pull the diagnose envelope
 

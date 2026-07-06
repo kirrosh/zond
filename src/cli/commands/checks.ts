@@ -18,7 +18,7 @@ import { listChecks, runChecks } from "../../core/checks/index.ts";
 import { listStatefulChecks } from "../../core/checks/stateful.ts";
 import { resolveBudget, isBudget, BUDGETS, type Budget } from "../../core/checks/budget.ts";
 import { generateSarifReport } from "../../core/checks/sarif.ts";
-import { emitToStdout } from "../../core/reporter/ndjson.ts";
+import { emitToStdout, nowIso } from "../../core/reporter/ndjson.ts";
 import { parseWorkers } from "../../core/runner/async-pool.ts";
 import { createAdaptiveRateLimiter, createRateLimiter, type RateLimiter } from "../../core/runner/rate-limiter.ts";
 import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
@@ -558,9 +558,33 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   if (ndjsonOutputPath) {
     ndjsonFd = openSync(ndjsonOutputPath, "w");
   }
+  // ARV-343: accumulate a running summary from the stream so a SIGTERM'd
+  // run still emits a terminal `summary` line (operations/cases counted so
+  // far) instead of dying before the runner's emit stage — triage's
+  // `sweepWindows`/status-dist read `.summary.operations` and had to
+  // reconstruct it from raw NDJSON when the window was killed mid-flight.
+  const partialOps = new Set<string>();
+  const partialChecks = new Set<string>();
+  let partialCases = 0;
+  let partialFindings = 0;
+  const partialBySeverity = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+  const accumulate = (ev: import("../../core/reporter/ndjson.ts").NdjsonEvent) => {
+    if (ev.type === "check_result") {
+      partialCases += 1;
+      partialChecks.add(ev.check);
+      partialOps.add(`${ev.operation.method} ${ev.operation.path}`);
+    } else if (ev.type === "check_start") {
+      partialOps.add(`${ev.operation.method} ${ev.operation.path}`);
+    } else if (ev.type === "finding") {
+      partialFindings += 1;
+      const sev = ev.finding.severity as keyof typeof partialBySeverity;
+      if (sev in partialBySeverity) partialBySeverity[sev] += 1;
+    }
+  };
   const ndjsonOnEvent = ndjson
     ? (ndjsonFd !== undefined
         ? (ev: import("../../core/reporter/ndjson.ts").NdjsonEvent) => {
+            accumulate(ev);
             ndjsonLastFullyWritten = false;
             ndjsonEventCount += 1;
             writeSync(ndjsonFd!, `${JSON.stringify(ev)}\n`);
@@ -571,6 +595,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
         // stream it claimed "0 event(s) flushed" while the redirect target
         // already held thousands of lines.
         : (ev: import("../../core/reporter/ndjson.ts").NdjsonEvent) => {
+            accumulate(ev);
             ndjsonEventCount += 1;
             emitToStdout(ev);
           })
@@ -586,19 +611,41 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   if (ndjson) {
     const shutdown = (signo: number) => {
       try {
+        // ARV-343: flush a partial terminal summary from the running
+        // accumulators. Schema-exact (CheckRunSummarySchema) so downstream
+        // `jq '.summary.operations'` and status-dist stay analyzable;
+        // by_category/skipped are left empty (not derivable in the CLI) —
+        // the stderr interrupt note below flags that it's a partial count.
+        const partialSummary = {
+          type: "summary" as const,
+          ts: nowIso(),
+          summary: {
+            operations: partialOps.size,
+            cases: partialCases,
+            checks_run: partialChecks.size,
+            findings: partialFindings,
+            by_severity: { ...partialBySeverity },
+            by_category: { security: 0, reliability: 0, contract: 0, hygiene: 0 },
+            skipped_outcomes: {},
+            skipped_outcomes_grouped: [],
+          },
+        };
         if (ndjsonFd !== undefined) {
           if (!ndjsonLastFullyWritten) {
             try { writeSync(ndjsonFd, "\n"); } catch { /* fd already gone */ }
           }
+          try { writeSync(ndjsonFd, `${JSON.stringify(partialSummary)}\n`); } catch { /* fd already gone */ }
           try { closeSync(ndjsonFd); } catch { /* already closed */ }
           ndjsonFd = undefined;
+        } else {
+          try { emitToStdout(partialSummary); } catch { /* stdout gone */ }
         }
       } catch { /* swallow; we're tearing down */ }
       // ARV-323: "emitted" not "flushed" — on the stdout channel the last
       // few lines may still sit in the pipe buffer, so the count is a
       // lower bound of what the consumer/file will contain, never an
       // excuse to discard a partial-but-real stream.
-      try { process.stderr.write(`zond: NDJSON run interrupted (signal ${signo}); ${ndjsonEventCount} event(s) emitted before interrupt (partial stream is usable).\n`); } catch { /* ignore */ }
+      try { process.stderr.write(`zond: NDJSON run interrupted (signal ${signo}); ${ndjsonEventCount} event(s) + a partial summary (${partialOps.size} ops, ${partialCases} cases so far) emitted before interrupt (partial stream is usable).\n`); } catch { /* ignore */ }
       process.exit(128 + signo);
     };
     const onTerm = () => shutdown(15);

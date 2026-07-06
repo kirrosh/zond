@@ -191,6 +191,8 @@ const report = await agent(
   `Ты — triage-стадия. Прочитай сырьё в ${setup.runDir}/raw/ и напиши ДВА markdown-артефакта. Severity ты назначаешь сам из evidence.
 
 Вход (Read tool): ${setup.runDir}/raw/*.ndjson, *.json, *.log, *.yaml, 99-zond-friction.md, 90-status-dist.txt, 70-coverage.json.
+
+DEPTH BREADTH (ARV-354): depth-pass был окновым (ARV-342), поэтому НИ 70-coverage.json, НИ последняя строка summary одного окна не отражают реальный охват. Агрегат по всем окнам уже посчитан воркфлоу: coverage depth-pass = ${covOps} operations, stateful depth-pass = ${stOps} operations. В отчёте про depth-охват используй ЭТИ числа (или, если хочешь перепроверить, посчитай distinct operation-пути: jq -r 'select(.type=="check_result") | .operation.method+" "+.operation.path' ${raw}/30-checks.ndjson ${raw}/40-stateful.ndjson | sort -u | wc -l). Не бери operations из summary одного окна — это ~10x недооценка.
 m-24 артефакты: 61-run.yaml (снапшот прогона), 62-diagnose.yaml (recommended_action-enum + сырой evidence, БЕЗ prose-подсказок), 63-compare.yaml (field-level контракт-дифф RUN_A↔RUN_B: body_changes[] — поле пропало/добавилось/сменило тип, даже если статусы зелёные).
 
 Severity — суждение агента из evidence (ARV-337: zond больше НЕ эмитит severity и НЕ калибрует; находки несут recommended_action-enum + сырой evidence, приоритет назначаешь ты):

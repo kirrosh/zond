@@ -1,9 +1,10 @@
 ---
 id: ARV-352
 title: db compare flags data-variance as body_changes on event/list endpoints
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 13:04'
+updated_date: '2026-07-06 14:51'
 labels:
   - zond-bug
   - db-compare
@@ -24,3 +25,9 @@ PHILOSOPHY CONSTRAINT (litmus): do NOT add a suppression heuristic that "guesses
 - [ ] #1 collection/log endpoints diffed structurally (schema-of-union), not per-element
 - [ ] #2 no FP-suppression heuristic added
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+db-analysis.ts: BodyFieldChange gains deterministic scope (element = path crosses [], container = envelope). No suppression (litmus/ARV-337): nothing dropped or down-ranked — agent judges via scope+endpoint. summary adds bodyChangesContainer/Element split. Skill zond-triage.md documents scope. AC#1 (structural schema-of-union, not per-element) + AC#2 (no FP heuristic) met.
+<!-- SECTION:NOTES:END -->

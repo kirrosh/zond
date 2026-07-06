@@ -164,9 +164,9 @@ describe("diffBodyShapes", () => {
     const after = JSON.stringify({ id: "1", name: "a", email: "a@b.c", tags: ["x"] });
     const changes = diffBodyShapes(before, after);
     expect(changes).toEqual([
-      { field: "email", change: "added", after: "string" },
-      { field: "id", change: "type_changed", before: "number", after: "string" },
-      { field: "legacy", change: "removed", before: "boolean" },
+      { field: "email", change: "added", after: "string", scope: "container" },
+      { field: "id", change: "type_changed", before: "number", after: "string", scope: "container" },
+      { field: "legacy", change: "removed", before: "boolean", scope: "container" },
     ]);
   });
 
@@ -180,7 +180,21 @@ describe("diffBodyShapes", () => {
     const before = JSON.stringify({ items: [{ id: 1 }] });
     const after = JSON.stringify({ items: [{ id: 1, price: 9.5 }] });
     expect(diffBodyShapes(before, after)).toEqual([
-      { field: "items[].price", change: "added", after: "number" },
+      { field: "items[].price", change: "added", after: "number", scope: "element" },
+    ]);
+  });
+
+  // ARV-352: on list/log endpoints, field variance across re-sampled objects
+  // must be scoped `element` (schema-of-union noise), while envelope/pagination
+  // changes stay `container` (real drift) — deterministic from the `[]` path.
+  test("scopes collection-item changes as element, envelope changes as container", () => {
+    const before = JSON.stringify({ object: "list", data: [{ request: { id: "req_1" } }] });
+    const after = JSON.stringify({ object: "list", total_count: 5, data: [{ request: { id: null }, extra: 1 }] });
+    const changes = diffBodyShapes(before, after);
+    expect(changes).toEqual([
+      { field: "data[].extra", change: "added", after: "number", scope: "element" },
+      { field: "data[].request.id", change: "type_changed", before: "string", after: "null", scope: "element" },
+      { field: "total_count", change: "added", after: "number", scope: "container" },
     ]);
   });
 

@@ -1,9 +1,10 @@
 ---
 id: ARV-353
 title: network_error findings from transient connection resets under load
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 13:04'
+updated_date: '2026-07-06 14:25'
 labels:
   - zond-bug
   - runner
@@ -23,3 +24,9 @@ LITMUS: deterministic robustness fix — retry N times on a transient reset (ECO
 <!-- AC:BEGIN -->
 - [ ] #1 transient connection resets are retried before a network_error finding is emitted
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done (6a6bd16). runner.ts: executeWithResetRetry() retries transient resets (ECONNRESET/socket hang up/EPIPE, fixed 2 retries) before network_error finding; non-transient errors re-thrown at once. Unit-tested (injectable executor).
+<!-- SECTION:NOTES:END -->

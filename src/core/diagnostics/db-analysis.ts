@@ -492,6 +492,16 @@ export interface BodyFieldChange {
   change: "added" | "removed" | "type_changed";
   before?: string;
   after?: string;
+  /** ARV-352: structural scope of the change, derived deterministically from
+   *  the path. `element` = the path crosses an array boundary (`[]`), i.e.
+   *  it's a field of a *collection item* — on list/log endpoints two samplings
+   *  return DIFFERENT objects, so element-level added/removed/type_changed is
+   *  schema-of-union variance across the sampled set, not a contract move.
+   *  `container` = no `[]` in the path — the response envelope/pagination
+   *  skeleton, where a change IS real drift. NOT a suppression heuristic
+   *  (ARV-337): nothing is dropped or down-ranked; the agent judges using the
+   *  scope tag + endpoint context. */
+  scope: "container" | "element";
 }
 
 export interface BodyDiff {
@@ -510,6 +520,12 @@ export interface CompareResult {
     newTests: number;
     removedTests: number;
     bodyChanges: number;
+    /** ARV-352: of `bodyChanges`, how many touch the response envelope
+     *  (`container`) vs collection-item fields (`element`). Element-heavy diffs
+     *  on list/log endpoints are schema-of-union variance across a re-sampled
+     *  set, not contract drift — split so triage doesn't read them as regression. */
+    bodyChangesContainer: number;
+    bodyChangesElement: number;
   };
   regressions: Array<{ suite: string; test: string; before: string; after: string }>;
   fixes: Array<{ suite: string; test: string; before: string; after: string }>;
@@ -554,16 +570,18 @@ export function diffBodyShapes(rawA: string | null, rawB: string | null): BodyFi
   const shapeB = new Map<string, Set<string>>();
   bodyShape(a, "", shapeA);
   bodyShape(b, "", shapeB);
+  const scopeOf = (field: string): "container" | "element" =>
+    field.includes("[]") ? "element" : "container";
   const changes: BodyFieldChange[] = [];
   for (const [field, typesB] of shapeB) {
     const typesA = shapeA.get(field);
-    if (!typesA) changes.push({ field, change: "added", after: typeLabel(typesB) });
+    if (!typesA) changes.push({ field, change: "added", after: typeLabel(typesB), scope: scopeOf(field) });
     else if (typeLabel(typesA) !== typeLabel(typesB)) {
-      changes.push({ field, change: "type_changed", before: typeLabel(typesA), after: typeLabel(typesB) });
+      changes.push({ field, change: "type_changed", before: typeLabel(typesA), after: typeLabel(typesB), scope: scopeOf(field) });
     }
   }
   for (const [field, typesA] of shapeA) {
-    if (!shapeB.has(field)) changes.push({ field, change: "removed", before: typeLabel(typesA) });
+    if (!shapeB.has(field)) changes.push({ field, change: "removed", before: typeLabel(typesA), scope: scopeOf(field) });
   }
   return changes.sort((x, y) => x.field.localeCompare(y.field));
 }
@@ -620,7 +638,16 @@ export function compareRuns(idA: number, idB: number, dbPath?: string): CompareR
   return {
     runA: { id: idA, started_at: runARecord.started_at },
     runB: { id: idB, started_at: runBRecord.started_at },
-    summary: { regressions: regressions.length, fixes: fixes.length, unchanged, newTests, removedTests, bodyChanges: body_changes.length },
+    summary: {
+      regressions: regressions.length,
+      fixes: fixes.length,
+      unchanged,
+      newTests,
+      removedTests,
+      bodyChanges: body_changes.length,
+      bodyChangesContainer: body_changes.filter(d => d.changes.some(c => c.scope === "container")).length,
+      bodyChangesElement: body_changes.filter(d => d.changes.every(c => c.scope === "element")).length,
+    },
     regressions,
     fixes,
     body_changes,
