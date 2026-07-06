@@ -703,13 +703,14 @@ export async function probeOne(
     // of guessing for 30 minutes whether zond is broken.
     if (isEmptyListBody(respBody)) {
       item.status = "miss-empty";
-      // ARV-261: surface the destructive nature of --seed in the hint so
-      // users don't run it against a production API without considering
-      // that it POST-creates real resources on the target.
+      // ARV-336: prepare-fixtures is single-pass and deterministic — it
+      // can't invent a record for an empty list. Create the resource
+      // yourself (product UI / API), then harvest its id by hand into
+      // .env.yaml (or `zond fixtures add`) and re-run discover.
       item.reason =
-        `no ${target.ownerResource} in target API — re-run with \`zond prepare-fixtures --api <name> --seed --apply\` ` +
-        `to POST-create one automatically (⚠ creates real resources on the target API — use only against a throwaway/test environment), ` +
-        `or create the resource yourself (in the product UI or via API) and re-run discover`;
+        `no ${target.ownerResource} in target API — create the resource yourself ` +
+        `(in the product UI or via API), then set its id in .env.yaml (or run ` +
+        `\`zond fixtures add\`) and re-run \`zond prepare-fixtures --api <name> --apply\``;
     } else {
       item.status = "miss-no-id";
       item.reason = `response shape has no extractable first id (no array/data/items/results/records field)`;

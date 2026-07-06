@@ -118,11 +118,11 @@ priority first):
 4. `fix_env` — env_issue cluster. Print `env_issue.message` verbatim;
    point at `.env.yaml` (path is in the envelope).
 5. `fix_fixture` — `prepare-fixtures` miss-* or inconclusive-baseline
-   from mass-assignment. Run
-   `zond prepare-fixtures --api <name> --apply [--cascade [--seed]]`. If
-   the run was post-probe and IDs may be stale, prefer
-   `prepare-fixtures --refresh` (TASK-281) and follow with `zond cleanup
-   --orphans` (TASK-278) before retrying.
+   from mass-assignment. Run `zond prepare-fixtures --api <name> --apply`
+   (single-pass); fill any remaining gaps by hand (`fixtures add` /
+   editing `.env.yaml`). If the run was post-probe and IDs may be stale,
+   prefer `prepare-fixtures --refresh` (TASK-281) and follow with `zond
+   cleanup --orphans` (TASK-278) before retrying.
 6. `fix_network_config` — connect-refused / DNS / TLS. Check `base_url`
    reachability; `--proxy` may be needed.
 7. `regenerate_suite` (ARV-42) — 4xx (400/422) on a generator-emitted
@@ -214,7 +214,7 @@ Pass <N>  Fail <M>  Error <K>  Coverage <pct>%
     next: edit apis/<name>/.env.yaml → base_url
 📥 fix_fixture  ×<n>
   · {{audience_id}} unresolved
-    next: zond prepare-fixtures --api <name> --apply --cascade
+    next: zond prepare-fixtures --api <name> --apply  (then fill gaps by hand)
 📜 fix_spec  ×<n>  (from check spec)
   · A2 missing operationId on POST /webhooks
     next: edit spec.json → operationId, then zond refresh-api <name>

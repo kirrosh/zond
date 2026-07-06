@@ -3,9 +3,10 @@ id: ARV-336
 title: >-
   m-24 remove auto-discovery + seed/cascade auto-create; fixtures become
   agent+user
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 07:14'
+updated_date: '2026-07-06 07:55'
 labels:
   - m-24
 dependencies: []

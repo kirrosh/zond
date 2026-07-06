@@ -215,7 +215,7 @@ existing by default (renders `! field: (conflict — kept existing; pass
 **Recommended pre-stateful sweep on a new API:**
 
 ```bash
-zond api annotate dump --api <name> --seed-bodies > /tmp/seed.json    # for prepare-fixtures --seed
+zond api annotate dump --api <name> --seed-bodies > /tmp/seed.json    # create-body overlay for stateful checks
 zond api annotate dump --api <name> --readback    > /tmp/readback.json # for cross_call_references
 zond api annotate dump --api <name> --pagination  > /tmp/pag.json     # for pagination_invariants
 zond api annotate dump --api <name> --lifecycle   > /tmp/life.json    # for lifecycle_transitions

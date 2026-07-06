@@ -1108,7 +1108,7 @@ function buildNextSteps(
     return steps;
   }
   if (attemptCount === 0) {
-    steps.push("No fixture POST attempts in DB yet — run `zond prepare-fixtures --api <name> --apply --cascade --seed` once to populate, then re-run --explain.");
+    steps.push("No fixture POST attempts in DB yet — run `zond prepare-fixtures --api <name> --apply` once to populate what discover finds, fill remaining fixtures by hand, then re-run --explain.");
   } else {
     steps.push("Read `attempt_history[0].response_body.error.{message,param,type}` for the most recent failure cause.");
     if (attemptCount > 1) {
