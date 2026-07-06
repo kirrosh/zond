@@ -248,6 +248,48 @@ function fillPathParams(
   });
 }
 
+/** ARV-344: a REQUIRED path param with no real fixture value — `fillPathParams`
+ *  would substitute a synthetic placeholder ("x"). Harmless for GET/HEAD/DELETE
+ *  existence probes (ARV-141's deterministic synthetic 404), but firing a
+ *  POST/PUT/PATCH create/update against a nonexistent parent just manufactures
+ *  noise findings (network_error / phantom 404) and burns rate budget. Callers
+ *  skip mutating ops in that state and bucket the reason as a fixture gap. */
+export function hasUnresolvedRequiredPathParam(op: EndpointInfo, pathVars?: Record<string, string>): boolean {
+  for (const p of op.parameters) {
+    const pp = p as OpenAPIV3.ParameterObject;
+    if (pp.in !== "path" || pp.required !== true) continue;
+    const v = pathVars?.[pp.name];
+    if (!(typeof v === "string" && v.length > 0)) return true;
+  }
+  return false;
+}
+
+/** ARV-353: transient connection resets under high windowed concurrency
+ *  (ECONNRESET / socket hang up / EPIPE) are transport flake, not an API
+ *  defect. Retry a small fixed number of times before letting the error become
+ *  a `network_error` finding, so flake is distinguished from a real
+ *  `fix_network_config` signal. Deterministic: fixed retry count, only on
+ *  reset-shaped errors (a real DNS/refused/timeout error is re-thrown at once). */
+const TRANSIENT_RESET_RE = /ECONNRESET|socket hang up|socket closed|connection reset|EPIPE|read ECONN/i;
+
+export async function executeWithResetRetry(
+  req: HttpRequest,
+  timeout: number,
+  retries = 2,
+  exec: (r: HttpRequest, o: { timeout: number }) => Promise<HttpResponse> = executeRequest,
+): Promise<HttpResponse> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await exec(req, { timeout });
+    } catch (err) {
+      lastErr = err;
+      if (!TRANSIENT_RESET_RE.test((err as Error).message ?? "")) throw err;
+    }
+  }
+  throw lastErr;
+}
+
 function requiredHeaders(op: EndpointInfo): OpenAPIV3.ParameterObject[] {
   return op.parameters.filter(
     (p) => (p as OpenAPIV3.ParameterObject).in === "header"
@@ -735,6 +777,34 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       cases.push(...buildUnsupportedMethod(op, declared, opts.baseUrl));
     }
 
+    // ARV-344: don't dispatch a mutation (POST/PUT/PATCH) whose required path
+    // param is unresolved — it targets a synthetic parent id ("/accounts/x/…")
+    // and only manufactures noise. Skip the op's cases and bucket the reason as
+    // a fixture gap (GET/HEAD/DELETE keep the ARV-141 synthetic-404 probe).
+    {
+      const m = op.method.toUpperCase();
+      const isMutation = m === "POST" || m === "PUT" || m === "PATCH";
+      if (isMutation && cases.length > 0 && hasUnresolvedRequiredPathParam(op, opts.pathVars)) {
+        const reason = "unresolved required path param (fixture gap) — mutation against a synthetic parent id skipped";
+        for (const built of cases) {
+          localSkipped[`${built.case.kind}: ${reason}`] = (localSkipped[`${built.case.kind}: ${reason}`] ?? 0) + 1;
+          if (opts.onCase) {
+            opts.onCase({
+              phase: "response",
+              checkId: built.case.kind,
+              kind: built.case.kind,
+              operation: { path: op.path, method: op.method, operationId: op.operationId },
+              request: built.req,
+              durationMs: 0,
+              verdict: "skip",
+              error: reason,
+            });
+          }
+        }
+        cases.length = 0;
+      }
+    }
+
     for (const built of cases) {
       if (!caseMatchesMode(built.case.mode, mode)) continue;
       if (opts.authHeaders) injectAuthHeadersIntoCase(built, opts.authHeaders);
@@ -765,7 +835,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       if (opts.rateLimiter) await opts.rateLimiter.acquire();
       let httpResp: HttpResponse;
       try {
-        httpResp = await executeRequest(built.req, { timeout: opts.timeoutMs ?? 30000 });
+        httpResp = await executeWithResetRetry(built.req, opts.timeoutMs ?? 30000);
       } catch (err) {
         const finding: CheckFinding = {
           check: "network_error",
@@ -849,7 +919,10 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
             type: "check_result",
             ts: nowIso(),
             check: check.id,
-            severity: check.severity,
+            // ARV-351: emit the SAME severity the finding carries, not the
+            // static declared default — else one case reads `high` on its
+            // check_result and `low` on its finding (open_cors_on_sensitive).
+            severity: (outcome.kind === "fail" ? outcome.severity : undefined) ?? check.severity,
             verdict: outcome.kind,
             operation: { path: op.path, method: op.method, operationId: op.operationId },
             request_signature: `${built.case.request.method} ${built.case.request.url}`,
@@ -1110,7 +1183,8 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
               type: "check_result",
               ts: nowIso(),
               check: check.id,
-              severity: check.severity,
+              // ARV-351: match the finding's severity (see per-response path).
+              severity: (outcome.kind === "fail" ? outcome.severity : undefined) ?? check.severity,
               verdict: outcome.kind,
               operation: { path: op.path, method: op.method, operationId: op.operationId },
               request_signature: `${op.method.toUpperCase()} ${op.path}`,
@@ -1199,7 +1273,8 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
               type: "check_result",
               ts: nowIso(),
               check: check.id,
-              severity: check.severity,
+              // ARV-351: match the finding's severity (see finding below).
+              severity: (outcome.kind === "fail" ? outcome.severity : undefined) ?? check.severity,
               verdict: outcome.kind,
               operation: evOp,
               request_signature: `${evOp.method.toUpperCase()} ${evOp.path} (chain)`,

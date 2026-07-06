@@ -114,8 +114,28 @@ export const negativeDataRejection: Check = {
   caseKinds: ["negative_data"],
   applies: (op) => Boolean(op.requestBodySchema),
   run({ case: c, response }): CheckOutcome {
-    if (ACCEPTABLE(response.status)) return { kind: "pass" };
     const meta = c.meta as MutationMeta | undefined;
+    const method = c.operation.method.toUpperCase();
+    const bodyless = method === "GET" || method === "HEAD" || method === "DELETE";
+    // ARV-345 (scope fix, like ARV-340): don't manufacture "accepted an invalid
+    // body" findings on methods with no request-body semantics. A GET/HEAD/DELETE
+    // that 2xx's a mutated body simply ignored the body — correct, not a gap.
+    if (bodyless && meta?.mutation === "boundary") {
+      return { kind: "skip", reason: "body mutation not applicable on GET/HEAD/DELETE (no request-body semantics)" };
+    }
+    // ARV-345: an unknown / wrong-type QUERY param a GET tolerates (2xx) is
+    // documented leniency ("invalid id → empty list"), not a rejectable invalid.
+    // drop-required-query stays in scope — a declared-required param silently
+    // optional IS a concrete contract gap.
+    if (
+      bodyless
+      && meta?.mutation === "param-boundary"
+      && meta?.param_location === "query"
+      && LOW_PARAM_SCENARIOS_ON_GET.has(meta?.param_scenario ?? "")
+    ) {
+      return { kind: "skip", reason: "unknown/wrong-type query param on GET is documented leniency, not a validation gap" };
+    }
+    if (ACCEPTABLE(response.status)) return { kind: "pass" };
     return {
       kind: "fail",
       message: `Server accepted an invalid body (status ${response.status}) — single-site mutation: ${

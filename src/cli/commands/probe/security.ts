@@ -224,7 +224,7 @@ export async function probeSecurityCommand(
       // ARV-321: say so explicitly — see mass-assignment.ts for the friction
       // that prompted this.
       if (options.emitTests) {
-        printWarning(`--emit-tests skipped: --dry-run has no live verdicts to lock in as regression suites. Re-run without --dry-run to emit ${options.emitTests}.`);
+        printWarning(`--emit-tests skipped: safe/dry-run mode has no live verdicts to lock in as regression suites. Re-run with --live to emit ${options.emitTests}.`);
       }
       if (options.output) {
         const payload = options.report === "json"

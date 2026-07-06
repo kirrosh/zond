@@ -1,10 +1,10 @@
 ---
 id: ARV-342
 title: 'checks run: no background/resume for large live APIs (SIGTERM at ~15%)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 10:52'
-updated_date: '2026-07-06 11:14'
+updated_date: '2026-07-06 14:06'
 labels:
   - zond-missing-feature
   - checks
@@ -21,7 +21,5 @@ Evidence: live Stripe audit 2026-07-06. zond checks run --phase coverage on 587 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-CONFIRMED BLOCKER of "max breadth/depth" goal. Re-run 20260706-135748 proved the workflow-level "run in background" band-aid does NOT hold: the 587-op sweep was SIGTERM-killed at 80/587 (~15%) after a ~69s window (well under the 120s bash cap) — the bg process is reaped when the agent turn ends. There is no window long enough for a single full sweep, and no checkpoint, so ALL downstream artifacts (61/62/63 yaml, 70-coverage, 90-status-dist) are lost every time.
-
-MINIMAL DETERMINISTIC FIX (passes src/CLAUDE.md litmus — pure scoping, no judgment): add an operation-window to runChecks + CLI, e.g. --max-ops N + --skip-ops M (or --offset/--limit), slicing the sorted `ops` array. The audit workflow then loops bounded windows that each finish in-budget, appending to one NDJSON, until skip>=total. Gives full 587-op breadth + partial artifacts survive each window. NOT adaptive/"smart" pacing — a fixed, replayable op-list slice.
+Landed earlier (see git log: 8f8846a ARV-340/341, 513ad26 ARV-342). Backlog status was stale; marking Done.
 <!-- SECTION:NOTES:END -->

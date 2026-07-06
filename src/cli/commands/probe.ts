@@ -334,6 +334,13 @@ function defineProbeMassAssignment(parent: Command, name: string): void {
       // dry-run explicitly).
       const live = resolveLive(opts);
       const effectiveDryRun = opts.dryRun === true || !live;
+      // ARV-348: fail loudly (see probe security) — --emit-tests needs live
+      // verdicts; safe/dry-run mode would leave an empty dir + exit 0.
+      if (opts.emitTests && !live) {
+        printError("--emit-tests requires --live: safe/dry-run mode produces no live verdicts to lock into regression suites. Re-run with --live against a throwaway/sandbox account, or drop --emit-tests to just plan.");
+        process.exitCode = 2;
+        return;
+      }
       if (!live && opts.dryRun !== true && !opts.listTags) {
         printWarning("probe mass-assignment: safe mode (default) — planning only, no live attack traffic. Re-run with --live against a throwaway/sandbox account to send probes.");
       }
@@ -432,6 +439,16 @@ function defineProbeSecurity(parent: Command, name: string): void {
       // ARV-299: safe (default) forces plan-only; live attack traffic needs --live.
       const live = resolveLive(opts);
       const effectiveDryRun = opts.dryRun === true || !live;
+      // ARV-348: fail loudly instead of silently producing an empty dir. Safe/
+      // dry-run mode has no live verdicts to lock into regression suites, so
+      // --emit-tests can't do anything — and a later `zond run <dir>` on the
+      // empty dir just prints "No test files found". One consistent message
+      // (—live), not the old contradictory "Re-run without --dry-run".
+      if (opts.emitTests && !live) {
+        printError("--emit-tests requires --live: safe/dry-run mode produces no live verdicts to lock into regression suites. Re-run with --live against a throwaway/sandbox account, or drop --emit-tests to just plan.");
+        process.exitCode = 2;
+        return;
+      }
       if (!live && opts.dryRun !== true && !opts.listTags) {
         printWarning("probe security: safe mode (default) — planning only, no live attack traffic. Re-run with --live against a throwaway/sandbox account to send probes.");
       }
