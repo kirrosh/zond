@@ -234,10 +234,10 @@ describe("zond discover", () => {
     const empty = env.data.items.find((i: { varName: string }) => i.varName === "empty_id");
     expect(empty.status).toBe("miss-empty");
     expect(empty.reason).toMatch(/no empties in target API/);
-    // ARV-31: hint should point at `--seed --apply` so tester knows the auto-create
-    // path exists, instead of being told only "create one first" in the product UI.
-    expect(empty.reason).toMatch(/--seed --apply/);
-    expect(empty.reason).toMatch(/POST-create/);
+    // ARV-336: prepare-fixtures is single-pass and never POST-creates. The
+    // hint tells the tester to create the record by hand and harvest its id.
+    expect(empty.reason).toMatch(/create the resource yourself/);
+    expect(empty.reason).toMatch(/fixtures add/);
 
     // TASK-294: every miss-* item carries a recommended_action for agent routing.
     type Item = { varName: string; status: string; recommended_action?: string };

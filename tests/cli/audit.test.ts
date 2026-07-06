@@ -82,12 +82,11 @@ describe("zond audit (TASK-262)", () => {
     expect(out).toContain("session end (reused — kept active)");
   });
 
-  test("--live --seed swaps single-pass prep for cascade+seed; opt-in flags add probe stages", async () => {
-    // ARV-264: --seed / --with-mass-assignment / --with-security are
-    // safe-mode-gated; --live is the explicit opt-in.
+  test("ARV-336: prep is always single-pass; --live opt-in flags add probe stages", async () => {
+    // ARV-264: --with-mass-assignment / --with-security are safe-mode-gated;
+    // --live is the explicit opt-in. ARV-336: prep is always single-pass.
     const code = await auditCommand({
       api: "demo",
-      seed: true,
       withMassAssignment: true,
       withSecurity: true,
       live: true,
@@ -95,8 +94,9 @@ describe("zond audit (TASK-262)", () => {
     });
     expect(code).toBe(0);
     const out = suppress.out;
-    expect(out).toContain("zond prepare-fixtures --api demo --apply --seed");
-    expect(out).not.toContain("zond prepare-fixtures --api demo --apply\n");
+    expect(out).toContain("zond prepare-fixtures --api demo --apply\n");
+    expect(out).not.toContain("--apply --seed");
+    expect(out).not.toContain("--cascade");
     expect(out).toContain("zond probe mass-assignment --api demo");
     expect(out).toContain("zond probe security ssrf,crlf,open-redirect --api demo");
     // ARV-108: 10 stages with both opt-ins (default 8 + mass-assignment + security).
@@ -106,19 +106,19 @@ describe("zond audit (TASK-262)", () => {
     expect(out).toContain("coverage (session union)");
   });
 
-  test("ARV-264: --safe (default) drops --seed / probe opt-ins with warnings", async () => {
+  test("ARV-264: --safe (default) drops probe opt-ins with warnings", async () => {
     const code = await auditCommand({
       api: "demo",
-      seed: true,
       withMassAssignment: true,
       withSecurity: true,
       dryRun: true,
     });
     expect(code).toBe(0);
     const out = suppress.out;
-    // Plain prep, no seed.
+    // Single-pass prep, no seed/cascade.
     expect(out).toContain("zond prepare-fixtures --api demo --apply\n");
     expect(out).not.toContain("--apply --seed");
+    expect(out).not.toContain("--cascade");
     // Mass-assignment / security stages dropped.
     expect(out).not.toContain("probe mass-assignment");
     expect(out).not.toContain("probe security ssrf,crlf,open-redirect");

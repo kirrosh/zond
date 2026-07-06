@@ -68,8 +68,9 @@ For triage of a failing run — see `zond-triage`.
   do not generate case-studies, do not `expect:`-mask.
 - **MUST run `zond doctor --api <name> --missing-only` before generating
   fixtures or touching `.env.yaml`** — identifies unfilled keys early.
-- **Cascade cap is 8 passes** (`zond prepare-fixtures --cascade [--seed]`)
-  — never override without a written reason.
+- **`prepare-fixtures` is single-pass and never POST-creates** — it fills
+  what discover resolves deterministically and reports the rest as gaps.
+  Fill remaining fixtures by hand (`fixtures add` / editing `.env.yaml`).
 
 ## Workspace artifact model
 
@@ -110,12 +111,12 @@ probes/                      ← probe-emitted suites
 - "Generate should sync `.env.yaml`" is a rejected design (decision-7,
   m-17).
 
-### Manual fixture-bootstrap (when `prepare-fixtures --seed` can't help)
+### Manual fixture-bootstrap (when discover can't resolve a var)
 
-`prepare-fixtures --seed` requires a discoverable list endpoint or a
-postable create. Path-id ids that live only in a vendor dashboard
-(Stripe `cus_*`, GitHub PR numbers, Sentry issue ids) need a manual
-hand-off:
+`prepare-fixtures` only resolves ids reachable from a list/read endpoint
+on the current account. Path-ids that live only in a vendor dashboard
+(Stripe `cus_*`, GitHub PR numbers, Sentry issue ids), or that require
+creating a record first, need a manual hand-off:
 
 | Input you have | Command |
 |---|---|
@@ -164,7 +165,7 @@ accept `--json` — use `--report json`.
 |---|---|
 | "smoke this API", "quick first pass", "demo / CI gate" | `zond audit --api <name>` (safe-mode breadth pass — no live mutations) |
 | "audit this API", "test the whole API", "raise coverage", "deep pass" | walk Phase 0–9 — audit covers smoke; depth (stateful, security, learn-apply) needs phase-level decisions |
-| "full live audit against sandbox", "include seed/mass-assignment/security probes" | `zond audit --api <name> --live --seed --with-mass-assignment --with-security` (REQUIRES throwaway/sandbox account) |
+| "full live audit against sandbox", "include mass-assignment/security probes" | `zond audit --api <name> --live --with-mass-assignment --with-security` (REQUIRES throwaway/sandbox account) |
 | "find bugs", "test for 5xx", "probe sweep" | Phase 0 → Phase 7 (Probes) |
 | "security only / SSRF / CRLF" | Phase 7.2 directly with `--dry-run` first |
 | "deep depth-checks", "SARIF", "stateful invariants" | Hand off → `zond-checks` |
@@ -192,46 +193,33 @@ If doctor reports stale → `zond refresh-api <name>`.
 
 ## Phase 1 — Fixture pack
 
-`zond prepare-fixtures` walks `.api-resources.yaml`, hits each owner
-list endpoint, fills `.env.yaml`. Always `--apply`; add `--cascade --seed`
-for empty workspaces.
+`zond prepare-fixtures` is **single-pass and deterministic**: it walks
+`.api-resources.yaml`, hits each owner list/read endpoint, and fills
+`.env.yaml` with the FK ids it can resolve. It does **not** POST-create
+resources. Whatever it can't resolve it reports as a gap — you (or the
+agent) fill those by hand.
 
 ```bash
-zond prepare-fixtures --api <name>                          # dry-run preview
-zond prepare-fixtures --api <name> --apply                  # single-pass
-zond prepare-fixtures --api <name> --apply --cascade --seed # cascade + POST-create when list is empty
-zond prepare-fixtures --api <name> --refresh                # = --verify --apply: drop stale ids, re-resolve
+zond prepare-fixtures --api <name>            # dry-run preview
+zond prepare-fixtures --api <name> --apply    # fill what discover resolves
+zond prepare-fixtures --api <name> --refresh  # = --verify --apply: drop stale ids, re-resolve
 ```
 
-`--seed` POSTs to create endpoints when a list returns `[]`, using a
-schema-derived body. Bracket-notation nested params (Stripe's
-`card[number]`, `items[0][price]`) are a known weak spot (ARV-196) —
-some APIs will 400 here; **don't ask the user to fill missing ids
-manually first**, jump to Phase 2 (annotate seed_body) instead.
+When a var stays UNSET after `--apply`, read the per-target reason in the
+output, then fill the gap directly:
 
-`--seed` handles most schema shapes including top-level required fields
-(ARV-67), discriminator-aware `oneOf` (ARV-78), and — since ARV-135 in
-m-21 — nested `oneOf`/`anyOf` with `discriminator.mapping`-only refs and
-multi-level discriminator chains. The variant picker now scores each
-candidate by how many of its required fields are resolvable from
-`properties` and prefers the most complete branch, so cases like the
-Resend `POST /automations` triggers stop 422-ing on missing
-`config`/`event_name`.
+| Input you have | Command |
+|---|---|
+| Concrete id values | `zond fixtures add <var>=<id> [--validate] --apply` |
+| Curl from devtools / dashboard | `pbpaste \| zond fixtures import --from-curl --apply` |
+| Nothing yet (empty list) | Create the resource in the product UI / via API, then harvest its id with `fixtures add` |
 
-Rare edge cases that still warrant `annotate seed_body` (Phase 2):
-- Required fields whose values are server-validated against external
-  state (a `webhook_url` that must resolve to a live HTTPS endpoint, a
-  `dns_record` that must already be verified).
-- Schemas that omit `required` AND `properties` for fields the API
-  silently enforces — the builder has no signal to synthesise them.
-
-If `--seed --cascade` reports `miss-seed-422` two passes in a row,
-escape to `annotate seed_body` or `zond fixtures add <var>=<value>`
-rather than looping.
-
-If `--seed` converges but vars stay UNSET, the reason is outside the
-API path (email verify / paid plan / SCIM / TOS limits). Document the
-gap; don't loop further.
+Common reasons a var stays UNSET (all fixed outside prepare-fixtures):
+- empty list on the target account — no record exists to harvest;
+- the id lives only in a vendor dashboard (Stripe `cus_*`, GitHub PR
+  numbers, Sentry issue ids) with no discoverable list endpoint;
+- the value is gated outside the API path (email verify / paid plan /
+  SCIM / TOS limits). Document the gap; don't loop.
 
 Editing `.env.yaml` by hand is the sanctioned fallback when the CLI
 cannot harvest a value (write-only ingest endpoints, SDK-only ids,
@@ -279,7 +267,7 @@ your downstream check needs:
 
 | Aspect | Dump produces | Feeds into |
 |---|---|---|
-| `--seed-bodies` | request-body schema per resource | `prepare-fixtures --seed`, all stateful checks |
+| `--seed-bodies` | request-body schema per resource | all stateful checks (create-body overlay) |
 | `--readback` | create+read pair (write-shape vs read-shape) | `cross_call_references` ignore_fields, write_to_read_map |
 | `--idempotency` | header candidates | `idempotency_replay` (header, scope, body_hash_fields) |
 | `--pagination` | list-endpoint cursor/page detection | `pagination_invariants` (type, cursor_param) |
@@ -321,7 +309,8 @@ to defaults and miss API-specific quirks (custom pagination params,
 non-standard lifecycle field names, write-only fields in create body).
 
 **For Stripe-style form-encoded APIs**: `--seed-bodies` is the single
-biggest win — it fixes `--seed` 400s for the bulk of resources.
+biggest win — the create-body overlay it produces lets stateful checks
+POST valid resources instead of 400-ing on schema-derived random bodies.
 
 ### Annotate-auto + agent-loop fast path (ARV-262 / 270 / 277 / 278-282)
 
@@ -352,12 +341,9 @@ zond api annotate dump --api <name> --seed-bodies --only <res> \
 #    accidental overwrite.
 zond api annotate apply --api <name> --seed-bodies --input agent-out.yaml --gap-fill-only
 
-# 5. Pre-cascade staleness check (ARV-282) — pings each pre-filled FK
-#    against its owner's read endpoint. Clears stale (404) values so
-#    cascade re-discovers them. One extra GET per pre-filled FK at
-#    session start; pays for itself the first time a stale `customer`
-#    would have broken 10+ downstream seeds.
-zond prepare-fixtures --api <name> --apply --cascade --seed --check-staleness
+# 5. Refresh fixtures — drop stale (404) ids and re-resolve any records
+#    that now exist from a discoverable list endpoint.
+zond prepare-fixtures --api <name> --refresh
 ```
 
 ## Phase 3 — Generate tests
@@ -606,7 +592,7 @@ zond coverage --api <name> --fail-on-coverage 50            # CI gate (gates pas
   - `pass-coverage`: endpoint had a passing 2xx (strict; CI gate via `--fail-on-coverage`)
   - `hit-coverage`: endpoint received any response (loose; breadth proxy)
   Three-bucket JSON: `covered2xx`, `coveredButNon2xx`, `unhit`.
-- **audit-coverage** — any HTTP touch from any producer (`zond run` + `checks run` + `probe` + `request` + `prepare-fixtures --cascade`). Use this to answer "did the scan reach the API at all?" — typical safe-mode runs without `zond run` still report >50% on a 1k-endpoint spec from `checks run` alone.
+- **audit-coverage** — any HTTP touch from any producer (`zond run` + `checks run` + `probe` + `request` + `prepare-fixtures`). Use this to answer "did the scan reach the API at all?" — typical safe-mode runs without `zond run` still report >50% on a 1k-endpoint spec from `checks run` alone.
 
 Source breakdown (`--scope audit` text or `data.audit_coverage.by_source` JSON):
 
@@ -665,8 +651,7 @@ new API". For a real depth campaign, walk Phase 0–9 from this skill.
 
 ```bash
 zond audit --api <name> --dry-run                       # print stage plan
-zond audit --api <name>                                  # safe mode (default) — no seed POSTs, no live probes
-zond audit --api <name> --live --seed                    # add prepare-fixtures --cascade --seed (throwaway/sandbox only)
+zond audit --api <name>                                  # safe mode (default) — no live probes
 zond audit --api <name> --live --with-mass-assignment --with-security   # full live pipeline (throwaway/sandbox only)
 zond audit --api <name> --out reports/audit-<name>.html
 ```
@@ -677,11 +662,11 @@ target API.
 
 | Concern | `--safe` (default) | `--live` |
 |---|---|---|
-| `prepare-fixtures` mode | path-FK discovery only (GET) | adds `--cascade --seed` when `--seed` passed |
+| `prepare-fixtures` mode | single-pass path-FK discovery (GET) | same — single-pass, never POST-creates |
 | `probe mass-assignment` | skipped even if `--with-mass-assignment` set, with a warning | runs when `--with-mass-assignment` set |
 | `probe security` (SSRF/CRLF/redirect) | skipped even if `--with-security` set, with a warning | runs when `--with-security` set |
 | `probe static` (validation+methods) | always runs — pure spec walk, no live traffic | same |
-| `run tests / probes` | runs against the live API but only generated GET-shape suites by default | same plus seeded resources from `--seed` |
+| `run tests / probes` | runs against the live API but only generated GET-shape suites by default | same |
 
 **Pre-flight warnings (printed before any subprocess fires):** missing
 `auth_token` when the spec declares securitySchemes (probes will skip

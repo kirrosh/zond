@@ -110,10 +110,7 @@ await agent(
 RUN="${setup.runDir}"; RAW="$RUN/raw"; MODE=${mode}
 
 Шаги:
-1. Annotate (heuristic, без агента, ДО fixtures — генерирует seed_body overlay, который --seed ниже должен прочитать): zond api annotate auto --api ${slug} --aspect all --confidence high --auto-apply 2>&1 | tee "$RAW/10-annotate.log"
-2. Fixtures: ${safe
-    ? `zond prepare-fixtures --api ${slug} --apply --cascade 2>&1 | tee "$RAW/02-fixtures.log"  (БЕЗ --seed: safe-mode)`
-    : `zond prepare-fixtures --api ${slug} --apply --cascade --seed 2>&1 | tee "$RAW/02-fixtures.log"`}
+1. Fixtures (single-pass, детерминированно заполняет что нашёл; недостающее дописывается руками/агентом): zond prepare-fixtures --api ${slug} --apply 2>&1 | tee "$RAW/02-fixtures.log"
    zond doctor --api ${slug} --json > "$RAW/03-doctor.json"
 3. Generate suites: zond generate --api ${slug} ${safe ? "--include 'method:GET'" : ''} --output apis/${slug}/tests --force 2>&1 | tee "$RAW/15-generate.log"
 4. Static spec audit: zond check spec --api ${slug} --json > "$RAW/20-check-spec.json"
