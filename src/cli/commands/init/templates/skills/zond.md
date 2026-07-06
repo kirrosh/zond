@@ -312,36 +312,30 @@ non-standard lifecycle field names, write-only fields in create body).
 biggest win — the create-body overlay it produces lets stateful checks
 POST valid resources instead of 400-ing on schema-derived random bodies.
 
-### Annotate-auto + agent-loop fast path (ARV-262 / 270 / 277 / 278-282)
+### Agent-in-the-loop annotate (dump → write → apply, ARV-187 / 277 / 278-282)
+
+zond does NOT infer annotations. YOU (the agent) read the spec slice and
+write the overlay; zond only dumps raw material and validates/merges what
+you produce.
 
 ```bash
-# 1. Heuristic baseline — fills pagination / seed-bodies / lifecycle /
-#    idempotency that zond can deterministically derive (no agent needed).
-zond api annotate auto --api <name> --aspect all --auto-apply
-
-# 2. Worklist — what's still incomplete, ranked by downstream impact.
-#    Resources where recent seed POSTs all hit capability-style errors
-#    are tagged `account_capability_missing` (ARV-280).
-zond api annotate auto --api <name> --aspect seed-bodies --gap-report
-zond api annotate auto --api <name> --aspect seed-bodies --gap-report \
-  --exclude-hard-blocked        # hide the account-capability rows
-
-# 3a. One-shot context for a single resource — joins spec slice + last
-#     5 attempts + heuristic suggestion + next_steps hints (ARV-279).
-zond api annotate auto --api <name> --gap-report --explain <resource>
-
-# 3b. Raw DB shape: full bundle + last N attempts of seed POST history
-#     so the agent sees error progression (ARV-277/278).
+# 1. Dump the raw material for a resource — spec slice + expected YAML
+#    shape + (for seed-bodies) the last N seed-POST attempts so you see
+#    the error progression, not just the current 400 (ARV-277/278).
 zond api annotate dump --api <name> --seed-bodies --only <res> \
   --with-last-attempt --history 5
 
-# 4. Agent edits .api-resources.local.yaml directly OR pipes its YAML
-#    through apply. With --gap-fill-only (ARV-281) the agent's response
-#    can ONLY add missing fields — already-set blocks are protected from
-#    accidental overwrite.
-zond api annotate apply --api <name> --seed-bodies --input agent-out.yaml --gap-fill-only
+# 2. YOU write the overlay: read the dumped slice + attempt history,
+#    reason about the required create body / pagination / lifecycle /
+#    idempotency, and produce one YAML doc per resource. Edit
+#    .api-resources.local.yaml directly OR emit a file for apply.
 
-# 5. Refresh fixtures — drop stale (404) ids and re-resolve any records
+# 3. Apply — zond validates your YAML (zod), renders a diff, and (with
+#    --yes) merges. With --gap-fill-only (ARV-281) your response can ONLY
+#    add missing fields — already-set blocks are protected from overwrite.
+zond api annotate apply --api <name> --seed-bodies --input agent-out.yaml --gap-fill-only --yes
+
+# 4. Refresh fixtures — drop stale (404) ids and re-resolve any records
 #    that now exist from a discoverable list endpoint.
 zond prepare-fixtures --api <name> --refresh
 ```

@@ -3,10 +3,10 @@ id: ARV-337
 title: >-
   m-24 remove severity calibrators + annotate auto; severity/annotation = agent
   judgment
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-06 07:14'
-updated_date: '2026-07-06 08:00'
+updated_date: '2026-07-06 08:27'
 labels:
   - m-24
 dependencies: []
