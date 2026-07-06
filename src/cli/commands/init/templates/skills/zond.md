@@ -206,6 +206,16 @@ zond prepare-fixtures --api <name> --apply    # fill what discover resolves
 zond prepare-fixtures --api <name> --refresh  # = --verify --apply: drop stale ids, re-resolve
 ```
 
+It also scans the generated suites and reports two named gap buckets
+(warnings in text, `summary.fixtureGaps` in `--json`) — report only, no
+values invented, no auto-seed (ARV-349/350):
+- **`unseededRoots`** — required manifest vars that are empty, referenced by
+  a suite, and seeded by no step (e.g. `{{account}}` created in `crud-accounts`
+  but referenced uncaptured in `persons-crud`). These are chain-heads: one id
+  un-skips a whole dependent CRUD suite. Fix these first.
+- **`undefinedVars`** — suite `{{vars}}` no manifest entry, capture, or param
+  produces (`{{bank_code}}`, `{{tax_id}}`). Supply by hand.
+
 When a var stays UNSET after `--apply`, read the per-target reason in the
 output, then fill the gap directly:
 

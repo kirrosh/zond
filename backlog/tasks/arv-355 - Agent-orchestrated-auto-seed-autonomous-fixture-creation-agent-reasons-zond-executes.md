@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-06 13:15'
+updated_date: '2026-07-06 13:28'
 labels:
   - project
   - fixtures
@@ -36,3 +37,9 @@ HONEST CEILING: auto-seed only what is self-contained in the API; fixtures needi
 - [ ] #4 un-seedable fixtures (external input) are reported, not invented
 - [ ] #5 NO auto-seed engine added to zond core (ARV-336 stays reverted)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Folds in ARV-347: agent seed_body authoring must also honor PROSE-encoded mutual exclusion (Stripe 'you may only specify one of A, B' — 80 such 400s in run 20260706-150730). No machine-readable oneOf in spec; agent reads the description / the 400 message and drops the conflicting member on retry (AC#2 feedback loop). This is the correct home for it — deterministic zond can't NL-parse prose.
+<!-- SECTION:NOTES:END -->

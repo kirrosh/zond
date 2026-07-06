@@ -3,9 +3,10 @@ id: ARV-350
 title: >-
   flag unseeded capture-chain roots (e.g. {{account}}) — report, do NOT
   auto-seed
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 13:03'
+updated_date: '2026-07-06 13:44'
 labels:
   - zond-bug
   - fixtures
@@ -26,3 +27,9 @@ PHILOSOPHY CONSTRAINT (src/CLAUDE.md litmus): m-24/ARV-336 removed the autonomou
 - [ ] #1 unseeded capture-chain root surfaced as a distinct, actionable fixture gap
 - [ ] #2 NO auto-seed / auto-POST-create added (ARV-336 stays reverted)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done (same module as ARV-349). unseededRoots = required manifest var, empty in env, suite-referenced, seeded by no step. Per-suite capture scoping matches runtime (only setup:true suites share captures) so cross-suite roots like {{account}} (created in crud-accounts, referenced uncaptured in persons-crud) are correctly flagged — verified on live stripe workspace (account now a root; 72/80 required-empty). Report-only, no auto-seed. AC#1 distinct actionable gap ✓ AC#2 no auto-seed ✓.
+<!-- SECTION:NOTES:END -->
