@@ -586,12 +586,8 @@ export async function writeAuditReport(outPath: string, data: ReportInput): Prom
                 : "";
               return `<li><strong>${escapeHtml(key)}</strong> ×${b.count}${sample ? ` — ${sample}${moreExamples}` : ""}</li>`;
             }).join("\n") + `</ul>`;
-        const envIssueHtml = diagnose.env_issue
-          ? `<div class="warn">env_issue (${escapeHtml(diagnose.env_issue.scope)}): ${escapeHtml(diagnose.env_issue.message)}</div>`
-          : "";
         return `<details>
   <summary>Run #${run.id} — ${run.failed}/${run.total} failed (${run.passed} passed)</summary>
-  ${envIssueHtml}
   ${bucketsHtml}
   <p class="cmds">
     Drill in: <code>zond db diagnose --run-id ${run.id} --json</code> ·
