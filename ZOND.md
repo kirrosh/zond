@@ -121,8 +121,8 @@ Commands group around the lifecycle phase they belong to (mirrors `zond --help`)
 | `use [api]` | Set/show the active API (writes `.zond/current-api`); see resolution chain above | — |
 | `refresh-api <name>` | Re-snapshot spec.json + regenerate the 3 artifacts | `--spec <path\|url>`, `--insecure` |
 | `doctor` | Fixture gaps in `.env.yaml` + artifact freshness vs spec.json (exit 0/1/2) | `--api <name>`, `--json` |
-| `prepare-fixtures` | Auto-fill `.env.yaml` FK ids — single-pass discover by default; `--cascade` enables the multi-pass discover+seed flow | `--api <name>`, `--apply`, `--verify`, `--refresh`, `--cascade`, `--seed`, `--force`, `--max-passes <n>`, `--env <path>`, `--timeout <ms>`, `--json` |
-| `fixtures add <var>=<value>` | Manual fixture set — for path-FK ids that auto-discover/--seed can't reach (vendor-dashboard ids). Optional `--validate` GETs the read-by-id endpoint and classifies live/stale/unknown (ARV-195) | `--api <name>`, `--validate`, `--apply`, `--json` |
+| `prepare-fixtures` | Auto-fill `.env.yaml` FK ids in a single discover pass; reports which fixtures are still missing (m-24: seed/cascade removed — fill gaps via `fixtures add` or the agent) | `--api <name>`, `--apply`, `--verify`, `--refresh`, `--env <path>`, `--timeout <ms>`, `--json` |
+| `fixtures add <var>=<value>` | Manual fixture set — for path-FK ids the discover pass can't reach (vendor-dashboard ids). Optional `--validate` GETs the read-by-id endpoint and classifies live/stale/unknown (ARV-195) | `--api <name>`, `--validate`, `--apply`, `--json` |
 | `fixtures import --from-curl` | Import fixtures from a curl command (paste from devtools / vendor dashboard). URL is matched against spec paths longest-template-first to extract `{var}` bindings (ARV-195) | `--api <name>`, `--curl <text>`, `--apply`, `--json` |
 | `clean` | Remove auto-generated files tracked in `.zond/manifest.json` | `--api <name>`, `--probes`, `--dry-run`, `--force` |
 | `cleanup` | Retry probe leftovers; currently only `--orphans` re-issues DELETE for resources captured in `~/.zond/orphans/` | `--orphans`, `--db <path>`, `--json` |
@@ -520,8 +520,8 @@ zond probe security --api sentry --isolated
 The trade-off is lower coverage — the seeded-fixture endpoints get a
 SKIPPED entry instead of HIGH/LOW findings — but `tests-run → probes-run
 → tests-run` round-trips on the same fixtures stop 404'ing. (For mass-
-assignment, isolation is achieved by giving the probe scratch fixtures via
-`prepare-fixtures --cascade --seed` instead of seeded ones.)
+assignment, isolation is achieved by giving the probe scratch fixtures —
+create them yourself or via the agent and add with `fixtures add`.)
 
 #### Stale fixture re-validation (`--verify` / `--refresh`)
 
