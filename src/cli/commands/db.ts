@@ -249,6 +249,17 @@ export async function dbCommand(options: DbOptions): Promise<number> {
           else printError(msg);
           return 2;
         }
+        // ARV-360: a run compared against itself is always a degenerate green
+        // (0 regressions / 0 body_changes) and signals nothing. This bit an
+        // audit pipeline that resolved "latest run id" to the same stale run
+        // for both A and B — the meaningless diff read as "contract stable".
+        // Fail loud instead of emitting a fake-passing comparison.
+        if (idA === idB) {
+          const msg = `Cannot compare run #${idA} against itself — pass two distinct run ids (a self-compare always reports 0 changes and hides that the ids were resolved wrong).`;
+          if (json) printJson(jsonError("db compare", [msg]));
+          else printError(msg);
+          return 2;
+        }
         const result = compareRuns(idA, idB, options.dbPath);
         if (json) {
           printJson(jsonOk("db compare", result));

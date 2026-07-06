@@ -3,9 +3,10 @@ id: ARV-359
 title: >-
   zond generate leaks into real repo when ephemeral workspace is nested inside
   another zond workspace
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 18:17'
+updated_date: '2026-07-06 18:43'
 labels:
   - zond-bug
   - workspace
@@ -23,3 +24,9 @@ ROOT-CAUSE HYPOTHESIS: the ephemeral workspace lives at zond-runs/<slug>/<ts>/wo
 
 LITMUS: deterministic isolation fix, belongs in zond. FIX DIRECTIONS: (a) zond core — ZOND_WORKSPACE must be a HARD ceiling for workspace walk-up (never resolve --output / workspace root above it), and path comparisons must canonicalize case on case-insensitive FS; (b) workflow mitigation — default 'out' to an out-of-repo temp dir (e.g. $TMPDIR/zond-audit) so the ephemeral WS is never nested under a real workspace. Do both: (a) is the real fix, (b) is defense-in-depth.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+ROOT CAUSE (revised): NOT zond core. findWorkspaceRoot correctly honors ZOND_WORKSPACE; the leak happened because the prep agent ran the command block across SEPARATE bash calls, so 'export ZOND_WORKSPACE; cd $WS' evaporated and generate fell back to walk-up → real repo (capital-P), while --output apis/<slug>/tests resolved cwd-relative → also real repo. Setup stage worked only because it happened to run atomically. FIX (workflow, 3 layers): (1) generate now inlines ZOND_WORKSPACE="$ws" + absolute --output "$ws/apis/<slug>/tests" — bulletproof regardless of cwd/env; (2) all finish-block write/run paths (probe emit-tests, ma-digest, zond run <path>) absolutized to $ws/...; (3) prep+finish prompts now demand ONE bash invocation and explain export/cd don't survive splitting. Verified: workflow parses; leaked apis/petstore/ removed from repo; zond-runs/ gitignored. Core hard-ceiling guard idea dropped — core behavior is correct given ZOND_WORKSPACE was unset.
+<!-- SECTION:NOTES:END -->

@@ -116,12 +116,12 @@ const WINDOW_SCHEMA = {
 // Prep — локальные/ограниченные шаги, один агент. Заодно обнуляем NDJSON,
 // в которые окна будут дописывать.
 await agent(
-  `Ты — prep-стадия. Выполни РОВНО эти команды по порядку (Bash, каждую с timeout 600000). Ничего не придумывай, не добавляй флагов.
+  `Ты — prep-стадия. Выполни РОВНО эти команды ОДНИМ вызовом Bash (весь блок сразу, timeout 600000) — НЕ разбивай на отдельные вызовы: export ZOND_WORKSPACE и cd живут только внутри одного шелла, при разбивке они теряются и zond пишет в чужой репозиторий (ARV-359). Ничего не придумывай, не добавляй флагов.
 ${envLine}
 : > "${raw}/30-checks.ndjson"; : > "${raw}/30-checks.stderr.log"; : > "${raw}/40-stateful.ndjson"; : > "${raw}/40-stateful.stderr.log"
 zond prepare-fixtures --api ${slug} --apply 2>&1 | tee "${raw}/02-fixtures.log"
 zond doctor --api ${slug} --json > "${raw}/03-doctor.json" 2> "${raw}/03-doctor.stderr.log"
-zond generate --api ${slug} ${covInc} --output apis/${slug}/tests --force 2>&1 | tee "${raw}/15-generate.log"
+ZOND_WORKSPACE="${ws}" zond generate --api ${slug} ${covInc} --output "${ws}/apis/${slug}/tests" --force 2>&1 | tee "${raw}/15-generate.log"
 zond check spec --api ${slug} --json > "${raw}/20-check-spec.json" 2> "${raw}/20-check-spec.stderr.log"
 Ответь одной строкой-сводкой.`,
   { label: `prep:${slug}`, phase: 'Depth', model: 'sonnet' },
@@ -166,14 +166,14 @@ log(`depth swept: coverage ${covOps} ops, stateful ${stOps} ops`)
 // coverage/session + status-dist. Один агент, каждую live-команду с
 // timeout 600000; не прерывается на ошибке одного шага.
 await agent(
-  `Ты — finish-стадия. Выполни РОВНО эти команды по порядку (Bash, каждую live-команду с timeout 600000). Не прерывайся на ошибке одного шага — логируй и иди дальше; странности пиши в "${raw}/99-zond-friction.md" (### команда — ожидал/вышло/raw).
+  `Ты — finish-стадия. Выполни РОВНО эти команды ОДНИМ вызовом Bash (весь блок сразу, timeout 600000) — НЕ разбивай на отдельные вызовы: export ZOND_WORKSPACE и cd теряются между вызовами, тогда 'zond db runs' читает чужой репозиторий и compare сравнивает не те прогоны (ARV-359/360). Не прерывайся на ошибке одного шага — логируй и иди дальше; странности пиши в "${raw}/99-zond-friction.md" (### команда — ожидал/вышло/raw).
 ${envLine}
-mkdir -p apis/${slug}/probes/mass-assignment apis/${slug}/probes/security
-zond probe mass-assignment --api ${slug} ${safe ? '--dry-run' : `--live --emit-tests apis/${slug}/probes/mass-assignment`} --output apis/${slug}/probes/ma-digest.md > "${raw}/50-probe-ma.log" 2>&1
-zond probe security ssrf,crlf,open-redirect --api ${slug} ${safe ? '--dry-run' : `--live --emit-tests apis/${slug}/probes/security`} > "${raw}/51-probe-sec.log" 2>&1
-${safe ? '# safe: probes dry-run only' : `zond run apis/${slug}/probes/mass-assignment --report json --output "${raw}/52-run-ma.json"\nzond run apis/${slug}/probes/security --report json --output "${raw}/53-run-sec.json"`}
-zond run apis/${slug}/tests --rate-limit ${safe ? '5' : 'auto'} --sequential --validate-schema --report json --output "${raw}/60-run.json"; RUN_A=$(zond db runs --json | jq -r '.data.runs[0].id')
-zond run apis/${slug}/tests --rate-limit ${safe ? '5' : 'auto'} --sequential --validate-schema --report json --output "${raw}/60-run-b.json"; RUN_B=$(zond db runs --json | jq -r '.data.runs[0].id')
+mkdir -p "${ws}/apis/${slug}/probes/mass-assignment" "${ws}/apis/${slug}/probes/security"
+zond probe mass-assignment --api ${slug} ${safe ? '--dry-run' : `--live --emit-tests "${ws}/apis/${slug}/probes/mass-assignment"`} --output "${ws}/apis/${slug}/probes/ma-digest.md" > "${raw}/50-probe-ma.log" 2>&1
+zond probe security ssrf,crlf,open-redirect --api ${slug} ${safe ? '--dry-run' : `--live --emit-tests "${ws}/apis/${slug}/probes/security"`} > "${raw}/51-probe-sec.log" 2>&1
+${safe ? '# safe: probes dry-run only' : `zond run "${ws}/apis/${slug}/probes/mass-assignment" --report json --output "${raw}/52-run-ma.json"\nzond run "${ws}/apis/${slug}/probes/security" --report json --output "${raw}/53-run-sec.json"`}
+zond run "${ws}/apis/${slug}/tests" --rate-limit ${safe ? '5' : 'auto'} --sequential --validate-schema --report json --output "${raw}/60-run.json"; RUN_A=$(zond db runs --json | jq -r '.data.runs[0].id')
+zond run "${ws}/apis/${slug}/tests" --rate-limit ${safe ? '5' : 'auto'} --sequential --validate-schema --report json --output "${raw}/60-run-b.json"; RUN_B=$(zond db runs --json | jq -r '.data.runs[0].id')
 echo "RUN_A=$RUN_A RUN_B=$RUN_B" > "${raw}/61-run-ids.txt"
 zond db run "$RUN_B" --report yaml > "${raw}/61-run.yaml" 2> "${raw}/61-run.stderr.log"
 zond db diagnose "$RUN_B" --report yaml > "${raw}/62-diagnose.yaml" 2> "${raw}/62-diagnose.stderr.log"
