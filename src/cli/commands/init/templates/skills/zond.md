@@ -765,7 +765,7 @@ verifying a fix** — small focused work. For breadth, use Phase 3
 zond db runs --limit 5 --json
 zond db diagnose <run-id> --json              # grouped by root_cause
 zond db run <id> --status 500 --json
-zond db compare <idA> <idB> --json            # regression diff
+zond db compare <idA> <idB> --json            # regression diff + field-level body diff (.data.body_changes[], ARV-339)
 zond db run <id> --report yaml                # run snapshot as YAML (ARV-338) — keep/diff as text
 ```
 

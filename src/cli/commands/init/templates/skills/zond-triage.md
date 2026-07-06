@@ -67,7 +67,10 @@ zond db runs --limit 5 --json   # pick a non-default run id
 
 If `trigger=ci`, mention the CI build in the summary. If the user said
 "после моего фикса", take the second-most-recent and pair with
-`zond db compare <prev> <curr> --json` for a regression diff.
+`zond db compare <prev> <curr> --json` for a regression diff. Besides
+status transitions, the payload carries `.data.body_changes[]` (ARV-339) —
+per-test field-level response-shape diff (`added` / `removed` /
+`type_changed`), i.e. how the contract moved even where status stayed green.
 
 ## Phase 2 — pull the diagnose envelope
 

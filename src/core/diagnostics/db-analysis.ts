@@ -487,6 +487,19 @@ export function groupFailures<T extends FailureItem>(failures: T[], maxExamples 
   return { grouped_failures, compactFailures };
 }
 
+export interface BodyFieldChange {
+  field: string;
+  change: "added" | "removed" | "type_changed";
+  before?: string;
+  after?: string;
+}
+
+export interface BodyDiff {
+  suite: string;
+  test: string;
+  changes: BodyFieldChange[];
+}
+
 export interface CompareResult {
   runA: { id: number; started_at: string };
   runB: { id: number; started_at: string };
@@ -496,10 +509,63 @@ export interface CompareResult {
     unchanged: number;
     newTests: number;
     removedTests: number;
+    bodyChanges: number;
   };
   regressions: Array<{ suite: string; test: string; before: string; after: string }>;
   fixes: Array<{ suite: string; test: string; before: string; after: string }>;
+  /** ARV-339: field-level response-shape diff for tests present in both runs.
+   *  Status-diff answers "what broke"; this answers "how the contract moved". */
+  body_changes: BodyDiff[];
   hasRegressions: boolean;
+}
+
+/** ARV-339: flatten a parsed JSON body into `path → union of leaf types`.
+ *  Array elements collapse under `[]` so item count/order don't add noise. */
+function bodyShape(value: unknown, path: string, out: Map<string, Set<string>>): void {
+  if (Array.isArray(value)) {
+    if (value.length === 0) addShape(out, path, "array");
+    for (const item of value) bodyShape(item, `${path}[]`, out);
+  } else if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) addShape(out, path, "object");
+    for (const [k, v] of entries) bodyShape(v, path ? `${path}.${k}` : k, out);
+  } else {
+    addShape(out, path, value === null ? "null" : typeof value);
+  }
+}
+
+function addShape(out: Map<string, Set<string>>, path: string, type: string): void {
+  const key = path || "$";
+  const set = out.get(key) ?? new Set<string>();
+  set.add(type);
+  out.set(key, set);
+}
+
+const typeLabel = (s: Set<string>): string => [...s].sort().join("|");
+
+/** ARV-339: diff two stored response bodies at field level. Returns [] when
+ *  either side is missing / non-JSON — a shape diff of prose is meaningless. */
+export function diffBodyShapes(rawA: string | null, rawB: string | null): BodyFieldChange[] {
+  if (!rawA || !rawB || rawA === rawB) return [];
+  let a: unknown, b: unknown;
+  try { a = JSON.parse(rawA); b = JSON.parse(rawB); } catch { return []; }
+  if (typeof a !== "object" || a === null || typeof b !== "object" || b === null) return [];
+  const shapeA = new Map<string, Set<string>>();
+  const shapeB = new Map<string, Set<string>>();
+  bodyShape(a, "", shapeA);
+  bodyShape(b, "", shapeB);
+  const changes: BodyFieldChange[] = [];
+  for (const [field, typesB] of shapeB) {
+    const typesA = shapeA.get(field);
+    if (!typesA) changes.push({ field, change: "added", after: typeLabel(typesB) });
+    else if (typeLabel(typesA) !== typeLabel(typesB)) {
+      changes.push({ field, change: "type_changed", before: typeLabel(typesA), after: typeLabel(typesB) });
+    }
+  }
+  for (const [field, typesA] of shapeA) {
+    if (!shapeB.has(field)) changes.push({ field, change: "removed", before: typeLabel(typesA) });
+  }
+  return changes.sort((x, y) => x.field.localeCompare(y.field));
 }
 
 export function compareRuns(idA: number, idB: number, dbPath?: string): CompareResult {
@@ -514,8 +580,16 @@ export function compareRuns(idA: number, idB: number, dbPath?: string): CompareR
 
   const mapA = new Map<string, string>();
   const mapB = new Map<string, string>();
-  for (const r of resultsA) mapA.set(`${r.suite_name}::${r.test_name}`, r.status);
-  for (const r of resultsB) mapB.set(`${r.suite_name}::${r.test_name}`, r.status);
+  const bodyA = new Map<string, string | null>();
+  const bodyB = new Map<string, string | null>();
+  for (const r of resultsA) {
+    mapA.set(`${r.suite_name}::${r.test_name}`, r.status);
+    bodyA.set(`${r.suite_name}::${r.test_name}`, r.response_body);
+  }
+  for (const r of resultsB) {
+    mapB.set(`${r.suite_name}::${r.test_name}`, r.status);
+    bodyB.set(`${r.suite_name}::${r.test_name}`, r.response_body);
+  }
 
   const regressions: Array<{ suite: string; test: string; before: string; after: string }> = [];
   const fixes: Array<{ suite: string; test: string; before: string; after: string }> = [];
@@ -523,10 +597,14 @@ export function compareRuns(idA: number, idB: number, dbPath?: string): CompareR
   let newTests = 0;
   let removedTests = 0;
 
+  const body_changes: BodyDiff[] = [];
+
   for (const [key, statusB] of mapB) {
     const statusA = mapA.get(key);
     if (statusA === undefined) { newTests++; continue; }
     const [suite, test] = key.split("::") as [string, string];
+    const changes = diffBodyShapes(bodyA.get(key) ?? null, bodyB.get(key) ?? null);
+    if (changes.length > 0) body_changes.push({ suite, test, changes });
     const wasPass = statusA === "pass";
     const isPass = statusB === "pass";
     const wasFail = statusA === "fail" || statusA === "error";
@@ -542,9 +620,10 @@ export function compareRuns(idA: number, idB: number, dbPath?: string): CompareR
   return {
     runA: { id: idA, started_at: runARecord.started_at },
     runB: { id: idB, started_at: runBRecord.started_at },
-    summary: { regressions: regressions.length, fixes: fixes.length, unchanged, newTests, removedTests },
+    summary: { regressions: regressions.length, fixes: fixes.length, unchanged, newTests, removedTests, bodyChanges: body_changes.length },
     regressions,
     fixes,
+    body_changes,
     hasRegressions: regressions.length > 0,
   };
 }
