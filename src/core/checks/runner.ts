@@ -176,6 +176,16 @@ export interface RunChecksOptions {
    *  `recommended_action: fix_fixture` instead of `report_backend_bug` —
    *  it's a known gap in our own test data, not new backend evidence. */
   fixtureGaps?: Set<string>;
+  /** ARV-342: operation-window. `skipOps` drops the first N operations
+   *  (post-filter, in the deterministic extraction order); `maxOps` caps
+   *  the window to N operations. Together they let a caller sweep a huge
+   *  spec in bounded, resumable slices (skip 0/max 50, skip 50/max 50, …)
+   *  that each finish inside a short run budget — the fix for
+   *  "587-op sweep SIGTERM-killed at 15%". Pure deterministic slicing of
+   *  the sorted op list: same skip/max ⇒ same window, no adaptive pacing.
+   *  A window's `summary.operations` < `maxOps` signals the last slice. */
+  skipOps?: number;
+  maxOps?: number;
   /** ARV-227: hard cap on outbound HTTP requests for the entire run.
    *  Once `used >= limit`, every subsequent case short-circuits and the
    *  summary surfaces the cap via `summary.skipped_outcomes
@@ -590,7 +600,13 @@ function recordFinding(
 export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult> {
   const doc = await readOpenApiSpec(opts.specPath);
   const allOps = extractEndpoints(doc);
-  const ops = opts.operationFilter ? allOps.filter(opts.operationFilter) : allOps;
+  const filteredOps = opts.operationFilter ? allOps.filter(opts.operationFilter) : allOps;
+  // ARV-342: deterministic operation-window. Slice the post-filter op
+  // list so a caller can sweep a large spec in bounded, resumable slices.
+  const skipOps = Math.max(0, opts.skipOps ?? 0);
+  const ops = opts.maxOps !== undefined && opts.maxOps >= 0
+    ? filteredOps.slice(skipOps, skipOps + opts.maxOps)
+    : filteredOps.slice(skipOps);
   const buckets = bucketEndpointsByPath(allOps);
   const schemaValidator: SchemaValidator = createSchemaValidator(doc);
 
