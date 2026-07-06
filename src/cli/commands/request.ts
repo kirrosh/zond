@@ -9,6 +9,7 @@ import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
 import { getDb } from "../../db/schema.ts";
 import type { AssertionResult } from "../../core/runner/types.ts";
+import { applyEnvWrites } from "./fixtures.ts";
 
 // TASK-272: when the request fails authentication (401/403) and the user
 // did NOT pass `--api <name>`, surface a one-liner pointing at auto-auth via
@@ -86,6 +87,10 @@ export interface RequestOptions {
   env?: string;
   api?: string;
   jsonPath?: string;
+  /** ARV-355: write the --json-path scalar into apis/<api>/.env.yaml as this
+   *  var, so a POST-create's returned id lands in a fixture in one command
+   *  (the "execute create+capture" primitive of the agent seed loop). */
+  capture?: string;
   dbPath?: string;
   json?: boolean;
   /** TASK-142: validate the response body against the OpenAPI response schema. */
@@ -109,6 +114,18 @@ interface SchemaValidationOutcome {
 
 export async function requestCommand(options: RequestOptions): Promise<number> {
   try {
+    // ARV-355: --capture needs a value to extract (--json-path) and a target
+    // .env.yaml (--api). Fail fast with an actionable message rather than
+    // silently no-op'ing mid-seed-loop.
+    if (options.capture && (!options.jsonPath || !options.api)) {
+      printError(
+        "--capture requires --json-path <path> (the field to extract) and --api <name> " +
+        "(the .env.yaml to write). E.g. `zond request POST /v1/accounts --api stripe " +
+        "--json-path id --capture account`.",
+      );
+      return 2;
+    }
+
     const headers: Record<string, string> = {};
     if (options.headers) {
       for (const h of options.headers) {
@@ -185,6 +202,33 @@ export async function requestCommand(options: RequestOptions): Promise<number> {
     } else {
       console.log(JSON.stringify(result, null, 2));
       if (validation) printSchemaValidation(validation);
+    }
+
+    // ARV-355: create+capture. Write the extracted json-path scalar into the
+    // api's .env.yaml so the agent seed loop can chain a created id into
+    // dependent fixtures with one command. Deterministic plumbing only — the
+    // agent decides the body/endpoint/var; zond just POSTs and captures.
+    // Gated to a 2xx response (capturing an id from an error body is a bug —
+    // the agent reads the note, revises the body, and retries).
+    if (options.capture) {
+      const v = result.body;
+      const ok2xx = result.status >= 200 && result.status < 300;
+      const scalar =
+        typeof v === "string" || typeof v === "number" || typeof v === "boolean" ? String(v) : null;
+      if (!ok2xx || scalar === null || scalar.length === 0) {
+        process.stderr.write(
+          `zond: --capture ${options.capture} skipped — need a non-empty scalar from a 2xx response ` +
+          `(status=${result.status}, --json-path '${options.jsonPath}' → ${scalar === null ? "non-scalar/null" : "empty"}). ` +
+          `Revise the request and retry.\n`,
+        );
+      } else {
+        const envPath = join(`apis/${options.api}`, ".env.yaml");
+        const { backup } = await applyEnvWrites(envPath, { [options.capture]: scalar });
+        process.stderr.write(
+          `zond: captured ${options.capture}=${scalar} → ${envPath}` +
+          (backup ? ` (backup: ${backup})` : "") + "\n",
+        );
+      }
     }
 
     // TASK-272: post-response auto-auth hint on 401/403 without --api
@@ -462,6 +506,13 @@ export function registerRequest(program: Command): void {
       "(`id=$(zond request --json-path data.id ...)`), objects/arrays as compact JSON. " +
       "With --json, embeds the extracted value as the envelope's `body` field.",
     )
+    .option(
+      "--capture <var>",
+      "ARV-355: write the --json-path scalar into apis/<api>/.env.yaml as <var> " +
+      "(requires --json-path and --api). Captures a POST-create's returned id into " +
+      "a fixture in one command, so the agent seed loop can chain dependent creates. " +
+      "Only writes on a 2xx response; a .env.yaml.bak backup is made.",
+    )
     .option("--db <path>", "Path to SQLite database file")
     .option("--validate-schema", "TASK-142: validate the response body against the OpenAPI response schema (requires --api). Endpoint is auto-resolved from the request method + URL.path; templated paths like /users/{id} are matched via regex. Falls back gracefully if no endpoint matches — pass --validate-against to override.")
     .option("--validate-against <method:path>", "TASK-142: explicit endpoint override for --validate-schema, e.g. \"GET:/users/{id}\". Use the spec template form (with \"{...}\" placeholders).")
@@ -486,6 +537,7 @@ export function registerRequest(program: Command): void {
         env: opts.env,
         api,
         jsonPath: opts.jsonPath,
+        capture: opts.capture,
         dbPath: opts.db,
         json: globalJson(cmd),
         validateSchema: opts.validateSchema === true || typeof opts.validateAgainst === "string",

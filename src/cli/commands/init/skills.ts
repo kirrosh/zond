@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import zondSkill from "./templates/skills/zond.md" with { type: "text" };
 import checksSkill from "./templates/skills/zond-checks.md" with { type: "text" };
 import triageSkill from "./templates/skills/zond-triage.md" with { type: "text" };
+import seedSkill from "./templates/skills/zond-seed.md" with { type: "text" };
 
 export interface SkillResult {
   name: string;
@@ -27,6 +28,9 @@ const SKILLS: SkillTemplate[] = [
   { name: "zond-checks", body: checksSkill },
   // Read-only triage of a finished run / probe artifact.
   { name: "zond-triage", body: triageSkill },
+  // ARV-355: agent-orchestrated auto-seed loop (read gaps → order by
+  // fkDependencies → author body → request POST --capture → fix 4xx + retry).
+  { name: "zond-seed", body: seedSkill },
 ];
 
 /**

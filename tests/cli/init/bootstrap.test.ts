@@ -37,6 +37,7 @@ describe("bootstrapWorkspace", () => {
     expect(r.skills.map((s) => s.name).sort()).toEqual([
       "zond",
       "zond-checks",
+      "zond-seed",
       "zond-triage",
     ]);
     expect(r.skills.every((s) => s.action === "created")).toBe(true);
