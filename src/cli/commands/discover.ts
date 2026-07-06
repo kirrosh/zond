@@ -30,6 +30,8 @@ import {
 import { liveAuthHeaders } from "../../core/probe/shared.ts";
 import { executeRequest } from "../../core/runner/http-client.ts";
 import { writeFixtureGaps, type FixtureGap } from "../../core/workspace/fixture-gaps.ts";
+import { reportFixtureGaps, type FixtureGapReport } from "../../core/workspace/fixture-gap-report.ts";
+import { parseSafe } from "../../core/parser/yaml-parser.ts";
 
 /**
  * Suffix-aware field extraction. For var `project_slug` we prefer the
@@ -833,6 +835,13 @@ export function upsertEnvLine(yamlText: string, key: string, value: string): str
   return lines.join("\n");
 }
 
+/** First 8 `{{var}}` names + "… and N more" — keeps the gap warning readable
+ *  when a barely-provisioned account leaves dozens of required fixtures empty. */
+function capNames(names: string[], max = 8): string {
+  const head = names.slice(0, max).map(n => `{{${n}}}`).join(", ");
+  return names.length > max ? `${head}, … and ${names.length - max} more` : head;
+}
+
 export async function discoverCommand(options: DiscoverOptions): Promise<number> {
   const commandName = options.commandName ?? "discover";
   try {
@@ -1145,6 +1154,28 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     // Rewritten wholesale every run so a since-fixed gap doesn't linger.
     await writeFixtureGaps(options.apiDir, gapsFromItems(items));
 
+    // ARV-349/350: report suite vars this single-pass run cannot resolve.
+    // Load the generated suites (best-effort — absent tests/ dir is fine) and
+    // scan them against the env we'd end up with (current + this run's writes).
+    // Report only; never invent values / auto-seed.
+    let gapReport: FixtureGapReport = { undefinedVars: [], unseededRoots: [] };
+    try {
+      const { suites } = await parseSafe(join(options.apiDir, "tests"));
+      if (suites.length > 0) {
+        const effectiveEnv: Record<string, string> = { ...env };
+        for (const w of writes) effectiveEnv[w.varName] = w.discovered!;
+        // Required manifest vars still empty after this pass = candidate
+        // chain-roots. Source-agnostic: real specs model these as `path`
+        // required:true with an empty default, not only `capture-chain`.
+        const requiredEmptyVars = new Set(
+          (manifest?.fixtures ?? [])
+            .filter(f => f.required && !(effectiveEnv[f.name] && effectiveEnv[f.name]!.length > 0))
+            .map(f => f.name),
+        );
+        gapReport = reportFixtureGaps(suites, effectiveEnv, requiredEmptyVars);
+      }
+    } catch { /* suite scan is best-effort — never fail prepare-fixtures on it */ }
+
     const requiredManifestCount = manifest
       ? manifest.fixtures.filter(f => f.required).length
       : 0;
@@ -1175,6 +1206,9 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
           writes: writes.length,
           alreadySet: items.filter(i => i.status === "skip-already-set").length,
           misses: items.filter(i => i.status.startsWith("miss-")).length,
+          // ARV-349/350: gaps prepare-fixtures cannot resolve deterministically.
+          // Present so an agent/user can fill them; values are never invented.
+          fixtureGaps: gapReport,
           ...(manifest ? {
             manifest: {
               required: requiredManifestCount,
@@ -1268,6 +1302,23 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
       }
       if (manifest) {
         console.log(`Filled ${filledCount} / ${requiredManifestCount} manifest entries.`);
+      }
+      // ARV-350: chain-roots that gate whole CRUD suites — flag first, they're
+      // the highest-leverage gap (one id un-skips a dependent chain). Cap the
+      // inline list; the full set is in the JSON envelope for agent consumption.
+      if (gapReport.unseededRoots.length > 0) {
+        printWarning(
+          `${gapReport.unseededRoots.length} unseeded chain-root(s): ${capNames(gapReport.unseededRoots.map(r => r.variable))}. ` +
+          `Dependent CRUD suites skip until these are set — supply an id via \`fixtures add\` / .env.yaml ` +
+          `(prepare-fixtures does not auto-seed; use --json for the full list).`,
+        );
+      }
+      // ARV-349: suite vars nothing produces — no env value, capture, or param.
+      if (gapReport.undefinedVars.length > 0) {
+        printWarning(
+          `${gapReport.undefinedVars.length} unresolved suite var(s): ${capNames(gapReport.undefinedVars.map(v => v.variable))}. ` +
+          `Fill them via \`fixtures add\` / .env.yaml (prepare-fixtures does not invent values; use --json for the full list).`,
+        );
       }
       if (unknownEnvKeys.length > 0) {
         printWarning(

@@ -1,9 +1,10 @@
 ---
 id: ARV-349
 title: prepare-fixtures neither fills nor flags unresolvable suite vars
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 13:03'
+updated_date: '2026-07-06 13:44'
 labels:
   - zond-bug
   - fixtures
@@ -24,3 +25,9 @@ LITMUS/PHILOSOPHY: prepare-fixtures is deterministic single-pass (ARV-336 remove
 - [ ] #1 prepare-fixtures reports vars it cannot resolve (does not silently skip)
 - [ ] #2 no auto-invention of values (stays single-pass deterministic)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Done. prepare-fixtures now scans generated suites and reports two gap buckets (report-only, no invention): undefinedVars = suite {{vars}} with no producer (preflightCheckVars). New core/workspace/fixture-gap-report.ts + tests; wired into discoverCommand JSON summary.fixtureGaps + text warnings. AC#1 report ✓ AC#2 no auto-invention ✓.
+<!-- SECTION:NOTES:END -->

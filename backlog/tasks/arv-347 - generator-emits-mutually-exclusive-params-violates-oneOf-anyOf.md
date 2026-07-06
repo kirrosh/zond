@@ -1,9 +1,10 @@
 ---
 id: ARV-347
 title: generator emits mutually-exclusive params (violates oneOf/anyOf)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 13:03'
+updated_date: '2026-07-06 13:28'
 labels:
   - zond-bug
   - generator
@@ -24,3 +25,9 @@ LITMUS: pure deterministic generator-correctness (honor oneOf/anyOf, pick exactl
 - [ ] #1 data-factory honors oneOf/anyOf: never emits >1 member of a mutual-exclusion group
 - [ ] #2 positive_data_acceptance noise on Stripe drops materially
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+SUPERSEDED by ARV-355. Misdiagnosed: the Stripe 'you may only specify one of' 400s (80/run) are prose-encoded exclusion (description text) — 0 machine-readable oneOf/anyOf in the spec, so there is nothing to 'honor'. Generator already picks one branch on real oneOf/anyOf (pickBestVariant). Deterministic zond cannot resolve prose exclusion without NL-parsing (violates litmus) or dropping optionals (kills depth, anti-m-24). Belongs to agent seed_body overlay -> folded into ARV-355.
+<!-- SECTION:NOTES:END -->
