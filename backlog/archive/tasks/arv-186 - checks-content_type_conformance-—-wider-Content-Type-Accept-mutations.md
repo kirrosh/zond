@@ -4,12 +4,13 @@ title: 'checks: content_type_conformance — wider Content-Type/Accept mutations
 status: To Do
 assignee: []
 created_date: '2026-05-13 09:17'
-updated_date: '2026-05-18 13:02'
+updated_date: '2026-07-06 07:10'
 labels:
   - parity-fix
   - deferred
   - feature-m-22
   - defer-post-m-23
+  - superseded-m23
 dependencies: []
 priority: low
 ---
