@@ -86,7 +86,6 @@ const SMOKE: SmokeEntry[] = [
     dataSchema: ProbeDryRunDataSchema,
   },
   { source: "generate.ts", argv: ["generate", PETSTORE, "--output", "/tmp/gen-arv57", "--json"] },
-  { source: "config.ts", argv: ["config", "validate", "--json"] },
 ];
 
 /** ALLOW_LIST: commands whose smoke scenario needs elaborate setup

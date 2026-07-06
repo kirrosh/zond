@@ -52,8 +52,7 @@
  *   signals proving auth is ignored. MEDIUM variants (strict-401
  *   conformance) are single-signal: auth is likely enforced (server still
  *   rejects), just with the wrong status code (403/404 instead of 401).
- *
- *   Users can re-calibrate per-API via `.zond/severity.yaml` (ARV-283).
+ *   The agent re-severitizes from the raw evidence.
  */
 import type { OpenAPIV3 } from "openapi-types";
 import type { AuthStatefulCheck } from "../stateful.ts";

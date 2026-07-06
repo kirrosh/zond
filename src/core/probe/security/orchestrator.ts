@@ -20,8 +20,6 @@ import {
   hasProbeBody,
   serializeProbeBody,
 } from "../probe-harness.ts";
-import { applyAntiFp } from "../../anti-fp/index.ts";
-import type { BaselineEchoCtx } from "../../anti-fp/rules/baseline-echo.ts";
 import { detectFields, PAYLOADS } from "./detectors.ts";
 import {
   restoreOriginal,
@@ -326,29 +324,6 @@ async function probeOneEndpoint(
         continue;
       }
       const finding = classify(hit, payload, resp, { endpoint: ep });
-      // ARV-126: route the 2xx-no-echo low-severity classification
-      // through the anti-FP registry. When the response body deeply
-      // equals the baseline body, the server ignored the attack
-      // payload entirely — no side-effect to verify — and the
-      // `baseline-echo` rule downgrades the finding to OK with a
-      // wontfix banner. Only relevant for `mode === "full"` (we don't
-      // retain per-field baseline response bodies).
-      if (
-        finding.severity === "low"
-        && !finding.echoed
-        && mode === "full"
-        && fullBaseline.kind === "ok"
-      ) {
-        const ctx: BaselineEchoCtx = {
-          responseBody: resp.body_parsed ?? resp.body,
-          baselineBody: fullBaseline.body,
-        };
-        const suppression = applyAntiFp(ctx, "probe:security");
-        if (suppression) {
-          finding.severity = "ok";
-          finding.reason = `${suppression.reason} (${suppression.ruleId})`;
-        }
-      }
       // Annotate which body shape was used for this attack — useful for
       // case-studies and emit-tests.
       finding.reason = mode === "partial"
@@ -386,9 +361,8 @@ async function probeOneEndpoint(
  * Roll up per-finding severities to the worst verdict-level severity.
  * ARV-253: "info" sits below "low" (single_signal sanitization-only).
  * ARV-254: "medium" sits between "high" and "low" (SSRF accept on an
- * endpoint declaring delivery). Exported so ARV-300 can recompute the
- * rollup after `.zond/severity.yaml` re-severitizes / suppresses
- * individual findings.
+ * endpoint declaring delivery). Exported so callers can recompute the
+ * verdict rollup after adjusting individual finding severities.
  */
 export function rollupSecuritySeverity(
   findings: readonly { severity: SecuritySeverity }[],

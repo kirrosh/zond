@@ -40,8 +40,6 @@ import { listStatefulChecks, makeHarness } from "./stateful.ts";
 import { caseMatchesMode, filterChecksByMode, type Mode } from "./mode.ts";
 import { buildNegativeBody } from "./checks/_negative_mutator.ts";
 import { nowIso, type NdjsonEvent } from "../reporter/ndjson.ts";
-import type { MergedConfig } from "../severity/config.ts";
-import { calibrate } from "../severity/calibrator.ts";
 import { runPool } from "../runner/async-pool.ts";
 import type { RateLimiter } from "../runner/rate-limiter.ts";
 import { recommendForCheck } from "./recommended-action.ts";
@@ -189,14 +187,6 @@ export interface RunChecksOptions {
    *  `--budget quick` from the CLI. Skipped stateful ids are surfaced
    *  in `summary.skipped_outcomes` so the user sees what was dropped. */
   skipStateful?: boolean;
-  /** ARV-283: severity calibration overlay loaded from
-   *  `.zond/severity.yaml` and/or `apis/<api>/.zond-severity.yaml`.
-   *  Optional — undefined ⇒ findings emit at the built-in severity.
-   *  When set, every emitted finding passes through `calibrate()` and
-   *  may be re-severitized or suppressed. The CLI loads it via
-   *  `loadSeverityConfig()` and forwards it; tests can pass a literal
-   *  MergedConfig (build with `mergeConfigs([{config, source}])`). */
-  severityConfig?: MergedConfig;
   /** ARV-328: fired after each operation finishes the response phase —
    *  lets the CLI print a throttled progress line during long coverage
    *  runs. `done`/`total` are operations (case count isn't known up
@@ -563,13 +553,8 @@ function representativeOp(g: CrudGroup): EndpointInfo | undefined {
 /** Build a finding, push it into the per-op buffer, and stream the
  *  ARV-10 NDJSON event. Summary aggregation moved out — the caller
  *  merges per-op buffers in input order so workers > 1 doesn't have to
- *  contend on a shared `summary` object.
- *
- *  ARV-283: severity passes through `applyCalibration` before emit so
- *  a `.zond/severity.yaml` rule can re-severitize or suppress. The
- *  emitted finding always reaches the buffer + ndjson stream so
- *  audit-trail survives; suppressed findings get `severity:
- *  "info-suppressed"` + `suppressed_by` instead of being dropped. */
+ *  contend on a shared `summary` object. The finding carries raw
+ *  evidence + its built-in severity default; the agent re-severitizes. */
 function recordFinding(
   out: CheckFinding[],
   check: Check,
@@ -578,7 +563,6 @@ function recordFinding(
   message: string,
   evidence: Record<string, unknown> | undefined,
   onEvent: ((event: NdjsonEvent) => void) | undefined,
-  severityConfig: MergedConfig | undefined,
   /** ARV-284: per-finding severity from CheckOutcome — overrides
    *  the check's natural tier when the check wants to dispatch by
    *  evidence (e.g. negative_data_rejection LOW for additionalProperties,
@@ -599,56 +583,8 @@ function recordFinding(
     evidence,
     recommended_action: action,
   };
-  applyCalibration(finding, resp, severityConfig);
   out.push(finding);
   if (onEvent) onEvent({ type: "finding", ts: nowIso(), check: check.id, finding });
-}
-
-/** ARV-283: mutate a finding in-place with the calibrated severity +
- *  suppression trace. Idempotent; pass-through when `config` is
- *  undefined or EMPTY_MERGED_CONFIG. Caller counts suppressed entries
- *  via the `info-suppressed` severity, not the trace presence. */
-function applyCalibration(
-  finding: CheckFinding,
-  resp: HttpResponse | { status: number; headers?: Record<string, string>; content_type?: string },
-  config: MergedConfig | undefined,
-): void {
-  if (!config || (config.suppressions.length === 0 && Object.keys(config.checks).length === 0)) return;
-  const headers = "headers" in resp && resp.headers ? resp.headers : {};
-  const result = calibrate(
-    {
-      check: finding.check,
-      defaultSeverity: finding.severity,
-      recommendedAction: finding.recommended_action,
-      context: {
-        finding: {
-          check: finding.check,
-          recommended_action: finding.recommended_action,
-          message: finding.message,
-          evidence: finding.evidence,
-        },
-        operation: {
-          method: finding.operation.method.toUpperCase(),
-          path: finding.operation.path,
-          operationId: finding.operation.operationId,
-        },
-        response: {
-          status: finding.response_summary.status,
-          headers,
-          content_type: finding.response_summary.content_type,
-        },
-      },
-    },
-    config,
-  );
-  finding.severity = result.severity;
-  if (result.suppressed && result.trace.kind === "suppressed") {
-    finding.suppressed_by = {
-      source: result.trace.source ?? "",
-      rule_index: result.trace.ruleIndex ?? 0,
-      reason: result.trace.reason ?? "",
-    };
-  }
 }
 
 export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult> {
@@ -824,7 +760,6 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           message: `Network error: ${(err as Error).message}`,
           recommended_action: recommendForCheck("network_error", 0),
         };
-        applyCalibration(finding, { status: 0, headers: {} }, opts.severityConfig);
         localFindings.push(finding);
         if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), check: "network_error", finding });
         if (opts.onCase) {
@@ -885,7 +820,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           options: checkRuntimeOptions,
         });
         if (outcome.kind === "fail") {
-          recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent, opts.severityConfig, outcome.severity, opts.fixtureGaps);
+          recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent, outcome.severity, opts.fixtureGaps);
         }
         if (outcome.kind === "skip") {
           // ARV-26: bucket skips by check+reason so the summary can surface
@@ -1099,20 +1034,6 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     const collected: CheckFinding[] = [];
     function pushStateful(f: CheckFinding): void {
       if (!f.category) f.category = categoryFor(f.check);
-      // ARV-283: stateful findings carry no upstream HTTP response shape
-      // — pass a synthetic context with just the status from
-      // response_summary so suppressions that key off status/method/path
-      // still match. Header-keyed suppressions don't fire on stateful
-      // (no headers preserved); that's an acceptable Phase A limitation.
-      applyCalibration(
-        f,
-        {
-          status: f.response_summary.status,
-          headers: {},
-          content_type: f.response_summary.content_type,
-        },
-        opts.severityConfig,
-      );
       collected.push(f);
       if (f.suppressed_by) {
         summary.suppressed = (summary.suppressed ?? 0) + 1;

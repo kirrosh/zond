@@ -10,7 +10,6 @@
  * `not_a_server_error` already covers it.
  */
 import type { Check } from "../types.ts";
-import { applyAntiFp } from "../../anti-fp/index.ts";
 
 export const positiveDataAcceptance: Check = {
   id: "positive_data_acceptance",
@@ -18,15 +17,13 @@ export const positiveDataAcceptance: Check = {
   defaultExpected: "Server must accept a generated-as-valid body (2xx)",
   references: [{ id: "OWASP-API-08" }],
   applies: (op) => Boolean(op.requestBodySchema),
-  run({ case: c, response }) {
+  run({ response }) {
     const s = response.status;
     if (s >= 200 && s < 300) return { kind: "pass" };
     // Auth / not-found / conflict / server-error → not a schema-rejection signal.
     if (s === 401 || s === 403 || s === 404 || s === 409) return { kind: "pass" };
     if (s >= 500) return { kind: "skip", reason: "5xx covered by not_a_server_error" };
     if (s !== 400 && s !== 422) return { kind: "skip", reason: `status ${s} not a schema-validation reject` };
-    const skip = applyAntiFp(c, "check:positive_data_acceptance");
-    if (skip) return { kind: "skip", reason: `${skip.ruleId}: ${skip.reason}` };
     return {
       kind: "fail",
       message: `Server rejected a generated-as-valid body with ${s} — generator or spec disagrees with the implementation`,

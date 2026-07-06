@@ -121,8 +121,8 @@ export type CheckOutcome =
        *  with `additionalProperties-violation` evidence → LOW, with
        *  `pattern-violation` → MEDIUM, with 5xx response → HIGH). The
        *  declared `Check.severity` stays as the natural fallback /
-       *  documentation tier. Subject to severity-config calibration
-       *  overlay (ARV-283) downstream. */
+       *  documentation tier. The agent re-severitizes from the raw
+       *  evidence downstream. */
       severity?: Severity;
       /** ARV-310: attribute the finding to a specific operation instead of
        *  the CRUD group's canonical create/read op. cursor_boundary_fuzzing
@@ -175,13 +175,11 @@ export interface CheckFinding {
    *  check id (and response status for `network_error`). Optional
    *  because synthetic findings (e.g. unit-test fakes) may skip it. */
   recommended_action?: RecommendedAction;
-  /** ARV-283: suppression trace — set only when a `.zond/severity.yaml`
-   *  suppression rule fired. Severity in that case is forced to `info`
-   *  (so downstream summary/SARIF code stays simple) and CI summary
-   *  excludes the finding from gate counts via this field's presence.
-   *  Readers / `severity explain` reconstruct the suppression from the
-   *  trace; presence of `suppressed_by` is the canonical "suppressed"
-   *  signal, not severity equality. */
+  /** Suppression trace — present when a finding was removed from the
+   *  gate counts (today only the deterministic broken-baseline guard,
+   *  ARV-307, marks findings this way). CI summary excludes such findings
+   *  from gate counts via this field's presence; presence of
+   *  `suppressed_by` is the canonical "suppressed" signal. */
   suppressed_by?: {
     source: string;
     rule_index: number;
@@ -211,10 +209,9 @@ export interface CheckRunSummary {
    *  `skipped_outcomes` field is kept for back-compat with existing parsers
    *  / NDJSON readers. */
   skipped_outcomes_grouped: Array<{ check: string; reason: string; count: number }>;
-  /** ARV-283: count of findings that were suppressed by a
-   *  `.zond/severity.yaml` rule. Excluded from `findings`/`by_severity`
-   *  so CI gates ignore them, but surfaced here for audit-trail and
-   *  `--show-suppressed` text output. */
+  /** Count of findings suppressed by the deterministic broken-baseline
+   *  guard (ARV-307). Excluded from `findings`/`by_severity` so CI gates
+   *  ignore them, but surfaced here for audit-trail reconciliation. */
   suppressed?: number;
 }
 

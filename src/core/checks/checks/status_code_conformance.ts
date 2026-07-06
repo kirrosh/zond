@@ -33,9 +33,8 @@
  * Per ARV-250's proof-cap principle (no evidence → no high severity):
  * the declared `severity: "low"` is the natural fallback / proof-cap
  * baseline; evidence strength escalates individual findings via
- * `outcome.severity` to override it.
- *
- * Users can re-calibrate per-API via `.zond/severity.yaml` (ARV-283).
+ * `outcome.severity` to override it. The agent re-severitizes from the
+ * raw evidence.
  */
 import type { OpenAPIV3 } from "openapi-types";
 

@@ -19,10 +19,6 @@ import { resolve as resolvePath } from "node:path";
 import { jsonOk, jsonError, printJson } from "../../json-envelope.ts";
 import { printError, printSuccess, printWarning } from "../../output.ts";
 import { parseEventLog, runWebhooksProbe, type WebhookFinding } from "../../../core/probe/webhooks-probe.ts";
-import { findWorkspaceRoot } from "../../../core/workspace/root.ts";
-import { loadSeverityConfig, SeverityConfigError } from "../../../core/severity/loader.ts";
-import { calibrateProbeSeverity } from "../../../core/severity/probe-adapter.ts";
-import type { MergedConfig } from "../../../core/severity/config.ts";
 
 export interface ProbeWebhooksOptions {
   specPath: string;
@@ -35,32 +31,8 @@ export interface ProbeWebhooksOptions {
   output?: string;
   /** Envelope mode — wraps result in {ok, command, data, errors}. */
   json?: boolean;
-  /** ARV-311: API name for per-api `.zond/severity.yaml` resolution. */
+  /** API name for audit-coverage attribution. */
   apiName?: string;
-}
-
-/** ARV-311: calibrate each webhook finding's severity in-place through the
- *  shared probe adapter (ARV-300), keyed by the finding kind so a
- *  `.zond/severity.yaml` rule can target `when.finding.check: shape_drift`.
- *  No-op when `config` is empty. */
-function calibrateWebhookFindings(findings: WebhookFinding[], config: MergedConfig | undefined): void {
-  if (!config) return;
-  for (const f of findings) {
-    const cal = calibrateProbeSeverity(
-      {
-        check: f.kind,
-        severity: f.severity,
-        context: {
-          finding: { check: f.kind, message: f.message },
-          operation: { method: "POST", path: f.event_type ?? "" },
-          response: { status: 0, headers: {} },
-        },
-      },
-      config,
-    );
-    f.severity = cal.severity as "high" | "low";
-    if (cal.suppressed_by) f.suppressed_by = cal.suppressed_by;
-  }
 }
 
 function severityCount(findings: WebhookFinding[]): { high: number; low: number } {
@@ -147,24 +119,6 @@ export async function probeWebhooksCommand(options: ProbeWebhooksOptions): Promi
     // not the schema validator, but the operator wants them in the
     // same digest (one place to look).
     result.findings = [...malformed, ...result.findings];
-
-    // ARV-311: calibrate finding severities through `.zond/severity.yaml`
-    // before the rollup (severityCount) so the digest, exit code, and
-    // envelope all reflect the same calibrated values.
-    let severityConfig: MergedConfig | undefined;
-    try {
-      const ws = findWorkspaceRoot();
-      severityConfig = loadSeverityConfig({ workspaceRoot: ws.root, api: options.apiName });
-    } catch (err) {
-      if (err instanceof SeverityConfigError) {
-        const msgs = err.errors.map((e) => `${e.source}: ${e.keyPath}: ${e.message}`);
-        if (options.json) printJson(jsonError("probe-webhooks", msgs));
-        else for (const m of msgs) printError(m);
-        return 2;
-      }
-      throw err;
-    }
-    calibrateWebhookFindings(result.findings, severityConfig);
 
     const sev = severityCount(result.findings);
     const fmt: "markdown" | "json" = options.report ?? "markdown";
