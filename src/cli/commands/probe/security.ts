@@ -21,12 +21,6 @@ import { SecurityProbe } from "../../../core/probe/security-probe-class.ts";
 import { summarizeDryRun } from "../../../core/probe/dry-run-envelope.ts";
 import { compileOperationFilter } from "../../../core/selectors/operation-filter.ts";
 import { loadSeedBodyOverlays } from "./_seed-bodies.ts";
-import { findWorkspaceRoot } from "../../../core/workspace/root.ts";
-import { loadSeverityConfig, SeverityConfigError } from "../../../core/severity/loader.ts";
-import { calibrateProbeSeverity } from "../../../core/severity/probe-adapter.ts";
-import { rollupSecuritySeverity } from "../../../core/probe/security/orchestrator.ts";
-import type { SecuritySeverity } from "../../../core/probe/security/types.ts";
-import type { MergedConfig } from "../../../core/severity/config.ts";
 
 interface Buckets {
   high: number;
@@ -64,39 +58,6 @@ const SEC_SUMMARY: ReadonlyArray<readonly [string, keyof Buckets & string]> = [
 const SEC_ZERO: Buckets = {
   high: 0, medium: 0, low: 0, info: 0, inconclusive: 0, inconclusiveBaseline: 0, ok: 0, skipped: 0,
 };
-
-/** ARV-300: calibrate each finding's severity in-place and recompute the
- *  verdict rollup. No-op when `config` is empty (pass-through). */
-function calibrateSecurityVerdicts(
-  verdicts: SecurityVerdict[],
-  config: MergedConfig | undefined,
-): void {
-  if (!config) return;
-  for (const v of verdicts) {
-    for (const f of v.findings) {
-      const cal = calibrateProbeSeverity(
-        {
-          check: f.class,
-          severity: f.severity,
-          recommendedAction: f.recommended_action,
-          context: {
-            finding: {
-              check: f.class,
-              recommended_action: f.recommended_action,
-              message: f.reason,
-            },
-            operation: { method: v.method.toUpperCase(), path: v.path },
-            response: { status: f.status, headers: {} },
-          },
-        },
-        config,
-      );
-      f.severity = cal.severity as SecuritySeverity;
-      if (cal.suppressed_by) f.suppressed_by = cal.suppressed_by;
-    }
-    v.severity = rollupSecuritySeverity(v.findings);
-  }
-}
 
 export interface ProbeSecurityOptions {
   specPath: string;
@@ -335,26 +296,6 @@ export async function probeSecurityCommand(
         process.stderr.write(`zond: audit persistence failed (${(err as Error).message}).\n`);
       }
     }
-
-    // ARV-300: run every finding through the same severity calibrator as
-    // checks. `.zond/severity.yaml` can re-severitize or suppress by
-    // `when.finding.check: <class>` (ssrf/crlf/open-redirect). Sentinel
-    // severities (inconclusive/ok/skipped) pass through untouched; the
-    // verdict rollup is recomputed so digests + counts stay consistent.
-    let severityConfig: MergedConfig | undefined;
-    try {
-      const ws = findWorkspaceRoot();
-      severityConfig = loadSeverityConfig({ workspaceRoot: ws.root, api: options.apiName });
-    } catch (err) {
-      if (err instanceof SeverityConfigError) {
-        const msgs = err.errors.map((e) => `${e.source}: ${e.keyPath}: ${e.message}`);
-        if (options.json) printJson(jsonError("probe-security", msgs));
-        else for (const m of msgs) printError(m);
-        return 2;
-      }
-      throw err;
-    }
-    calibrateSecurityVerdicts(result.verdicts, severityConfig);
 
     // ARV-253: filter verdicts for display under the evidence-chain
     // principle. INFO-severity findings (CRLF accepted, no reflection

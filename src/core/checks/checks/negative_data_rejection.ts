@@ -3,7 +3,7 @@
  * The runner builds a single-site negative case (one mutation against
  * a valid body, see `_negative_mutator.ts`); if the server still
  * accepts it (status outside 4xx/5xx + 401/403/404 admin set), we
- * raise a finding — *unless* an anti-FP guard fires (see `_anti_fp.ts`).
+ * raise a finding with raw evidence. The agent triages / re-severitizes.
  *
  * Default expected: 400 / 401 / 403 / 404 / 422 / 428 / 5xx.
  *   2xx and 3xx with our payload are findings.
@@ -32,16 +32,10 @@
  * single-signal proof caps at LOW; concrete schema breach escalates to
  * MEDIUM. The declared `severity: "low"` is the natural fallback /
  * proof-cap baseline; stronger findings use `outcome.severity` to
- * override.
- *
- * Users can re-calibrate any of these per-API via `.zond/severity.yaml`
- * (ARV-283) — e.g. promote `additionalProperties-violation` to MEDIUM
- * for a strict-validating API that documents rejection, or suppress
- * `wrong-type` query on GET for a Stripe-style "empty list" vendor.
+ * override. The agent re-severitizes from the raw evidence.
  */
 import type { Check, CheckOutcome } from "../types.ts";
 import type { Severity } from "../../severity/index.ts";
-import { applyAntiFp } from "../../anti-fp/index.ts";
 
 const ACCEPTABLE = (status: number): boolean => {
   if (status === 400 || status === 401 || status === 403 || status === 404 || status === 422 || status === 428) return true;
@@ -121,10 +115,6 @@ export const negativeDataRejection: Check = {
   applies: (op) => Boolean(op.requestBodySchema),
   run({ case: c, response }): CheckOutcome {
     if (ACCEPTABLE(response.status)) return { kind: "pass" };
-    const skip = applyAntiFp(c, "check:negative_data_rejection");
-    if (skip) {
-      return { kind: "skip", reason: `${skip.ruleId}: ${skip.reason}` };
-    }
     const meta = c.meta as MutationMeta | undefined;
     return {
       kind: "fail",

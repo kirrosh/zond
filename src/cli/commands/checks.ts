@@ -15,8 +15,6 @@ import { resolve as resolvePath, relative as relativePath } from "node:path";
 import type { Command } from "commander";
 
 import { listChecks, runChecks } from "../../core/checks/index.ts";
-import { findWorkspaceRoot } from "../../core/workspace/root.ts";
-import { loadSeverityConfig, SeverityConfigError } from "../../core/severity/loader.ts";
 import { listStatefulChecks } from "../../core/checks/stateful.ts";
 import { resolveBudget, isBudget, BUDGETS, type Budget } from "../../core/checks/budget.ts";
 import { generateSarifReport } from "../../core/checks/sarif.ts";
@@ -470,23 +468,6 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     process.exit(2);
   }
 
-  // ARV-283: severity overlay from .zond/severity.yaml and
-  // apis/<api>/.zond-severity.yaml. Both optional — silent when absent;
-  // invalid config aborts with file:keypath:msg (AC#2).
-  let severityConfig;
-  try {
-    const ws = findWorkspaceRoot();
-    severityConfig = loadSeverityConfig({ workspaceRoot: ws.root, api: apiName });
-  } catch (err) {
-    if (err instanceof SeverityConfigError) {
-      const msgs = err.errors.map((e) => `${e.source}: ${e.keyPath}: ${e.message}`);
-      if (json) printJson(jsonError("checks run", msgs));
-      else for (const m of msgs) printError(m);
-      process.exit(2);
-    }
-    throw err;
-  }
-
   // ARV-3: lift auth headers from --auth-header (wins) and/or the
   // resolved --api's .env.yaml (auth_token / api_key conventions).
   const fromEnv = await deriveAuthHeadersFromApi(apiName, opts.db);
@@ -714,7 +695,6 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       rateLimiter,
       maxRequests: budgetResolved.maxRequests,
       skipStateful: budgetResolved.skipStateful,
-      severityConfig,
       safe: !resolveLive(opts),
     });
 
@@ -1006,7 +986,7 @@ function defineRun(parent: Command): void {
     )
     .option(
       "--show-suppressed",
-      "ARV-283: show findings suppressed by `.zond/severity.yaml` in the text summary (with their suppressed_by trace). Suppressed findings stay in ndjson/JSON audit-trail regardless of this flag and never count toward CI exit codes.",
+      "Show findings suppressed by the deterministic broken-baseline guard in the text summary (with their suppressed_by trace). Suppressed findings stay in the ndjson/JSON audit-trail regardless of this flag and never count toward CI exit codes.",
     )
     .option(
       "--no-fail-on-findings",

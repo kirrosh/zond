@@ -95,7 +95,6 @@ const LEGACY_ALLOW_LIST: Record<string, string> = {
   "api annotate auto": "ARV-262: heuristic inference (pagination/lifecycle/idempotency) writes the overlay without an agent; --json wraps the inference summary. OutputSpec migration not scheduled.",
   "fixtures add": "ARV-195: --json envelope via printJson. OutputSpec migration not scheduled — single-shape command (writes + validations).",
   "fixtures import": "ARV-195: --json envelope via printJson. OutputSpec migration not scheduled — single-shape command (writes + source).",
-  "config validate": "ARV-283: --json envelope via printJson (severity config load+validate result). OutputSpec migration not scheduled — single-shape command.",
 };
 
 interface LeafEntry {

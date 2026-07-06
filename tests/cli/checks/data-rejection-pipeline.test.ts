@@ -1,7 +1,8 @@
 /**
  * Integration tests for the ARV-4 data-rejection checks.
- * AC #5 — serialize-coerce server (string → int) must NOT produce a
- * `negative_data_rejection` finding (the anti-FP guard suppresses it).
+ * ARV-337 (Cut A): the anti-FP suppression layer was removed. A
+ * serialize-coerce server (string → int) that 2xx's a mutated body now
+ * emits a RAW `negative_data_rejection` finding — the agent triages it.
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdir, writeFile, rm } from "fs/promises";
@@ -9,7 +10,6 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import { runChecks } from "../../../src/core/checks/index.ts";
-import { bootstrapAntiFp, resetAntiFpBootstrap } from "../../../src/core/anti-fp/bootstrap.ts";
 
 describe("ARV-4 data-rejection pipeline", () => {
   let server: ReturnType<typeof Bun.serve>;
@@ -18,11 +18,6 @@ describe("ARV-4 data-rejection pipeline", () => {
   let specPath: string;
 
   beforeAll(async () => {
-    // ARV-124: anti-FP guards live in the registry now — bootstrap it so
-    // the direct check-call below sees the schemathesis rule that turns
-    // an integer→string coercion 2xx into a skip instead of a finding.
-    resetAntiFpBootstrap();
-    bootstrapAntiFp();
     // Server emulates Express/FastAPI-style coercion: it accepts both
     // {qty: 5} and {qty: "5"}. From the wire it can't tell — auto-cast.
     // For schema-typed fields it 200's; for dropped required fields it
@@ -101,10 +96,11 @@ describe("ARV-4 data-rejection pipeline", () => {
     expect(finding).toBeUndefined();
   });
 
-  test("AC #5 — serialize-coerce: integer→string mutation on a coercing server is GUARDED", async () => {
+  test("ARV-337 — serialize-coerce: integer→string mutation on a coercing 2xx now emits a RAW finding", async () => {
     // Use the in-process check runner directly to control exactly the
     // mutation type we want to test (the integration runner picks
-    // drop_required first).
+    // drop_required first). Pre-ARV-337 the anti-FP guard suppressed
+    // this as a skip; now the finding surfaces raw for the agent.
     const { negativeDataRejection } = await import("../../../src/core/checks/checks/negative_data_rejection.ts");
     const outcome = negativeDataRejection.run({
       case: {
@@ -128,8 +124,12 @@ describe("ARV-4 data-rejection pipeline", () => {
       },
       response: { status: 201, headers: { "content-type": "application/json" }, body: { id: 1, accepted: true }, duration_ms: 1 },
     });
-    // Guard #2 must suppress — finding NOT issued.
-    expect(outcome.kind).toBe("skip");
-    if (outcome.kind === "skip") expect(outcome.reason).toMatch(/string_type_mutation/);
+    // Raw emit: the server accepted an invalid (type-mutated) body with
+    // a 2xx, so the check fails and carries the mutation as evidence.
+    expect(outcome.kind).toBe("fail");
+    if (outcome.kind === "fail") {
+      expect(outcome.evidence).toMatchObject({ status: 201 });
+      expect(outcome.message).toMatch(/accepted an invalid body/);
+    }
   });
 });
