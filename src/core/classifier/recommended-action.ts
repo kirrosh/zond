@@ -164,8 +164,19 @@ export function classify(ctx: ClassifierContext): RecommendedAction | undefined 
       // state — even a synthetic/garbage id shouldn't crash the server.
       return "report_backend_bug";
 
-    case "check:unsupported_method":
     case "check:positive_data_acceptance":
+      // ARV-324: a known unresolved fixture gap (garbage path-id → 400)
+      // is our own missing test data, not a backend or spec defect.
+      if (ctx.unresolved_fixture) return "fix_fixture";
+      // ARV-341: otherwise this check fires ONLY when the server rejects a
+      // body *we* generated as valid (400/422). The server is
+      // authoritative — our generated body or the spec was wrong, not the
+      // backend. Route to fix_spec, not report_backend_bug, so 100s of
+      // generator/spec-drift cases don't spam the API owner with false
+      // bug reports.
+      return "fix_spec";
+
+    case "check:unsupported_method":
     case "check:use_after_free":
     case "check:ensure_resource_availability":
     case "check:cross_call_references":
