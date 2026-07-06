@@ -1,10 +1,10 @@
 ---
 id: ARV-345
 title: negative_data_rejection false-positives on GET-body / unknown-query mutations
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 10:52'
-updated_date: '2026-07-06 11:07'
+updated_date: '2026-07-06 14:25'
 labels:
   - zond-bug
   - anti-fp
@@ -29,5 +29,5 @@ SCOPE fix (deterministic, like ARV-340): negative_data_rejection should not eval
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-CONSTRAINT (src/CLAUDE.md litmus): this is a SCOPE fix, NOT a suppression task. Do NOT add an anti-FP suppress/down-rank gate on emitted findings — that rebuilds the layer ARV-337 removed. Only two allowed forms: (a) deterministic case-generation scope so the check never emits the case, or (b) emit raw evidence and leave the FP call to the agent in triage (which already worked this run). The word "false-positive" in the title = the symptom, not a mandate to add FP-detection to zond.
+Done (6a6bd16). negative_data_rejection.run(): skip body-mutation cases on GET/HEAD/DELETE (no body semantics) and wrong-type query on GET (documented leniency); drop-required-query stays MEDIUM. Tests updated.
 <!-- SECTION:NOTES:END -->
