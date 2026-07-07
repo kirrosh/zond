@@ -6,6 +6,81 @@ All notable changes to this project will be documented in this file.
 
 (Empty — next development cycle.)
 
+## [0.25.0] — 2026-07-07
+
+m-24: **rebuild around the agent.** zond becomes a set of deterministic
+dumb tools — it sends requests, validates schemas, stores and diffs runs,
+and reports gaps. The autonomous heuristic layer that produced most of the
+0.24 bug-stream (auto-discovery/seed/cascade, annotate-auto guess-engine,
+severity calibrators, anti-FP suppression) is removed; the agent now owns
+every judgment call (severity, spec-vs-backend blame, "is this a false
+positive?", which value fills a fixture). The deterministic core —
+send → validate → store → diff — survives intact. A litmus test in
+`src/CLAUDE.md` keeps the heuristic layer from creeping back one
+"reasonable" fix at a time: same input → same output, or it's the agent's.
+
+### Removed (heuristic layer)
+- **Autonomous fixture seed/cascade engine gone (ARV-336):** `bootstrap.ts`
+  + `create-body.ts` deleted. Live-POST resource creation guessed bodies and
+  cascaded parent→child (1% success on Stripe). prepare-fixtures is now
+  single-pass verify + gap-report; the agent (or user) creates resources.
+- **Severity calibrators + anti-FP suppression gate removed (ARV-337 Cut A):**
+  severity is agent judgment; anti-FP `applyAntiFp` no longer gates emission —
+  the rule reasons survive as raw evidence, not as a suppress-or-emit verdict.
+- **annotate-auto guess-engine removed (ARV-337 Cut B):** `inferSeedBody`
+  fabricated bodies from format/name fallbacks and self-ranked confidence.
+  annotate now dumps the spec slice; the agent authors the YAML, zond
+  validates and merges.
+
+### Agent-facing artifacts & new mechanics
+- **YAML run summary (ARV-338):** `zond db diagnose` drops prose hints (keeps
+  the mechanical counts/grouping spine); `db … --report yaml` emits
+  agent-friendly output.
+- **Field-level run diff (ARV-339):** `zond db compare` now diffs response
+  body/schema per field, not just status.
+- **prepare-fixtures gap report (ARV-349/350):** undefined vars + unseeded
+  capture-chain roots are reported deterministically — no auto-seed.
+- **Agent-orchestrated auto-seed (ARV-355):** `zond request --capture` +
+  `zond-seed` skill — the agent reasons about creation order, zond executes.
+- **Ambiguous-id guard (ARV-334):** the hint-less fixture harvest reports
+  `miss-ambiguous-id` (naming the candidate string field) instead of silently
+  putting a numeric `id` into a string slot like `{owner}` — zond flags the
+  ambiguity, the agent/annotation picks the field.
+- **generate preserves hand-edits (ARV-361):** suite files whose auto-gen
+  header was removed are treated as agent-owned and preserved on regenerate;
+  `--force` overwrites them (was a documented no-op).
+
+### Checks, probes & safety
+- **`--safe`/`--live` parity (ARV-299)** across `checks run` and `probe`.
+- **stateful scope (ARV-325):** `--check stateful` expands to the
+  state-machine set only.
+- **cascade fast-fail (ARV-326):** prepare-fixtures aborts early on a
+  dead/scoped-wrong token instead of grinding through futile attempts.
+- **input-triggered 5xx caught (ARV-340/341):** self-generated body rejects
+  route to `fix_spec`, not `report_backend_bug`.
+- **child-exclude wired (ARV-330):** the last-attempt history lookup uses the
+  all-run-kinds query + child-exclude pattern so probe sub-resource POSTs
+  (`/v1/accounts/{id}/reject`) don't starve the real create-path window.
+- **checks reporting fixes (ARV-322/323/328):** suppressed-count accuracy,
+  SIGTERM ndjson counting, throttled stderr progress on long runs.
+
+### Sweeps & infrastructure
+- **Bounded/resumable sweeps (ARV-342):** `--skip-ops` / `--max-ops` op-window.
+- **DB retention (ARV-266):** `zond db prune` + `zond db stats`, per-run-kind
+  cutoffs, VACUUM after delete.
+- **Schema from observed runs (ARV-175/176):** `schema-from-runs` command +
+  `refresh-api --merge-schema` — union/required-intersection from real
+  responses, not guessing.
+
+### Report, triage & audit-run cleanup
+- Report-noise, severity and UX cleanup (ARV-343/344/345/346/348/351/353);
+  compare scope tag, partial summary on SIGTERM, triage depth aggregate
+  (ARV-352/354).
+- Empty-dir `zond run --output` writes a `0 tests` envelope instead of no
+  file (ARV-357); cross-phase double-emit documented for triage (ARV-358).
+- Workspace-leak fix (env-independent audit paths) + self-compare guard
+  (ARV-359/360), from a petstore audit-run.
+
 ## [0.24.0] — 2026-07-03
 
 m-22 validation sprint. No new milestone surface — this release hardens the
