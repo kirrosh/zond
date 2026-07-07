@@ -115,7 +115,11 @@ export async function dumpCommand(opts: DumpOptions): Promise<number> {
   // by hand to reproduce the failure mode.
   if (opts.withLastAttempt && opts.kind === "seed-bodies") {
     try {
-      const { getRecentFixturePosts } = await import("../../../../db/queries/results.ts");
+      // ARV-330: use the wider all-run-kinds query (a create-path POST made
+      // during a check/probe run counts too, not just fixture runs) and pass
+      // the child-exclude pattern so probe sub-resource POSTs
+      // (`/v1/accounts/{id}/reject`) don't monopolise the history window.
+      const { getRecentCreatePosts } = await import("../../../../db/queries/results.ts");
       const limit = Math.max(1, Math.floor(opts.historyLimit ?? 1));
       for (const b of bundles) {
         const data = b.data as Record<string, unknown> | null;
@@ -123,7 +127,7 @@ export async function dumpCommand(opts: DumpOptions): Promise<number> {
         const create = endpoints?.create;
         if (!create) continue;
         const pattern = createUrlLikePattern(create.path);
-        const recent = getRecentFixturePosts(pattern, limit);
+        const recent = getRecentCreatePosts(pattern, limit, childExcludePattern(create.path));
         if (recent.length === 0) continue;
         // ARV-278: keep `last_attempt` as the most-recent entry (back-compat
         // with single-snapshot consumers) and add `attempt_history` when
