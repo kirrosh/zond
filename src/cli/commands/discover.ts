@@ -131,6 +131,57 @@ function extractFirstField(body: unknown, preferred: string): string | undefined
   return undefined;
 }
 
+/** Return the first object in a list-response (bare array or a `data`/`items`/
+ *  `results`/`records` envelope), or undefined. Same shape-walk as
+ *  extractFirstField, but hands back the whole item for field inspection. */
+function firstListItem(body: unknown): Record<string, unknown> | undefined {
+  const pick = (arr: unknown): Record<string, unknown> | undefined =>
+    Array.isArray(arr) && arr[0] && typeof arr[0] === "object"
+      ? (arr[0] as Record<string, unknown>)
+      : undefined;
+  if (Array.isArray(body)) return pick(body);
+  if (body && typeof body === "object") {
+    const obj = body as Record<string, unknown>;
+    for (const key of ["data", "items", "results", "records"]) {
+      const hit = pick(obj[key]);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
+/** True when the var name carries an explicit field suffix (`_slug`, `_name`,
+ *  `_id`, …) — those are trusted; only the hint-less default is ambiguous. */
+function varHasFieldHint(varName: string): boolean {
+  return VAR_SUFFIX_HINTS.some(({ suffix }) => varName.endsWith(suffix));
+}
+
+/** ARV-334: string identifiers a path segment plausibly uses (as opposed to a
+ *  display `name`/`title`). GitHub's `{owner}` wants `login`, not the numeric
+ *  `id`. */
+const STRING_ID_SIBLINGS = ["login", "username", "handle", "slug", "key"];
+
+/** Deterministic ambiguity signal (response-only, no spec): the hint-less
+ *  default harvest just picked the numeric `id`, but the same item exposes a
+ *  string identifier alongside it. Which one fills the slot is the agent's
+ *  call — return the sibling field name so we report a gap instead of guessing.
+ *  Returns undefined when the var is hinted, `id` isn't numeric, or no string
+ *  sibling exists (the common, unambiguous case). */
+export function ambiguousStringIdSibling(body: unknown, varName: string): string | undefined {
+  if (varHasFieldHint(varName)) return undefined;
+  const item = firstListItem(body);
+  if (!item) return undefined;
+  const idVal = item["id"];
+  const idIsNumeric =
+    typeof idVal === "number" || (typeof idVal === "string" && /^\d+$/.test(idVal.trim()));
+  if (!idIsNumeric) return undefined;
+  for (const f of STRING_ID_SIBLINGS) {
+    const v = item[f];
+    if (typeof v === "string" && v.trim()) return f;
+  }
+  return undefined;
+}
+
 /** True when the list-response is well-shaped but contains zero items.
  *  Used to distinguish "no <entity> in target API yet — go create one"
  *  from "response shape unrecognized" (TASK-273). */
@@ -204,6 +255,10 @@ export interface DiscoveryItem {
     | "miss-status"
     | "miss-empty"
     | "miss-no-id"
+    // ARV-334: got a list, but the hint-less default harvest would put a
+    // numeric `id` into a slot that also exposes a string identifier —
+    // ambiguous, so we report instead of guessing.
+    | "miss-ambiguous-id"
     // TASK-281 verify-mode states
     | "verify-live"
     | "verify-stale"
@@ -722,6 +777,22 @@ export async function probeOne(
   if (current && current === id) {
     item.discovered = id;
     item.status = "skip-already-equal";
+    return item;
+  }
+  // ARV-334: don't silently write a numeric `id` into a slot like {owner}
+  // when the list item also exposes a string identifier — that mismatch is
+  // the GitHub owner→login crash. zond can't know which the path wants
+  // (agent's call), so it reports the ambiguity instead of guessing. Only
+  // fires on the hint-less default harvest; `foo_slug`/`foo_id` stay trusted.
+  const ambiguous = ambiguousStringIdSibling(respBody, target.varName);
+  if (ambiguous) {
+    item.discovered = id;
+    item.status = "miss-ambiguous-id";
+    item.reason =
+      `ambiguous identifier for {${target.varName}}: ${target.ownerResource} list item exposes both ` +
+      `numeric \`id\` (${id}) and string \`${ambiguous}\` — path slots usually want the string. zond ` +
+      `won't guess: set {${target.varName}} in .env.yaml, or add a capture-field hint to ` +
+      `.api-resources.yaml, then re-run \`zond prepare-fixtures --api <name> --apply\`.`;
     return item;
   }
   item.discovered = id;
