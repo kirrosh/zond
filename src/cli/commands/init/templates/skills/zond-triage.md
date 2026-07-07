@@ -132,10 +132,12 @@ priority first):
 6. `fix_network_config` — connect-refused / DNS / TLS. Check `base_url`
    reachability; `--proxy` may be needed.
 7. `regenerate_suite` (ARV-42) — 4xx (400/422) on a generator-emitted
-   suite under `apis/<name>/tests/`. Editing the YAML is wrong: the
-   next `zond audit` overwrites it. Re-run `zond generate --api <name>`
-   so newer heuristics apply (e.g. ARV-38 default-string), or refine
-   `.api-resources.yaml` hints when the body shape can't be inferred.
+   suite under `apis/<name>/tests/`. Prefer re-running `zond generate
+   --api <name>` so newer generation applies (e.g. ARV-38 default-string),
+   or refine `.api-resources.yaml` hints when the body shape can't be
+   inferred. If you DO hand-edit the YAML, delete its `# Auto-generated`
+   header so regenerate preserves it (ARV-361) — otherwise a re-run
+   regenerates it; `--force` overwrites even header-stripped files.
 8. `fix_test_logic` — 4xx (400/422) on a manually-authored suite, or any
    leftover assertion failure not absorbed by the buckets above. Phase 4a
    of the `zond` skill: fixture pack first, typed generator second,
@@ -197,6 +199,18 @@ zond probe mass-assignment --api <name> --json
 For `probe security`, the digest is the source. Read the file the user
 named (or `apis/<name>/probes/security-digest.md`) and pull HIGH rows
 plus the `## ⚠️ Cleanup failures` section if present.
+
+### Cross-phase double-emit (ARV-358)
+
+A single backend defect surfaces in more than one phase stream, so a naive
+HIGH count over-reports. The `checks` phase (`30-checks.ndjson`, e.g.
+`not_a_server_error`) and the `stateful` phase (`40-stateful.ndjson`, e.g.
+`cursor_boundary_fuzzing`) can both flag the *same* endpoint 5xx — that's
+one defect counted 3–4×. zond does NOT dedup this for you: the check_ids
+differ, so collapsing them is a "same root cause" judgment (attribution),
+which is your job, not the tool's. When counting, **group by `(method,
+path, status)` across phase streams**, not by raw finding count — one
+`GET /v1/billing/alerts → 500` is one defect even if it appears 4 times.
 
 ## Output template
 

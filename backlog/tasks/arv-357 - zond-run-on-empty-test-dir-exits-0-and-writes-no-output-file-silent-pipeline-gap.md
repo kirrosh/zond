@@ -3,9 +3,10 @@ id: ARV-357
 title: >-
   zond run on empty test dir exits 0 and writes no --output file (silent
   pipeline gap)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-06 15:40'
+updated_date: '2026-07-07 08:19'
 labels:
   - zond-bug
   - ux
