@@ -1,9 +1,10 @@
 ---
 id: ARV-364
 title: README v2 + skills переписаны под агент-оркестратора (форма m-24)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-08 07:14'
+updated_date: '2026-07-08 07:52'
 labels:
   - m-25
   - distribution

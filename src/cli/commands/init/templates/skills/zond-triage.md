@@ -234,7 +234,7 @@ Pass <N>  Fail <M>  Error <K>  Coverage <pct>%
     next: edit apis/<name>/.env.yaml → base_url
 📥 fix_fixture  ×<n>
   · {{audience_id}} unresolved
-    next: zond prepare-fixtures --api <name> --apply  (then fill gaps by hand)
+    next: zond prepare-fixtures --api <name>  (reports the gap; fill it via `fixtures add` / .env.yaml)
 📜 fix_spec  ×<n>  (from check spec)
   · A2 missing operationId on POST /webhooks
     next: edit spec.json → operationId, then zond refresh-api <name>
