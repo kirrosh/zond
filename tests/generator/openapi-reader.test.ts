@@ -1,5 +1,9 @@
-import { describe, test, expect } from "bun:test";
-import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "../../src/core/generator/openapi-reader.ts";
+import { afterEach, describe, test, expect } from "bun:test";
+import { rootCertificates } from "node:tls";
+import { writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, resolveSpecFetchTls } from "../../src/core/generator/openapi-reader.ts";
 
 const FIXTURE = "tests/fixtures/petstore-auth.json";
 
@@ -258,5 +262,60 @@ describe("extractEndpoints — x-circular param stubs (ARV-200/F1)", () => {
     expect(ep.parameters.length).toBe(1);
     expect(ep.parameters[0]!.name).toBe("limit");
     expect(ep.parameters.every((p) => typeof p.name === "string" && typeof p.in === "string")).toBe(true);
+  });
+});
+
+describe("resolveSpecFetchTls (MF1 / ARV-367)", () => {
+  const saved = process.env.NODE_EXTRA_CA_CERTS;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.NODE_EXTRA_CA_CERTS;
+    else process.env.NODE_EXTRA_CA_CERTS = saved;
+  });
+
+  const PEM = "-----BEGIN CERTIFICATE-----\nMIIBfoo\n-----END CERTIFICATE-----\n";
+
+  test("no options → undefined (default trust store)", () => {
+    delete process.env.NODE_EXTRA_CA_CERTS;
+    expect(resolveSpecFetchTls()).toBeUndefined();
+    expect(resolveSpecFetchTls({})).toBeUndefined();
+  });
+
+  test("insecure → verification off", () => {
+    delete process.env.NODE_EXTRA_CA_CERTS;
+    expect(resolveSpecFetchTls({ insecure: true })).toEqual({ rejectUnauthorized: false });
+  });
+
+  test("caPath APPENDS to public roots (never replaces them)", () => {
+    delete process.env.NODE_EXTRA_CA_CERTS;
+    const p = join(tmpdir(), `zond-ca-${process.pid}.pem`);
+    writeFileSync(p, PEM);
+    try {
+      const tls = resolveSpecFetchTls({ caPath: p }) as { ca: string[] };
+      expect(tls.ca[0]).toContain("BEGIN CERTIFICATE");
+      expect(tls.ca.length).toBe(1 + rootCertificates.length);
+    } finally {
+      rmSync(p);
+    }
+  });
+
+  test("NODE_EXTRA_CA_CERTS honored when caPath absent", () => {
+    const p = join(tmpdir(), `zond-ca-env-${process.pid}.pem`);
+    writeFileSync(p, PEM);
+    process.env.NODE_EXTRA_CA_CERTS = p;
+    try {
+      const tls = resolveSpecFetchTls() as { ca: string[] };
+      expect(tls.ca.length).toBe(1 + rootCertificates.length);
+    } finally {
+      rmSync(p);
+    }
+  });
+
+  test("insecure overrides caPath", () => {
+    expect(resolveSpecFetchTls({ insecure: true, caPath: "/nonexistent" })).toEqual({ rejectUnauthorized: false });
+  });
+
+  test("unreadable CA path throws (surfaces misconfig, no silent fallthrough)", () => {
+    delete process.env.NODE_EXTRA_CA_CERTS;
+    expect(() => resolveSpecFetchTls({ caPath: "/nonexistent/zond-ca.pem" })).toThrow(/CA bundle not readable/);
   });
 });

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { rootCertificates } from "node:tls";
 import { dereference } from "@readme/openapi-parser";
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, ResponseInfo, SecuritySchemeInfo } from "./types.ts";
@@ -5,12 +7,48 @@ import { disambiguateGenericPathParams } from "./path-param-disambig.ts";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
-export async function readOpenApiSpec(specPath: string, options?: { insecure?: boolean }): Promise<OpenAPIV3.Document> {
+export interface SpecFetchTlsOptions {
+  /** Disable TLS verification entirely (bun `--insecure`). Last resort. */
+  insecure?: boolean;
+  /** Path to a PEM CA bundle to trust in addition to the public roots.
+   *  Falls back to the `NODE_EXTRA_CA_CERTS` env var. */
+  caPath?: string;
+}
+
+/** MF1 (ARV-367): resolve the bun `fetch` `tls` option for a spec fetch so a
+ *  self-signed / internal corporate CA validates *without* disabling TLS.
+ *
+ *  Precedence: `insecure` (verification off) > explicit `caPath` /
+ *  `NODE_EXTRA_CA_CERTS` (extra CA APPENDED to the public roots — never
+ *  replacing them, so public specs keep validating) > default (undefined).
+ *  Returns undefined when nothing special is needed. Throws if a CA path is
+ *  set but unreadable — a misconfigured CA should surface, not fall through
+ *  to a confusing "self signed certificate" error. */
+export function resolveSpecFetchTls(
+  options?: SpecFetchTlsOptions,
+): { rejectUnauthorized: false } | { ca: string[] } | undefined {
+  if (options?.insecure) return { rejectUnauthorized: false };
+  const caPath = options?.caPath ?? process.env.NODE_EXTRA_CA_CERTS;
+  if (caPath) {
+    let extra: string;
+    try {
+      extra = readFileSync(caPath, "utf8");
+    } catch (e) {
+      throw new Error(
+        `CA bundle not readable: ${caPath} (${(e as Error).message}). ` +
+          `Set --ca / NODE_EXTRA_CA_CERTS to a valid PEM file, or use --insecure.`,
+      );
+    }
+    if (extra.trim()) return { ca: [extra, ...rootCertificates] };
+  }
+  return undefined;
+}
+
+export async function readOpenApiSpec(specPath: string, options?: SpecFetchTlsOptions): Promise<OpenAPIV3.Document> {
   // For HTTP URLs, fetch the spec first then dereference the parsed object
   if (specPath.startsWith("http://") || specPath.startsWith("https://")) {
-    const resp = await fetch(specPath, {
-      ...(options?.insecure ? { tls: { rejectUnauthorized: false } } : {}),
-    });
+    const tls = resolveSpecFetchTls(options);
+    const resp = await fetch(specPath, { ...(tls ? { tls } : {}) });
     if (!resp.ok) throw new Error(`Failed to fetch spec: ${resp.status} ${resp.statusText}`);
     const spec = await resp.json();
     const api = await dereference(spec as string);

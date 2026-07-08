@@ -24,6 +24,7 @@ export interface AddApiOptions {
   dir?: string;
   force?: boolean;
   insecure?: boolean;
+  caPath?: string;
   dbPath?: string;
   json?: boolean;
 }
@@ -49,6 +50,7 @@ export async function addApiCommand(opts: AddApiOptions): Promise<number> {
       dbPath: opts.dbPath,
       force: opts.force,
       insecure: opts.insecure,
+      caPath: opts.caPath,
     });
   } catch (err) {
     const m = (err as Error).message;
@@ -111,6 +113,7 @@ export function registerAdd(program: Command): void {
     .option("--dir <path>", "Target directory (defaults to apis/<name>/)")
     .option("--force", "Overwrite an existing API with the same name")
     .option("--insecure", "Skip TLS verification when fetching the spec from https")
+    .option("--ca <path>", "PEM CA bundle to trust for the spec fetch (adds to public roots; also reads NODE_EXTRA_CA_CERTS) — use instead of --insecure for internal/corp CAs")
     .option("--db <path>", "Path to SQLite database file")
     .action(async (name: string, opts, cmd: Command) => {
       const json = globalJson(cmd);
@@ -127,6 +130,7 @@ export function registerAdd(program: Command): void {
         dir: opts.dir,
         force: opts.force === true,
         insecure: opts.insecure === true,
+        caPath: typeof opts.ca === "string" ? opts.ca : undefined,
         dbPath: typeof opts.db === "string" ? opts.db : undefined,
         json,
       });
