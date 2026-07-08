@@ -609,11 +609,31 @@ export function detectCrudGroupsWithDiagnostics(
 }
 
 /** Generate a CRUD chain suite from a CrudGroup */
+/** ARV-368: does the create's success response actually carry the capture
+ *  field? If not — a 204 no-body create, or a response schema without the id —
+ *  the runtime capture is empty and `{{captureVar}}` falls back to the
+ *  read-fixture of the SAME name (ARV-137 deliberately shares it). A PUT/DELETE
+ *  then targets a *pre-existing* resource whose id the user harvested for read
+ *  coverage — silent data-loss. Gate mutating chain steps on this so the suite
+ *  can only ever update/delete what it actually captured, never live data. */
+function createCapturesId(
+  create: EndpointInfo | undefined,
+  captureField: string,
+): boolean {
+  if (!create) return false;
+  const props = getSuccessSchema(create)?.properties;
+  return !!props && captureField in props;
+}
+
 export function generateCrudSuite(
   group: CrudGroup,
   securitySchemes: SecuritySchemeInfo[],
 ): RawSuite {
   const captureField = group.create ? getCaptureField(group.create, group.idParam) : "id";
+  // ARV-368: only chain PUT/DELETE when the create response yields the id we'd
+  // capture. Otherwise the capture is empty at runtime and the mutating step
+  // falls back to the shared read-fixture → deletes/overwrites pre-existing data.
+  const canChainMutations = createCapturesId(group.create, captureField);
   // ARV-137: use the spec's path-param name as the capture var. Previously
   // we synthesised `<resource>_id` via `resourceVar(...)`, which produced
   // phantom manifest dupes whenever the spec named the path-param anything
@@ -658,8 +678,9 @@ export function generateCrudSuite(
     tests.push(step);
   }
 
-  // 3. Update
-  if (group.update) {
+  // 3. Update (ARV-368: only if the chain self-captures its id — else the
+  //    fixture-fallback would overwrite a pre-existing resource)
+  if (group.update && canChainMutations) {
     const method = group.update.method.toUpperCase();
     const itemPath = convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`);
     const etagVar = resourceVar(group.resource, "etag");
@@ -694,8 +715,9 @@ export function generateCrudSuite(
     tests.push(step);
   }
 
-  // 4. Delete
-  if (group.delete) {
+  // 4. Delete (ARV-368: only if the chain self-captures its id — else the
+  //    fixture-fallback would DELETE a pre-existing resource → data-loss)
+  if (group.delete && canChainMutations) {
     const itemPath = convertPath(group.itemPath).replace(`{{${group.idParam}}}`, `{{${captureVar}}}`);
     const etagVar = resourceVar(group.resource, "etag");
 
