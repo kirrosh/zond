@@ -3,6 +3,7 @@ import { mkdir, writeFile, readFile, rm } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { discoverCommand } from "../../src/cli/commands/discover.ts";
+import { captureOutput } from "../_helpers/output.ts";
 
 describe("zond discover", () => {
   let server: ReturnType<typeof Bun.serve>;
@@ -160,10 +161,15 @@ describe("zond discover", () => {
     expect(after).toBe(`base_url: ${baseUrl}\n`);
   });
 
-  test("--apply writes discovered ids and creates a backup", async () => {
+  // ARV-362 (m-25): discover never writes values — which record/field fills a
+  // slot is the agent's call. --apply (outside --verify) leaves .env.yaml
+  // untouched and reports every unfilled var as a gap.
+  test("--apply does not write values — reports non-empty lists as needs-value gaps", async () => {
     const envPath = join(apiDir, ".env.apply.yaml");
-    await writeFile(envPath, `base_url: ${baseUrl}\naudience_id: ""\n`);
+    const before = `base_url: ${baseUrl}\naudience_id: ""\n`;
+    await writeFile(envPath, before);
 
+    const out = captureOutput({ console: true });
     const exit = await discoverCommand({
       specPath,
       apiDir,
@@ -173,18 +179,19 @@ describe("zond discover", () => {
     });
     expect(exit).toBe(0);
 
+    // .env.yaml untouched — no harvested value, no backup.
     const after = await readFile(envPath, "utf8");
-    expect(after).toContain(`audience_id: "aud_real_42"`);
-    // Project slug discovered via { data: [{slug}] } shape.
-    expect(after).toContain(`project_slug: "proj-zond"`);
-    // empty list — no value written, env should not contain a non-empty empty_id.
-    expect(after).not.toMatch(/^empty_id:\s*"[^"]+"\s*$/m);
-    // forbidden — 403; no value written.
-    expect(after).not.toMatch(/^forbidden_id:\s*"[^"]+"\s*$/m);
+    expect(after).toBe(before);
 
-    // Backup exists and equals the pre-apply content.
-    const backup = await readFile(`${envPath}.bak`, "utf8");
-    expect(backup).toBe(`base_url: ${baseUrl}\naudience_id: ""\n`);
+    const env = JSON.parse(out.out);
+    expect(env.data.applied).toBe(false);
+    const byVar = (n: string) =>
+      env.data.items.find((i: { varName: string }) => i.varName === n);
+    // Non-empty lists → miss-needs-value (agent picks), not a write.
+    expect(byVar("audience_id").status).toBe("miss-needs-value");
+    expect(byVar("project_slug").status).toBe("miss-needs-value");
+    // No item is ever a write anymore.
+    expect(env.data.items.some((i: { status: string }) => i.status === "write")).toBe(false);
   });
 
   test("skips vars already filled with a non-placeholder value", async () => {
@@ -247,10 +254,6 @@ describe("zond discover", () => {
     for (const i of misses) {
       const expected = i.status === "miss-network" ? "fix_network_config" : "fix_fixture";
       expect(i.recommended_action).toBe(expected);
-    }
-    // Successful writes do not carry a recommended_action.
-    for (const i of items.filter(i => i.status === "write")) {
-      expect(i.recommended_action).toBeUndefined();
     }
   });
 
@@ -341,14 +344,15 @@ describe("zond discover", () => {
     const byName = Object.fromEntries(items.map(i => [i.varName, i]));
     expect(byName.base_url!.manifestStatus).toBe("skipped:not-required");
     expect(byName.auth_token!.manifestStatus).toBe("skipped:not-required");
-    // audience_id is path-source, list endpoint /audiences responds with array → filled.
-    expect(byName.audience_id!.manifestStatus).toBe("filled");
+    // ARV-362: audience_id list /audiences responds with records, but discover
+    // won't pick one — the agent fills it. Reported as failed:needs-value.
+    expect(byName.audience_id!.manifestStatus).toBe("failed:needs-value");
     // capture-chain entries are not the discover loop's responsibility.
     expect(byName.capture_var!.manifestStatus).toBe("skipped:not-required");
-    // Manifest summary: filled = 1, required (manifest) = 3.
+    // ARV-362: discover never auto-fills → filled = 0, required (manifest) = 3.
     expect(env.data.summary.manifest).toBeDefined();
     expect(env.data.summary.manifest.required).toBe(3);
-    expect(env.data.summary.manifest.filled).toBe(1);
+    expect(env.data.summary.manifest.filled).toBe(0);
     expect(env.data.summary.manifest.unknownEnvKeys).toContain("legacy_var");
   });
 

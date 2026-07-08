@@ -3,9 +3,10 @@ id: ARV-362
 title: >-
   discover.ts — finish reshape to deterministic verify+gap-report, cut
   field-guessing
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-08 07:13'
+updated_date: '2026-07-08 07:46'
 labels:
   - m-25
   - cleanup
