@@ -92,25 +92,26 @@ describe("ARV-119: probe family --report resolution", () => {
     expect(stderr).not.toContain("Unknown --report format");
   });
 
-  // ARV-321: --emit-tests + --dry-run silently no-op'd (target dir stayed
-  // empty, zero signal) — read as a bug on the live Stripe run
-  // (report-zond friction, 2026-07-02). Both probe families now warn.
-  test("probe mass-assignment --dry-run --emit-tests warns it's a no-op", async () => {
+  // ARV-321/ARV-348: --emit-tests without --live used to silently no-op (empty
+  // dir, exit 0) then a later `zond run <dir>` printed "No test files found".
+  // Now it fails loudly with ONE consistent message (—live), not the old
+  // contradictory "Re-run without --dry-run".
+  test("probe mass-assignment --emit-tests without --live fails loud (requires --live)", async () => {
     const { stderr } = await runCli([
       "probe", "mass-assignment", specPath, "--dry-run",
       "--emit-tests", join(workspace, "emitted"),
     ]);
-    expect(stderr).toContain("--emit-tests skipped");
-    expect(stderr).toContain("--dry-run");
+    expect(stderr).toContain("--emit-tests requires --live");
+    expect(stderr).not.toContain("without --dry-run");
   });
 
-  test("probe security --dry-run --emit-tests warns it's a no-op", async () => {
+  test("probe security --emit-tests without --live fails loud (requires --live)", async () => {
     const { stderr } = await runCli([
       "probe", "security", "ssrf", specPath, "--dry-run",
       "--emit-tests", join(workspace, "emitted"),
     ]);
-    expect(stderr).toContain("--emit-tests skipped");
-    expect(stderr).toContain("--dry-run");
+    expect(stderr).toContain("--emit-tests requires --live");
+    expect(stderr).not.toContain("without --dry-run");
   });
 
   test("probe mass-assignment --dry-run without --emit-tests stays silent about it", async () => {

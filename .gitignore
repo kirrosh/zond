@@ -53,3 +53,6 @@ playground/
 
 # Claude Code local state
 .claude/
+
+# zond audit run artifacts (contain throwaway workspaces + secrets — never commit)
+zond-runs/

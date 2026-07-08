@@ -30,6 +30,8 @@ import {
 import { liveAuthHeaders } from "../../core/probe/shared.ts";
 import { executeRequest } from "../../core/runner/http-client.ts";
 import { writeFixtureGaps, type FixtureGap } from "../../core/workspace/fixture-gaps.ts";
+import { reportFixtureGaps, type FixtureGapReport } from "../../core/workspace/fixture-gap-report.ts";
+import { parseSafe } from "../../core/parser/yaml-parser.ts";
 
 /**
  * Suffix-aware field extraction. For var `project_slug` we prefer the
@@ -129,6 +131,57 @@ function extractFirstField(body: unknown, preferred: string): string | undefined
   return undefined;
 }
 
+/** Return the first object in a list-response (bare array or a `data`/`items`/
+ *  `results`/`records` envelope), or undefined. Same shape-walk as
+ *  extractFirstField, but hands back the whole item for field inspection. */
+function firstListItem(body: unknown): Record<string, unknown> | undefined {
+  const pick = (arr: unknown): Record<string, unknown> | undefined =>
+    Array.isArray(arr) && arr[0] && typeof arr[0] === "object"
+      ? (arr[0] as Record<string, unknown>)
+      : undefined;
+  if (Array.isArray(body)) return pick(body);
+  if (body && typeof body === "object") {
+    const obj = body as Record<string, unknown>;
+    for (const key of ["data", "items", "results", "records"]) {
+      const hit = pick(obj[key]);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
+/** True when the var name carries an explicit field suffix (`_slug`, `_name`,
+ *  `_id`, …) — those are trusted; only the hint-less default is ambiguous. */
+function varHasFieldHint(varName: string): boolean {
+  return VAR_SUFFIX_HINTS.some(({ suffix }) => varName.endsWith(suffix));
+}
+
+/** ARV-334: string identifiers a path segment plausibly uses (as opposed to a
+ *  display `name`/`title`). GitHub's `{owner}` wants `login`, not the numeric
+ *  `id`. */
+const STRING_ID_SIBLINGS = ["login", "username", "handle", "slug", "key"];
+
+/** Deterministic ambiguity signal (response-only, no spec): the hint-less
+ *  default harvest just picked the numeric `id`, but the same item exposes a
+ *  string identifier alongside it. Which one fills the slot is the agent's
+ *  call — return the sibling field name so we report a gap instead of guessing.
+ *  Returns undefined when the var is hinted, `id` isn't numeric, or no string
+ *  sibling exists (the common, unambiguous case). */
+export function ambiguousStringIdSibling(body: unknown, varName: string): string | undefined {
+  if (varHasFieldHint(varName)) return undefined;
+  const item = firstListItem(body);
+  if (!item) return undefined;
+  const idVal = item["id"];
+  const idIsNumeric =
+    typeof idVal === "number" || (typeof idVal === "string" && /^\d+$/.test(idVal.trim()));
+  if (!idIsNumeric) return undefined;
+  for (const f of STRING_ID_SIBLINGS) {
+    const v = item[f];
+    if (typeof v === "string" && v.trim()) return f;
+  }
+  return undefined;
+}
+
 /** True when the list-response is well-shaped but contains zero items.
  *  Used to distinguish "no <entity> in target API yet — go create one"
  *  from "response shape unrecognized" (TASK-273). */
@@ -202,6 +255,10 @@ export interface DiscoveryItem {
     | "miss-status"
     | "miss-empty"
     | "miss-no-id"
+    // ARV-334: got a list, but the hint-less default harvest would put a
+    // numeric `id` into a slot that also exposes a string identifier —
+    // ambiguous, so we report instead of guessing.
+    | "miss-ambiguous-id"
     // TASK-281 verify-mode states
     | "verify-live"
     | "verify-stale"
@@ -703,13 +760,14 @@ export async function probeOne(
     // of guessing for 30 minutes whether zond is broken.
     if (isEmptyListBody(respBody)) {
       item.status = "miss-empty";
-      // ARV-261: surface the destructive nature of --seed in the hint so
-      // users don't run it against a production API without considering
-      // that it POST-creates real resources on the target.
+      // ARV-336: prepare-fixtures is single-pass and deterministic — it
+      // can't invent a record for an empty list. Create the resource
+      // yourself (product UI / API), then harvest its id by hand into
+      // .env.yaml (or `zond fixtures add`) and re-run discover.
       item.reason =
-        `no ${target.ownerResource} in target API — re-run with \`zond prepare-fixtures --api <name> --seed --apply\` ` +
-        `to POST-create one automatically (⚠ creates real resources on the target API — use only against a throwaway/test environment), ` +
-        `or create the resource yourself (in the product UI or via API) and re-run discover`;
+        `no ${target.ownerResource} in target API — create the resource yourself ` +
+        `(in the product UI or via API), then set its id in .env.yaml (or run ` +
+        `\`zond fixtures add\`) and re-run \`zond prepare-fixtures --api <name> --apply\``;
     } else {
       item.status = "miss-no-id";
       item.reason = `response shape has no extractable first id (no array/data/items/results/records field)`;
@@ -719,6 +777,22 @@ export async function probeOne(
   if (current && current === id) {
     item.discovered = id;
     item.status = "skip-already-equal";
+    return item;
+  }
+  // ARV-334: don't silently write a numeric `id` into a slot like {owner}
+  // when the list item also exposes a string identifier — that mismatch is
+  // the GitHub owner→login crash. zond can't know which the path wants
+  // (agent's call), so it reports the ambiguity instead of guessing. Only
+  // fires on the hint-less default harvest; `foo_slug`/`foo_id` stay trusted.
+  const ambiguous = ambiguousStringIdSibling(respBody, target.varName);
+  if (ambiguous) {
+    item.discovered = id;
+    item.status = "miss-ambiguous-id";
+    item.reason =
+      `ambiguous identifier for {${target.varName}}: ${target.ownerResource} list item exposes both ` +
+      `numeric \`id\` (${id}) and string \`${ambiguous}\` — path slots usually want the string. zond ` +
+      `won't guess: set {${target.varName}} in .env.yaml, or add a capture-field hint to ` +
+      `.api-resources.yaml, then re-run \`zond prepare-fixtures --api <name> --apply\`.`;
     return item;
   }
   item.discovered = id;
@@ -830,6 +904,13 @@ export function upsertEnvLine(yamlText: string, key: string, value: string): str
     lines[idx] = newLine;
   }
   return lines.join("\n");
+}
+
+/** First 8 `{{var}}` names + "… and N more" — keeps the gap warning readable
+ *  when a barely-provisioned account leaves dozens of required fixtures empty. */
+function capNames(names: string[], max = 8): string {
+  const head = names.slice(0, max).map(n => `{{${n}}}`).join(", ");
+  return names.length > max ? `${head}, … and ${names.length - max} more` : head;
 }
 
 export async function discoverCommand(options: DiscoverOptions): Promise<number> {
@@ -1144,6 +1225,28 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     // Rewritten wholesale every run so a since-fixed gap doesn't linger.
     await writeFixtureGaps(options.apiDir, gapsFromItems(items));
 
+    // ARV-349/350: report suite vars this single-pass run cannot resolve.
+    // Load the generated suites (best-effort — absent tests/ dir is fine) and
+    // scan them against the env we'd end up with (current + this run's writes).
+    // Report only; never invent values / auto-seed.
+    let gapReport: FixtureGapReport = { undefinedVars: [], unseededRoots: [] };
+    try {
+      const { suites } = await parseSafe(join(options.apiDir, "tests"));
+      if (suites.length > 0) {
+        const effectiveEnv: Record<string, string> = { ...env };
+        for (const w of writes) effectiveEnv[w.varName] = w.discovered!;
+        // Required manifest vars still empty after this pass = candidate
+        // chain-roots. Source-agnostic: real specs model these as `path`
+        // required:true with an empty default, not only `capture-chain`.
+        const requiredEmptyVars = new Set(
+          (manifest?.fixtures ?? [])
+            .filter(f => f.required && !(effectiveEnv[f.name] && effectiveEnv[f.name]!.length > 0))
+            .map(f => f.name),
+        );
+        gapReport = reportFixtureGaps(suites, effectiveEnv, requiredEmptyVars);
+      }
+    } catch { /* suite scan is best-effort — never fail prepare-fixtures on it */ }
+
     const requiredManifestCount = manifest
       ? manifest.fixtures.filter(f => f.required).length
       : 0;
@@ -1174,6 +1277,9 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
           writes: writes.length,
           alreadySet: items.filter(i => i.status === "skip-already-set").length,
           misses: items.filter(i => i.status.startsWith("miss-")).length,
+          // ARV-349/350: gaps prepare-fixtures cannot resolve deterministically.
+          // Present so an agent/user can fill them; values are never invented.
+          fixtureGaps: gapReport,
           ...(manifest ? {
             manifest: {
               required: requiredManifestCount,
@@ -1267,6 +1373,23 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
       }
       if (manifest) {
         console.log(`Filled ${filledCount} / ${requiredManifestCount} manifest entries.`);
+      }
+      // ARV-350: chain-roots that gate whole CRUD suites — flag first, they're
+      // the highest-leverage gap (one id un-skips a dependent chain). Cap the
+      // inline list; the full set is in the JSON envelope for agent consumption.
+      if (gapReport.unseededRoots.length > 0) {
+        printWarning(
+          `${gapReport.unseededRoots.length} unseeded chain-root(s): ${capNames(gapReport.unseededRoots.map(r => r.variable))}. ` +
+          `Dependent CRUD suites skip until these are set — supply an id via \`fixtures add\` / .env.yaml ` +
+          `(prepare-fixtures does not auto-seed; use --json for the full list).`,
+        );
+      }
+      // ARV-349: suite vars nothing produces — no env value, capture, or param.
+      if (gapReport.undefinedVars.length > 0) {
+        printWarning(
+          `${gapReport.undefinedVars.length} unresolved suite var(s): ${capNames(gapReport.undefinedVars.map(v => v.variable))}. ` +
+          `Fill them via \`fixtures add\` / .env.yaml (prepare-fixtures does not invent values; use --json for the full list).`,
+        );
       }
       if (unknownEnvKeys.length > 0) {
         printWarning(

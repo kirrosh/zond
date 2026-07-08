@@ -1,14 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach, beforeAll } from "bun:test";
-import { bootstrapAntiFp } from "../../../src/core/anti-fp/bootstrap.ts";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 
-// ARV-125: the inconclusive-baseline summary now consults the anti-FP
-// registry (`subscription-gated/paid-plan-403` rule) instead of an inline regex
-// array. The probe entry-point doesn't bootstrap the registry — the
-// CLI does, in `buildProgram`. Tests bypass that, so we register the
-// shipped rule set explicitly. Idempotent: safe to call repeatedly.
-beforeAll(() => {
-  bootstrapAntiFp();
-});
+// ARV-337 (Cut A): the anti-FP registry was removed. The
+// subscription-gated 403 signal is now an inlined matcher in
+// mass-assignment/classify.ts (`isSubscriptionGated`) — no bootstrap
+// needed; it feeds the baseline summary as a plain evidence reason.
 import {
   runMassAssignmentProbes,
   formatDigestMarkdown,

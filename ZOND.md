@@ -121,8 +121,8 @@ Commands group around the lifecycle phase they belong to (mirrors `zond --help`)
 | `use [api]` | Set/show the active API (writes `.zond/current-api`); see resolution chain above | — |
 | `refresh-api <name>` | Re-snapshot spec.json + regenerate the 3 artifacts | `--spec <path\|url>`, `--insecure` |
 | `doctor` | Fixture gaps in `.env.yaml` + artifact freshness vs spec.json (exit 0/1/2) | `--api <name>`, `--json` |
-| `prepare-fixtures` | Auto-fill `.env.yaml` FK ids — single-pass discover by default; `--cascade` enables the multi-pass discover+seed flow | `--api <name>`, `--apply`, `--verify`, `--refresh`, `--cascade`, `--seed`, `--force`, `--max-passes <n>`, `--env <path>`, `--timeout <ms>`, `--json` |
-| `fixtures add <var>=<value>` | Manual fixture set — for path-FK ids that auto-discover/--seed can't reach (vendor-dashboard ids). Optional `--validate` GETs the read-by-id endpoint and classifies live/stale/unknown (ARV-195) | `--api <name>`, `--validate`, `--apply`, `--json` |
+| `prepare-fixtures` | Auto-fill `.env.yaml` FK ids in a single discover pass; reports which fixtures are still missing (m-24: seed/cascade removed — fill gaps via `fixtures add` or the agent) | `--api <name>`, `--apply`, `--verify`, `--refresh`, `--env <path>`, `--timeout <ms>`, `--json` |
+| `fixtures add <var>=<value>` | Manual fixture set — for path-FK ids the discover pass can't reach (vendor-dashboard ids). Optional `--validate` GETs the read-by-id endpoint and classifies live/stale/unknown (ARV-195) | `--api <name>`, `--validate`, `--apply`, `--json` |
 | `fixtures import --from-curl` | Import fixtures from a curl command (paste from devtools / vendor dashboard). URL is matched against spec paths longest-template-first to extract `{var}` bindings (ARV-195) | `--api <name>`, `--curl <text>`, `--apply`, `--json` |
 | `clean` | Remove auto-generated files tracked in `.zond/manifest.json` | `--api <name>`, `--probes`, `--dry-run`, `--force` |
 | `cleanup` | Retry probe leftovers; currently only `--orphans` re-issues DELETE for resources captured in `~/.zond/orphans/` | `--orphans`, `--db <path>`, `--json` |
@@ -520,8 +520,8 @@ zond probe security --api sentry --isolated
 The trade-off is lower coverage — the seeded-fixture endpoints get a
 SKIPPED entry instead of HIGH/LOW findings — but `tests-run → probes-run
 → tests-run` round-trips on the same fixtures stop 404'ing. (For mass-
-assignment, isolation is achieved by giving the probe scratch fixtures via
-`prepare-fixtures --cascade --seed` instead of seeded ones.)
+assignment, isolation is achieved by giving the probe scratch fixtures —
+create them yourself or via the agent and add with `fixtures add`.)
 
 #### Stale fixture re-validation (`--verify` / `--refresh`)
 
@@ -1348,37 +1348,41 @@ does not. Error codes follow the `ZondErrorCode` enum (see
 `--report json`. Use `--report json` for the report payload; `--report-out
 <file>` writes it to disk.
 
-### `db diagnose` envelope — `env_issue`
+### `db run` / `db diagnose` / `db compare` — `--report yaml` (ARV-338)
 
-When the diagnose detector decides that environment misconfiguration (not test
-logic, not a backend bug) is the root cause of failures, it surfaces the
-finding as a structured `env_issue` field in the `data` payload:
+Without `--json`, these commands print their payload as plain JSON to stdout.
+Pass `--report yaml` to get the same payload as YAML — an agent-friendly run
+snapshot you can commit next to suite YAMLs and diff between runs as text:
 
-```jsonc
-{
-  "env_issue": {
-    "message": "Suite \"payments\" looks env-broken (missing_var=2) — check .env.yaml",
-    "scope": "suite:payments",          // "run" or "suite:<name>"
-    "affected_suites": ["payments"],    // suites that were re-classified to fix_env
-    "symptoms": {                       // histogram of root-cause classes
-      "missing_var": 2,                 // unresolved {{var}} in URL/body/headers
-      "base_url": 0,                    // base_url unset or empty
-      "url_malformed": 0,               // computed URL is not parseable
-      "auth_expired": 0                 // 401/403 with auth-header reference
-    }
-  }
-}
+```bash
+zond db run 42 --report yaml > runs/42.yaml
+zond db diagnose --report yaml            # dev summary of the last failing run
+zond db compare 41 42 --report yaml       # status + field-level regression diff
 ```
 
-`scope` semantics:
-- `run` — multiple suites tripped the detector; the run as a whole is
-  env-broken. Often paired with a "missing base_url"/expired-token symptom
-  set.
-- `suite:<name>` — only one suite tripped the detector. The other suites'
-  failures keep their original `recommended_action` (e.g. `fix_test_logic`).
+`--report yaml` and `--json` are mutually exclusive. Prose hint fields
+(`env_issue`, `auth_hint`, `agent_directive`, per-failure `hint`) were removed
+from the diagnose payload in ARV-338 — route on the `recommended_action` enum
+and raw evidence instead.
 
-5xx failures are **never** rewritten to `fix_env` — `report_backend_bug` wins
-even when the surrounding suite is otherwise env-broken.
+### `db compare` — field-level body diff (ARV-339)
+
+Beyond status transitions, `db compare` diffs the stored response bodies of
+every test present in both runs and reports how the response shape moved:
+
+```yaml
+body_changes:
+  - suite: users
+    test: get user
+    changes:
+      - { field: email, change: added, after: string }
+      - { field: id, change: type_changed, before: number, after: string }
+      - { field: legacy, change: removed, before: boolean }
+```
+
+Fields are dot-paths; array elements collapse under `[]` (`items[].price`),
+so item count/order is not a change. Non-JSON or missing bodies are skipped.
+`summary.bodyChanges` counts affected tests.
 
 ---
 

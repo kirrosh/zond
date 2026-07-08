@@ -58,9 +58,23 @@ Pragmatic режим (default) — реалистичный для production AP
 
 ## Iron rules
 
+- **Safe by default (ARV-299).** `checks run` and the mutating probes
+  (`probe mass-assignment`, `probe security`) default to `--safe`: no
+  destructive traffic. For `checks run` that means the stateful CRUD
+  create-chains (`ensure_resource_availability`, `use_after_free`) self-skip
+  — read-only checks (conformance, pagination, observation-mode lifecycle)
+  still run. For probes it means plan-only (no live attack payloads). Pass
+  `--live` to opt into mutating traffic — **only against a throwaway/sandbox
+  account.** Same vocabulary as `zond audit --safe/--live`. `probe static`
+  only generates suites, so it's always safe (`--live` is a no-op there).
 - **NEVER hand-roll these checks in YAML.** The catalog encodes
   schemathesis V4 semantics 1-to-1 — replicating them in YAML drifts
   silently. `zond checks run` is the single source of truth.
+- **`--check stateful` = state-machine set only (ARV-325):**
+  cross_call_references, idempotency_replay, pagination_invariants,
+  lifecycle_transitions, use_after_free, ensure_resource_availability,
+  cursor_boundary_fuzzing. `ignored_auth` / `open_cors_on_sensitive` are
+  NOT included — run them by explicit id when you want the security pair.
 - **NEVER run `--check stateful` without prior `api annotate` review.**
   m-20 stateful checks (cross_call_references, idempotency_replay,
   pagination_invariants, lifecycle_transitions) read `.api-resources.local.yaml`
@@ -77,7 +91,8 @@ Pragmatic режим (default) — реалистичный для production AP
 - **Prewarm a fresh workspace before `zond checks run`.** Right after
   `zond add api <name>`, `.env.yaml` only has the auth skeleton — list
   endpoints can return 401 until a `setup:` suite captures session
-  vars. Running `--check stateful` immediately surfaces dozens of
+  vars. Running checks cold (e.g. `--check ignored_auth` or a full
+  run) immediately surfaces dozens of
   spurious `ignored_auth` / `report_backend_bug` findings (cold-state
   race, F1/F18 in feedback loop). Fix: run one smoke pass first
   (`zond run apis/<name>/tests --safe --report json` or `zond doctor
@@ -98,6 +113,13 @@ Pragmatic режим (default) — реалистичный для production AP
     is contract drift; HIGH on a field the server actually doesn't
     persist is a backend bug. Use `cross_call_references` to
     disambiguate before reporting.
+    - **No response schema declared** (Sentry-style specs where the
+      check skips 200+ endpoints): mine schemas from a real run and
+      patch them in — `zond schema-from-runs --api <name>` writes
+      `patch.schema.json` from the run's 2xx bodies, then
+      `zond refresh-api --api <name> --merge-schema patch.schema.json`
+      folds them into `.api-schema.local.yaml` (survives refresh) and
+      re-runs conformance with real schemas (ARV-175/176).
 
 ## In-spec `x-zond-*` extensions (ARV-189, m-21)
 
@@ -193,7 +215,7 @@ existing by default (renders `! field: (conflict — kept existing; pass
 **Recommended pre-stateful sweep on a new API:**
 
 ```bash
-zond api annotate dump --api <name> --seed-bodies > /tmp/seed.json    # for prepare-fixtures --seed
+zond api annotate dump --api <name> --seed-bodies > /tmp/seed.json    # create-body overlay for stateful checks
 zond api annotate dump --api <name> --readback    > /tmp/readback.json # for cross_call_references
 zond api annotate dump --api <name> --pagination  > /tmp/pag.json     # for pagination_invariants
 zond api annotate dump --api <name> --lifecycle   > /tmp/life.json    # for lifecycle_transitions
@@ -208,27 +230,12 @@ zond api annotate apply --api <name> --idempotency --input /tmp/idem.yaml --yes
 
 Each block's YAML format is documented under the per-check section below.
 
-**Heuristic shortcut (large APIs):** `zond api annotate auto` skips the
-agent loop and applies pure spec-pattern heuristics for `pagination`,
-`lifecycle`, and `idempotency`. Useful when a 1000+-endpoint spec makes
-hand-authoring per-resource YAML impractical. Only emits
-`confidence: high` inferences — ambiguous cases stay null and still
-need the agent overlay path (`dump` → `apply`).
-
-```bash
-zond api annotate auto --api <name> --aspect all                # dry-run + diff (all 3 aspects)
-zond api annotate auto --api <name> --aspect pagination          # one aspect only
-zond api annotate auto --api <name> --aspect all --auto-apply    # write to overlay
-zond api annotate auto --api <name> --aspect all --only issues,repos  # scope to N resources
-```
-
-Heuristics (each ⇒ `confidence: high`):
-- **pagination**: list endpoint has `page` + `per_page`/`page_size`/`limit` → `type: page`;
-  or `cursor`/`starting_after`/`after`/`page_token` → `type: cursor`.
-- **lifecycle**: read/list/create response has a `state` or `status` enum
-  with ≥2 values → observation-mode `{ field, states, transitions: [], actions: {} }`.
-- **idempotency**: create endpoint declares a header with `idempotency`
-  in its name → `{ header: <name> }`.
+**Who writes the annotations:** zond does not infer them. The agent reads
+the `dump` output (spec slice + expected YAML shape) and writes the overlay;
+`apply` validates it against the zod contract and merges into
+`.api-resources.local.yaml`. For large specs, dump per-resource with
+`--only <res>` and (for seed-bodies) `--with-last-attempt --history N` to
+pull the recent seed-POST error progression onto your screen before writing.
 
 ## Reading findings
 
@@ -245,9 +252,17 @@ can route without parsing free-form messages:
 | `fix_network_config` | Transport-level error (timeout / DNS / refused). Verify `base_url` and reachability before re-running. |
 | `wontfix_known_limitation` | Known accepted gap. Don't retry, don't file a bug. |
 
-Triage by `recommended_action` first, then by severity. HIGH/CRITICAL
-gates exit-code 1; LOW/MEDIUM is informational. In an orchestrator/CI
-that must tell "found drift" from "command crashed", pass
+**Severity is a coarse deterministic CI-gate default, not a priority signal
+(ARV-346).** zond stamps each check a fixed severity so the exit code
+(`high_or_critical`) and SARIF mapping are reproducible — it is NOT a judgment
+about which finding matters most on *your* API. You (the agent) prioritize
+from `recommended_action` + the raw evidence, not from zond's severity number:
+route by the closed enum first, read the response body, decide impact. The
+severity field only answers "does this trip the CI gate?", nothing more. (This
+is the deterministic per-check default — not the removed ARV-337 calibrator.)
+
+HIGH/CRITICAL gates exit-code 1; LOW/MEDIUM is informational. In an
+orchestrator/CI that must tell "found drift" from "command crashed", pass
 `--no-fail-on-findings` (alias `--advisory`, ARV-308): exit 0 even with
 HIGH/CRITICAL findings — the findings are still in the envelope. Mirrors
 `zond run --no-fail-on-failures`. Exit 2 stays reserved for real failures.

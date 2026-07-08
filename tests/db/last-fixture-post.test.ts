@@ -10,6 +10,7 @@ import { getDb, closeDb } from "../../src/db/schema.ts";
 import { tmpDb, unlinkDb as tryUnlink } from "../_helpers/tmp-db";
 import { createRun, saveResults } from "../../src/db/queries.ts";
 import { getRecentFixturePosts, getRecentCreatePosts } from "../../src/db/queries/results.ts";
+import { childExcludePattern } from "../../src/cli/commands/api/annotate/index.ts";
 import type { LastFixtureAttempt } from "../../src/db/queries/results.ts";
 import type { TestRunResult } from "../../src/core/runner/types.ts";
 
@@ -155,6 +156,20 @@ describe("fixture POST history (ARV-277/278)", () => {
       }],
     }]);
     expect(getRecentCreatePosts("%/v1/accounts%", 5)).toHaveLength(1);
+  });
+
+  test("ARV-330: childExcludePattern drops child sub-resource POSTs (prod wiring)", () => {
+    const run = createRun({ started_at: "2026-07-03T00:00:00.000Z", run_kind: "probe" });
+    saveResults(run, [postStep("https://api.stripe.com/v1/accounts", { status: 400 })]);
+    // a probe hitting a child sub-resource — the loose parent LIKE matches it too
+    saveResults(run, [postStep("https://api.stripe.com/v1/accounts/acct_1/reject", { status: 200 })]);
+
+    // Without the exclude, the child POST pollutes the create-path window...
+    expect(getRecentCreatePosts("%/v1/accounts%", 5)).toHaveLength(2);
+    // ...with the exact production pattern, only the real create-path survives.
+    const filtered = getRecentCreatePosts("%/v1/accounts%", 5, childExcludePattern("/v1/accounts"));
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0]?.request_url).toBe("https://api.stripe.com/v1/accounts");
   });
 
   test("ignores GET requests (only POSTs count as seed attempts)", () => {

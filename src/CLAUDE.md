@@ -4,6 +4,15 @@
 
 zond — API hygiene scanner. **Dumb-tool**: умеет дёргать API, собирать evidence, проверять конформность спеки. Не зовёт LLM, не делает решения — это работа агента, который скармливает zond'у YAML и читает обратно отчёты.
 
+### Litmus-тест: что кладём в zond, а что оставляем агенту
+
+m-24 срезал эвристический слой (discovery/seed/cascade, severity-калибраторы, anti-FP-гейты, annotate-auto). Чтобы он не наползал обратно по одному «разумному» фиксу за раз — **каждое изменение zond проходит один тест: детерминировано ли оно?** Один и тот же вход → один и тот же выход, без догадок про намерение / вину / серьёзность / «баг ли это на самом деле».
+
+- ✅ **В zond** (детерминированное, быстрое, скучное): слать запросы, валидировать схемы, считать диффы, эмитить evidence + closed-enum хинты, **корректно ограничивать scope чека** (какие case-kinds / методы он оценивает), плюс plumbing/скорость/артефакты. zond — удобный работающий быстрый инструмент.
+- ❌ **Агенту** (суждение): severity, приоритет, атрибуция вины (spec vs backend), «это false-positive?», «это эксплуатируемо?», выдумывание фикстур, многопроходный discovery. Сложное решает умный агент, читая сырой evidence.
+
+Практическое следствие для «zond что-то пропустил/зашумил» из аудита: **чини scope чека детерминированно** (напр. ARV-340 — чек смотрел не те case-kinds) — но **не добавляй suppression/down-rank «это FP»** (это ровно тот anti-FP-гейт, что убрал ARV-337; FP отсекает агент в триаже). `recommended_action` — самая размытая из выживших поверхностей: это тонкий routing-хинт, держи его тупым, не выращивай в мини-классификатор.
+
 ## Top-level layout
 
 | Каталог | Назначение |
@@ -53,7 +62,7 @@ zond — API hygiene scanner. **Dumb-tool**: умеет дёргать API, со
 
 ## db/
 
-SQLite на bun. `migrations/` — versioned migrations, `schema.ts` — текущий schema, `queries/` — типизированные SQL. Используется reporter'ами и `coverage` для исторических runs. Retention policy — ARV-266.
+SQLite на bun. `migrations/` — versioned migrations, `schema.ts` — текущий schema, `queries/` — типизированные SQL. Используется reporter'ами и `coverage` для исторических runs. Retention (ARV-266): `zond db stats` — счётчики строк per `run_kind`; `zond db prune` — opt-in удаление (per-kind defaults: check/probe/request/fixture старше 7d, `regular` — forever; `--older-than 30d` для uniform-cutoff), VACUUM после delete.
 
 ## Data-flow по фазам
 

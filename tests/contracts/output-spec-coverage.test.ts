@@ -70,6 +70,8 @@ const LEGACY_ALLOW_LIST: Record<string, string> = {
   "db diagnose": "pre-m-19: --json envelope via printJson.",
   "db run": "pre-m-19: --json envelope via printJson.",
   "db runs": "pre-m-19: --json envelope via printJson.",
+  "db stats": "ARV-266: --json envelope via printJson (per-run_kind counts). Single-shape command; OutputSpec migration not scheduled.",
+  "db prune": "ARV-266: --json envelope via printJson (retention delete summary). Single-shape command; OutputSpec migration not scheduled.",
   "describe": "pre-m-19: --json envelope via printJson.",
   "doctor": "pre-m-19: --json envelope via printJson.",
   "generate": "pre-m-19: --json envelope via printJson.",
@@ -80,6 +82,7 @@ const LEGACY_ALLOW_LIST: Record<string, string> = {
   "refresh-api": "pre-m-19: --json envelope via printJson.",
   "remove api": "pre-m-19: --json envelope via printJson.",
   "report bundle": "pre-m-19: --json envelope via printJson.",
+  "schema-from-runs": "ARV-175: --json envelope via printJson (emitted/skipped schema groups). Single-shape command; OutputSpec migration not scheduled.",
   "report export": "pre-m-19: --json envelope via printJson.",
   "request": "pre-m-19: --json envelope via printJson.",
   "session end": "pre-m-19: --json envelope via printJson.",
@@ -89,10 +92,8 @@ const LEGACY_ALLOW_LIST: Record<string, string> = {
   "use": "pre-m-19: --json envelope via printJson.",
   "api annotate dump": "ARV-187: emits per-resource spec slices for the agent (no prompts inside zond); --json wraps in envelope. OutputSpec migration not scheduled.",
   "api annotate apply": "ARV-187: applies the agent's YAML responses to .api-resources.local.yaml; --json wraps the merge summary. OutputSpec migration not scheduled.",
-  "api annotate auto": "ARV-262: heuristic inference (pagination/lifecycle/idempotency) writes the overlay without an agent; --json wraps the inference summary. OutputSpec migration not scheduled.",
   "fixtures add": "ARV-195: --json envelope via printJson. OutputSpec migration not scheduled — single-shape command (writes + validations).",
   "fixtures import": "ARV-195: --json envelope via printJson. OutputSpec migration not scheduled — single-shape command (writes + source).",
-  "config validate": "ARV-283: --json envelope via printJson (severity config load+validate result). OutputSpec migration not scheduled — single-shape command.",
 };
 
 interface LeafEntry {

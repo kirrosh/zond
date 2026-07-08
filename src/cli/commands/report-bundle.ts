@@ -49,7 +49,6 @@ interface BundleEntry {
   caseStudy?: string;
   htmlReport?: string;
   diagnose?: string;
-  agentDirective?: string | null;
 }
 
 export function parseBundleRange(input: string): number[] | { error: string } {
@@ -186,7 +185,6 @@ export async function reportBundleCommand(options: ReportBundleOptions): Promise
       const file = join(runDir, "diagnose.json");
       await Bun.write(file, JSON.stringify(diag, null, 2));
       entry.diagnose = file;
-      entry.agentDirective = (diag as unknown as { agent_directive?: string }).agent_directive ?? null;
     }
 
     entries.push(entry);
@@ -214,7 +212,6 @@ export async function reportBundleCommand(options: ReportBundleOptions): Promise
           caseStudy: e.caseStudy ?? null,
           htmlReport: e.htmlReport ?? null,
           diagnose: e.diagnose ?? null,
-          agentDirective: e.agentDirective ?? null,
         })),
         skipped,
       }),
@@ -284,8 +281,8 @@ function renderIndex(entries: BundleEntry[], skipped: Array<{ runId: number; rea
   lines.push(`Generated: ${new Date().toISOString()}`);
   lines.push(`Runs: ${entries.length}` + (skipped.length > 0 ? ` (skipped: ${skipped.length})` : ""));
   lines.push("");
-  lines.push("| Run | Spec | Total | Pass | Fail | Skip | Artefacts | Directive |");
-  lines.push("|----:|------|------:|-----:|-----:|-----:|-----------|-----------|");
+  lines.push("| Run | Spec | Total | Pass | Fail | Skip | Artefacts |");
+  lines.push("|----:|------|------:|-----:|-----:|-----:|-----------|");
 
   for (const e of entries) {
     const links: string[] = [];
@@ -293,7 +290,7 @@ function renderIndex(entries: BundleEntry[], skipped: Array<{ runId: number; rea
     if (e.htmlReport) links.push(`[html](${rel(e.htmlReport)})`);
     if (e.diagnose) links.push(`[diagnose](${rel(e.diagnose)})`);
     lines.push(
-      `| ${e.runId} | ${e.spec ?? "—"} | ${e.totals.total} | ${e.totals.passed} | ${e.totals.failed} | ${e.totals.skipped} | ${links.join(" · ") || "—"} | ${truncate(e.agentDirective ?? "", 80)} |`,
+      `| ${e.runId} | ${e.spec ?? "—"} | ${e.totals.total} | ${e.totals.passed} | ${e.totals.failed} | ${e.totals.skipped} | ${links.join(" · ") || "—"} |`,
     );
   }
 
@@ -310,9 +307,4 @@ function rel(p: string): string {
   const seg = p.split(/[/\\]/);
   const tail = seg.slice(-2);
   return tail.join("/");
-}
-
-function truncate(s: string, n: number): string {
-  if (s.length <= n) return s.replace(/\n/g, " ");
-  return s.slice(0, n - 1).replace(/\n/g, " ") + "…";
 }

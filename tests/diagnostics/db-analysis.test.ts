@@ -7,7 +7,6 @@ function makeFailure(overrides: Partial<{
   test_name: string;
   failure_type: string;
   recommended_action: RecommendedAction;
-  hint: string;
   response_status: number | null;
 }> = {}) {
   return {
@@ -15,7 +14,6 @@ function makeFailure(overrides: Partial<{
     test_name: overrides.test_name ?? "test",
     failure_type: overrides.failure_type ?? "assertion_failed",
     recommended_action: overrides.recommended_action ?? ("fix_test_logic" as RecommendedAction),
-    hint: overrides.hint,
     response_status: overrides.response_status ?? null,
   };
 }
@@ -37,7 +35,6 @@ describe("groupFailures", () => {
         test_name: `test_${i}`,
         response_status: 401,
         failure_type: "assertion_failed",
-        hint: "Auth failure",
       })
     );
     const result = groupFailures(failures);
@@ -89,19 +86,6 @@ describe("groupFailures", () => {
     const result = groupFailures(failures);
     expect(result.grouped_failures).toBeUndefined();
     expect(result.compactFailures).toHaveLength(6);
-  });
-
-  test("includes hint from first failure in group", () => {
-    const failures = Array.from({ length: 6 }, (_, i) =>
-      makeFailure({
-        test_name: `test_${i}`,
-        response_status: 429,
-        failure_type: "assertion_failed",
-        hint: "Rate limited — too many requests",
-      })
-    );
-    const result = groupFailures(failures);
-    expect(result.grouped_failures![0]!.hint).toBe("Rate limited — too many requests");
   });
 
   test("grouped api_error failures carry report_backend_bug action", () => {
@@ -168,5 +152,56 @@ describe("groupFailures", () => {
 
     // compactFailures: 8 (all 5xx) + 1 (representative of 401 group) = 9
     expect(result.compactFailures).toHaveLength(9);
+  });
+});
+
+// ARV-339: field-level body/schema diff for `zond db compare`.
+import { diffBodyShapes } from "../../src/core/diagnostics/db-analysis.ts";
+
+describe("diffBodyShapes", () => {
+  test("detects added, removed and type-changed fields", () => {
+    const before = JSON.stringify({ id: 1, name: "a", legacy: true, tags: ["x"] });
+    const after = JSON.stringify({ id: "1", name: "a", email: "a@b.c", tags: ["x"] });
+    const changes = diffBodyShapes(before, after);
+    expect(changes).toEqual([
+      { field: "email", change: "added", after: "string", scope: "container" },
+      { field: "id", change: "type_changed", before: "number", after: "string", scope: "container" },
+      { field: "legacy", change: "removed", before: "boolean", scope: "container" },
+    ]);
+  });
+
+  test("collapses array elements — item count/order is not a shape change", () => {
+    const before = JSON.stringify({ items: [{ id: 1 }, { id: 2 }] });
+    const after = JSON.stringify({ items: [{ id: 3 }] });
+    expect(diffBodyShapes(before, after)).toEqual([]);
+  });
+
+  test("reports nested field paths through arrays", () => {
+    const before = JSON.stringify({ items: [{ id: 1 }] });
+    const after = JSON.stringify({ items: [{ id: 1, price: 9.5 }] });
+    expect(diffBodyShapes(before, after)).toEqual([
+      { field: "items[].price", change: "added", after: "number", scope: "element" },
+    ]);
+  });
+
+  // ARV-352: on list/log endpoints, field variance across re-sampled objects
+  // must be scoped `element` (schema-of-union noise), while envelope/pagination
+  // changes stay `container` (real drift) — deterministic from the `[]` path.
+  test("scopes collection-item changes as element, envelope changes as container", () => {
+    const before = JSON.stringify({ object: "list", data: [{ request: { id: "req_1" } }] });
+    const after = JSON.stringify({ object: "list", total_count: 5, data: [{ request: { id: null }, extra: 1 }] });
+    const changes = diffBodyShapes(before, after);
+    expect(changes).toEqual([
+      { field: "data[].extra", change: "added", after: "number", scope: "element" },
+      { field: "data[].request.id", change: "type_changed", before: "string", after: "null", scope: "element" },
+      { field: "total_count", change: "added", after: "number", scope: "container" },
+    ]);
+  });
+
+  test("returns [] for missing, identical or non-JSON bodies", () => {
+    expect(diffBodyShapes(null, '{"a":1}')).toEqual([]);
+    expect(diffBodyShapes('{"a":1}', '{"a":1}')).toEqual([]);
+    expect(diffBodyShapes("<html>", '{"a":1}')).toEqual([]);
+    expect(diffBodyShapes('"plain string"', '{"a":1}')).toEqual([]);
   });
 });

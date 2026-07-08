@@ -15,12 +15,10 @@ import { resolve as resolvePath, relative as relativePath } from "node:path";
 import type { Command } from "commander";
 
 import { listChecks, runChecks } from "../../core/checks/index.ts";
-import { findWorkspaceRoot } from "../../core/workspace/root.ts";
-import { loadSeverityConfig, SeverityConfigError } from "../../core/severity/loader.ts";
 import { listStatefulChecks } from "../../core/checks/stateful.ts";
 import { resolveBudget, isBudget, BUDGETS, type Budget } from "../../core/checks/budget.ts";
 import { generateSarifReport } from "../../core/checks/sarif.ts";
-import { emitToStdout } from "../../core/reporter/ndjson.ts";
+import { emitToStdout, nowIso } from "../../core/reporter/ndjson.ts";
 import { parseWorkers } from "../../core/runner/async-pool.ts";
 import { createAdaptiveRateLimiter, createRateLimiter, type RateLimiter } from "../../core/runner/rate-limiter.ts";
 import { compileOperationFilter } from "../../core/selectors/operation-filter.ts";
@@ -29,6 +27,7 @@ import { readResourceMap } from "./discover.ts";
 import type { ReadbackDiffConfig, IdempotencyConfig, PaginationConfig, LifecycleConfig, SeedBodyConfig } from "../../core/generator/resources-builder.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
+import { SAFE_HELP, LIVE_HELP, resolveLive } from "../safe-live.ts";
 import { loadEnvironment } from "../../core/parser/variables.ts";
 import { readFixtureGaps, gapIndex } from "../../core/workspace/fixture-gaps.ts";
 import { getApi } from "../util/api-context.ts";
@@ -127,6 +126,9 @@ interface ChecksRunOptions {
   strict405?: boolean;
   strict401?: boolean;
   maxRequests?: number;
+  /** ARV-342: operation-window for bounded/resumable sweeps of large specs. */
+  maxOps?: number;
+  skipOps?: number;
   budget?: string;
   showSuppressed?: boolean;
   /** ARV-308: `--no-fail-on-findings` sets this to false (commander default
@@ -135,6 +137,10 @@ interface ChecksRunOptions {
   failOnFindings?: boolean;
   /** ARV-308: `--advisory` alias for --no-fail-on-findings. */
   advisory?: boolean;
+  /** ARV-299: safe/live parity with `audit`. Default safe — mutating
+   *  stateful create-chains self-skip; `--live` runs them. */
+  safe?: boolean;
+  live?: boolean;
 }
 
 function parseAuthHeaders(values: string[] | undefined): Record<string, string> {
@@ -369,9 +375,22 @@ function splitList(values: string[] | undefined): string[] | undefined {
 // instead of hand-listing cross_call_references, idempotency_replay, … —
 // matching the prior `--phase stateful` UX promise without overloading the
 // case-generation `--phase` flag.
-function expandStatefulAlias(ids: string[] | undefined): string[] | undefined {
+// ARV-325: `ignored_auth` / `open_cors_on_sensitive` live in the stateful
+// *registry* (they need the stateful harness to run), but semantically they
+// are auth/security checks. Users reading `--check stateful` expect
+// state-machine probes, not a full security pass — on Stripe the pair added
+// ~520 extra cases and turned a sub-minute run into ~10 minutes. Keep them
+// runnable by explicit id; just don't smuggle them in through the alias.
+const STATEFUL_ALIAS_EXCLUDED: ReadonlySet<string> = new Set([
+  "ignored_auth",
+  "open_cors_on_sensitive",
+]);
+
+export function expandStatefulAlias(ids: string[] | undefined): string[] | undefined {
   if (!ids) return ids;
-  const statefulIds = listStatefulChecks().map((c) => c.id);
+  const statefulIds = listStatefulChecks()
+    .map((c) => c.id)
+    .filter((id) => !STATEFUL_ALIAS_EXCLUDED.has(id));
   const out: string[] = [];
   for (const id of ids) {
     if (id === "stateful") out.push(...statefulIds);
@@ -450,23 +469,6 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     if (json) printJson(jsonError("checks run", [baseRes.error]));
     else printError(baseRes.error);
     process.exit(2);
-  }
-
-  // ARV-283: severity overlay from .zond/severity.yaml and
-  // apis/<api>/.zond-severity.yaml. Both optional — silent when absent;
-  // invalid config aborts with file:keypath:msg (AC#2).
-  let severityConfig;
-  try {
-    const ws = findWorkspaceRoot();
-    severityConfig = loadSeverityConfig({ workspaceRoot: ws.root, api: apiName });
-  } catch (err) {
-    if (err instanceof SeverityConfigError) {
-      const msgs = err.errors.map((e) => `${e.source}: ${e.keyPath}: ${e.message}`);
-      if (json) printJson(jsonError("checks run", msgs));
-      else for (const m of msgs) printError(m);
-      process.exit(2);
-    }
-    throw err;
   }
 
   // ARV-3: lift auth headers from --auth-header (wins) and/or the
@@ -556,15 +558,47 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   if (ndjsonOutputPath) {
     ndjsonFd = openSync(ndjsonOutputPath, "w");
   }
+  // ARV-343: accumulate a running summary from the stream so a SIGTERM'd
+  // run still emits a terminal `summary` line (operations/cases counted so
+  // far) instead of dying before the runner's emit stage — triage's
+  // `sweepWindows`/status-dist read `.summary.operations` and had to
+  // reconstruct it from raw NDJSON when the window was killed mid-flight.
+  const partialOps = new Set<string>();
+  const partialChecks = new Set<string>();
+  let partialCases = 0;
+  let partialFindings = 0;
+  const partialBySeverity = { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+  const accumulate = (ev: import("../../core/reporter/ndjson.ts").NdjsonEvent) => {
+    if (ev.type === "check_result") {
+      partialCases += 1;
+      partialChecks.add(ev.check);
+      partialOps.add(`${ev.operation.method} ${ev.operation.path}`);
+    } else if (ev.type === "check_start") {
+      partialOps.add(`${ev.operation.method} ${ev.operation.path}`);
+    } else if (ev.type === "finding") {
+      partialFindings += 1;
+      const sev = ev.finding.severity as keyof typeof partialBySeverity;
+      if (sev in partialBySeverity) partialBySeverity[sev] += 1;
+    }
+  };
   const ndjsonOnEvent = ndjson
     ? (ndjsonFd !== undefined
         ? (ev: import("../../core/reporter/ndjson.ts").NdjsonEvent) => {
+            accumulate(ev);
             ndjsonLastFullyWritten = false;
             ndjsonEventCount += 1;
             writeSync(ndjsonFd!, `${JSON.stringify(ev)}\n`);
             ndjsonLastFullyWritten = true;
           }
-        : emitToStdout)
+        // ARV-323: count stdout-channel events too — the SIGTERM handler
+        // reports `ndjsonEventCount`, and with a shell-redirected stdout
+        // stream it claimed "0 event(s) flushed" while the redirect target
+        // already held thousands of lines.
+        : (ev: import("../../core/reporter/ndjson.ts").NdjsonEvent) => {
+            accumulate(ev);
+            ndjsonEventCount += 1;
+            emitToStdout(ev);
+          })
     : undefined;
 
   // ARV-230: clean SIGTERM/SIGINT shutdown for NDJSON streams. Without
@@ -577,15 +611,41 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   if (ndjson) {
     const shutdown = (signo: number) => {
       try {
+        // ARV-343: flush a partial terminal summary from the running
+        // accumulators. Schema-exact (CheckRunSummarySchema) so downstream
+        // `jq '.summary.operations'` and status-dist stay analyzable;
+        // by_category/skipped are left empty (not derivable in the CLI) —
+        // the stderr interrupt note below flags that it's a partial count.
+        const partialSummary = {
+          type: "summary" as const,
+          ts: nowIso(),
+          summary: {
+            operations: partialOps.size,
+            cases: partialCases,
+            checks_run: partialChecks.size,
+            findings: partialFindings,
+            by_severity: { ...partialBySeverity },
+            by_category: { security: 0, reliability: 0, contract: 0, hygiene: 0 },
+            skipped_outcomes: {},
+            skipped_outcomes_grouped: [],
+          },
+        };
         if (ndjsonFd !== undefined) {
           if (!ndjsonLastFullyWritten) {
             try { writeSync(ndjsonFd, "\n"); } catch { /* fd already gone */ }
           }
+          try { writeSync(ndjsonFd, `${JSON.stringify(partialSummary)}\n`); } catch { /* fd already gone */ }
           try { closeSync(ndjsonFd); } catch { /* already closed */ }
           ndjsonFd = undefined;
+        } else {
+          try { emitToStdout(partialSummary); } catch { /* stdout gone */ }
         }
       } catch { /* swallow; we're tearing down */ }
-      try { process.stderr.write(`zond: NDJSON run interrupted (signal ${signo}); ${ndjsonEventCount} event(s) flushed.\n`); } catch { /* ignore */ }
+      // ARV-323: "emitted" not "flushed" — on the stdout channel the last
+      // few lines may still sit in the pipe buffer, so the count is a
+      // lower bound of what the consumer/file will contain, never an
+      // excuse to discard a partial-but-real stream.
+      try { process.stderr.write(`zond: NDJSON run interrupted (signal ${signo}); ${ndjsonEventCount} event(s) + a partial summary (${partialOps.size} ops, ${partialCases} cases so far) emitted before interrupt (partial stream is usable).\n`); } catch { /* ignore */ }
       process.exit(128 + signo);
     };
     const onTerm = () => shutdown(15);
@@ -642,6 +702,21 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
     forceStatefulIfIncluded: includesStateful,
   });
 
+  // ARV-328: throttled progress line on stderr during long runs (CI jobs
+  // and subagents with wall-clock budgets had zero visibility — the only
+  // artifact was the growing ndjson file). stderr never corrupts stdout
+  // reports; 10s throttle keeps short runs silent.
+  const PROGRESS_INTERVAL_MS = 10_000;
+  let lastProgressAt = Date.now();
+  const onProgress = (p: { done: number; total: number; cases: number }) => {
+    const now = Date.now();
+    if (now - lastProgressAt < PROGRESS_INTERVAL_MS) return;
+    lastProgressAt = now;
+    try {
+      process.stderr.write(`zond: progress — ${p.done}/${p.total} operations, ${p.cases} case(s) run\n`);
+    } catch { /* ignore */ }
+  };
+
   try {
     const result = await runChecks({
       specPath: specRes.spec,
@@ -662,6 +737,7 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       operationFilter,
       onEvent: ndjsonOnEvent,
       onCase,
+      onProgress,
       // ARV-8: bounded concurrency at op-level + optional rate-limiter
       // gating. workers=1 (default) preserves the pre-ARV-8 sequential
       // path inside runPool — same observable behaviour.
@@ -669,7 +745,9 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       rateLimiter,
       maxRequests: budgetResolved.maxRequests,
       skipStateful: budgetResolved.skipStateful,
-      severityConfig,
+      maxOps: opts.maxOps,
+      skipOps: opts.skipOps,
+      safe: !resolveLive(opts),
     });
 
     // ARV-265: persist the accumulated cases as a `run_kind='check'` run
@@ -887,7 +965,7 @@ function defineRun(parent: Command): void {
     .option("--api <name>", "Use the registered API's spec + .env.yaml")
     .option("--spec <path>", "Explicit OpenAPI spec path (overrides --api)")
     .option("--base-url <url>", "Base URL for requests (overrides --api env file)")
-    .option("--check <ids...>", "Only run these checks (comma-separated or repeated)")
+    .option("--check <ids...>", "Only run these checks (comma-separated or repeated). 'stateful' expands to the state-machine set: use_after_free, ensure_resource_availability, cross_call_references, idempotency_replay, pagination_invariants, lifecycle_transitions, cursor_boundary_fuzzing — NOT ignored_auth/open_cors_on_sensitive (run those by explicit id)")
     .option("--exclude-check <ids...>", "Skip these checks (comma-separated or repeated)")
     .option("--timeout <ms>", "Per-request timeout in ms", (v) => Number.parseInt(v, 10))
     .option("--db <path>", "SQLite path (for --api lookup)")
@@ -955,12 +1033,22 @@ function defineRun(parent: Command): void {
       (v) => Number.parseInt(v, 10),
     )
     .option(
+      "--max-ops <n>",
+      "ARV-342: cap this run to N operations (deterministic op-window). Pair with --skip-ops to sweep a large spec in bounded, resumable slices that each finish in a short budget. A window whose summary.operations < N is the last slice.",
+      (v) => Number.parseInt(v, 10),
+    )
+    .option(
+      "--skip-ops <n>",
+      "ARV-342: skip the first N operations (post-filter, deterministic order) before applying --max-ops. Resume token for windowed sweeps: skip 0, skip 50, skip 100, …",
+      (v) => Number.parseInt(v, 10),
+    )
+    .option(
       "--budget <tier>",
       "ARV-292: adaptive cap and stateful gating tier. `quick` (cap 50, skip stateful) → ~60-sec gate. `standard` (cap 500, all checks). `full` (uncapped). Omitted ⇒ legacy uncapped behaviour. --max-requests always overrides the tier cap; `--check stateful` opts back into stateful even under `quick`.",
     )
     .option(
       "--show-suppressed",
-      "ARV-283: show findings suppressed by `.zond/severity.yaml` in the text summary (with their suppressed_by trace). Suppressed findings stay in ndjson/JSON audit-trail regardless of this flag and never count toward CI exit codes.",
+      "Show findings suppressed by the deterministic broken-baseline guard in the text summary (with their suppressed_by trace). Suppressed findings stay in the ndjson/JSON audit-trail regardless of this flag and never count toward CI exit codes.",
     )
     .option(
       "--no-fail-on-findings",
@@ -970,6 +1058,8 @@ function defineRun(parent: Command): void {
       "--advisory",
       "ARV-308: alias for --no-fail-on-findings.",
     )
+    .option("--safe", SAFE_HELP)
+    .option("--live", LIVE_HELP)
     .action(checksRunAction);
 }
 

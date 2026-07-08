@@ -40,8 +40,6 @@ import { listStatefulChecks, makeHarness } from "./stateful.ts";
 import { caseMatchesMode, filterChecksByMode, type Mode } from "./mode.ts";
 import { buildNegativeBody } from "./checks/_negative_mutator.ts";
 import { nowIso, type NdjsonEvent } from "../reporter/ndjson.ts";
-import type { MergedConfig } from "../severity/config.ts";
-import { calibrate } from "../severity/calibrator.ts";
 import { runPool } from "../runner/async-pool.ts";
 import type { RateLimiter } from "../runner/rate-limiter.ts";
 import { recommendForCheck } from "./recommended-action.ts";
@@ -178,6 +176,16 @@ export interface RunChecksOptions {
    *  `recommended_action: fix_fixture` instead of `report_backend_bug` —
    *  it's a known gap in our own test data, not new backend evidence. */
   fixtureGaps?: Set<string>;
+  /** ARV-342: operation-window. `skipOps` drops the first N operations
+   *  (post-filter, in the deterministic extraction order); `maxOps` caps
+   *  the window to N operations. Together they let a caller sweep a huge
+   *  spec in bounded, resumable slices (skip 0/max 50, skip 50/max 50, …)
+   *  that each finish inside a short run budget — the fix for
+   *  "587-op sweep SIGTERM-killed at 15%". Pure deterministic slicing of
+   *  the sorted op list: same skip/max ⇒ same window, no adaptive pacing.
+   *  A window's `summary.operations` < `maxOps` signals the last slice. */
+  skipOps?: number;
+  maxOps?: number;
   /** ARV-227: hard cap on outbound HTTP requests for the entire run.
    *  Once `used >= limit`, every subsequent case short-circuits and the
    *  summary surfaces the cap via `summary.skipped_outcomes
@@ -189,14 +197,20 @@ export interface RunChecksOptions {
    *  `--budget quick` from the CLI. Skipped stateful ids are surfaced
    *  in `summary.skipped_outcomes` so the user sees what was dropped. */
   skipStateful?: boolean;
-  /** ARV-283: severity calibration overlay loaded from
-   *  `.zond/severity.yaml` and/or `apis/<api>/.zond-severity.yaml`.
-   *  Optional — undefined ⇒ findings emit at the built-in severity.
-   *  When set, every emitted finding passes through `calibrate()` and
-   *  may be re-severitized or suppressed. The CLI loads it via
-   *  `loadSeverityConfig()` and forwards it; tests can pass a literal
-   *  MergedConfig (build with `mergeConfigs([{config, source}])`). */
-  severityConfig?: MergedConfig;
+  /** ARV-328: fired after each operation finishes the response phase —
+   *  lets the CLI print a throttled progress line during long coverage
+   *  runs. `done`/`total` are operations (case count isn't known up
+   *  front); `cases` is HTTP cases executed so far.
+   *  ponytail: response phase only — stateful phase is short by
+   *  comparison; extend there if it ever dominates wall-clock. */
+  onProgress?: (progress: { done: number; total: number; cases: number }) => void;
+  /** ARV-299: safe mode (CLI default). Mirrors `audit --safe`: no
+   *  destructive traffic. The stateful CRUD phase builds groups from
+   *  read-only ops only, so create/update/delete chains
+   *  (ensure_resource_availability, use_after_free) self-skip instead of
+   *  POSTing real resources. Read-only stateful checks (pagination,
+   *  observation-mode lifecycle) still run. `--live` sets this false. */
+  safe?: boolean;
 }
 
 export interface RunChecksResult {
@@ -232,6 +246,48 @@ function fillPathParams(
       ? encodeURIComponent(placeholderForParam(match as OpenAPIV3.ParameterObject))
       : "1";
   });
+}
+
+/** ARV-344: a REQUIRED path param with no real fixture value — `fillPathParams`
+ *  would substitute a synthetic placeholder ("x"). Harmless for GET/HEAD/DELETE
+ *  existence probes (ARV-141's deterministic synthetic 404), but firing a
+ *  POST/PUT/PATCH create/update against a nonexistent parent just manufactures
+ *  noise findings (network_error / phantom 404) and burns rate budget. Callers
+ *  skip mutating ops in that state and bucket the reason as a fixture gap. */
+export function hasUnresolvedRequiredPathParam(op: EndpointInfo, pathVars?: Record<string, string>): boolean {
+  for (const p of op.parameters) {
+    const pp = p as OpenAPIV3.ParameterObject;
+    if (pp.in !== "path" || pp.required !== true) continue;
+    const v = pathVars?.[pp.name];
+    if (!(typeof v === "string" && v.length > 0)) return true;
+  }
+  return false;
+}
+
+/** ARV-353: transient connection resets under high windowed concurrency
+ *  (ECONNRESET / socket hang up / EPIPE) are transport flake, not an API
+ *  defect. Retry a small fixed number of times before letting the error become
+ *  a `network_error` finding, so flake is distinguished from a real
+ *  `fix_network_config` signal. Deterministic: fixed retry count, only on
+ *  reset-shaped errors (a real DNS/refused/timeout error is re-thrown at once). */
+const TRANSIENT_RESET_RE = /ECONNRESET|socket hang up|socket closed|connection reset|EPIPE|read ECONN/i;
+
+export async function executeWithResetRetry(
+  req: HttpRequest,
+  timeout: number,
+  retries = 2,
+  exec: (r: HttpRequest, o: { timeout: number }) => Promise<HttpResponse> = executeRequest,
+): Promise<HttpResponse> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await exec(req, { timeout });
+    } catch (err) {
+      lastErr = err;
+      if (!TRANSIENT_RESET_RE.test((err as Error).message ?? "")) throw err;
+    }
+  }
+  throw lastErr;
 }
 
 function requiredHeaders(op: EndpointInfo): OpenAPIV3.ParameterObject[] {
@@ -549,13 +605,8 @@ function representativeOp(g: CrudGroup): EndpointInfo | undefined {
 /** Build a finding, push it into the per-op buffer, and stream the
  *  ARV-10 NDJSON event. Summary aggregation moved out — the caller
  *  merges per-op buffers in input order so workers > 1 doesn't have to
- *  contend on a shared `summary` object.
- *
- *  ARV-283: severity passes through `applyCalibration` before emit so
- *  a `.zond/severity.yaml` rule can re-severitize or suppress. The
- *  emitted finding always reaches the buffer + ndjson stream so
- *  audit-trail survives; suppressed findings get `severity:
- *  "info-suppressed"` + `suppressed_by` instead of being dropped. */
+ *  contend on a shared `summary` object. The finding carries raw
+ *  evidence + its built-in severity default; the agent re-severitizes. */
 function recordFinding(
   out: CheckFinding[],
   check: Check,
@@ -564,7 +615,6 @@ function recordFinding(
   message: string,
   evidence: Record<string, unknown> | undefined,
   onEvent: ((event: NdjsonEvent) => void) | undefined,
-  severityConfig: MergedConfig | undefined,
   /** ARV-284: per-finding severity from CheckOutcome — overrides
    *  the check's natural tier when the check wants to dispatch by
    *  evidence (e.g. negative_data_rejection LOW for additionalProperties,
@@ -585,62 +635,20 @@ function recordFinding(
     evidence,
     recommended_action: action,
   };
-  applyCalibration(finding, resp, severityConfig);
   out.push(finding);
   if (onEvent) onEvent({ type: "finding", ts: nowIso(), check: check.id, finding });
-}
-
-/** ARV-283: mutate a finding in-place with the calibrated severity +
- *  suppression trace. Idempotent; pass-through when `config` is
- *  undefined or EMPTY_MERGED_CONFIG. Caller counts suppressed entries
- *  via the `info-suppressed` severity, not the trace presence. */
-function applyCalibration(
-  finding: CheckFinding,
-  resp: HttpResponse | { status: number; headers?: Record<string, string>; content_type?: string },
-  config: MergedConfig | undefined,
-): void {
-  if (!config || (config.suppressions.length === 0 && Object.keys(config.checks).length === 0)) return;
-  const headers = "headers" in resp && resp.headers ? resp.headers : {};
-  const result = calibrate(
-    {
-      check: finding.check,
-      defaultSeverity: finding.severity,
-      recommendedAction: finding.recommended_action,
-      context: {
-        finding: {
-          check: finding.check,
-          recommended_action: finding.recommended_action,
-          message: finding.message,
-          evidence: finding.evidence,
-        },
-        operation: {
-          method: finding.operation.method.toUpperCase(),
-          path: finding.operation.path,
-          operationId: finding.operation.operationId,
-        },
-        response: {
-          status: finding.response_summary.status,
-          headers,
-          content_type: finding.response_summary.content_type,
-        },
-      },
-    },
-    config,
-  );
-  finding.severity = result.severity;
-  if (result.suppressed && result.trace.kind === "suppressed") {
-    finding.suppressed_by = {
-      source: result.trace.source ?? "",
-      rule_index: result.trace.ruleIndex ?? 0,
-      reason: result.trace.reason ?? "",
-    };
-  }
 }
 
 export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult> {
   const doc = await readOpenApiSpec(opts.specPath);
   const allOps = extractEndpoints(doc);
-  const ops = opts.operationFilter ? allOps.filter(opts.operationFilter) : allOps;
+  const filteredOps = opts.operationFilter ? allOps.filter(opts.operationFilter) : allOps;
+  // ARV-342: deterministic operation-window. Slice the post-filter op
+  // list so a caller can sweep a large spec in bounded, resumable slices.
+  const skipOps = Math.max(0, opts.skipOps ?? 0);
+  const ops = opts.maxOps !== undefined && opts.maxOps >= 0
+    ? filteredOps.slice(skipOps, skipOps + opts.maxOps)
+    : filteredOps.slice(skipOps);
   const buckets = bucketEndpointsByPath(allOps);
   const schemaValidator: SchemaValidator = createSchemaValidator(doc);
 
@@ -769,6 +777,34 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       cases.push(...buildUnsupportedMethod(op, declared, opts.baseUrl));
     }
 
+    // ARV-344: don't dispatch a mutation (POST/PUT/PATCH) whose required path
+    // param is unresolved — it targets a synthetic parent id ("/accounts/x/…")
+    // and only manufactures noise. Skip the op's cases and bucket the reason as
+    // a fixture gap (GET/HEAD/DELETE keep the ARV-141 synthetic-404 probe).
+    {
+      const m = op.method.toUpperCase();
+      const isMutation = m === "POST" || m === "PUT" || m === "PATCH";
+      if (isMutation && cases.length > 0 && hasUnresolvedRequiredPathParam(op, opts.pathVars)) {
+        const reason = "unresolved required path param (fixture gap) — mutation against a synthetic parent id skipped";
+        for (const built of cases) {
+          localSkipped[`${built.case.kind}: ${reason}`] = (localSkipped[`${built.case.kind}: ${reason}`] ?? 0) + 1;
+          if (opts.onCase) {
+            opts.onCase({
+              phase: "response",
+              checkId: built.case.kind,
+              kind: built.case.kind,
+              operation: { path: op.path, method: op.method, operationId: op.operationId },
+              request: built.req,
+              durationMs: 0,
+              verdict: "skip",
+              error: reason,
+            });
+          }
+        }
+        cases.length = 0;
+      }
+    }
+
     for (const built of cases) {
       if (!caseMatchesMode(built.case.mode, mode)) continue;
       if (opts.authHeaders) injectAuthHeadersIntoCase(built, opts.authHeaders);
@@ -799,7 +835,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       if (opts.rateLimiter) await opts.rateLimiter.acquire();
       let httpResp: HttpResponse;
       try {
-        httpResp = await executeRequest(built.req, { timeout: opts.timeoutMs ?? 30000 });
+        httpResp = await executeWithResetRetry(built.req, opts.timeoutMs ?? 30000);
       } catch (err) {
         const finding: CheckFinding = {
           check: "network_error",
@@ -810,7 +846,6 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           message: `Network error: ${(err as Error).message}`,
           recommended_action: recommendForCheck("network_error", 0),
         };
-        applyCalibration(finding, { status: 0, headers: {} }, opts.severityConfig);
         localFindings.push(finding);
         if (opts.onEvent) opts.onEvent({ type: "finding", ts: nowIso(), check: "network_error", finding });
         if (opts.onCase) {
@@ -871,7 +906,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           options: checkRuntimeOptions,
         });
         if (outcome.kind === "fail") {
-          recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent, opts.severityConfig, outcome.severity, opts.fixtureGaps);
+          recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent, outcome.severity, opts.fixtureGaps);
         }
         if (outcome.kind === "skip") {
           // ARV-26: bucket skips by check+reason so the summary can surface
@@ -884,7 +919,10 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
             type: "check_result",
             ts: nowIso(),
             check: check.id,
-            severity: check.severity,
+            // ARV-351: emit the SAME severity the finding carries, not the
+            // static declared default — else one case reads `high` on its
+            // check_result and `low` on its finding (open_cors_on_sensitive).
+            severity: (outcome.kind === "fail" ? outcome.severity : undefined) ?? check.severity,
             verdict: outcome.kind,
             operation: { path: op.path, method: op.method, operationId: op.operationId },
             request_signature: `${built.case.request.method} ${built.case.request.url}`,
@@ -929,7 +967,16 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   // sequential code path inside runPool — same microtask interleaving as
   // before, AC #4 backward-compat.
   const workers = opts.workers ?? 1;
-  const opReports = await runPool(ops, workers, processOperation);
+  // ARV-328: progress accounting rides on op completion.
+  let opsDone = 0;
+  let casesDone = 0;
+  const opReports = await runPool(ops, workers, async (op: EndpointInfo) => {
+    const report = await processOperation(op);
+    opsDone += 1;
+    casesDone += report.cases;
+    opts.onProgress?.({ done: opsDone, total: ops.length, cases: casesDone });
+    return report;
+  });
 
   let findings: CheckFinding[] = [];
   /** ARV-60: per-check accumulator for spec_findings rollup. Built from
@@ -1054,8 +1101,17 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     // self-skip via `applies(g)` — instead of leaking a live POST create
     // despite the GET-only filter. Read-only stateful checks (pagination
     // invariants, observation-mode lifecycle) still run on the list/read ops.
+    // ARV-299: in safe mode, feed only read-only ops to the CRUD builder so
+    // no group carries a create/update/delete — same self-skip path ARV-332
+    // uses for `--include method:GET`, but driven by the safe/live toggle.
+    const statefulOps = opts.safe
+      ? ops.filter((o) => {
+          const m = o.method.toUpperCase();
+          return m === "GET" || m === "HEAD";
+        })
+      : ops;
     const crudGroups = activeStateful.some((c) => c.phase === "crud")
-      ? augmentWithListOnlyGroups(detectCrudGroups(ops), ops)
+      ? augmentWithListOnlyGroups(detectCrudGroups(statefulOps), statefulOps)
       : [];
     summary.checks_run += activeStateful.length;
 
@@ -1067,20 +1123,6 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     const collected: CheckFinding[] = [];
     function pushStateful(f: CheckFinding): void {
       if (!f.category) f.category = categoryFor(f.check);
-      // ARV-283: stateful findings carry no upstream HTTP response shape
-      // — pass a synthetic context with just the status from
-      // response_summary so suppressions that key off status/method/path
-      // still match. Header-keyed suppressions don't fire on stateful
-      // (no headers preserved); that's an acceptable Phase A limitation.
-      applyCalibration(
-        f,
-        {
-          status: f.response_summary.status,
-          headers: {},
-          content_type: f.response_summary.content_type,
-        },
-        opts.severityConfig,
-      );
       collected.push(f);
       if (f.suppressed_by) {
         summary.suppressed = (summary.suppressed ?? 0) + 1;
@@ -1141,7 +1183,8 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
               type: "check_result",
               ts: nowIso(),
               check: check.id,
-              severity: check.severity,
+              // ARV-351: match the finding's severity (see per-response path).
+              severity: (outcome.kind === "fail" ? outcome.severity : undefined) ?? check.severity,
               verdict: outcome.kind,
               operation: { path: op.path, method: op.method, operationId: op.operationId },
               request_signature: `${op.method.toUpperCase()} ${op.path}`,
@@ -1230,7 +1273,8 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
               type: "check_result",
               ts: nowIso(),
               check: check.id,
-              severity: check.severity,
+              // ARV-351: match the finding's severity (see finding below).
+              severity: (outcome.kind === "fail" ? outcome.severity : undefined) ?? check.severity,
               verdict: outcome.kind,
               operation: evOp,
               request_signature: `${evOp.method.toUpperCase()} ${evOp.path} (chain)`,
@@ -1296,6 +1340,13 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       summary.findings -= 1;
       summary.by_severity[f.severity] -= 1;
       if (f.category) summary.by_category[f.category] -= 1;
+      // ARV-322: the finding event already streamed to NDJSON before the
+      // guard fired, so a consumer counting `type:finding` records would
+      // see one more than `summary.findings`. Route the removal through
+      // `summary.suppressed` (same bucket as ARV-283 calibration
+      // suppressions) so `findings + suppressed` always reconciles with
+      // the stream instead of silently diverging.
+      summary.suppressed = (summary.suppressed ?? 0) + 1;
     }
     const reasonKey = `status_code_conformance: broken-baseline (${baselineGuard.removed.length} conformance finding(s) suppressed)`;
     summary.skipped_outcomes[reasonKey] = (summary.skipped_outcomes[reasonKey] ?? 0) + baselineGuard.removed.length;
