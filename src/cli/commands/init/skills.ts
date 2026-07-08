@@ -5,6 +5,7 @@ import zondSkill from "./templates/skills/zond.md" with { type: "text" };
 import checksSkill from "./templates/skills/zond-checks.md" with { type: "text" };
 import triageSkill from "./templates/skills/zond-triage.md" with { type: "text" };
 import seedSkill from "./templates/skills/zond-seed.md" with { type: "text" };
+import warmUpSkill from "./templates/skills/warm-up-target.md" with { type: "text" };
 
 export interface SkillResult {
   name: string;
@@ -31,6 +32,10 @@ const SKILLS: SkillTemplate[] = [
   // ARV-355: agent-orchestrated auto-seed loop (read gaps → order by
   // fkDependencies → author body → request POST --capture → fix 4xx + retry).
   { name: "zond-seed", body: seedSkill },
+  // ARV-366: warm up external-input fixtures (issue_id/file_id/integration_id)
+  // via the target's own SDK/CLI/replay — the honest-2xx ceiling zond-seed
+  // can't reach with a plain POST. Agent warms, zond stores + measures.
+  { name: "warm-up-target", body: warmUpSkill },
 ];
 
 /**

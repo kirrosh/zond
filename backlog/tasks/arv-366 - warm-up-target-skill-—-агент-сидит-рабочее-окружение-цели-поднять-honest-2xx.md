@@ -1,9 +1,10 @@
 ---
 id: ARV-366
 title: 'warm-up-target skill — агент сидит рабочее окружение цели, поднять honest-2xx'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-08 07:14'
+updated_date: '2026-07-08 07:59'
 labels:
   - m-25
   - skill
