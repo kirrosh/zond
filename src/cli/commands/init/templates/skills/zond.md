@@ -69,9 +69,10 @@ For triage of a failing run — see `zond-triage`.
   case-studies, do not `expect:`-mask.
 - **MUST run `zond doctor --api <name> --missing-only` before generating
   fixtures or touching `.env.yaml`** — identifies unfilled keys early.
-- **`prepare-fixtures` is single-pass and never POST-creates** — it fills
-  what discover resolves deterministically and reports the rest as gaps.
-  Fill remaining fixtures by hand (`fixtures add` / editing `.env.yaml`).
+- **`prepare-fixtures` is single-pass, never POST-creates, and never
+  harvests values** (ARV-362) — it verifies existing fixtures and reports
+  unfilled vars as gaps. Which record/field fills a slot is your call:
+  fill fixtures by hand (`fixtures add` / editing `.env.yaml`).
 
 ## Workspace artifact model
 
@@ -195,15 +196,16 @@ If doctor reports stale → `zond refresh-api <name>`.
 ## Phase 1 — Fixture pack
 
 `zond prepare-fixtures` is **single-pass and deterministic**: it walks
-`.api-resources.yaml`, hits each owner list/read endpoint, and fills
-`.env.yaml` with the FK ids it can resolve. It does **not** POST-create
-resources. Whatever it can't resolve it reports as a gap — you (or the
-agent) fill those by hand.
+`.api-resources.yaml`, hits each owner list/read endpoint, and **reports**
+which FK vars are unfilled (empty list → create one first; non-empty →
+pick a value; 404/403 → auth/drift). It does **not** POST-create resources
+and (ARV-362) **never harvests a value** — which record/field fills a slot
+is your judgment. Fill every gap by hand (`fixtures add` / `.env.yaml`).
 
 ```bash
-zond prepare-fixtures --api <name>            # dry-run preview
-zond prepare-fixtures --api <name> --apply    # fill what discover resolves
-zond prepare-fixtures --api <name> --refresh  # = --verify --apply: drop stale ids, re-resolve
+zond prepare-fixtures --api <name>            # report gaps (never writes values)
+zond prepare-fixtures --api <name> --apply    # only unsets stale ids under --refresh; never harvests
+zond prepare-fixtures --api <name> --refresh  # = --verify --apply: drop (unset) stale 404 ids → you refill
 ```
 
 It also scans the generated suites and reports two named gap buckets
@@ -351,8 +353,8 @@ zond api annotate dump --api <name> --seed-bodies --only <res> \
 #    add missing fields — already-set blocks are protected from overwrite.
 zond api annotate apply --api <name> --seed-bodies --input agent-out.yaml --gap-fill-only --yes
 
-# 4. Refresh fixtures — drop stale (404) ids and re-resolve any records
-#    that now exist from a discoverable list endpoint.
+# 4. Refresh fixtures — drop (unset) stale (404) ids so they resurface as
+#    gaps; refill them by hand / `fixtures add` (discover never harvests).
 zond prepare-fixtures --api <name> --refresh
 ```
 
