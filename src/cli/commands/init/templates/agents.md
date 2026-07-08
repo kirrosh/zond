@@ -16,8 +16,14 @@ only, no MCP server in this workspace.
   lifecycle_transitions) and the `zond api annotate dump+apply` flow.
 - **`.claude/skills/zond-triage/SKILL.md`** — read-only triage of a
   finished run / probe artifact. Routes by `recommended_action` enum.
+- **`.claude/skills/zond-seed/SKILL.md`** — agent-orchestrated seed loop:
+  read fixture gaps → order by FK deps → author body → `request POST
+  --capture` → fix 4xx + retry. Fills what `prepare-fixtures` reports missing.
+- **`.claude/skills/warm-up-target/SKILL.md`** — warm external-input
+  fixtures (issue_id/file_id/integration_id) via the target's own
+  SDK/CLI/replay — the honest-2xx ceiling a plain POST can't reach.
 
-Both skills work off the per-API artifacts written by `zond add api`:
+These skills work off the per-API artifacts written by `zond add api`:
 
 ```
 apis/<name>/
