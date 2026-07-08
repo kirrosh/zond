@@ -2,9 +2,8 @@
  * TASK-29: actionable "Suggested fixes" surfaces for `zond db diagnose`.
  *
  * The base diagnose envelope already classifies failures and wires
- * agent_directive / recommended_action / env_issue. This layer adds two
- * concrete, fixable signals that the LLM agent can act on without a second
- * round-trip:
+ * recommended_action. This layer adds two concrete, fixable signals that
+ * the LLM agent can act on without a second round-trip:
  *
  *   1. Placeholder path-params on 404s — when a 404 hits a URL that still
  *      contains literal example/placeholder values (`example`, all-zeros

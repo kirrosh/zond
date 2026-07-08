@@ -100,7 +100,7 @@ async function readEnv(envPath: string): Promise<Record<string, string>> {
   return (await loadEnvFile(envPath)) ?? {};
 }
 
-async function applyEnvWrites(
+export async function applyEnvWrites(
   envPath: string,
   writes: Record<string, string>,
 ): Promise<{ backup: string | null }> {

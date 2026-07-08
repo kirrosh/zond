@@ -3,7 +3,7 @@
  * The runner builds a single-site negative case (one mutation against
  * a valid body, see `_negative_mutator.ts`); if the server still
  * accepts it (status outside 4xx/5xx + 401/403/404 admin set), we
- * raise a finding — *unless* an anti-FP guard fires (see `_anti_fp.ts`).
+ * raise a finding with raw evidence. The agent triages / re-severitizes.
  *
  * Default expected: 400 / 401 / 403 / 404 / 422 / 428 / 5xx.
  *   2xx and 3xx with our payload are findings.
@@ -32,16 +32,10 @@
  * single-signal proof caps at LOW; concrete schema breach escalates to
  * MEDIUM. The declared `severity: "low"` is the natural fallback /
  * proof-cap baseline; stronger findings use `outcome.severity` to
- * override.
- *
- * Users can re-calibrate any of these per-API via `.zond/severity.yaml`
- * (ARV-283) — e.g. promote `additionalProperties-violation` to MEDIUM
- * for a strict-validating API that documents rejection, or suppress
- * `wrong-type` query on GET for a Stripe-style "empty list" vendor.
+ * override. The agent re-severitizes from the raw evidence.
  */
 import type { Check, CheckOutcome } from "../types.ts";
 import type { Severity } from "../../severity/index.ts";
-import { applyAntiFp } from "../../anti-fp/index.ts";
 
 const ACCEPTABLE = (status: number): boolean => {
   if (status === 400 || status === 401 || status === 403 || status === 404 || status === 422 || status === 428) return true;
@@ -120,12 +114,28 @@ export const negativeDataRejection: Check = {
   caseKinds: ["negative_data"],
   applies: (op) => Boolean(op.requestBodySchema),
   run({ case: c, response }): CheckOutcome {
-    if (ACCEPTABLE(response.status)) return { kind: "pass" };
-    const skip = applyAntiFp(c, "check:negative_data_rejection");
-    if (skip) {
-      return { kind: "skip", reason: `${skip.ruleId}: ${skip.reason}` };
-    }
     const meta = c.meta as MutationMeta | undefined;
+    const method = c.operation.method.toUpperCase();
+    const bodyless = method === "GET" || method === "HEAD" || method === "DELETE";
+    // ARV-345 (scope fix, like ARV-340): don't manufacture "accepted an invalid
+    // body" findings on methods with no request-body semantics. A GET/HEAD/DELETE
+    // that 2xx's a mutated body simply ignored the body — correct, not a gap.
+    if (bodyless && meta?.mutation === "boundary") {
+      return { kind: "skip", reason: "body mutation not applicable on GET/HEAD/DELETE (no request-body semantics)" };
+    }
+    // ARV-345: an unknown / wrong-type QUERY param a GET tolerates (2xx) is
+    // documented leniency ("invalid id → empty list"), not a rejectable invalid.
+    // drop-required-query stays in scope — a declared-required param silently
+    // optional IS a concrete contract gap.
+    if (
+      bodyless
+      && meta?.mutation === "param-boundary"
+      && meta?.param_location === "query"
+      && LOW_PARAM_SCENARIOS_ON_GET.has(meta?.param_scenario ?? "")
+    ) {
+      return { kind: "skip", reason: "unknown/wrong-type query param on GET is documented leniency, not a validation gap" };
+    }
+    if (ACCEPTABLE(response.status)) return { kind: "pass" };
     return {
       kind: "fail",
       message: `Server accepted an invalid body (status ${response.status}) — single-site mutation: ${

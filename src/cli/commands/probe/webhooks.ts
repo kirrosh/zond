@@ -31,6 +31,8 @@ export interface ProbeWebhooksOptions {
   output?: string;
   /** Envelope mode — wraps result in {ok, command, data, errors}. */
   json?: boolean;
+  /** API name for audit-coverage attribution. */
+  apiName?: string;
 }
 
 function severityCount(findings: WebhookFinding[]): { high: number; low: number } {

@@ -189,6 +189,24 @@ export async function runCommand(options: RunOptions): Promise<number> {
       return 2;
     }
     printWarning(`No test files found in ${pathList}`);
+    // ARV-357: an empty dir used to exit 0 and write NO --output file, so a
+    // scripted pipeline saw a missing file with no error to key on. Still
+    // write the requested report (empty JSON `[]` / junit tests=0 envelope)
+    // so downstream stages parse "zero tests" instead of silently skipping.
+    if (options.output) {
+      try {
+        const spec = resolveOutput(RUN_OUTPUT_SPEC, { report: options.report, output: options.output });
+        if (spec.channel === "file") {
+          const content = spec.format === "junit" ? generateJunitXml([]) : generateJsonReport([]);
+          await mkdir(pathDirname(spec.path!), { recursive: true });
+          await writeFile(spec.path!, content, "utf-8");
+          process.stderr.write(`zond: empty report written to ${spec.path!} (0 tests)\n`);
+        }
+      } catch (err) {
+        printError(`Failed to write --output file ${options.output}: ${(err as Error).message}`);
+        return 2;
+      }
+    }
     return 0;
   }
 

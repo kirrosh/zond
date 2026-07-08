@@ -76,6 +76,17 @@ describe("not_a_server_error", () => {
   test("edge — 499 (just below 5xx) passes", () => {
     expect(notAServerError.run(ctx(makeCase(), makeResponse({ status: 499 }))).kind).toBe("pass");
   });
+  // ARV-340: the check must be scoped to malformed-input cases too — a
+  // 500 from a negative_data mutation is exactly the case that slipped
+  // through when this defaulted to positive-only (live Stripe:
+  // GET /v1/billing/alerts 500 on a bad query param, zero findings).
+  // unsupported_method stays out (501/405 there is legitimate).
+  test("ARV-340 — evaluates negative_data + missing_required_header, not unsupported_method", () => {
+    expect(notAServerError.caseKinds).toContain("negative_data");
+    expect(notAServerError.caseKinds).toContain("missing_required_header");
+    expect(notAServerError.caseKinds).toContain("positive");
+    expect(notAServerError.caseKinds).not.toContain("unsupported_method");
+  });
 });
 
 // ── status_code_conformance ─────────────────────────────────────────

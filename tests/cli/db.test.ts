@@ -107,6 +107,46 @@ describe("dbCommand", () => {
     }
   });
 
+  // ARV-338: `--report yaml` emits the same payload as YAML.
+  test("run/diagnose/compare --report yaml emit parseable YAML", async () => {
+    db = tmpDb();
+    output = captureOutput({ console: true });
+    getDb(db);
+    const runIdA = createRun({ started_at: new Date().toISOString() });
+    finalizeRun(runIdA, []);
+    const runIdB = createRun({ started_at: new Date().toISOString() });
+    finalizeRun(runIdB, []);
+
+    const { parse: parseYaml } = await import("yaml");
+    const cases: Array<{ subcommand: string; positional: string[]; key: string }> = [
+      { subcommand: "run", positional: [String(runIdA)], key: "run" },
+      { subcommand: "diagnose", positional: [String(runIdA)], key: "summary" },
+      { subcommand: "compare", positional: [String(runIdA), String(runIdB)], key: "summary" },
+    ];
+    for (const { subcommand, positional, key } of cases) {
+      output.restore();
+      output = captureOutput({ console: true });
+      const code = await dbCommand({ subcommand, positional, report: "yaml", dbPath: db, json: false });
+      expect(code).toBe(0);
+      const doc = parseYaml(output.out) as Record<string, unknown>;
+      expect(doc[key]).toBeDefined();
+    }
+  });
+
+  test("--report yaml with --json is rejected", async () => {
+    db = tmpDb();
+    output = captureOutput({ console: true });
+    const code = await dbCommand({ subcommand: "run", positional: ["1"], report: "yaml", dbPath: db, json: true });
+    expect(code).toBe(2);
+  });
+
+  test("--report with unknown format is rejected", async () => {
+    db = tmpDb();
+    output = captureOutput({ console: true });
+    const code = await dbCommand({ subcommand: "run", positional: ["1"], report: "xml", dbPath: db, json: false });
+    expect(code).toBe(2);
+  });
+
   // TASK-266: `db diagnose` without an id targets the most recent failing run.
   test("diagnose without id picks latest failing run (TASK-266)", async () => {
     db = tmpDb();

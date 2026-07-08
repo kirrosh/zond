@@ -1,8 +1,37 @@
-import { applyAntiFp } from "../../anti-fp/index.ts";
-import { matchesSubscriptionGated as matchesPaidPlan403 } from "../../anti-fp/rules/subscription-gated/paid-plan-403.ts";
 import { classify as classifyRecommendedAction } from "../../classifier/recommended-action.ts";
 import type { EndpointInfo } from "../../generator/types.ts";
 import type { EndpointVerdict } from "./types.ts";
+
+/** Lower-cased anchored fragments for the SaaS-flavoured 403 wordings we
+ *  encounter in the wild (paid plan / role-scope / feature-flag gates).
+ *  Each entry is one independent signal — a body matching any one of them
+ *  is treated as subscription-gated. Formerly the anti-FP registry rule
+ *  `subscription-gated/paid-plan-403` (ARV-125); now inlined as a plain
+ *  evidence signal on the baseline summary — NOT a suppressor. */
+const SUBSCRIPTION_GATED_PATTERNS: RegExp[] = [
+  /\bpaid plan\b/i,
+  /\bsubscription (?:required|needed)\b/i,
+  /\bnot (?:available|enabled) (?:on|for) your\b/i,
+  /\bplan (?:does not include|doesn['']?t include)\b/i,
+  /\brequires? (?:the )?[\w:-]+ scope\b/i,
+  /\bmissing (?:the )?[\w:-]+ scope\b/i,
+  /\bfeature (?:is )?(?:not enabled|disabled|not available)\b/i,
+  /\binsufficient (?:permissions?|scope)\b/i,
+];
+
+/** Reason text surfaced on the baseline summary when a 403 body names a
+ *  subscription/scope gate — signals to the triage agent that fixture
+ *  edits won't help. */
+const SUBSCRIPTION_GATED_REASON =
+  "endpoint is env/subscription-gated (paid plan, role/scope, feature flag); " +
+  "not a fixture issue — wontfix unless scope changes";
+
+function matchesSubscriptionGated(message: string): boolean {
+  for (const re of SUBSCRIPTION_GATED_PATTERNS) {
+    if (re.test(message)) return true;
+  }
+  return false;
+}
 
 /** ARV-56: route through the single classifier instead of carrying the
  *  severity→action switch inline. */
@@ -26,18 +55,14 @@ export function inconclusiveBaselineSummary(
 ): string {
   const hint = extractBaselineHint(body);
   const base = `baseline body invalid — server returned ${status}`;
-  // ARV-104 (F9) → ARV-125: when status is 403 and the response body
-  // names a subscription/scope gate (paid plan, feature flag, role/scope
+  // ARV-104 (F9): when status is 403 and the response body names a
+  // subscription/scope gate (paid plan, feature flag, role/scope
   // insufficient), the right answer isn't "fix fixture" — there's
-  // nothing to fix. The pattern set + suppression text now live in the
-  // anti-FP registry as `subscription-gated/paid-plan-403`; we route through
-  // `applyAntiFp` so the rule body, references, and identifier stay in
-  // one place.
-  const suppression = hint !== undefined
-    ? applyAntiFp({ status, message: hint }, "probe:mass-assignment")
-    : null;
-  const tail = suppression
-    ? ` — ${suppression.reason}`
+  // nothing to fix. Surface a wontfix reason on the summary as raw
+  // evidence for the triage agent (this is a hint, NOT a suppressor).
+  const gated = status === 403 && hint !== undefined && matchesSubscriptionGated(hint);
+  const tail = gated
+    ? ` — ${SUBSCRIPTION_GATED_REASON}`
     : " — fix fixture / FK value / path-params and re-probe";
   // TASK-137: if body-FK auto-discovery couldn't fill required FK fields, name
   // them in the summary so the user knows exactly what to add to env (or
@@ -52,13 +77,10 @@ export function inconclusiveBaselineSummary(
     : `${base}${fkClause}${tail}`;
 }
 
-/** ARV-104 (F9) → ARV-125: pattern set + suppression text moved to the
- *  anti-FP registry (`subscription-gated/paid-plan-403`). This re-export keeps
- *  pre-migration callers (existing unit test in
- *  mass-assignment-probe.test.ts) working through a thin shim. New
- *  callers should depend on the rule module directly or route
- *  through `applyAntiFp(ctx, "probe:mass-assignment")`. */
-export const isSubscriptionGated = matchesPaidPlan403;
+/** ARV-104 (F9): quick yes/no on whether a 403 body names a
+ *  subscription/scope gate. Public predicate for callers (and tests)
+ *  that want the signal without composing a summary string. */
+export const isSubscriptionGated = matchesSubscriptionGated;
 
 function extractBaselineHint(body: unknown): string | undefined {
   if (typeof body === "string") {

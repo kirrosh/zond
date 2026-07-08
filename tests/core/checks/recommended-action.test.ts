@@ -22,10 +22,13 @@ describe("ARV-11 AC #1: recommended_action table", () => {
     ["response_headers_conformance", undefined, "fix_spec"],
     ["response_schema_conformance", undefined, "fix_spec"],
 
+    // ARV-341: server rejected a body WE generated as valid → our
+    // spec/generator drifted from the implementation, not a backend bug.
+    ["positive_data_acceptance", 422, "fix_spec"],
+
     // Backend bugs.
     ["not_a_server_error", 503, "report_backend_bug"],
     ["unsupported_method", 200, "report_backend_bug"],
-    ["positive_data_acceptance", 422, "report_backend_bug"],
     ["use_after_free", 200, "report_backend_bug"],
     ["ensure_resource_availability", 404, "report_backend_bug"],
     ["cross_call_references", undefined, "report_backend_bug"],
@@ -87,7 +90,6 @@ describe("ARV-11 AC #1: recommended_action table", () => {
 describe("ARV-324: unresolved_fixture downgrades report_backend_bug → fix_fixture", () => {
   const downgradable = [
     "unsupported_method",
-    "positive_data_acceptance",
     "use_after_free",
     "ensure_resource_availability",
     "cross_call_references",
@@ -106,6 +108,17 @@ describe("ARV-324: unresolved_fixture downgrades report_backend_bug → fix_fixt
       expect(recommendForCheck(check, 400)).toBe("report_backend_bug");
     });
   }
+
+  // ARV-341: positive_data_acceptance keeps the ARV-324 fixture downgrade
+  // but its default is fix_spec (self-generated body rejected), not
+  // report_backend_bug.
+  test("positive_data_acceptance: unresolved_fixture=true → fix_fixture", () => {
+    expect(recommendForCheck("positive_data_acceptance", 400, true)).toBe("fix_fixture");
+  });
+  test("positive_data_acceptance: unresolved_fixture=false/undefined → fix_spec", () => {
+    expect(recommendForCheck("positive_data_acceptance", 400, false)).toBe("fix_spec");
+    expect(recommendForCheck("positive_data_acceptance", 400)).toBe("fix_spec");
+  });
 
   test("not_a_server_error stays report_backend_bug even when unresolved_fixture=true (a 5xx is always worth flagging)", () => {
     expect(recommendForCheck("not_a_server_error", 500, true)).toBe("report_backend_bug");

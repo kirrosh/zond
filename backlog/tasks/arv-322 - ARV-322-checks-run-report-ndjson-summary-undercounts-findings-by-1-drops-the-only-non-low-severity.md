@@ -3,15 +3,15 @@ id: ARV-322
 title: >-
   ARV-322: checks run --report ndjson summary undercounts findings by 1, drops
   the only non-low severity
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-03 07:41'
-updated_date: '2026-07-03 15:53'
+updated_date: '2026-07-03 16:05'
 labels:
   - checks
   - ndjson
 dependencies: []
-priority: high
+priority: medium
 ---
 
 ## Description
@@ -22,6 +22,12 @@ Found on Stripe zond-audit run 20260703-094334 (raw/30-checks.ndjson). Stream co
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 summary.findings equals the count of type:finding records in the same ndjson stream
-- [ ] #2 summary.by_severity totals match the severity distribution of the finding records
+- [x] #1 summary.findings equals the count of type:finding records in the same ndjson stream
+- [x] #2 summary.by_severity totals match the severity distribution of the finding records
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fixed via summary.suppressed accounting: guard-removed findings (already streamed) now count into summary.suppressed, so stream reconciles as findings+suppressed==count(type:finding). by_severity tallies non-suppressed only (consistent with ARV-283). Test: tests/cli/checks/ndjson-summary-reconciliation.test.ts
+<!-- SECTION:NOTES:END -->

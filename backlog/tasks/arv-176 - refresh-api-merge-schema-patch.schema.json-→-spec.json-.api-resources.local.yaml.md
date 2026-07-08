@@ -3,16 +3,16 @@ id: ARV-176
 title: >-
   refresh-api: --merge-schema patch.schema.json → spec.json +
   .api-resources.local.yaml
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-12 13:26'
-updated_date: '2026-07-03 15:53'
+updated_date: '2026-07-03 16:43'
 labels:
   - depth
   - spec
   - deferred-m-21
 dependencies: []
-priority: high
+priority: medium
 ---
 
 ## Description
@@ -43,7 +43,13 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond refresh-api --merge-schema patch.schema.json мержит response schemas в overlay
-- [ ] #2 повторный refresh-api без флага сохраняет overlay из .api-resources.local.yaml
-- [ ] #3 конфликты path/endpoint логируются и скипаются
+- [x] #1 zond refresh-api --merge-schema patch.schema.json мержит response schemas в overlay
+- [x] #2 повторный refresh-api без флага сохраняет overlay из .api-resources.local.yaml
+- [x] #3 конфликты path/endpoint логируются и скипаются
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+refresh-api --merge-schema merges patch into .api-schema.local.yaml overlay (mergePatch union) + applies onto doc before spec.json write. Overlay re-applied on every refresh (apply-always, not flag-gated) → survives upstream re-pull (AC#2). Gap-fill only unless --force; path/method absent upstream → conflict logged+skipped (AC#3). Chose dedicated .api-schema.local.yaml over .api-resources.local.yaml (resource-shaped) — noted in commit. Core: core/spec/schema-overlay.ts. Tests: tests/core/spec/schema-overlay.test.ts (7).
+<!-- SECTION:NOTES:END -->

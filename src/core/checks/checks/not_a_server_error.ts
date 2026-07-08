@@ -13,6 +13,14 @@ export const notAServerError: Check = {
   references: [
     { id: "RFC-9110-15.6", url: "https://www.rfc-editor.org/rfc/rfc9110#name-server-error-5xx" },
   ],
+  // ARV-340: evaluate malformed-input cases too, not just the positive
+  // baseline. A negative_data / missing-header request is still a
+  // well-formed HTTP request the server must handle with a 4xx — a 5xx
+  // there is an unhandled crash (live Stripe: GET /v1/billing/alerts 500
+  // on a bad query param slipped through when this defaulted to positive
+  // only). `unsupported_method` is excluded on purpose: 501/405 to an
+  // undeclared method is legitimate, not a server error.
+  caseKinds: ["positive", "negative_data", "missing_required_header"],
   applies: () => true,
   run({ response }) {
     if (response.status >= 500 && response.status < 600) {

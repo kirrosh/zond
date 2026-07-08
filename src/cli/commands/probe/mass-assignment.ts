@@ -197,7 +197,7 @@ export async function probeMassAssignmentCommand(
       // Stripe run (report-zond friction, 2026-07-02) — the target dir stayed
       // empty with zero signal that --emit-tests was ignored.
       if (options.emitTests) {
-        printWarning(`--emit-tests skipped: --dry-run has no live verdicts to lock in as regression suites. Re-run without --dry-run to emit ${options.emitTests}.`);
+        printWarning(`--emit-tests skipped: safe/dry-run mode has no live verdicts to lock in as regression suites. Re-run with --live to emit ${options.emitTests}.`);
       }
       if (options.output) {
         const payload = options.report === "json"

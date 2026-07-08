@@ -102,55 +102,107 @@ if (!setup.authVerified) {
 // --- Phase 2: Depth (детерминированный pass) --------------------------------
 phase('Depth')
 const safe = mode === 'safe'
+const ws = setup.wsDir
+const raw = `${setup.runDir}/raw`
+const envLine = `export ZOND_WORKSPACE="${ws}"; cd "${ws}"`
+const covInc = safe ? "--include 'method:GET'" : ''
+const covPhase = safe ? 'examples' : 'coverage'
+const statefulInc = safe ? '--include method:GET' : ''
+const WINDOW_SCHEMA = {
+  type: 'object', required: ['operations'], additionalProperties: false,
+  properties: { operations: { type: 'integer', description: 'operations из ПОСЛЕДНЕЙ строки summary этого окна (0 если файла/summary нет)' } },
+}
+
+// Prep — локальные/ограниченные шаги, один агент. Заодно обнуляем NDJSON,
+// в которые окна будут дописывать.
 await agent(
-  `Ты — depth-стадия. Выполни детерминированный depth-pass zond по API "${slug}". Это ИСПОЛНИТЕЛЬ, не импровизируй методологию — гони команды ниже по порядку, логируй stderr каждой в raw/NN-*.log.
+  `Ты — prep-стадия. Выполни РОВНО эти команды ОДНИМ вызовом Bash (весь блок сразу, timeout 600000) — НЕ разбивай на отдельные вызовы: export ZOND_WORKSPACE и cd живут только внутри одного шелла, при разбивке они теряются и zond пишет в чужой репозиторий (ARV-359). Ничего не придумывай, не добавляй флагов.
+${envLine}
+: > "${raw}/30-checks.ndjson"; : > "${raw}/30-checks.stderr.log"; : > "${raw}/40-stateful.ndjson"; : > "${raw}/40-stateful.stderr.log"
+zond prepare-fixtures --api ${slug} --apply 2>&1 | tee "${raw}/02-fixtures.log"
+zond doctor --api ${slug} --json > "${raw}/03-doctor.json" 2> "${raw}/03-doctor.stderr.log"
+ZOND_WORKSPACE="${ws}" zond generate --api ${slug} ${covInc} --output "${ws}/apis/${slug}/tests" --force 2>&1 | tee "${raw}/15-generate.log"
+zond check spec --api ${slug} --json > "${raw}/20-check-spec.json" 2> "${raw}/20-check-spec.stderr.log"
+Ответь одной строкой-сводкой.`,
+  { label: `prep:${slug}`, phase: 'Depth', model: 'sonnet' },
+)
 
-Окружение (обязательно в каждой команде):
-  export ZOND_WORKSPACE="${setup.wsDir}"; cd "${setup.wsDir}"
-RUN="${setup.runDir}"; RAW="$RUN/raw"; MODE=${mode}
+// ── Windowed depth-pass. КЛЮЧЕВОЕ (ARV-342): цикл окон живёт ЗДЕСЬ, в JS
+// воркфлоу, а НЕ в голове агента. Каждое окно — отдельный короткий agent на
+// ОДНУ команду (~40с, заведомо < 120с bash-лимита); JS решает, когда стоп
+// (operations последнего окна < размера окна = последний срез). Прошлые 3
+// прогона усекались на ~11-15% именно потому, что агент не собирал цикл из
+// прозы и гонял один foreground `checks run`, ловивший SIGTERM на 120с.
+async function sweepWindows(kind, cmd, win, maxWindows) {
+  let skip = 0, ops = win, total = 0
+  for (let i = 0; i < maxWindows && ops >= win; i++) {
+    const r = await agent(
+      `Запусти РОВНО ОДНУ Bash-команду ниже (она закрывается за <2 мин). Потом верни целое operations из ПОСЛЕДНЕЙ строки {"type":"summary"}, которую она дописала в NDJSON: grep '"type":"summary"' <файл-из-команды> | tail -1 | jq '.summary.operations'. Больше НИЧЕГО не делай, флагов не меняй.
+${envLine}
+${cmd(skip)}`,
+      { label: `${kind}:${skip}`, phase: 'Depth', schema: WINDOW_SCHEMA, model: 'sonnet' },
+    )
+    ops = r?.operations ?? 0
+    total += ops
+    log(`${kind} window skip=${skip}: +${ops} ops (total ${total})`)
+    skip += win
+  }
+  return total
+}
 
-Шаги:
-1. Annotate (heuristic, без агента, ДО fixtures — генерирует seed_body overlay, который --seed ниже должен прочитать): zond api annotate auto --api ${slug} --aspect all --confidence high --auto-apply 2>&1 | tee "$RAW/10-annotate.log"
-2. Fixtures: ${safe
-    ? `zond prepare-fixtures --api ${slug} --apply --cascade 2>&1 | tee "$RAW/02-fixtures.log"  (БЕЗ --seed: safe-mode)`
-    : `zond prepare-fixtures --api ${slug} --apply --cascade --seed 2>&1 | tee "$RAW/02-fixtures.log"`}
-   zond doctor --api ${slug} --json > "$RAW/03-doctor.json"
-3. Generate suites: zond generate --api ${slug} ${safe ? "--include 'method:GET'" : ''} --output apis/${slug}/tests --force 2>&1 | tee "$RAW/15-generate.log"
-4. Static spec audit: zond check spec --api ${slug} --json > "$RAW/20-check-spec.json"
-5. Depth checks: ${safe
-    ? `zond checks run --api ${slug} --include 'method:GET' --phase examples --workers 4 --rate-limit 30 --report ndjson > "$RAW/30-checks.ndjson" 2> "$RAW/30-checks.stderr.log"`
-    : `zond checks run --api ${slug} --phase coverage --workers 4 --rate-limit 30 --report ndjson > "$RAW/30-checks.ndjson" 2> "$RAW/30-checks.stderr.log"`}
-6. Stateful checks: zond checks run --api ${slug} --check stateful ${safe ? "--include method:GET" : ''} --workers 2 --rate-limit 30 --report ndjson > "$RAW/40-stateful.ndjson" 2> "$RAW/40-stateful.stderr.log"
-7. Probes: mkdir -p apis/${slug}/probes/mass-assignment apis/${slug}/probes/security
-   zond probe mass-assignment --api ${slug} ${safe ? '--dry-run' : ''} --emit-tests apis/${slug}/probes/mass-assignment --output apis/${slug}/probes/ma-digest.md > "$RAW/50-probe-ma.log" 2>&1
-   zond probe security ssrf,crlf,open-redirect --api ${slug} ${safe ? '--dry-run' : ''} --emit-tests apis/${slug}/probes/security > "$RAW/51-probe-sec.log" 2>&1
-   ${safe ? '# safe: probes только dry-run (inventory)' : `zond run apis/${slug}/probes/mass-assignment --report json --output "$RAW/52-run-ma.json"; zond run apis/${slug}/probes/security --report json --output "$RAW/53-run-sec.json"`}
-8. Run suites (schema-drift): zond run apis/${slug}/tests --rate-limit ${safe ? '5' : 'auto'} --sequential --validate-schema --report json --output "$RAW/60-run.json"
-9. Coverage + session end: zond coverage --api ${slug} --union session --json > "$RAW/70-coverage.json"; zond session end 2>&1 | tee "$RAW/70-session-end.log"
-10. HTTP status distribution: jq -r 'select(.type=="check_result") | .response.status // "no-response"' "$RAW/30-checks.ndjson" | sort | uniq -c | sort -rn > "$RAW/90-status-dist.txt"
+const covOps = await sweepWindows(
+  'cov',
+  (skip) => `zond checks run --api ${slug} ${covInc} --phase ${covPhase} --skip-ops ${skip} --max-ops 40 --workers 4 --rate-limit 30 --report ndjson >> "${raw}/30-checks.ndjson" 2>> "${raw}/30-checks.stderr.log"`,
+  40, 20,
+)
+const stOps = await sweepWindows(
+  'stateful',
+  (skip) => `zond checks run --api ${slug} --check stateful ${statefulInc} --skip-ops ${skip} --max-ops 120 --workers 2 --rate-limit 30 --report ndjson >> "${raw}/40-stateful.ndjson" 2>> "${raw}/40-stateful.stderr.log"`,
+  120, 12,
+)
+log(`depth swept: coverage ${covOps} ops, stateful ${stOps} ops`)
 
-Правила: не прерывайся на ошибке одного шага — логируй и иди дальше. Каждый шаг, который сам упал/повёл себя странно — коротко запиши симптом в "$RAW/99-zond-friction.md" (### <команда> — что ожидал / что вышло / raw-файл): это сырьё для report-zond.md.
-Никогда: curl/wget, чтение .secrets.yaml.
-
-Верни одну строку: сколько шагов прошло / сколько дало непустой вывод, и есть ли записи в 99-zond-friction.md.`,
-  { label: `depth:${slug}`, phase: 'Depth' },
+// Finish — probes + два suite-run (m-24 contract-diff) + yaml/compare +
+// coverage/session + status-dist. Один агент, каждую live-команду с
+// timeout 600000; не прерывается на ошибке одного шага.
+await agent(
+  `Ты — finish-стадия. Выполни РОВНО эти команды ОДНИМ вызовом Bash (весь блок сразу, timeout 600000) — НЕ разбивай на отдельные вызовы: export ZOND_WORKSPACE и cd теряются между вызовами, тогда 'zond db runs' читает чужой репозиторий и compare сравнивает не те прогоны (ARV-359/360). Не прерывайся на ошибке одного шага — логируй и иди дальше; странности пиши в "${raw}/99-zond-friction.md" (### команда — ожидал/вышло/raw).
+${envLine}
+mkdir -p "${ws}/apis/${slug}/probes/mass-assignment" "${ws}/apis/${slug}/probes/security"
+zond probe mass-assignment --api ${slug} ${safe ? '--dry-run' : `--live --emit-tests "${ws}/apis/${slug}/probes/mass-assignment"`} --output "${ws}/apis/${slug}/probes/ma-digest.md" > "${raw}/50-probe-ma.log" 2>&1
+zond probe security ssrf,crlf,open-redirect --api ${slug} ${safe ? '--dry-run' : `--live --emit-tests "${ws}/apis/${slug}/probes/security"`} > "${raw}/51-probe-sec.log" 2>&1
+${safe ? '# safe: probes dry-run only' : `zond run "${ws}/apis/${slug}/probes/mass-assignment" --report json --output "${raw}/52-run-ma.json"\nzond run "${ws}/apis/${slug}/probes/security" --report json --output "${raw}/53-run-sec.json"`}
+zond run "${ws}/apis/${slug}/tests" --rate-limit ${safe ? '5' : 'auto'} --sequential --validate-schema --report json --output "${raw}/60-run.json"; RUN_A=$(zond db runs --json | jq -r '.data.runs[0].id')
+zond run "${ws}/apis/${slug}/tests" --rate-limit ${safe ? '5' : 'auto'} --sequential --validate-schema --report json --output "${raw}/60-run-b.json"; RUN_B=$(zond db runs --json | jq -r '.data.runs[0].id')
+echo "RUN_A=$RUN_A RUN_B=$RUN_B" > "${raw}/61-run-ids.txt"
+zond db run "$RUN_B" --report yaml > "${raw}/61-run.yaml" 2> "${raw}/61-run.stderr.log"
+zond db diagnose "$RUN_B" --report yaml > "${raw}/62-diagnose.yaml" 2> "${raw}/62-diagnose.stderr.log"
+zond db compare "$RUN_A" "$RUN_B" --report yaml > "${raw}/63-compare.yaml" 2> "${raw}/63-compare.stderr.log"
+zond coverage --api ${slug} --union session --json > "${raw}/70-coverage.json" 2> "${raw}/70-coverage.stderr.log"
+zond session end 2>&1 | tee "${raw}/70-session-end.log"
+jq -r 'select(.type=="check_result") | .response.status // "no-response"' "${raw}/30-checks.ndjson" | sort | uniq -c | sort -rn > "${raw}/90-status-dist.txt"
+Никогда: curl/wget, чтение .secrets.yaml. Ответь одной строкой-сводкой (что прошло, есть ли записи в 99-zond-friction.md).`,
+  { label: `finish:${slug}`, phase: 'Depth', model: 'sonnet' },
 )
 
 // --- Phase 3: Triage → артефакты --------------------------------------------
 phase('Triage')
 const report = await agent(
-  `Ты — triage-стадия. Прочитай сырьё в ${setup.runDir}/raw/ и напиши ДВА markdown-артефакта. Строго применяй severity-калибровку.
+  `Ты — triage-стадия. Прочитай сырьё в ${setup.runDir}/raw/ и напиши ДВА markdown-артефакта. Severity ты назначаешь сам из evidence.
 
-Вход (Read tool): ${setup.runDir}/raw/*.ndjson, *.json, *.log, 99-zond-friction.md, 90-status-dist.txt, 70-coverage.json.
+Вход (Read tool): ${setup.runDir}/raw/*.ndjson, *.json, *.log, *.yaml, 99-zond-friction.md, 90-status-dist.txt, 70-coverage.json.
 
-Severity-калибровка (переопределяет raw-severity):
-- HIGH только с evidence: 5xx, auth bypass, data leak, конкретный body-schema diff с примером. recommended_action:fix_spec без exploit → демоут в MEDIUM.
+DEPTH BREADTH (ARV-354): depth-pass был окновым (ARV-342), поэтому НИ 70-coverage.json, НИ последняя строка summary одного окна не отражают реальный охват. Агрегат по всем окнам уже посчитан воркфлоу: coverage depth-pass = ${covOps} operations, stateful depth-pass = ${stOps} operations. В отчёте про depth-охват используй ЭТИ числа (или, если хочешь перепроверить, посчитай distinct operation-пути: jq -r 'select(.type=="check_result") | .operation.method+" "+.operation.path' ${raw}/30-checks.ndjson ${raw}/40-stateful.ndjson | sort -u | wc -l). Не бери operations из summary одного окна — это ~10x недооценка.
+m-24 артефакты: 61-run.yaml (снапшот прогона), 62-diagnose.yaml (recommended_action-enum + сырой evidence, БЕЗ prose-подсказок), 63-compare.yaml (field-level контракт-дифф RUN_A↔RUN_B: body_changes[] — поле пропало/добавилось/сменило тип, даже если статусы зелёные).
+
+Severity — суждение агента из evidence (ARV-337: zond больше НЕ эмитит severity и НЕ калибрует; находки несут recommended_action-enum + сырой evidence, приоритет назначаешь ты):
+- HIGH только с evidence: 5xx, auth bypass, data leak, конкретный body-schema diff с примером. recommended_action:fix_spec без exploit → MEDIUM.
 - Класс finding'а (один kind+reason) с >20 инстансами → СВЕРНИ в rollup, считай как 1.
 - check spec (static): style/doc-rule'ы (missing pattern/additionalProperties/example) → INFO, не LOW.
 - Probe matcher false-positives (CRLF на name/description и т.п.) → в report-zond.md, НЕ в API findings.
 
 Артефакт 1 — ${setup.runDir}/report-api.md (находки про API):
-  заголовок (slug, spec, mode, endpoints, дата), Headline (1-3 строки), Summary-таблица по source×severity+rollups, HTTP status distribution (из 90-status-dist.txt), HIGH (evidence-backed), MEDIUM (после rollup), Spec-drift rollups (kind|reason|count|example|fix_hint), coverage (test + audit из 70-coverage.json), Coverage gaps.
+  заголовок (slug, spec, mode, endpoints, дата), Headline (1-3 строки), Summary-таблица по source×severity+rollups, HTTP status distribution (из 90-status-dist.txt), HIGH (evidence-backed), MEDIUM (после rollup), Spec-drift rollups (kind|reason|count|example|fix_hint), Contract-drift (из 63-compare.yaml: status-регрессии RUN_A↔RUN_B + body_changes[] с примером поля; если пусто — "стабилен между прогонами"), coverage (test + audit из 70-coverage.json), Coverage gaps.
 
 Артефакт 2 — ${setup.runDir}/report-zond.md (фидбэк про САМ zond = ошибки/проблемы прогона):
   из 99-zond-friction.md + любых аномалий в логах. Секции: Missing-features, UX papercuts, Skill-drift (расхождение skills в workspace vs реальный CLI), Bugs (краши/некорректное поведение). Каждый пункт: repro-команда, expected, actual, raw-ссылка. Если zond отработал чисто — файл с одной строкой "no issues observed".

@@ -118,7 +118,7 @@ describe("negative_data_rejection — severity matrix", () => {
     expect(outcome.severity).toBe("medium");
   });
 
-  it("wrong-type query on GET → LOW (vendor empty-list pattern)", () => {
+  it("wrong-type query on GET → SKIP (ARV-345: documented leniency, not a gap)", () => {
     const outcome = negativeDataRejection.run({
       case: buildCase(GET_OP, {
         mutation: "param-boundary",
@@ -127,8 +127,9 @@ describe("negative_data_rejection — severity matrix", () => {
       }),
       response: buildResp(200),
     } as never);
-    if (outcome.kind !== "fail") throw new Error("expected fail");
-    expect(outcome.severity).toBe("low");
+    // Was a LOW finding; now scoped off — an unknown/wrong-type query param a
+    // GET tolerates (2xx) is vendor "invalid id → empty list" leniency.
+    expect(outcome.kind).toBe("skip");
   });
 
   it("wrong-type query on POST → MEDIUM (no vendor empty-list convention)", () => {
@@ -136,6 +137,27 @@ describe("negative_data_rejection — severity matrix", () => {
       case: buildCase(POST_OP, {
         mutation: "param-boundary",
         param_scenario: "wrong-type",
+        param_location: "query",
+      }),
+      response: buildResp(200),
+    } as never);
+    if (outcome.kind !== "fail") throw new Error("expected fail");
+    expect(outcome.severity).toBe("medium");
+  });
+
+  it("ARV-345: body-boundary mutation on GET → SKIP (no request-body semantics)", () => {
+    const outcome = negativeDataRejection.run({
+      case: buildCase(GET_OP, { mutation: "boundary", boundary: "maxLength+1" }),
+      response: buildResp(200),
+    } as never);
+    expect(outcome.kind).toBe("skip");
+  });
+
+  it("drop-required-query on GET stays in scope → MEDIUM (contract gap, not skipped)", () => {
+    const outcome = negativeDataRejection.run({
+      case: buildCase(GET_OP, {
+        mutation: "param-boundary",
+        param_scenario: "drop-required-query",
         param_location: "query",
       }),
       response: buildResp(200),

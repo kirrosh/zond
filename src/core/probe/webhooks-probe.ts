@@ -68,6 +68,9 @@ export interface WebhookFinding {
   event_type: string | null;
   message: string;
   evidence: Record<string, unknown>;
+  /** Reserved suppression trace (audit-trail). Currently unset — the
+   *  agent triages severity from the raw finding. */
+  suppressed_by?: { source: string; rule_index: number; reason: string };
 }
 
 export interface WebhookProbeResult {

@@ -3,14 +3,14 @@ id: ARV-326
 title: >-
   ARV-326: prepare-fixtures --cascade burns a full 92-resource pass before
   signaling the root cause is a dead/scoped-wrong auth token
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-03 07:42'
-updated_date: '2026-07-03 15:53'
+updated_date: '2026-07-03 16:17'
 labels:
   - prepare-fixtures
 dependencies: []
-priority: high
+priority: low
 ---
 
 ## Description
@@ -21,5 +21,11 @@ Found on Stripe zond-audit run 20260703-094334 (raw/02-fixtures.log, raw/03-doct
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 prepare-fixtures --cascade exits early (before completing all resources) with a clear 'auth appears broken' message once a majority of discovery probes return 401/403
+- [x] #1 prepare-fixtures --cascade exits early (before completing all resources) with a clear 'auth appears broken' message once a majority of discovery probes return 401/403
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+runCascade counts auth rejections mid-pass (AUTH_ABORT_MIN_PROBES=10, ratio 0.5); new CascadeStopReason 'auth-broken' in envelope + loud stderr message with doctor hint; seed loop gated off on auth-broken. Test: tests/cli/bootstrap-auth-fastfail.test.ts (15 resources, 401 server → exactly 10 probes).
+<!-- SECTION:NOTES:END -->

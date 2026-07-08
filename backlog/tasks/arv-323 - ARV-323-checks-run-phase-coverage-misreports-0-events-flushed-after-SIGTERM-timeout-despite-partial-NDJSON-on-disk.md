@@ -3,15 +3,15 @@ id: ARV-323
 title: >-
   ARV-323: checks run --phase coverage misreports 0 events flushed after SIGTERM
   timeout despite partial NDJSON on disk
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-03 07:41'
-updated_date: '2026-07-03 15:53'
+updated_date: '2026-07-03 16:08'
 labels:
   - checks
   - ndjson
 dependencies: []
-priority: high
+priority: medium
 ---
 
 ## Description
@@ -22,5 +22,11 @@ Found on Stripe zond-audit run 20260702-210359 (raw/30-checks.ndjson, raw/30-che
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 on SIGTERM during an ndjson run, the reported flushed-event count matches (or is documented as a lower bound of) the actual lines written to the output file
+- [x] #1 on SIGTERM during an ndjson run, the reported flushed-event count matches (or is documented as a lower bound of) the actual lines written to the output file
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Root cause: ndjsonEventCount only incremented in the file-fd branch; stdout channel (shell redirect) bypassed it. Fixed by counting in both branches; message now says 'N emitted before interrupt (partial stream is usable)' — lower bound semantics per AC. Verified manually: SIGTERM mid-run reports 26 emitted == 26 lines in redirect target.
+<!-- SECTION:NOTES:END -->

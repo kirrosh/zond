@@ -16,7 +16,7 @@ function scanRefs(value: unknown, out: Set<string>): void {
   }
 }
 
-function collectCapturesAndSets(step: TestStep, out: Set<string>): void {
+export function collectCapturesAndSets(step: TestStep, out: Set<string>): void {
   if (step.set) {
     for (const k of Object.keys(step.set)) out.add(k);
   }
@@ -57,6 +57,23 @@ export interface MissingVarHit {
  * forward references inside the suite are tolerated (correctness requires
  * runtime ordering checks anyway).
  */
+/** All non-generator {{var}} references a step reads (path, headers, body,
+ *  query, skip_if, retry_until, set, for_each). Excludes `$generators`. */
+export function collectStepRefs(step: TestStep): Set<string> {
+  const refs = new Set<string>();
+  scanRefs(step.path, refs);
+  scanRefs(step.headers, refs);
+  scanRefs(step.json, refs);
+  scanRefs(step.form, refs);
+  scanRefs(step.multipart, refs);
+  scanRefs(step.query, refs);
+  if (step.skip_if) scanRefs(step.skip_if, refs);
+  if (step.retry_until) scanRefs(step.retry_until.condition, refs);
+  if (step.set) scanRefs(step.set, refs);
+  if (step.for_each) scanRefs(step.for_each.in, refs);
+  return refs;
+}
+
 export function preflightCheckVars(
   suites: TestSuite[],
   env: Record<string, string>,
@@ -71,20 +88,7 @@ export function preflightCheckVars(
     }
     for (const step of suite.tests) collectCapturesAndSets(step, known);
 
-    const scanStepRefs = (step: TestStep): Set<string> => {
-      const refs = new Set<string>();
-      scanRefs(step.path, refs);
-      scanRefs(step.headers, refs);
-      scanRefs(step.json, refs);
-      scanRefs(step.form, refs);
-      scanRefs(step.multipart, refs);
-      scanRefs(step.query, refs);
-      if (step.skip_if) scanRefs(step.skip_if, refs);
-      if (step.retry_until) scanRefs(step.retry_until.condition, refs);
-      if (step.set) scanRefs(step.set, refs);
-      if (step.for_each) scanRefs(step.for_each.in, refs);
-      return refs;
-    };
+    const scanStepRefs = collectStepRefs;
 
     const suiteRefs = new Set<string>();
     if (suite.base_url) scanRefs(suite.base_url, suiteRefs);

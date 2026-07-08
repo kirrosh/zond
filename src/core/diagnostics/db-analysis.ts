@@ -1,9 +1,8 @@
 import { getDb } from "../../db/schema.ts";
 import { listCollections, listRuns, getRunById, getResultsByRunId, getCollectionById } from "../../db/queries.ts";
 import { join } from "node:path";
-import { statusHint, classifyFailure, envHint, envCategory, schemaHint, computeSharedEnvIssue, clusterEnvIssues, buildEnvIssue, recommendedActionForGenerated, isGeneratedTest, softDeleteHint, type RecommendedAction, type EnvIssue } from "./failure-hints.ts";
+import { classifyFailure, recommendedActionForGenerated, isGeneratedTest, type RecommendedAction } from "./failure-hints.ts";
 import { buildSuggestedFixes, type SuggestedFix } from "./suggested-fixes.ts";
-import { AUTH_PATH_RE } from "../runner/auth-path.ts";
 
 function truncateErrorMessage(raw: string | null | undefined, verbose?: boolean): string | undefined {
   if (!raw) return undefined;
@@ -187,7 +186,6 @@ export interface FailureGroup {
   count: number;
   failure_type: string;
   recommended_action: RecommendedAction;
-  hint?: string;
   examples: string[];
   response_status: number | null;
 }
@@ -213,9 +211,6 @@ export interface DiagnoseResult {
     assertion_failures: number;
     network_errors: number;
   };
-  agent_directive?: string;
-  env_issue?: EnvIssue;
-  auth_hint?: string;
   cascade_skips?: CascadeSkipGroup[];
   /** TASK-29: actionable suggestions populated from 404 placeholder
    *  detection + .env.yaml unfilled-key audit. Empty / undefined when
@@ -232,8 +227,6 @@ export interface DiagnoseResult {
     request_method: string | null;
     request_url: string | null;
     response_status: number | null;
-    hint?: string;
-    schema_hint?: string;
     response_body?: unknown;
     response_headers?: Record<string, string>;
     assertions: unknown;
@@ -292,9 +285,6 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
     .filter(r => r.status === "fail" || r.status === "error")
     .map(r => {
       const parsedBody = parseBodySafe(r.response_body);
-      const hint = envHint(r.request_url, r.error_message, envFilePath) ??
-        softDeleteHint(r.response_status, r.request_method, parsedBody) ??
-        statusHint(r.response_status);
       const failure_type = classifyFailure(r.status, r.response_status);
       // ARV-42: generator-emitted suites should not route to fix_test_logic —
       // editing the YAML gets clobbered on the next `zond audit`.
@@ -306,7 +296,6 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
       // test-logic mistakes.
       const schema_violation = hasSchemaAssertion(r.assertions);
       const rec_action = recommendedActionForGenerated(failure_type, r.response_status, generated, schema_violation);
-      const sHint = schemaHint(failure_type, r.response_status);
       return {
         suite_name: r.suite_name,
         test_name: r.test_name,
@@ -318,8 +307,6 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
         request_method: r.request_method,
         request_url: r.request_url,
         response_status: r.response_status,
-        ...(hint ? { hint } : {}),
-        ...(sHint ? { schema_hint: sHint } : {}),
         response_body: parsedBody,
         response_headers: filterHeaders(r.response_headers),
         assertions: r.assertions,
@@ -327,77 +314,11 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
       };
     });
 
-  // TASK-70 + TASK-98 — env_issue detector.
-  //
-  // Two passes:
-  //   1. Run-level: if every non-5xx failure shares a single env-category,
-  //      treat it as a global env_issue (legacy TASK-70 behaviour). This
-  //      catches the most common case — base_url unset, every test broken.
-  //   2. Suite-level clustering: group failures by suite, flag each suite
-  //      whose non-5xx failures are ≥80% env-symptomatic (TASK-98). Catches
-  //      per-suite missing variables, expired auth tokens, dead webhook
-  //      hosts — situations where the run is *mixed* but a specific suite
-  //      is clearly env-broken.
-  //
-  // The fix_env override only applies to failures inside an affected suite.
-  // 5xx (api_error) is excluded everywhere — backend bugs stay
-  // report_backend_bug regardless of env state.
-  let env_issue: EnvIssue | undefined;
-  const legacyEnvHint = computeSharedEnvIssue(failures, envFilePath);
-  const clusters = clusterEnvIssues(failures);
-  const built = buildEnvIssue(clusters, envFilePath);
-
-  let affectedSuites: Set<string>;
-  if (built) {
-    env_issue = built;
-    affectedSuites = new Set(built.affected_suites);
-  } else if (legacyEnvHint) {
-    // Legacy global env_issue (no clustered match — e.g. only one failure,
-    // or every suite has a single failing test). Preserve the original
-    // single-message form but expose it via the new envelope shape so
-    // downstream consumers see one stable contract.
-    const allSuites = [...new Set(failures.filter(f => f.failure_type !== "api_error").map(f => f.suite_name))].sort();
-    env_issue = {
-      message: legacyEnvHint,
-      scope: "run",
-      affected_suites: allSuites,
-      symptoms: {},
-    };
-    affectedSuites = new Set(allSuites);
-  } else {
-    affectedSuites = new Set();
-  }
-
-  if (env_issue) {
-    for (const f of failures) {
-      if (f.failure_type === "api_error") continue; // real backend bug — keep
-      if (!affectedSuites.has(f.suite_name)) continue; // out-of-scope suite
-      f.recommended_action = "fix_env";
-      delete f.hint;
-      delete f.schema_hint;
-    }
-  }
-
   let apiErrors = 0, assertionFailures = 0, networkErrors = 0;
-  let authFailureCount = 0;
   for (const f of failures) {
     if (f.failure_type === "api_error") apiErrors++;
     else if (f.failure_type === "assertion_failed") assertionFailures++;
     else if (f.failure_type === "network_error") networkErrors++;
-    if (f.response_status === 401 || f.response_status === 403) authFailureCount++;
-  }
-
-  let agent_directive: string | undefined;
-  if (apiErrors > 0) {
-    const fixable = assertionFailures + networkErrors;
-    agent_directive =
-      `${apiErrors} test${apiErrors === 1 ? "" : "s"} returned 5xx server errors. ` +
-      `Do NOT change test expectations to accept 5xx responses. ` +
-      `These are backend bugs, not test logic errors. ` +
-      `Stop iterating on these tests and report the failures to the API team.` +
-      (fixable > 0
-        ? ` The remaining ${fixable} failure${fixable === 1 ? "" : "s"} may be fixable in test logic.`
-        : "");
   }
 
   // Cascade skips: skipped tests due to missing captures from failed create steps
@@ -419,19 +340,6 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
         examples: examples.slice(0, 3),
       }))
     : undefined;
-
-  // Auth hint: when many tests fail with 401/403, suggest auth setup
-  let auth_hint: string | undefined;
-  if (authFailureCount >= 5 && authFailureCount / diagRun.total >= 0.3) {
-    const loginEndpoint = allResults.find(
-      r => r.request_method?.toUpperCase() === "POST" && AUTH_PATH_RE.test(r.request_url ?? "")
-    );
-    if (loginEndpoint) {
-      auth_hint = `${authFailureCount} tests failed with 401/403. Found auth endpoint: POST ${loginEndpoint.request_url} — add \`setup: true\` to your auth suite so its captured token is shared with all other suites, or set auth_token manually in .env.yaml`;
-    } else {
-      auth_hint = `${authFailureCount} tests failed with 401/403 — add \`setup: true\` to your auth suite so its captured token is shared with all other suites, or set auth_token in .env.yaml`;
-    }
-  }
 
   const { grouped_failures, compactFailures } = verbose
     ? { grouped_failures: undefined, compactFailures: failures }
@@ -509,9 +417,6 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
       assertion_failures: assertionFailures,
       network_errors: networkErrors,
     },
-    ...(agent_directive ? { agent_directive } : {}),
-    ...(env_issue ? { env_issue } : {}),
-    ...(auth_hint ? { auth_hint } : {}),
     ...(cascade_skips ? { cascade_skips } : {}),
     ...(suggestedFixes.length > 0 ? { suggested_fixes: suggestedFixes } : {}),
     failures: compactFailures,
@@ -520,7 +425,7 @@ export function diagnoseRun(runId: number, verbose?: boolean, dbPath?: string, m
   };
 }
 
-type FailureItem = { suite_name: string; test_name: string; failure_type: string; recommended_action: RecommendedAction; hint?: string; response_status: number | null; group_count?: number };
+type FailureItem = { suite_name: string; test_name: string; failure_type: string; recommended_action: RecommendedAction; response_status: number | null; group_count?: number };
 
 /** Group similar failures for compact output. Exported for testing. */
 export function groupFailures<T extends FailureItem>(failures: T[], maxExamples = 2): { grouped_failures?: FailureGroup[]; compactFailures: T[] } {
@@ -528,7 +433,7 @@ export function groupFailures<T extends FailureItem>(failures: T[], maxExamples 
     return { compactFailures: failures };
   }
 
-  const groupMap = new Map<string, { items: T[]; failure_type: string; hint?: string; response_status: number | null }>();
+  const groupMap = new Map<string, { items: T[]; failure_type: string; response_status: number | null }>();
 
   for (const f of failures) {
     const key = `${f.response_status ?? "null"}|${f.failure_type}`;
@@ -539,7 +444,6 @@ export function groupFailures<T extends FailureItem>(failures: T[], maxExamples 
       groupMap.set(key, {
         items: [f],
         failure_type: f.failure_type,
-        hint: f.hint,
         response_status: f.response_status,
       });
     }
@@ -567,7 +471,6 @@ export function groupFailures<T extends FailureItem>(failures: T[], maxExamples 
       count: group.items.length,
       failure_type: group.failure_type,
       recommended_action: group.items[0]!.recommended_action,
-      hint: group.hint,
       examples: (showAll ? group.items : group.items.slice(0, maxExamples)).map(f => `${f.suite_name}/${f.test_name}`),
       response_status: group.response_status,
     });
@@ -584,6 +487,29 @@ export function groupFailures<T extends FailureItem>(failures: T[], maxExamples 
   return { grouped_failures, compactFailures };
 }
 
+export interface BodyFieldChange {
+  field: string;
+  change: "added" | "removed" | "type_changed";
+  before?: string;
+  after?: string;
+  /** ARV-352: structural scope of the change, derived deterministically from
+   *  the path. `element` = the path crosses an array boundary (`[]`), i.e.
+   *  it's a field of a *collection item* — on list/log endpoints two samplings
+   *  return DIFFERENT objects, so element-level added/removed/type_changed is
+   *  schema-of-union variance across the sampled set, not a contract move.
+   *  `container` = no `[]` in the path — the response envelope/pagination
+   *  skeleton, where a change IS real drift. NOT a suppression heuristic
+   *  (ARV-337): nothing is dropped or down-ranked; the agent judges using the
+   *  scope tag + endpoint context. */
+  scope: "container" | "element";
+}
+
+export interface BodyDiff {
+  suite: string;
+  test: string;
+  changes: BodyFieldChange[];
+}
+
 export interface CompareResult {
   runA: { id: number; started_at: string };
   runB: { id: number; started_at: string };
@@ -593,10 +519,71 @@ export interface CompareResult {
     unchanged: number;
     newTests: number;
     removedTests: number;
+    bodyChanges: number;
+    /** ARV-352: of `bodyChanges`, how many touch the response envelope
+     *  (`container`) vs collection-item fields (`element`). Element-heavy diffs
+     *  on list/log endpoints are schema-of-union variance across a re-sampled
+     *  set, not contract drift — split so triage doesn't read them as regression. */
+    bodyChangesContainer: number;
+    bodyChangesElement: number;
   };
   regressions: Array<{ suite: string; test: string; before: string; after: string }>;
   fixes: Array<{ suite: string; test: string; before: string; after: string }>;
+  /** ARV-339: field-level response-shape diff for tests present in both runs.
+   *  Status-diff answers "what broke"; this answers "how the contract moved". */
+  body_changes: BodyDiff[];
   hasRegressions: boolean;
+}
+
+/** ARV-339: flatten a parsed JSON body into `path → union of leaf types`.
+ *  Array elements collapse under `[]` so item count/order don't add noise. */
+function bodyShape(value: unknown, path: string, out: Map<string, Set<string>>): void {
+  if (Array.isArray(value)) {
+    if (value.length === 0) addShape(out, path, "array");
+    for (const item of value) bodyShape(item, `${path}[]`, out);
+  } else if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) addShape(out, path, "object");
+    for (const [k, v] of entries) bodyShape(v, path ? `${path}.${k}` : k, out);
+  } else {
+    addShape(out, path, value === null ? "null" : typeof value);
+  }
+}
+
+function addShape(out: Map<string, Set<string>>, path: string, type: string): void {
+  const key = path || "$";
+  const set = out.get(key) ?? new Set<string>();
+  set.add(type);
+  out.set(key, set);
+}
+
+const typeLabel = (s: Set<string>): string => [...s].sort().join("|");
+
+/** ARV-339: diff two stored response bodies at field level. Returns [] when
+ *  either side is missing / non-JSON — a shape diff of prose is meaningless. */
+export function diffBodyShapes(rawA: string | null, rawB: string | null): BodyFieldChange[] {
+  if (!rawA || !rawB || rawA === rawB) return [];
+  let a: unknown, b: unknown;
+  try { a = JSON.parse(rawA); b = JSON.parse(rawB); } catch { return []; }
+  if (typeof a !== "object" || a === null || typeof b !== "object" || b === null) return [];
+  const shapeA = new Map<string, Set<string>>();
+  const shapeB = new Map<string, Set<string>>();
+  bodyShape(a, "", shapeA);
+  bodyShape(b, "", shapeB);
+  const scopeOf = (field: string): "container" | "element" =>
+    field.includes("[]") ? "element" : "container";
+  const changes: BodyFieldChange[] = [];
+  for (const [field, typesB] of shapeB) {
+    const typesA = shapeA.get(field);
+    if (!typesA) changes.push({ field, change: "added", after: typeLabel(typesB), scope: scopeOf(field) });
+    else if (typeLabel(typesA) !== typeLabel(typesB)) {
+      changes.push({ field, change: "type_changed", before: typeLabel(typesA), after: typeLabel(typesB), scope: scopeOf(field) });
+    }
+  }
+  for (const [field, typesA] of shapeA) {
+    if (!shapeB.has(field)) changes.push({ field, change: "removed", before: typeLabel(typesA), scope: scopeOf(field) });
+  }
+  return changes.sort((x, y) => x.field.localeCompare(y.field));
 }
 
 export function compareRuns(idA: number, idB: number, dbPath?: string): CompareResult {
@@ -611,8 +598,16 @@ export function compareRuns(idA: number, idB: number, dbPath?: string): CompareR
 
   const mapA = new Map<string, string>();
   const mapB = new Map<string, string>();
-  for (const r of resultsA) mapA.set(`${r.suite_name}::${r.test_name}`, r.status);
-  for (const r of resultsB) mapB.set(`${r.suite_name}::${r.test_name}`, r.status);
+  const bodyA = new Map<string, string | null>();
+  const bodyB = new Map<string, string | null>();
+  for (const r of resultsA) {
+    mapA.set(`${r.suite_name}::${r.test_name}`, r.status);
+    bodyA.set(`${r.suite_name}::${r.test_name}`, r.response_body);
+  }
+  for (const r of resultsB) {
+    mapB.set(`${r.suite_name}::${r.test_name}`, r.status);
+    bodyB.set(`${r.suite_name}::${r.test_name}`, r.response_body);
+  }
 
   const regressions: Array<{ suite: string; test: string; before: string; after: string }> = [];
   const fixes: Array<{ suite: string; test: string; before: string; after: string }> = [];
@@ -620,10 +615,14 @@ export function compareRuns(idA: number, idB: number, dbPath?: string): CompareR
   let newTests = 0;
   let removedTests = 0;
 
+  const body_changes: BodyDiff[] = [];
+
   for (const [key, statusB] of mapB) {
     const statusA = mapA.get(key);
     if (statusA === undefined) { newTests++; continue; }
     const [suite, test] = key.split("::") as [string, string];
+    const changes = diffBodyShapes(bodyA.get(key) ?? null, bodyB.get(key) ?? null);
+    if (changes.length > 0) body_changes.push({ suite, test, changes });
     const wasPass = statusA === "pass";
     const isPass = statusB === "pass";
     const wasFail = statusA === "fail" || statusA === "error";
@@ -639,9 +638,19 @@ export function compareRuns(idA: number, idB: number, dbPath?: string): CompareR
   return {
     runA: { id: idA, started_at: runARecord.started_at },
     runB: { id: idB, started_at: runBRecord.started_at },
-    summary: { regressions: regressions.length, fixes: fixes.length, unchanged, newTests, removedTests },
+    summary: {
+      regressions: regressions.length,
+      fixes: fixes.length,
+      unchanged,
+      newTests,
+      removedTests,
+      bodyChanges: body_changes.length,
+      bodyChangesContainer: body_changes.filter(d => d.changes.some(c => c.scope === "container")).length,
+      bodyChangesElement: body_changes.filter(d => d.changes.every(c => c.scope === "element")).length,
+    },
     regressions,
     fixes,
+    body_changes,
     hasRegressions: regressions.length > 0,
   };
 }

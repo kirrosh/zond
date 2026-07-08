@@ -16,7 +16,6 @@ import { registerPrepareFixtures } from "./commands/prepare-fixtures.ts";
 import { registerFixtures } from "./commands/fixtures.ts";
 import { registerProbes } from "./commands/probe.ts";
 import { bootstrapProbes } from "../core/probe/bootstrap.ts";
-import { bootstrapAntiFp } from "../core/anti-fp/bootstrap.ts";
 import { registerReport } from "./commands/report.ts";
 import { registerCatalog } from "./commands/catalog.ts";
 import { registerCompletions } from "./commands/completions.ts";
@@ -24,11 +23,11 @@ import { registerUse } from "./commands/use.ts";
 import { registerSession } from "./commands/session.ts";
 import { registerDoctor } from "./commands/doctor.ts";
 import { registerRefreshApi } from "./commands/refresh-api.ts";
+import { registerSchemaFromRuns } from "./commands/schema-from-runs.ts";
 import { registerAdd } from "./commands/add-api.ts";
 import { registerRemove } from "./commands/remove-api.ts";
 import { registerAudit } from "./commands/audit.ts";
 import { registerReference } from "./commands/reference.ts";
-import { registerConfig } from "./commands/config.ts";
 import { registerApiAnnotate } from "./commands/api/annotate/index.ts";
 
 import { getSecretRegistry } from "../core/secrets/registry.ts";
@@ -84,6 +83,7 @@ export function buildProgram(): Command {
 
   registerUse(program);
   registerRefreshApi(program);
+  registerSchemaFromRuns(program);
   registerDoctor(program);
 
   registerSession(program);
@@ -109,9 +109,6 @@ export function buildProgram(): Command {
   // contract before commander gets to wire them up. Boot-throws on a
   // missing slot, so a regression can't slip past CI.
   bootstrapProbes();
-  // ARV-123/124: populate the anti-FP rule registry before checks run
-  // — checks call applyAntiFp() and need every shipped rule present.
-  bootstrapAntiFp();
   registerProbes(program);
 
   registerCatalog(program);
@@ -120,7 +117,6 @@ export function buildProgram(): Command {
   registerCompletions(program);
   registerReference(program);
   registerApiAnnotate(program);
-  registerConfig(program);
 
   // TASK-267: group top-level commands by phase in `zond --help`. Without
   // grouping, the flat 20+ command list buries the workflow shape; with it,

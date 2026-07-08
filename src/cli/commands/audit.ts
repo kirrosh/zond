@@ -4,8 +4,8 @@
  * Оборачивает 8-10 ручных шагов (prepare-fixtures → generate → probes
  * → session-wrapped run → coverage → HTML report) в одну команду:
  *
- *   1. `prepare-fixtures --apply` (или `--cascade --seed --apply` при
- *      `--seed`) — заполняет `.env.yaml` FK-идентификаторами.
+ *   1. `prepare-fixtures --apply` — single-pass, заполняет `.env.yaml`
+ *      FK-идентификаторами, что нашлись детерминированно.
  *   2. `generate` — пропускается если `apis/<name>/tests/` свежее, чем
  *      `spec.json` (mtime-эвристика; `--force` отключает skip).
  *   3. `probe static` (validation+methods, всегда). `mass-assignment` и
@@ -57,7 +57,6 @@ interface StageResult {
 export interface AuditOptions {
   api: string;
   dbPath?: string;
-  seed?: boolean;
   withMassAssignment?: boolean;
   withSecurity?: boolean;
   out?: string;
@@ -65,8 +64,8 @@ export interface AuditOptions {
   force?: boolean;
   json?: boolean;
   /** ARV-264: opt-in to the full pipeline against a real-traffic API.
-   *  When false (default), audit runs in safe mode — no --seed POSTs,
-   *  no mass-assignment / security probes, no destructive probes. */
+   *  When false (default), audit runs in safe mode — no mass-assignment /
+   *  security probes, no destructive probes. */
   live?: boolean;
   /** ARV-292: adaptive cap and stateful gating tier. Translates to
    *  `--max-requests N` on every spawned `run` stage. */
@@ -109,25 +108,14 @@ function buildStages(opts: AuditOptions, apiDir: string, specPath: string | null
     ? ["--max-endpoints", String(probeMaxEndpoints)]
     : [];
 
-  // ARV-264: in safe mode (default) `--seed` is ignored — seed POSTs
-  // create real resources on the target API and have unacceptable blast
-  // radius when the user hasn't opted into --live. The "stage skipped:
-  // seed requires --live" warning is printed by `runSafeModeGuard`
-  // before the pipeline starts.
-  const seedEnabled = opts.seed === true && opts.live === true;
-  if (seedEnabled) {
-    stages.push({
-      key: "prepare-fixtures-cascade",
-      name: "prepare-fixtures (cascade discover + seed)",
-      args: ["prepare-fixtures", "--api", api, "--apply", "--seed"],
-    });
-  } else {
-    stages.push({
-      key: "prepare-fixtures",
-      name: "prepare-fixtures (path-FK fixtures)",
-      args: ["prepare-fixtures", "--api", api, "--apply"],
-    });
-  }
+  // ARV-336: prep is always a single-pass `prepare-fixtures --apply`. It
+  // fills what discover resolves deterministically and reports the rest as
+  // gaps for the agent/user to fill by hand — no autonomous seed/cascade.
+  stages.push({
+    key: "prepare-fixtures",
+    name: "prepare-fixtures (path-FK fixtures)",
+    args: ["prepare-fixtures", "--api", api, "--apply"],
+  });
 
   stages.push({
     key: "generate",
@@ -540,7 +528,6 @@ export async function writeAuditReport(outPath: string, data: ReportInput): Prom
   }).join("\n");
 
   const reruncmd = `zond audit --api ${data.api}`
-    + (data.options.seed ? " --seed" : "")
     + (data.options.withMassAssignment ? " --with-mass-assignment" : "")
     + (data.options.withSecurity ? " --with-security" : "");
 
@@ -599,12 +586,8 @@ export async function writeAuditReport(outPath: string, data: ReportInput): Prom
                 : "";
               return `<li><strong>${escapeHtml(key)}</strong> ×${b.count}${sample ? ` — ${sample}${moreExamples}` : ""}</li>`;
             }).join("\n") + `</ul>`;
-        const envIssueHtml = diagnose.env_issue
-          ? `<div class="warn">env_issue (${escapeHtml(diagnose.env_issue.scope)}): ${escapeHtml(diagnose.env_issue.message)}</div>`
-          : "";
         return `<details>
   <summary>Run #${run.id} — ${run.failed}/${run.total} failed (${run.passed} passed)</summary>
-  ${envIssueHtml}
   ${bucketsHtml}
   <p class="cmds">
     Drill in: <code>zond db diagnose --run-id ${run.id} --json</code> ·
@@ -698,12 +681,6 @@ export function runSafePreflight(
   const safe = opts.live !== true;
 
   if (safe) {
-    if (opts.seed) {
-      out.push(
-        "audit --safe (default): --seed ignored. Seed POSTs create real resources on the target API. " +
-        "Re-run with --live to enable, only against a throwaway / sandbox account.",
-      );
-    }
     if (opts.withMassAssignment) {
       out.push(
         "audit --safe (default): --with-mass-assignment ignored. Mass-assignment probes POST mutated " +
@@ -765,10 +742,9 @@ export function registerAudit(program: Command): void {
     // mirror > .zond/current-api.
     .option("--api <name>", "Registered API to audit. Falls back to ZOND_API / .zond/current-api.")
     .option("--db <path>", "Path to SQLite database file")
-    .option("--seed", "Use 'prepare-fixtures --cascade --seed --apply' instead of the plain single-pass prep stage. Requires --live.")
     .option("--with-mass-assignment", "Include 'probe mass-assignment' as an extra stage. Requires --live.")
     .option("--with-security", "Include 'probe security ssrf,crlf,open-redirect' as an extra stage. Requires --live.")
-    .option("--live", "ARV-264: opt into the full pipeline against a real-traffic API. Without this flag, audit runs in safe mode: no seed POSTs, no mass-assignment / security probes, no destructive traffic. Use only against throwaway/sandbox accounts.")
+    .option("--live", "ARV-264: opt into the full pipeline against a real-traffic API. Without this flag, audit runs in safe mode: no mass-assignment / security probes, no destructive traffic. Use only against throwaway/sandbox accounts.")
     .option("--out <path>", "HTML report output path (default: audit-report.html)")
     .option("--dry-run", "Print the stage plan without executing anything")
     .option("--force", "Disable mtime-based skip (always regenerate, even if tests/ newer than spec)")
@@ -797,7 +773,6 @@ export function registerAudit(program: Command): void {
       process.exitCode = await auditCommand({
         api: opts.api,
         dbPath: opts.db,
-        seed: opts.seed === true,
         withMassAssignment: opts.withMassAssignment === true,
         withSecurity: opts.withSecurity === true,
         out: opts.out,

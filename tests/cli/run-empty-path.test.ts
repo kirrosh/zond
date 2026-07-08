@@ -11,6 +11,9 @@
  * exit code 2 and a clear message.
  */
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { mkdtempSync, readFileSync, existsSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runCommand } from "../../src/cli/commands/run.ts";
 import { closeDb } from "../../src/db/schema.ts";
 import { captureOutput } from "../_helpers/output";
@@ -66,5 +69,39 @@ describe("zond run: empty path argument is a hard error", () => {
     const stderr = suppress.errChunks.join("");
     expect(stderr).toContain("Empty path argument");
     expect(stderr).toContain("2 blank entries");
+  });
+});
+
+// ARV-357: empty dir + --output used to exit 0 and write NO file, so a
+// scripted pipeline saw a missing file with no error to key on. It must
+// now still write an empty "0 tests" envelope.
+describe("zond run: empty dir still writes --output envelope", () => {
+  let suppress: ReturnType<typeof captureOutput>;
+  let dir: string;
+
+  beforeEach(() => {
+    suppress = captureOutput();
+    dir = mkdtempSync(join(tmpdir(), "zond-empty-"));
+  });
+
+  afterEach(() => {
+    suppress.restore();
+    closeDb();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("empty dir + --report json + --output writes [] and exits 0", async () => {
+    const out = join(dir, "report.json");
+    const code = await runCommand({
+      paths: [dir],
+      report: "json",
+      output: out,
+      bail: false,
+      noDb: true,
+    });
+
+    expect(code).toBe(0);
+    expect(existsSync(out)).toBe(true);
+    expect(JSON.parse(readFileSync(out, "utf-8"))).toEqual([]);
   });
 });

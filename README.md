@@ -21,10 +21,10 @@ Bootstrap a workspace, register your first API, then fill its fixtures:
 zond init                                              # bootstrap workspace (no fixture changes)
 zond add api my-api --spec ./openapi.json              # register: copies spec.json + emits manifest
 zond doctor --api my-api --missing-only                # gap report: which vars are UNSET
-zond prepare-fixtures --api my-api --apply [--seed]    # fill apis/my-api/.env.yaml from live API
+zond prepare-fixtures --api my-api --apply             # fill apis/my-api/.env.yaml from live API (single discover pass)
 ```
 
-For path-FK ids that auto-discover/--seed can't reach (vendor-dashboard
+For path-FK ids that the discover pass can't reach (vendor-dashboard
 ids like `cus_*`, GitHub PR numbers, Sentry issue ids), use the manual
 helpers (ARV-195):
 
