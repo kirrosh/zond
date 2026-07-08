@@ -504,7 +504,7 @@ review. Defaults catch the obvious; quirks need declared config.
 ```bash
 zond probe static --api <name>                # validation + methods (defaults; generator, always safe)
 zond probe mass-assignment --api <name> --live --emit-tests apis/<name>/probes/mass-assignment
-zond probe security ssrf,crlf,open-redirect,prompt-injection --api <name> --live \
+zond probe security ssrf,crlf,open-redirect --api <name> --live \
   --emit-tests apis/<name>/probes/security
 zond run apis/<name>/probes --report json
 ```
@@ -545,7 +545,7 @@ round-trip GET → **HIGH**, file via `report bundle --include case-study`.
 
 ```bash
 zond probe security ssrf,crlf --api <name> --dry-run         # first run: which (endpoint, field) — same as default --safe
-zond probe security ssrf,crlf,open-redirect,prompt-injection --api <name> --live   # send, sandbox only
+zond probe security ssrf,crlf,open-redirect --api <name> --live   # send, sandbox only
 ```
 
 **Targeting** (two filters; an endpoint must pass BOTH to be planned):
@@ -557,8 +557,7 @@ zond probe security ssrf,crlf,open-redirect,prompt-injection --api <name> --live
    no field matches, the endpoint is skipped with `no-matched-field`.
 
 Field autodetection: SSRF (`*_url`/`webhook`/`callback`/`format: uri`),
-CRLF (`subject`/`*_prefix`/`name`), open-redirect (`redirect`/`next`),
-prompt-injection (`prompt`/`system`/`instruction`).
+CRLF (`subject`/`*_prefix`/`name`), open-redirect (`redirect`/`next`).
 
 If `--dry-run` reports `0 planned / 0 skipped / 0 total` with a narrow
 `--include`, the scope likely captured only GET routes — broaden the
@@ -635,8 +634,8 @@ Producers opt out via `ZOND_CHECKS_PERSIST=0`.
 
 ```bash
 zond report export <run-id>                                # default: triage/<api>/run-<id>/
-zond report bundle 135..142 -o triage/sweep/               # all artefacts (default): case-study + html + diagnose + index.md
-zond report bundle <run-id> --include case-study,diagnose  # subset only (drop html)
+zond report bundle 135..142 -o triage/sweep/               # all artefacts (default): case-study + export + diagnose + index.md
+zond report bundle <run-id> --include case-study,diagnose  # subset only (drop export)
 zond report bundle --session <id> -o triage/session/       # group by session
 ```
 
