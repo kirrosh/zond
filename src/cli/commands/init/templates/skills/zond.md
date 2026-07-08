@@ -113,12 +113,13 @@ probes/                      ← probe-emitted suites
 - "Generate should sync `.env.yaml`" is a rejected design (decision-7,
   m-17).
 
-### Manual fixture-bootstrap (when discover can't resolve a var)
+### Manual fixture-bootstrap (you fill every value)
 
-`prepare-fixtures` only resolves ids reachable from a list/read endpoint
-on the current account. Path-ids that live only in a vendor dashboard
-(Stripe `cus_*`, GitHub PR numbers, Sentry issue ids), or that require
-creating a record first, need a manual hand-off:
+ARV-362: `prepare-fixtures` **reports** FK gaps — it never harvests a
+value. Every fixture is filled by hand: read the gap (empty list → create
+a record first; non-empty → pick a value; 404/403 → auth/drift), then
+supply it. Vendor-dashboard ids (Stripe `cus_*`, GitHub PR numbers,
+Sentry issue ids) have no list endpoint at all — same hand-off:
 
 | Input you have | Command |
 |---|---|
@@ -128,7 +129,7 @@ creating a record first, need a manual hand-off:
 `--validate` GETs the spec's read-by-id endpoint and classifies the
 fixture as `live` / `stale` / `unknown` so dead ids don't silently
 break later runs (ARV-32). Both commands write to `apis/<name>/.env.yaml`
-with a `.env.yaml.bak` backup, mirroring `prepare-fixtures --apply`.
+with a `.env.yaml.bak` backup.
 
 ### When to read which file
 

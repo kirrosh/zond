@@ -48,16 +48,19 @@ finding'и). Источник правды — [decision-7](backlog/decisions/de
 |---|---|---|---|
 | 1. Gap-отчёт | `zond doctor --api <name> --missing-only` | manifest + env | — |
 | 2. Manifest (опц.) | `cat apis/<name>/.api-fixtures.yaml` | manifest | — |
-| 3. Заполнить values | `zond prepare-fixtures --api <name> --apply [--seed] [--cascade]` | manifest + live API | `.env.yaml` (+`.bak`) |
-| 3b. Ручной hand-off (опц.) | `zond fixtures add --api <name> <var>=<value> --validate --apply` или `pbpaste \| zond fixtures import --api <name> --from-curl --apply` | manifest + spec | `.env.yaml` (+`.bak`) |
+| 3. Gap-отчёт по FK | `zond prepare-fixtures --api <name>` | manifest + live API | — (только отчёт) |
+| 4. Заполнить values | `zond fixtures add --api <name> <var>=<value> --validate --apply` или `pbpaste \| zond fixtures import --api <name> --from-curl --apply` | manifest + spec | `.env.yaml` (+`.bak`) |
 
-`--seed` — новинка vs старого `discover`: когда list endpoint возвращает
-`200 []`, POST-создаёт ресурс из schema-derived body и забирает его id.
-На prod/shared org — сперва `--dry-run`.
+**ARV-362:** `prepare-fixtures` больше **не заполняет и не сидит значения** —
+он verify'ит существующие фикстуры и репортит незаполненные FK-vars как gap'ы
+(пустой list → создай ресурс; непустой → выбери значение; 404/403 → auth/drift).
+Какое значение/поле кладётся в слот — суждение агента, не догадка zond'а.
+`--refresh` (`=--verify --apply`) только unset'ит протухшие (404) id, чтобы они
+снова стали gap'ами.
 
-`fixtures add` / `fixtures import --from-curl` (ARV-195) — для path-FK
-ids, которые `--seed` не достаёт: vendor-dashboard ids (`cus_*`,
-GitHub PR numbers, Sentry issue ids), curl-paste из devtools.
+`fixtures add` / `fixtures import --from-curl` (ARV-195) — как заполнить
+gap руками: vendor-dashboard ids (`cus_*`, GitHub PR numbers, Sentry issue
+ids), curl-paste из devtools.
 `--validate` GET'ит read-by-id endpoint и помечает live/stale/unknown.
 
 **Что `zond init` НЕ делает.** Init — это только воркспейс-рефрешер:
