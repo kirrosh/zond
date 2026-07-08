@@ -41,6 +41,16 @@ YOU read the provider's docs/SDK and drive it; zond only records the id
   guarantee cleanup, ask before creating.
 - **Hand off to `zond-seed` first.** Only warm what `zond-seed` marked
   un-seedable. Don't reinvent plain-POST creation here — that's zond-seed's job.
+- **Ask early, don't reverse-engineer.** Give yourself a hard budget of ~1-2
+  attempts to derive a create-recipe from the spec/API. If a blind create 4xx/5xx
+  (missing an integer id the API doesn't expose, an opaque body shape), STOP —
+  ask the user for an example request (a working `curl`/HAR/body from their UI).
+  Extract the ids from it deterministically and replay. Do NOT spelunk 10 endpoints
+  guessing how creation works — that's the slow path the user hates.
+- **Delete only by self-captured id.** Tear-down must target the id YOUR create
+  returned, never a harvested read-fixture value. Deleting by `{{key}}` when that
+  key came from a live resource wipes pre-existing data (see ARV-368). Track
+  created ids explicitly; DELETE those and only those.
 - **Report honestly what you can't warm.** Some fixtures need a human (a paid
   plan, a KYC step, a physical device, a manual dashboard toggle). Surface those
   as a short "needs you" list with the exact action — never fake a value (it
