@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-08 09:22'
+updated_date: '2026-07-08 10:11'
 labels:
   - m-25
   - distribution
@@ -31,7 +32,13 @@ UX2 (stretch, вне scope): dev-стенд захлёбывался на --work
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 zond add api --spec <https-url> подхватывает системный trust store / NODE_EXTRA_CA_CERTS при fetch спека — внутренний/корп CA работает без --insecure
+- [x] #1 zond add api --spec <https-url> подхватывает системный trust store / NODE_EXTRA_CA_CERTS при fetch спека — внутренний/корп CA работает без --insecure
 - [ ] #2 runner TLS-политика (безусловный rejectUnauthorized:false) задокументирована в zond-checks/README; опц. --strict-tls для валидации против публичного API
 - [ ] #3 doctor (или add api) для apiKey-схемы в Authorization подсказывает: писать raw-токен без Bearer-префикса
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+AC1 (system trust store) done: readOpenApiSpec now honors NODE_EXTRA_CA_CERTS + a new 'zond add api --ca <pem>' flag, appending the extra CA to the public roots (node:tls rootCertificates) — never replacing them, so public specs keep validating. resolveSpecFetchTls() precedence: insecure > caPath/env > default; throws on unreadable CA path. Verified end-to-end: registered the internal docgen v30 spec over its self-signed corp CA WITHOUT --insecure by exporting the keychain roots to a PEM and passing --ca. Unit tests in openapi-reader.test.ts. AC2 (runner TLS docs + --strict-tls) and AC3 (apiKey raw-token hint) still open.
+<!-- SECTION:NOTES:END -->

@@ -184,6 +184,7 @@ export interface SetupApiOptions {
   dbPath?: string;
   force?: boolean;
   insecure?: boolean;
+  caPath?: string;
 }
 
 export interface SetupApiResult {
@@ -239,7 +240,7 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   let dereferencedDoc: unknown = null;
   let authVarNames: string[] = [];
   if (spec) {
-    const doc = await readOpenApiSpec(spec, { insecure: options.insecure });
+    const doc = await readOpenApiSpec(spec, { insecure: options.insecure, caPath: options.caPath });
     // Validate the document looks like OpenAPI/Swagger before we snapshot it.
     // dereference() happily round-trips arbitrary JSON (e.g. a marketing-site
     // landing payload), so without this guard `zond add api foo --spec
