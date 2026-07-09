@@ -105,3 +105,41 @@ describe("zond run: empty dir still writes --output envelope", () => {
     expect(JSON.parse(readFileSync(out, "utf-8"))).toEqual([]);
   });
 });
+
+// ARV-383: a path that does not exist on disk is a hard error, NOT a green
+// 0-test run. Distinct from ARV-357 (existing-but-empty dir → advisory exit 0).
+// Trigger in the wild: a probe that matched 0 fields never created its output
+// dir, then `zond run <that-dir>` silently reported a 0-test "pass".
+describe("zond run: non-existent path is a hard error", () => {
+  let suppress: ReturnType<typeof captureOutput>;
+  let dir: string;
+
+  beforeEach(() => {
+    suppress = captureOutput();
+    dir = mkdtempSync(join(tmpdir(), "zond-missing-"));
+  });
+
+  afterEach(() => {
+    suppress.restore();
+    closeDb();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  test("missing dir exits 2 and does NOT write a green empty report", async () => {
+    const missing = join(dir, "never-created");
+    const out = join(dir, "report.json");
+    const code = await runCommand({
+      paths: [missing],
+      report: "json",
+      output: out,
+      bail: false,
+      noDb: true,
+    });
+
+    expect(code).toBe(2);
+    expect(existsSync(out)).toBe(false);
+    const stderr = suppress.errChunks.join("");
+    expect(stderr).toContain("No such file or directory");
+    expect(stderr).toContain("never-created");
+  });
+});
