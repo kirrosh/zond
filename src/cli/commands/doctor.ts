@@ -368,6 +368,27 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
     );
   }
 
+  // ARV-367 (UX1): apiKey scheme living in the Authorization header is a
+  // trap — the server expects the RAW key, but muscle memory prefixes
+  // "Bearer ", which yields an opaque 401. Call it out deterministically.
+  if (specExists && specAbsPath) {
+    try {
+      const spec = JSON.parse(readFileSync(specAbsPath, "utf-8")) as {
+        components?: { securitySchemes?: Record<string, { type?: string; in?: string; name?: string }> };
+      };
+      const rawAuthHeader = Object.entries(spec.components?.securitySchemes ?? {}).find(
+        ([, s]) => s?.type === "apiKey" && s.in === "header" && (s.name ?? "").toLowerCase() === "authorization",
+      );
+      if (rawAuthHeader) {
+        warnings.push(
+          `securityScheme '${rawAuthHeader[0]}' is apiKey in the Authorization header — set auth_token to the RAW key, no 'Bearer ' prefix (Bearer is for http/bearer schemes only)`,
+        );
+      }
+    } catch {
+      // unreadable spec — surfaced by the spec check above
+    }
+  }
+
   // Endpoint counts from .api-catalog.yaml — read what `zond add api` already
   // computed, so `--json` consumers (e.g. /zond-scan PF2 budget estimate)
   // don't have to walk raw spec.json themselves (which would violate the
