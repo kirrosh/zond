@@ -13,7 +13,7 @@
 
 import type { EndpointInfo, CrudGroup } from "./types.ts";
 import type { OpenAPIV3 } from "openapi-types";
-import { detectCrudGroups, singularizeResource } from "./suite-generator.ts";
+import { detectCrudGroups, singularizeResource, stripTrailingVersionSegments } from "./suite-generator.ts";
 
 export interface ResourceFkRef {
   /** Variable name expected in `.env.yaml` to satisfy the FK (e.g. `audience_id`). */
@@ -490,7 +490,11 @@ export function resolveOwnerListPaths(endpoints: EndpointInfo[]): Map<string, st
 }
 
 function listPathToResourceName(listPath: string): string {
-  const segs = pathStripSlash(listPath).split("/").filter(Boolean);
+  // ARV-372/ARV-369 follow-up: strip trailing version segments (`v30`)
+  // before scanning backward, same as the CRUD-group resource-name
+  // derivation in suite-generator.ts — otherwise list-only resources on a
+  // spec shaped `/api/<resource>/v{N}` all collapse to "v30".
+  const segs = stripTrailingVersionSegments(pathStripSlash(listPath).split("/").filter(Boolean));
   for (let i = segs.length - 1; i >= 0; i--) {
     if (!isParamSeg(segs[i])) return segs[i]!;
   }
