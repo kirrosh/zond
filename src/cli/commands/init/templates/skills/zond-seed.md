@@ -35,9 +35,11 @@ it works where the heuristic engine failed.
   reply.
 - **Seed only what the API can self-serve.** Fixtures needing external input —
   KYC-verified accounts, verified bank accounts, webhook signing secrets,
-  paid-plan / SCIM / TOS-gated resources — are **reported, not invented**
-  (pairs with `prepare-fixtures` `unseededRoots` and ARV-349/350). Guessing a
-  value here just 422s and lies about coverage.
+  paid-plan / SCIM / TOS-gated resources, or ids that only exist after a real
+  event (`issue_id`, `file_id`, `integration_id`) — are **reported, not
+  invented** (pairs with `prepare-fixtures` `unseededRoots` and ARV-349/350).
+  Guessing a value here just 422s and lies about coverage. Hand those to the
+  **`warm-up-target`** skill, which warms them via the target's own SDK/CLI.
 - **Live + throwaway/sandbox + cleanup only.** Never seed against production or
   shared data. Confirm `base_url` is a sandbox/test account first. Track every
   id you create and DELETE it at the end (or seed inside a disposable account /
@@ -59,6 +61,14 @@ it works where the heuristic engine failed.
 whose FK points at another must be created *after* its parent (parent id is
 captured first, then referenced). Sort parent-before-child yourself; skip
 cycles and resources whose only dep is external input.
+
+**miss-no-list `candidates` (ARV-382):** when prepare-fixtures can't confidently
+derive the owner list for a fixture var, the item carries a `candidates[]` of
+plausible GET/list endpoints (ranked by structural proximity; deprecated ones
+marked `(deprecated)`). zond does NOT pick — that's your call: `zond request`
+the top candidate, read a record, `zond fixtures add <var>=<id>`. An empty
+`candidates` (and no owner) is an honest dead-end: no listable source exists —
+create the resource or obtain the id from a parent flow.
 
 ## The loop
 

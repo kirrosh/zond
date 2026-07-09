@@ -1,10 +1,13 @@
 import { stringify as stringifyYaml } from "yaml";
 import { getCollections, getRuns, getRunDetail, diagnoseRun, compareRuns } from "../../core/diagnostics/db-analysis.ts";
-import { getFilteredResults, getLatestFailingRunId, getLatestRunId, runKindStats, deleteRunsOlderThan } from "../../db/queries.ts";
+import { getFilteredResults, getLatestFailingRunId, getLatestRunId, runKindStats, deleteRunsOlderThan, listRunsBySession, listRunsByCollectionFiltered, findCollectionByNameOrId } from "../../db/queries.ts";
 import { getDb } from "../../db/schema.ts";
 import { printError } from "../output.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { parseStatusFilter, compileStatusFilterToSql, type StatusMatcher } from "../status-filter.ts";
+import { parseUnion, type UnionSpec } from "./coverage.ts";
+import { readCurrentSession } from "../../core/context/session.ts";
+import { readCurrentApi } from "../../core/context/current.ts";
 
 export interface DbOptions {
   subcommand: string;
@@ -35,6 +38,12 @@ export interface DbOptions {
   /** ARV-338: `--report yaml` — emit the same payload as YAML instead of
    *  JSON, so agents can drop it next to suite YAMLs and diff runs as text. */
   report?: string;
+  /** ARV-380: `db diagnose --union <spec>` — aggregate `by_recommended_action`
+   *  across a run set using coverage's `--union` vocabulary
+   *  (session | since:<dur> | tag:<name> | runs:<id1,id2,…>). */
+  union?: string;
+  /** ARV-380: API name for scoping since:/tag: unions to a collection. */
+  api?: string;
 }
 
 /** ARV-338: shared stdout emitter for run/diagnose/compare payloads. */
@@ -68,6 +77,66 @@ export function parseRetentionDays(spec: string): number | null {
 /** ARV-266: cutoff ISO timestamp `days` before now. */
 function cutoffIso(days: number, now: Date): string {
   return new Date(now.getTime() - days * 86_400_000).toISOString();
+}
+
+/** ARV-380: resolve a coverage-style `--union` spec to the concrete run-ids
+ *  it selects. session/since/tag need context (active session / collection);
+ *  `runs:` is self-contained. */
+function resolveUnionRunIds(spec: UnionSpec, apiName?: string): { ids: number[] } | { error: string } {
+  switch (spec.kind) {
+    case "runIds":
+      return { ids: spec.ids };
+    case "session": {
+      const cur = readCurrentSession();
+      if (!cur) return { error: "--union session: no active session (start one with `zond session start`, or use --union runs:<ids>)." };
+      return { ids: listRunsBySession(cur.id).map((r) => (r as { id: number }).id) };
+    }
+    case "since":
+    case "tag": {
+      // Mirror the standard --api chain: explicit flag > ZOND_API(_GLOBAL) > `zond use`.
+      const resolvedApi = apiName ?? readCurrentApi();
+      if (!resolvedApi) return { error: `--union ${spec.kind}:<...> needs --api <name> (or ZOND_API / \`zond use\`) to scope runs to a collection.` };
+      const col = findCollectionByNameOrId(resolvedApi);
+      if (!col) return { error: `API '${apiName}' not found. Register it with \`zond add api\` or check the name.` };
+      const filter = spec.kind === "since"
+        ? { since: new Date(Date.now() - spec.durationMs).toISOString() }
+        : { tag: spec.name };
+      return { ids: listRunsByCollectionFiltered((col as { id: number }).id, filter).map((r) => r.id) };
+    }
+  }
+}
+
+/** ARV-380: fold `by_recommended_action` (+ summary counts) across a run set.
+ *  Examples are deduped by method+path+status and capped at 5 per action,
+ *  mirroring the single-run cap in `diagnoseRun`. */
+function aggregateDiagnose(ids: number[], options: DbOptions) {
+  type Example = NonNullable<ReturnType<typeof diagnoseRun>["by_recommended_action"]>[string]["examples"][number];
+  const byAction: Record<string, { count: number; examples: Example[]; seen: Set<string> }> = {};
+  const summary = { total: 0, passed: 0, failed: 0, api_errors: 0, assertion_failures: 0, network_errors: 0 };
+  for (const id of ids) {
+    const r = diagnoseRun(id, options.verbose, options.dbPath, options.limit);
+    summary.total += r.summary.total;
+    summary.passed += r.summary.passed;
+    summary.failed += r.summary.failed;
+    summary.api_errors += r.summary.api_errors;
+    summary.assertion_failures += r.summary.assertion_failures;
+    summary.network_errors += r.summary.network_errors;
+    for (const [action, bucket] of Object.entries(r.by_recommended_action ?? {})) {
+      const agg = byAction[action] ??= { count: 0, examples: [], seen: new Set<string>() };
+      agg.count += bucket.count;
+      for (const ex of bucket.examples) {
+        const key = `${ex.method} ${ex.path} ${ex.status}`;
+        if (agg.seen.has(key) || agg.examples.length >= 5) continue;
+        agg.seen.add(key);
+        agg.examples.push(ex);
+      }
+    }
+  }
+  const by_recommended_action: Record<string, { count: number; examples: Example[] }> = {};
+  for (const [action, agg] of Object.entries(byAction)) {
+    by_recommended_action[action] = { count: agg.count, examples: agg.examples };
+  }
+  return { runs_diagnosed: ids.length, run_ids: ids, summary, by_recommended_action };
 }
 
 export async function dbCommand(options: DbOptions): Promise<number> {
@@ -165,12 +234,43 @@ export async function dbCommand(options: DbOptions): Promise<number> {
       }
 
       case "diagnose": {
+        getDb(options.dbPath);
+
+        // ARV-380: `--union <spec>` aggregates by_recommended_action across a
+        // run set (same vocabulary as `zond coverage --union`) instead of the
+        // single-run default, so an agent stops looping `db diagnose $id` per
+        // run and merging client-side.
+        if (options.union !== undefined) {
+          let spec: UnionSpec;
+          try {
+            spec = parseUnion(options.union);
+          } catch (err) {
+            const msg = (err as Error).message;
+            if (json) printJson(jsonError("db diagnose", [msg])); else printError(msg);
+            return 2;
+          }
+          const resolved = resolveUnionRunIds(spec, options.api);
+          if ("error" in resolved) {
+            if (json) printJson(jsonError("db diagnose", [resolved.error])); else printError(resolved.error);
+            return 2;
+          }
+          if (resolved.ids.length === 0) {
+            const msg = `No runs match --union ${options.union}.`;
+            if (json) printJson(jsonError("db diagnose", [msg])); else printError(msg);
+            return 1;
+          }
+          const agg = aggregateDiagnose(resolved.ids, options);
+          const payload = { ...agg, union: options.union };
+          if (json) printJson(jsonOk("db diagnose", payload));
+          else emitPayload(payload, options.report);
+          return 0;
+        }
+
         // TASK-266: resolve run id with the priority
         //   explicit positional > --run-id > --latest > last failing run.
         // The bare `zond db diagnose` is the agent-friendly default the
         // `zond-triage` skill relies on; `--latest` exists for "show me the
         // last run, even if it passed".
-        getDb(options.dbPath);
         let id: number | null = null;
         let resolution: "explicit" | "run-id-flag" | "latest" | "latest-failing" = "explicit";
         const positionalRaw = positional[0];
@@ -440,6 +540,8 @@ export function registerDb(program: Command): void {
     .description("Diagnose run failures. Without [id]: defaults to the most recent failing run (TASK-266); falls back to latest run with a 'no failures' note when nothing has failed.")
     .option("--latest", "Diagnose the most recent run regardless of status (TASK-266)")
     .option("--run-id <N>", "Explicit run id override (same as positional [id]; preferred form for agents)", parsePositiveInt("--run-id"))
+    .option("--union <spec>", "ARV-380: aggregate by_recommended_action across a run set instead of one run. Vocabulary matches `zond coverage --union`: session | since:<dur> | tag:<name> | runs:<id1,id2,…>. since:/tag: need --api to scope the collection.")
+    .option("--api <name>", "API/collection to scope --union since:/tag: against. Falls back to ZOND_API / .zond/current-api.")
     .option("--limit <N>", "Examples per failure group", parsePositiveInt("--limit"))
     .option("--verbose", "Show all examples (not grouped)")
     .option("--report <format>", "Output format: json (default) or yaml (ARV-338: agent-friendly summary)")
@@ -452,6 +554,8 @@ export function registerDb(program: Command): void {
         verbose: opts.verbose === true,
         latest: opts.latest === true,
         runId: opts.runId,
+        union: opts.union,
+        api: opts.api,
         report: opts.report,
         dbPath: opts.db,
         json: globalJson(cmd),

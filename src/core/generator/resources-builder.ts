@@ -13,7 +13,7 @@
 
 import type { EndpointInfo, CrudGroup } from "./types.ts";
 import type { OpenAPIV3 } from "openapi-types";
-import { detectCrudGroups, singularizeResource } from "./suite-generator.ts";
+import { detectCrudGroups, singularizeResource, stripTrailingVersionSegments } from "./suite-generator.ts";
 
 export interface ResourceFkRef {
   /** Variable name expected in `.env.yaml` to satisfy the FK (e.g. `audience_id`). */
@@ -424,9 +424,24 @@ function getCaptureField(create: EndpointInfo): string {
  *    we walk back to the nearest non-param segment and search for any
  *    GET path ending with that hint).
  */
+// ARV-376: list-shaped verb suffixes. `/api/business-segment20/list` is the
+// collection listing for stem `/api/business-segment20`, even though the
+// stem itself is not a GET endpoint. Same for `/search` and `/find`.
+const LIST_VERB_SUFFIXES = new Set(["list", "search", "find"]);
+
 export function resolveOwnerListPaths(endpoints: EndpointInfo[]): Map<string, string> {
   const getPathSet = new Set<string>();
   const getPathsByLastSeg = new Map<string, string[]>();
+  // ARV-376: a `/list`-style endpoint indexed by its collection stem
+  // (path minus the verb suffix) and by that stem's last noun segment, so a
+  // read-by-id sibling (`/{code}`, `/byid/{id}`) can find its listing even
+  // though the bare collection path has no GET.
+  const listByStem = new Map<string, string>();
+  const listByStemLastSeg = new Map<string, string[]>();
+  const considerShortest = (map: Map<string, string>, key: string, path: string) => {
+    const cur = map.get(key);
+    if (!cur || path.length < cur.length) map.set(key, path);
+  };
   for (const ep of endpoints) {
     if (ep.method.toUpperCase() !== "GET" || ep.deprecated) continue;
     const path = pathStripSlash(ep.path);
@@ -437,6 +452,20 @@ export function resolveOwnerListPaths(endpoints: EndpointInfo[]): Map<string, st
       const arr = getPathsByLastSeg.get(last) ?? [];
       arr.push(path);
       getPathsByLastSeg.set(last, arr);
+    }
+    // Index list-verb endpoints against their collection stem. The stem key
+    // is the leading-slash path form the resolution loop below builds its
+    // prefixes in (NOT the filtered form) so the two sides compare equal.
+    if (last && LIST_VERB_SUFFIXES.has(last.toLowerCase()) && segs.length >= 2) {
+      const stemLast = segs[segs.length - 2];
+      if (stemLast && !isParamSeg(stemLast)) {
+        const lastSlash = path.lastIndexOf("/");
+        const stemPath = lastSlash > 0 ? path.slice(0, lastSlash) : "";
+        considerShortest(listByStem, stemPath, path);
+        const arr = listByStemLastSeg.get(stemLast) ?? [];
+        arr.push(path);
+        listByStemLastSeg.set(stemLast, arr);
+      }
     }
   }
 
@@ -455,21 +484,27 @@ export function resolveOwnerListPaths(endpoints: EndpointInfo[]): Map<string, st
       const m = /^\{([^}]+)\}$/.exec(seg);
       if (!m) continue;
       const param = m[1]!;
-      const prevSeg = segs[i - 1];
 
-      // Strategy 1 (canonical): prev seg is a non-param noun and the
-      // prefix up to (but not including) `{param}` is a GET endpoint.
-      if (prevSeg && !isParamSeg(prevSeg)) {
-        const prefix = segs.slice(0, i).join("/");
-        if (getPathSet.has(prefix)) {
-          consider(param, prefix);
-          continue;
-        }
+      // Strategy 1 (canonical + ARV-376): walk back over the run of
+      // consecutive non-param segments before `{param}`; for each candidate
+      // prefix match either a collection GET or a `/list`-style endpoint.
+      // Longest (most specific) prefix wins. Stops at the first param
+      // segment so we never attribute a child id to a grandparent list. This
+      // tolerates read-by-id marker segments (`/byid/{id}` → owner is the
+      // `/business-segment20/list` two segments up).
+      let matched = false;
+      for (let k = i; k >= 1; k--) {
+        if (isParamSeg(segs[k - 1]!)) break; // hit a param boundary — stop
+        const prefix = segs.slice(0, k).join("/");
+        if (getPathSet.has(prefix)) { consider(param, prefix); matched = true; break; }
+        const listPath = listByStem.get(prefix);
+        if (listPath) { consider(param, listPath); matched = true; break; }
       }
+      if (matched) continue;
 
       // Strategy 2 (sibling-param chain): walk back to the nearest
       // non-param segment, then look for *any* GET path that terminates
-      // with that segment. Pick the shortest match.
+      // with that segment (or a `/list`-style endpoint for that stem).
       let hint: string | undefined;
       for (let j = i - 1; j >= 0; j--) {
         const s = segs[j]!;
@@ -479,7 +514,7 @@ export function resolveOwnerListPaths(endpoints: EndpointInfo[]): Map<string, st
         }
       }
       if (!hint) continue;
-      const candidates = getPathsByLastSeg.get(hint);
+      const candidates = getPathsByLastSeg.get(hint) ?? listByStemLastSeg.get(hint);
       if (!candidates || candidates.length === 0) continue;
       const shortest = candidates.reduce((a, b) => (a.length <= b.length ? a : b));
       consider(param, shortest);
@@ -490,7 +525,11 @@ export function resolveOwnerListPaths(endpoints: EndpointInfo[]): Map<string, st
 }
 
 function listPathToResourceName(listPath: string): string {
-  const segs = pathStripSlash(listPath).split("/").filter(Boolean);
+  // ARV-372/ARV-369 follow-up: strip trailing version segments (`v30`)
+  // before scanning backward, same as the CRUD-group resource-name
+  // derivation in suite-generator.ts — otherwise list-only resources on a
+  // spec shaped `/api/<resource>/v{N}` all collapse to "v30".
+  const segs = stripTrailingVersionSegments(pathStripSlash(listPath).split("/").filter(Boolean));
   for (let i = segs.length - 1; i >= 0; i--) {
     if (!isParamSeg(segs[i])) return segs[i]!;
   }
@@ -691,6 +730,7 @@ export function buildApiResourceMap(params: BuildResourcesParams): ApiResourceMa
     r.fkDependencies = collectPathFkDeps(r.basePath, "", ownerListPaths, resourceByListPath);
   }
 
+
   // ARV-134 (follow-up): the early disambiguation pass only operated on
   // CRUD groups, but collisions also fire CRUD-vs-implicit (`/repos/
   // {owner}/{repo}/check-runs` is CRUD, `/repos/{owner}/{repo}/commits/
@@ -698,6 +738,27 @@ export function buildApiResourceMap(params: BuildResourcesParams): ApiResourceMa
   // `check-runs`). Run the same prefix-rename here on the combined list
   // so the final yaml never carries duplicate `resource:` lines.
   const resources = disambiguateEntryCollisions([...crudResources, ...implicitResources]);
+
+  // ARV-376: surface a resource's OWN secondary lookup keys (e.g. the
+  // `/{code}` read-by-code param, or a `/byid/{id}` param that isn't the
+  // canonical idParam) as fillable targets. resolveOwnerListPaths already
+  // links each such param to this resource's `/list` endpoint; expose it as a
+  // self-referential fkDependency so prepare-fixtures reports a candidate
+  // (GET the list, pick a value) instead of `miss-no-list`. Runs after
+  // disambiguateEntryCollisions so it keys off the FINAL unique resource
+  // names (pre-disambig implicit names collide on `list`).
+  const byOwnListPath = new Map<string, ApiResourceEntry>();
+  for (const r of resources) {
+    const label = r.endpoints.list;
+    if (!label) continue;
+    byOwnListPath.set(pathStripSlash(label.slice(label.indexOf(" ") + 1)), r);
+  }
+  for (const [param, listPath] of ownerListPaths) {
+    const r = byOwnListPath.get(pathStripSlash(listPath));
+    if (!r || param === r.idParam) continue;
+    if ((r.fkDependencies ?? []).some(d => d.var === param)) continue;
+    r.fkDependencies.push({ var: param, param, in: "path", ownerResource: r.resource });
+  }
 
   // Endpoints that aren't in any CRUD group — RPC-style actions, webhook
   // accept-only routes, etc. Implicit-list endpoints stay in orphans

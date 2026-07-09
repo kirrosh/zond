@@ -77,6 +77,10 @@ export interface RowBucket {
   /** Latest observed HTTP status across all cells/results on this row, or
    *  `null` for unhit / network-error-only rows. */
   lastStatus: number | null;
+  /** ARV-379: spec-declared `deprecated` (or text-flagged) for this
+   *  endpoint. Lets a consumer split "real, closeable gap" from
+   *  "structurally out of scope by design" without re-reading spec.json. */
+  deprecated: boolean;
 }
 
 export interface BucketBreakdown {
@@ -101,6 +105,7 @@ export function bucketRows(matrix: CoverageMatrix): BucketBreakdown {
       method: row.method,
       path: row.path,
       lastStatus,
+      deprecated: !!row.deprecated,
     };
     if (has2xxPass) covered2xx.push(bucket);
     else if (allResults.length > 0) coveredButNon2xx.push(bucket);
@@ -431,6 +436,12 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
       // by zond generate" without re-deriving from the spec.
       deprecated_unhit: uncoveredRows.filter((r) => r.deprecated).length,
       deprecated_total: cov.matrix.rows.filter((r) => r.deprecated).length,
+      // ARV-379: the endpoint keys (method+path) marked deprecated in the
+      // spec. Intersect with `uncoveredEndpoints` to split "real, closeable
+      // gap" from "deprecated, skip by design" without re-reading spec.json.
+      // (RowBucket entries in the *Endpoints arrays also carry a per-entry
+      //  `deprecated` boolean for the object-shaped consumers.)
+      deprecatedEndpoints: cov.matrix.rows.filter((r) => r.deprecated).map((r) => r.endpoint),
       // ARV-265: dual-metric envelope.
       test_coverage: wantTest ? {
         pass: { covered: passCount, total, ratio: total === 0 ? 0 : Number((passCount / total).toFixed(4)) },

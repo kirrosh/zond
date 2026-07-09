@@ -1,7 +1,7 @@
 # zond workspace config
 #
 # The presence of this file marks the workspace root for `zond` walk-up
-# resolution (zond.db, apis/<name>/, .zond/current-api are anchored here).
+# resolution (.zond/zond.db, apis/<name>/, .zond/current-api are anchored here).
 
 version: 1
 

@@ -19,11 +19,13 @@ import { printError, printSuccess } from "../output.ts";
 
 export interface AddApiOptions {
   name: string;
-  spec?: string;
+  /** One or more specs. Multiple → deterministic union (ARV-375). */
+  specs?: string[];
   baseUrl?: string;
   dir?: string;
   force?: boolean;
   insecure?: boolean;
+  caPath?: string;
   dbPath?: string;
   json?: boolean;
 }
@@ -31,7 +33,7 @@ export interface AddApiOptions {
 export async function addApiCommand(opts: AddApiOptions): Promise<number> {
   const ws = findWorkspaceRoot();
   if (ws.fromFallback) {
-    const m = `No workspace detected (no zond.config.yml / .zond / zond.db / apis marker). Run \`zond init\` first to bootstrap a workspace.`;
+    const m = `No workspace detected (no zond.config.yml / .zond / apis marker). Run \`zond init\` first to bootstrap a workspace.`;
     if (opts.json) printJson(jsonError("add-api", [m])); else printError(m);
     return 2;
   }
@@ -39,16 +41,18 @@ export async function addApiCommand(opts: AddApiOptions): Promise<number> {
   const envVars: Record<string, string> = {};
   if (opts.baseUrl) envVars.base_url = opts.baseUrl;
 
+  const hasSpec = (opts.specs?.length ?? 0) > 0;
   let result: SetupApiResult;
   try {
     result = await setupApi({
       name: opts.name,
-      spec: opts.spec,
+      specs: opts.specs,
       dir: opts.dir,
       envVars: Object.keys(envVars).length > 0 ? envVars : undefined,
       dbPath: opts.dbPath,
       force: opts.force,
       insecure: opts.insecure,
+      caPath: opts.caPath,
     });
   } catch (err) {
     const m = (err as Error).message;
@@ -63,7 +67,7 @@ export async function addApiCommand(opts: AddApiOptions): Promise<number> {
     return 2;
   }
 
-  const mode: "spec" | "run-only" = opts.spec ? "spec" : "run-only";
+  const mode: "spec" | "run-only" = hasSpec ? "spec" : "run-only";
   const artifacts = mode === "spec"
     ? ["spec.json", ".api-catalog.yaml", ".api-resources.yaml", ".api-fixtures.yaml", ".env.yaml"]
     : [".env.yaml"];
@@ -106,15 +110,22 @@ export function registerAdd(program: Command): void {
   add
     .command("api <name>")
     .description("Register an API: from an OpenAPI spec (full toolkit) or just --base-url (run-only mode)")
-    .option("--spec <path>", "Path or URL to OpenAPI spec — enables generate/probe/validate-schema")
+    .option(
+      "--spec <path>",
+      "Path or URL to OpenAPI spec — enables generate/probe/validate-schema. Repeat --spec to union multiple specs (e.g. v1 + v2) into one merged audit target (ARV-375).",
+      (val: string, acc: string[]) => acc.concat(val),
+      [] as string[],
+    )
     .option("--base-url <url>", "Base URL recorded in .env.yaml (required if --spec is omitted)")
     .option("--dir <path>", "Target directory (defaults to apis/<name>/)")
     .option("--force", "Overwrite an existing API with the same name")
     .option("--insecure", "Skip TLS verification when fetching the spec from https")
+    .option("--ca <path>", "PEM CA bundle to trust for the spec fetch (adds to public roots; also reads NODE_EXTRA_CA_CERTS) — use instead of --insecure for internal/corp CAs")
     .option("--db <path>", "Path to SQLite database file")
     .action(async (name: string, opts, cmd: Command) => {
       const json = globalJson(cmd);
-      if (!opts.spec && !opts.baseUrl) {
+      const specs: string[] = Array.isArray(opts.spec) ? opts.spec : (opts.spec ? [opts.spec] : []);
+      if (specs.length === 0 && !opts.baseUrl) {
         const m = "Provide --spec <path|url> for a full registration, or --base-url <url> for run-only mode.";
         if (json) printJson(jsonError("add-api", [m])); else printError(m);
         process.exitCode = 2;
@@ -122,11 +133,12 @@ export function registerAdd(program: Command): void {
       }
       process.exitCode = await addApiCommand({
         name,
-        spec: opts.spec,
+        specs,
         baseUrl: opts.baseUrl,
         dir: opts.dir,
         force: opts.force === true,
         insecure: opts.insecure === true,
+        caPath: typeof opts.ca === "string" ? opts.ca : undefined,
         dbPath: typeof opts.db === "string" ? opts.db : undefined,
         json,
       });

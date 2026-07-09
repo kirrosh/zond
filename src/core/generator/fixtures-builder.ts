@@ -14,7 +14,7 @@
 
 import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
 import type { OpenAPIV3 } from "openapi-types";
-import { schemeVarName, resourceVar } from "./suite-generator.ts";
+import { schemeVarName, resourceVar, computeAmbiguousPathParams, fixtureVarNameForPathParam, owningCollectionForPathParam } from "./suite-generator.ts";
 import type { ApiResourceMap } from "./resources-builder.ts";
 import { canonicalVarName, isFkFixtureField, effectiveObjectShape } from "./data-factory.ts";
 
@@ -127,13 +127,22 @@ export function buildApiFixtureManifest(params: BuildFixturesParams): ApiFixture
     }
   }
 
-  // 3. Required path params → one var per unique name
+  // 3. Required path params → one var per unique name, disambiguated by
+  //    owning resource when the raw name is genuinely reused across
+  //    distinct collections (ARV-369). Without this, a spec where
+  //    `{code}` appears under both `/macros/v30/{code}` and
+  //    `/templates/v30/{code}` collapses to ONE `code` fixture — one
+  //    `.env.yaml` value then silently misapplies to whichever resources
+  //    don't own it, producing false-negative 404s in generated suites.
+  //    Single-owner param names (the common case) keep their raw name,
+  //    unchanged from pre-ARV-369 behavior.
+  const ambiguousPathParams = computeAmbiguousPathParams(params.endpoints);
   for (const ep of params.endpoints) {
     for (const p of ep.parameters) {
       if (p.in !== "path") continue;
       if (p.required === false) continue;
-      const name = p.name;
-      let req = fixtures.get(name);
+      const varName = fixtureVarNameForPathParam(ep.path, p.name, ambiguousPathParams);
+      let req = fixtures.get(varName);
       if (!req) {
         const schema = p.schema as { type?: string; format?: string; example?: unknown } | undefined;
         let defaultValue = "";
@@ -141,15 +150,18 @@ export function buildApiFixtureManifest(params: BuildFixturesParams): ApiFixture
         else if (schema?.format === "uuid") defaultValue = "";
         else if (schema?.type === "integer" || schema?.type === "number") defaultValue = "";
 
+        const scopeNote = ambiguousPathParams.has(p.name)
+          ? ` Scoped to "${owningCollectionForPathParam(ep.path, p.name) ?? "?"}" — the raw name "${p.name}" is also used by other resources with unrelated ids.`
+          : "";
         req = {
-          name,
+          name: varName,
           source: "path",
-          description: `Path parameter ${name}${schema?.format ? ` (${schema.format})` : schema?.type ? ` (${schema.type})` : ""}. Set to a real id from your account, or leave blank to skip dependent tests.`,
+          description: `Path parameter ${p.name}${schema?.format ? ` (${schema.format})` : schema?.type ? ` (${schema.type})` : ""}.${scopeNote} Set to a real id from your account, or leave blank to skip dependent tests.`,
           affectedEndpoints: [],
           required: true,
           defaultValue,
         };
-        fixtures.set(name, req);
+        fixtures.set(varName, req);
       }
       pushAffected(req, ep);
     }

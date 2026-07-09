@@ -35,7 +35,8 @@ scenarios; this one only reads.
 - **`report_backend_bug` / 5xx → STOP, surface, do not edit `expect:`.**
   Same iron rule as the parent `zond` skill.
 - **Never read raw response bodies past 8 KB.** The diagnose envelope
-  truncates by default; pass `--no-body-cap` only if the user is
+  truncates by default; to see full bodies, bundle the run instead
+  (`zond report bundle <id> --no-body-cap`) — only when the user is
   triaging body-shape bugs.
 - **Никогда не выдавать абстрактные «проверьте логи» / «уточните у
   команды».** Если в enum-группе нет конкретного действия — пометить
@@ -47,7 +48,7 @@ scenarios; this one only reads.
 |---|---|---|
 | `zond db diagnose <run-id> --json` | per-failure under `data.failures[]` | every fail/error in the run |
 | `zond check spec --api <name> --json` | `data.issues[]` | every lint Issue (always `fix_spec`) |
-| `zond probe mass-assignment --json` | `data.verdicts[]` | per-endpoint verdicts (high/medium/inconclusive-5xx/inconclusive-baseline) |
+| `zond probe mass-assignment --json` | `data.endpoints[]` (action under `findings[].evidence.recommended_action`) | per-endpoint verdicts (high/medium/inconclusive-5xx/inconclusive-baseline) |
 | `zond probe security --json` | counts only — read the markdown digest | high / low findings (markdown table) |
 | `zond probe static --json` | `data.files[]` (suite YAMLs to run) | findings surface only after `zond run` → routed via diagnose |
 
@@ -86,6 +87,11 @@ zond db diagnose --json              # last failing run (default — TASK-266)
 zond db diagnose <run-id> --json     # explicit run
 zond db diagnose --latest --json     # last run, even if it passed
 zond db diagnose --report yaml       # same payload as YAML (ARV-338) — for run snapshots you keep/diff as text
+# ARV-380: aggregate by_recommended_action across a run SET (same --union
+# vocabulary as `zond coverage`) instead of looping per run and merging:
+zond db diagnose --union session --json                # all runs in the active session
+zond db diagnose --union since:2h --api <name> --json  # runs in a time window (scoped to a collection)
+zond db diagnose --union runs:263,266,269 --json       # an explicit run-id set
 ```
 
 The shape (relevant fields only):
@@ -234,7 +240,7 @@ Pass <N>  Fail <M>  Error <K>  Coverage <pct>%
     next: edit apis/<name>/.env.yaml → base_url
 📥 fix_fixture  ×<n>
   · {{audience_id}} unresolved
-    next: zond prepare-fixtures --api <name> --apply  (then fill gaps by hand)
+    next: zond prepare-fixtures --api <name>  (reports the gap; fill it via `fixtures add` / .env.yaml)
 📜 fix_spec  ×<n>  (from check spec)
   · A2 missing operationId on POST /webhooks
     next: edit spec.json → operationId, then zond refresh-api <name>
@@ -248,7 +254,7 @@ say "all green" and exit — don't invent work.
 - **Mixed recommended_action inside one suite (>3 distinct enums):**
   the run was probably aborted mid-setup. Look for unresolved `{{var}}`
   in `request_url` first; if none, the run hit a fatal early failure —
-  `zond db run <id> --status 500 --first-only --json` to find it.
+  `zond db run <id> --status 500 --json` to find it.
 - **Cleanup failures from `probe security`:** call out at the **top** —
   this means probe mutated state it could not restore. Treat as
   blocking; do not run more probes against the same env until the

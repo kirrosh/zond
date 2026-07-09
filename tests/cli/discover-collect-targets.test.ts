@@ -6,7 +6,7 @@
  * `prepare-fixtures --cascade --seed`, leaving 9/12 vars unattempted.
  */
 import { describe, test, expect } from "bun:test";
-import { collectTargets, type ApiResourceMapYaml, type FixtureManifestYaml } from "../../src/cli/commands/discover.ts";
+import { collectTargets, findCandidateListEndpoints, type ApiResourceMapYaml, type FixtureManifestYaml } from "../../src/cli/commands/discover.ts";
 
 const map = (resources: ApiResourceMapYaml["resources"]): ApiResourceMapYaml =>
   ({ resources } as unknown as ApiResourceMapYaml);
@@ -124,5 +124,32 @@ describe("collectTargets (ARV-133 cascade scope)", () => {
     expect(names).toContain("contact_id");
     expect(names).toContain("broadcast_id");
     expect(names).toContain("topic_id");
+  });
+});
+
+// ARV-382: candidate-surfacing for miss-no-list.
+describe("findCandidateListEndpoints", () => {
+  const eps = [
+    { method: "GET", path: "/api/segment/list" },
+    { method: "GET", path: "/api/segment/byid/{segment_id}" },
+    { method: "GET", path: "/api/legacy/list", deprecated: true },
+    { method: "GET", path: "/api/legacy/byid/{legacy_id}" },
+  ];
+
+  test("surfaces the collection's live list endpoint, ranked by proximity", () => {
+    const c = findCandidateListEndpoints(["GET /api/segment/byid/{segment_id}"], eps);
+    expect(c).toContain("GET /api/segment/list");
+    // no unfillable inner-param endpoints, no deprecated when a live one exists
+    expect(c.every((l) => !l.includes("{") && !l.includes("(deprecated)"))).toBe(true);
+  });
+
+  test("marks a deprecated-only list so the agent decides", () => {
+    const c = findCandidateListEndpoints(["GET /api/legacy/byid/{legacy_id}"], eps);
+    expect(c).toContain("GET /api/legacy/list (deprecated)");
+  });
+
+  test("returns [] when nothing structurally plausible exists (honest dead-end)", () => {
+    const c = findCandidateListEndpoints(["GET /api/orphan/{orphan_id}/child/{child_id}"], eps);
+    expect(c).toEqual([]);
   });
 });

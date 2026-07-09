@@ -8,9 +8,6 @@ on:
 permissions:
   contents: write
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   build:
     name: Build (${{ matrix.target }})
@@ -52,7 +49,7 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path ${{ matrix.artifact }} -DestinationPath zond-${{ matrix.target }}.zip
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: zond-${{ matrix.target }}
           path: zond-${{ matrix.target }}.${{ matrix.archive }}
@@ -63,12 +60,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           files: |

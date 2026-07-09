@@ -21,12 +21,12 @@ Bootstrap a workspace, register your first API, then fill its fixtures:
 zond init                                              # bootstrap workspace (no fixture changes)
 zond add api my-api --spec ./openapi.json              # register: copies spec.json + emits manifest
 zond doctor --api my-api --missing-only                # gap report: which vars are UNSET
-zond prepare-fixtures --api my-api --apply             # fill apis/my-api/.env.yaml from live API (single discover pass)
+zond prepare-fixtures --api my-api                     # gap report: verify fixtures + which FK vars need a value
 ```
 
-For path-FK ids that the discover pass can't reach (vendor-dashboard
-ids like `cus_*`, GitHub PR numbers, Sentry issue ids), use the manual
-helpers (ARV-195):
+`prepare-fixtures` **reports** gaps — it never harvests a value (which
+record/field fills a path slot is your call). Fill each gap with the
+manual helpers (ARV-195):
 
 ```bash
 zond fixtures add --api my-api customer_id=cus_123 --validate --apply
@@ -46,9 +46,10 @@ Each registered API gets four files in `apis/<name>/`:
 - `.api-resources.yaml` — CRUD chains, FK dependencies, ETag/soft-delete flags.
 - `.api-fixtures.yaml` — **manifest** of required `{{vars}}` (read-only, auto-generated).
 
-Plus a sibling `.env.yaml` that you (or `zond prepare-fixtures`) fill with
-the **values** for those vars. The manifest/values split is strict — see
-the [workspace contract](AGENTS.md#workspace-contract) for details.
+Plus a sibling `.env.yaml` that **you** fill with the **values** for those
+vars (`zond prepare-fixtures` only reports which are missing). The
+manifest/values split is strict — see the
+[workspace contract](AGENTS.md#workspace-contract) for details.
 
 Run `zond refresh-api <name> [--spec <new-source>]` to re-snapshot when the
 upstream spec changes.

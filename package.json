@@ -1,6 +1,6 @@
 {
   "name": "@kirrosh/zond",
-  "version": "0.25.0",
+  "version": "0.26.0",
   "description": "API testing platform — define tests in YAML, run from CLI, generate from OpenAPI specs",
   "license": "MIT",
   "module": "index.ts",
@@ -34,8 +34,7 @@
     "schemas": "bun run scripts/emit-json-schemas.ts",
     "schemas:check": "bun run scripts/emit-json-schemas.ts --check",
     "lint:dead": "knip --reporter compact",
-    "build": "bun build --compile src/cli/index.ts --outfile dist/zond && bun run scripts/codesign-darwin.ts ./dist/zond",
-    "bench:api": "bun benchmarks/api/server.ts"
+    "build": "bun build --compile src/cli/index.ts --outfile dist/zond && bun run scripts/codesign-darwin.ts ./dist/zond"
   },
   "devDependencies": {
     "@types/bun": "latest",
