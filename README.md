@@ -1,8 +1,18 @@
 # zond
 
-API hygiene scanner for small teams — AI-powered API testing for Claude Code, Cursor, and CI/CD.
+API hygiene scanner for small teams and their coding agents — test REST API endpoints against the OpenAPI spec, catch contract drift, track coverage.
 
-Say "test my API" — get working tests, coverage dashboard, and CI config in minutes.
+**Use it when you need to:** test REST API endpoints from an OpenAPI spec,
+verify an API contract after a deploy, debug a failing HTTP request with
+stored run history, or raise endpoint coverage. Works standalone or through
+a coding agent (Claude Code, Cursor) — say "test my API" and the agent
+drives zond for you.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh   # or: npm i -g @kirrosh/zond
+zond init && zond add api my-api --spec ./openapi.json
+zond audit --api my-api --safe    # read-only pass: spec lint → probes → tests → coverage → HTML report
+```
 
 > **Safe by default.** The first run (`zond audit --safe`) sends read-only
 > GET traffic — no writes, no deletes, nothing destructive. Mutating
