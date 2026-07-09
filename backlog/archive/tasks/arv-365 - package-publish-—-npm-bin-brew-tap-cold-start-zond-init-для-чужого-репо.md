@@ -4,9 +4,9 @@ title: package & publish — npm bin + brew tap + cold-start zond init для ч
 status: To Do
 assignee: []
 created_date: '2026-07-08 07:14'
+updated_date: '2026-07-09 12:56'
 labels:
-  - m-25
-  - distribution
+  - m-27
 dependencies:
   - ARV-364
 priority: high
