@@ -3,8 +3,7 @@
   "entry": [
     "src/cli/index.ts",
     "scripts/**/*.ts",
-    "tests/**/*.{ts,tsx}",
-    "benchmarks/**/*.ts"
+    "tests/**/*.{ts,tsx}"
   ],
   "project": ["src/**/*.{ts,tsx}"],
   "ignore": [
@@ -12,7 +11,7 @@
     "src/db/queries/coverage.ts",
     "src/db/queries/settings.ts"
   ],
-  "ignoreBinaries": ["tsc", "benchmarks/api/server.ts"],
+  "ignoreBinaries": ["tsc"],
   "ignoreExportsUsedInFile": true,
   "rules": {
     "exports": "warn",

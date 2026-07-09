@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { rootCertificates } from "node:tls";
 import { dereference } from "@readme/openapi-parser";
 import type { OpenAPIV3 } from "openapi-types";
 import type { EndpointInfo, ResponseInfo, SecuritySchemeInfo } from "./types.ts";
@@ -5,12 +7,48 @@ import { disambiguateGenericPathParams } from "./path-param-disambig.ts";
 
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"] as const;
 
-export async function readOpenApiSpec(specPath: string, options?: { insecure?: boolean }): Promise<OpenAPIV3.Document> {
+export interface SpecFetchTlsOptions {
+  /** Disable TLS verification entirely (bun `--insecure`). Last resort. */
+  insecure?: boolean;
+  /** Path to a PEM CA bundle to trust in addition to the public roots.
+   *  Falls back to the `NODE_EXTRA_CA_CERTS` env var. */
+  caPath?: string;
+}
+
+/** MF1 (ARV-367): resolve the bun `fetch` `tls` option for a spec fetch so a
+ *  self-signed / internal corporate CA validates *without* disabling TLS.
+ *
+ *  Precedence: `insecure` (verification off) > explicit `caPath` /
+ *  `NODE_EXTRA_CA_CERTS` (extra CA APPENDED to the public roots — never
+ *  replacing them, so public specs keep validating) > default (undefined).
+ *  Returns undefined when nothing special is needed. Throws if a CA path is
+ *  set but unreadable — a misconfigured CA should surface, not fall through
+ *  to a confusing "self signed certificate" error. */
+export function resolveSpecFetchTls(
+  options?: SpecFetchTlsOptions,
+): { rejectUnauthorized: false } | { ca: string[] } | undefined {
+  if (options?.insecure) return { rejectUnauthorized: false };
+  const caPath = options?.caPath ?? process.env.NODE_EXTRA_CA_CERTS;
+  if (caPath) {
+    let extra: string;
+    try {
+      extra = readFileSync(caPath, "utf8");
+    } catch (e) {
+      throw new Error(
+        `CA bundle not readable: ${caPath} (${(e as Error).message}). ` +
+          `Set --ca / NODE_EXTRA_CA_CERTS to a valid PEM file, or use --insecure.`,
+      );
+    }
+    if (extra.trim()) return { ca: [extra, ...rootCertificates] };
+  }
+  return undefined;
+}
+
+export async function readOpenApiSpec(specPath: string, options?: SpecFetchTlsOptions): Promise<OpenAPIV3.Document> {
   // For HTTP URLs, fetch the spec first then dereference the parsed object
   if (specPath.startsWith("http://") || specPath.startsWith("https://")) {
-    const resp = await fetch(specPath, {
-      ...(options?.insecure ? { tls: { rejectUnauthorized: false } } : {}),
-    });
+    const tls = resolveSpecFetchTls(options);
+    const resp = await fetch(specPath, { ...(tls ? { tls } : {}) });
     if (!resp.ok) throw new Error(`Failed to fetch spec: ${resp.status} ${resp.statusText}`);
     const spec = await resp.json();
     const api = await dereference(spec as string);
@@ -18,6 +56,29 @@ export async function readOpenApiSpec(specPath: string, options?: { insecure?: b
   }
   const api = await dereference(specPath);
   return api as OpenAPIV3.Document;
+}
+
+/** ARV-376: align declared path-param names with the path template when they
+ *  diverge (spec quirk: path `/byid/{id}` but param declared `byid_id`). The
+ *  template is authoritative for substitution, so unmatched params are renamed
+ *  to the unmatched template segment names, in positional order. No-op when
+ *  names already agree (the common, well-formed case). Mutates in place. */
+export function reconcilePathParamNames(
+  path: string,
+  parameters: OpenAPIV3.ParameterObject[],
+): void {
+  const tplNames = [...path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!);
+  if (tplNames.length === 0) return;
+  const pathParams = parameters.filter((p) => p.in === "path");
+  const declared = new Set(pathParams.map((p) => p.name));
+  const unmatchedTpl = tplNames.filter((n) => !declared.has(n));
+  const unmatchedParams = pathParams.filter((p) => !tplNames.includes(p.name));
+  // Only reconcile a clean 1:1 correspondence — if the counts differ we can't
+  // safely guess the mapping, so leave the (already odd) spec untouched.
+  if (unmatchedTpl.length === 0 || unmatchedTpl.length !== unmatchedParams.length) return;
+  unmatchedParams.forEach((p, i) => {
+    (p as { name: string }).name = unmatchedTpl[i]!;
+  });
 }
 
 export function extractSecuritySchemes(doc: OpenAPIV3.Document): SecuritySchemeInfo[] {
@@ -87,6 +148,15 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
           }
         }
       }
+
+      // ARV-376: reconcile a malformed spec where a path *template* segment
+      // (`/byid/{id}`) disagrees with the declared path *parameter* name
+      // (`byid_id`) — a docgen-style quirk. The path template is what the
+      // runner substitutes, so it wins: rename the diverging param(s) to the
+      // template segment name(s), positionally. Without this the fixture var
+      // (from the param) never matches the `{...}` in the path, and every
+      // downstream layer (disambig, manifest, resource-graph) diverges.
+      reconcilePathParamNames(path, parameters);
 
       // Request body schema + content type
       let requestBodySchema: OpenAPIV3.SchemaObject | undefined;

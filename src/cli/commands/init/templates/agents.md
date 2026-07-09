@@ -16,8 +16,14 @@ only, no MCP server in this workspace.
   lifecycle_transitions) and the `zond api annotate dump+apply` flow.
 - **`.claude/skills/zond-triage/SKILL.md`** — read-only triage of a
   finished run / probe artifact. Routes by `recommended_action` enum.
+- **`.claude/skills/zond-seed/SKILL.md`** — agent-orchestrated seed loop:
+  read fixture gaps → order by FK deps → author body → `request POST
+  --capture` → fix 4xx + retry. Fills what `prepare-fixtures` reports missing.
+- **`.claude/skills/warm-up-target/SKILL.md`** — warm external-input
+  fixtures (issue_id/file_id/integration_id) via the target's own
+  SDK/CLI/replay — the honest-2xx ceiling a plain POST can't reach.
 
-Both skills work off the per-API artifacts written by `zond add api`:
+These skills work off the per-API artifacts written by `zond add api`:
 
 ```
 apis/<name>/
@@ -41,7 +47,8 @@ an env fix.
 zond init                                              # bootstrap workspace (no fixture changes)
 zond add api <name> --spec <path-or-url>               # register API + emit manifest + seed empty .env.yaml
 zond doctor --api <name> --missing-only                # gap report: which vars are UNSET
-zond prepare-fixtures --api <name> --apply [--seed]    # fill .env.yaml from live API
+zond prepare-fixtures --api <name>                     # gap report: verify + which FK vars need a value
+# → fill each gap yourself: `zond fixtures add` / edit .env.yaml (you pick the value)
 zond doctor --api <name>                               # re-check (exit 0 = ready)
 ```
 
@@ -52,7 +59,9 @@ What each step does to `.env.yaml`:
 | `zond init` | no — only writes workspace/skills files |
 | `zond add api` | seeds skeleton with empty placeholders for every required var |
 | `zond doctor` | no — read-only diagnostic |
-| `zond prepare-fixtures --apply` | writes discovered values (`.bak` backup); `--seed` POST-creates resources when list endpoints return `[]` |
+| `zond prepare-fixtures` | no — reports gaps only; **never harvests a value** (which record/field fills a slot is your call) |
+| `zond prepare-fixtures --refresh` | unsets stale (404) ids so they resurface as gaps (`.bak` backup); does not re-resolve |
+| `zond fixtures add` / `import` | writes the value you supply (`.bak` backup) |
 | `zond refresh-api` | no — only re-snapshots `spec.json` and rebuilds the manifest |
 
 `zond refresh-api <name> [--spec <new-source>]` re-snapshots when the upstream

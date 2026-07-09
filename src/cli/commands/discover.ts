@@ -33,30 +33,6 @@ import { writeFixtureGaps, type FixtureGap } from "../../core/workspace/fixture-
 import { reportFixtureGaps, type FixtureGapReport } from "../../core/workspace/fixture-gap-report.ts";
 import { parseSafe } from "../../core/parser/yaml-parser.ts";
 
-/**
- * Suffix-aware field extraction. For var `project_slug` we prefer the
- * response's `slug` field over `id`; for `team_uuid` we prefer `uuid`.
- * This matches the user's intent expressed in the env-var name and avoids
- * the surprise where every nested resource gets the same generic `id` even
- * when the path-param clearly wants a slug.
- */
-const VAR_SUFFIX_HINTS: Array<{ suffix: string; field: string }> = [
-  { suffix: "_slug", field: "slug" },
-  { suffix: "_uuid", field: "uuid" },
-  { suffix: "_key", field: "key" },
-  { suffix: "_version", field: "version" },
-  { suffix: "_name", field: "name" },
-  { suffix: "_code", field: "code" },
-  { suffix: "_id", field: "id" },
-];
-
-function preferredFieldFromVar(varName: string): string {
-  for (const { suffix, field } of VAR_SUFFIX_HINTS) {
-    if (varName.endsWith(suffix)) return field;
-  }
-  return "id";
-}
-
 /** Strip a trailing FK-shape suffix (`_id`, `Id`, `_uuid`, `_slug`, `_name`,
  *  `_code`) from a var name and return the stem. Used by ARV-69 to find an
  *  owner resource when the resource map doesn't link the var to a list
@@ -95,45 +71,10 @@ export function inferOwnerFromVarName(
   return undefined;
 }
 
-function pickFieldFromObject(item: unknown, preferred: string): string | undefined {
-  if (!item || typeof item !== "object") return undefined;
-  const obj = item as Record<string, unknown>;
-  const tryKey = (k: string): string | undefined => {
-    if (k in obj) {
-      const v = obj[k];
-      if (typeof v === "string" || typeof v === "number") return String(v);
-    }
-    return undefined;
-  };
-  return (
-    tryKey(preferred) ??
-    tryKey("id") ??
-    tryKey("slug") ??
-    tryKey("uuid") ??
-    tryKey("key") ??
-    tryKey("name")
-  );
-}
-
-/** Walk the response body for the first item matching common SaaS list shapes,
- *  then pick a field hint-aware. */
-function extractFirstField(body: unknown, preferred: string): string | undefined {
-  if (Array.isArray(body)) return pickFieldFromObject(body[0], preferred);
-  if (body && typeof body === "object") {
-    const obj = body as Record<string, unknown>;
-    for (const key of ["data", "items", "results", "records"]) {
-      const arr = obj[key];
-      if (Array.isArray(arr) && arr.length > 0) {
-        return pickFieldFromObject(arr[0], preferred);
-      }
-    }
-  }
-  return undefined;
-}
-
 /** Return the first object in a list-response (bare array or a `data`/`items`/
- *  `results`/`records` envelope), or undefined. Same shape-walk as
- *  extractFirstField, but hands back the whole item for field inspection. */
+ *  `results`/`records` envelope), or undefined. Distinguishes a non-empty
+ *  recognized list ("resource exists, agent must pick a value") from an
+ *  unrecognized shape. */
 function firstListItem(body: unknown): Record<string, unknown> | undefined {
   const pick = (arr: unknown): Record<string, unknown> | undefined =>
     Array.isArray(arr) && arr[0] && typeof arr[0] === "object"
@@ -146,38 +87,6 @@ function firstListItem(body: unknown): Record<string, unknown> | undefined {
       const hit = pick(obj[key]);
       if (hit) return hit;
     }
-  }
-  return undefined;
-}
-
-/** True when the var name carries an explicit field suffix (`_slug`, `_name`,
- *  `_id`, …) — those are trusted; only the hint-less default is ambiguous. */
-function varHasFieldHint(varName: string): boolean {
-  return VAR_SUFFIX_HINTS.some(({ suffix }) => varName.endsWith(suffix));
-}
-
-/** ARV-334: string identifiers a path segment plausibly uses (as opposed to a
- *  display `name`/`title`). GitHub's `{owner}` wants `login`, not the numeric
- *  `id`. */
-const STRING_ID_SIBLINGS = ["login", "username", "handle", "slug", "key"];
-
-/** Deterministic ambiguity signal (response-only, no spec): the hint-less
- *  default harvest just picked the numeric `id`, but the same item exposes a
- *  string identifier alongside it. Which one fills the slot is the agent's
- *  call — return the sibling field name so we report a gap instead of guessing.
- *  Returns undefined when the var is hinted, `id` isn't numeric, or no string
- *  sibling exists (the common, unambiguous case). */
-export function ambiguousStringIdSibling(body: unknown, varName: string): string | undefined {
-  if (varHasFieldHint(varName)) return undefined;
-  const item = firstListItem(body);
-  if (!item) return undefined;
-  const idVal = item["id"];
-  const idIsNumeric =
-    typeof idVal === "number" || (typeof idVal === "string" && /^\d+$/.test(idVal.trim()));
-  if (!idIsNumeric) return undefined;
-  for (const f of STRING_ID_SIBLINGS) {
-    const v = item[f];
-    if (typeof v === "string" && v.trim()) return f;
   }
   return undefined;
 }
@@ -242,11 +151,12 @@ export interface DiscoveryItem {
   discovered?: string;
   /** What's currently in env (may be empty/placeholder). */
   current?: string;
-  /** Action to take: write, skip-already-set, miss-no-list, miss-network, miss-status, miss-empty, miss-no-id. */
+  /** Gap/verify classification. ARV-362 (m-25): discover never harvests a
+   *  value — the write path is gone. Non-empty lists surface as
+   *  `miss-needs-value` (resource exists, agent picks); everything else is a
+   *  verify state or a miss-* gap. */
   status:
-    | "write"
     | "skip-already-set"
-    | "skip-already-equal"
     | "skip-not-required"
     | "miss-no-list"
     | "miss-nested-list"
@@ -255,10 +165,9 @@ export interface DiscoveryItem {
     | "miss-status"
     | "miss-empty"
     | "miss-no-id"
-    // ARV-334: got a list, but the hint-less default harvest would put a
-    // numeric `id` into a slot that also exposes a string identifier —
-    // ambiguous, so we report instead of guessing.
-    | "miss-ambiguous-id"
+    // ARV-362: got a non-empty list, but which record/field fills the slot is
+    // the agent's call (ARV-334 lived here). discover reports the gap.
+    | "miss-needs-value"
     // TASK-281 verify-mode states
     | "verify-live"
     | "verify-stale"
@@ -278,15 +187,20 @@ export interface DiscoveryItem {
   /** ARV-46: source classification copied from `.api-fixtures.yaml`. */
   manifestSource?: FixtureManifestEntry["source"];
   reason?: string;
+  /** ARV-382: when zond can't CONFIDENTLY derive the owner list endpoint
+   *  (miss-no-list), it surfaces the plausible GET/list endpoints — ranked by
+   *  structural proximity to where the id is consumed — instead of dead-ending.
+   *  zond does NOT pick a value; the agent reads these, picks one, and sets the
+   *  fixture (or fires one `zond request` against the top candidate). Empty
+   *  when nothing structurally plausible exists. */
+  candidates?: string[];
   /** TASK-294: agent-routable action for items the user must fix.
    *  miss-* / verify-stale / verify-unknown → `fix_fixture`.
    *  miss-network → `fix_network_config`.
-   *  write / skip-* / verify-live → undefined. */
+   *  skip-* / verify-live → undefined. */
   recommended_action?: RecommendedAction;
-  /** ARV-142: when --refresh re-resolves a verify-stale item, the original
-   *  verify-stale entry is replaced with the refresh outcome. This flag
-   *  preserves the "was stale before refresh" signal so summary can
-   *  report stale_fixed vs still_stale honestly. */
+  /** ARV-362: set when --refresh drops (unsets) a stale fixture. Marks which
+   *  vars to unset on disk and feeds the summary `dropped` count. */
   wasStale?: boolean;
 }
 
@@ -303,19 +217,16 @@ export function discoveryAction(status: DiscoveryItem["status"]): RecommendedAct
  *  prints this column when discover runs in manifest-driven mode and it's
  *  exposed verbatim in the JSON envelope. */
 export type ManifestStatus =
-  | "filled"
   | "failed:no-list-endpoint"
   | "failed:list-empty"
+  | "failed:needs-value"
   | "failed:miss-network"
   | "skipped:already-set"
   | "skipped:not-required";
 
 export function toManifestStatus(status: DiscoveryItem["status"]): ManifestStatus {
   switch (status) {
-    case "write":
-      return "filled";
     case "skip-already-set":
-    case "skip-already-equal":
       return "skipped:already-set";
     case "skip-not-required":
       return "skipped:not-required";
@@ -323,6 +234,9 @@ export function toManifestStatus(status: DiscoveryItem["status"]): ManifestStatu
       return "failed:miss-network";
     case "miss-empty":
       return "failed:list-empty";
+    // ARV-362: list has records but discover won't pick — the agent fills it.
+    case "miss-needs-value":
+      return "failed:needs-value";
     // miss-no-list / miss-nested-list / miss-no-owner / miss-status / miss-no-id —
     // the underlying cause is "we have no usable list endpoint to read from", so
     // they collapse onto the same manifest-level bucket.
@@ -331,17 +245,22 @@ export function toManifestStatus(status: DiscoveryItem["status"]): ManifestStatu
   }
 }
 
-/** ARV-324: project confirmed-empty/inaccessible list-probes into the
- *  `.fixture-gaps.yaml` shape. Only `miss-status` (list endpoint rejected
- *  the request) and `miss-empty` (200 with an empty collection) carry an
- *  actual observed response worth cross-referencing against a later
- *  `checks run` — the other miss-* statuses mean "we never even sent a
- *  request" (no list endpoint / no owner resource). De-dupes by
- *  (method, path); a later pass's entry for the same var wins. */
+/** ARV-324: project confirmed-empty/inaccessible/needs-value list-probes into
+ *  the `.fixture-gaps.yaml` shape. `miss-status` (list endpoint rejected the
+ *  request), `miss-empty` (200 with an empty collection) and `miss-needs-value`
+ *  (ARV-362: 200 with records the agent must pick from) all carry an actual
+ *  observed response worth cross-referencing against a later `checks run` —
+ *  the other miss-* statuses mean "we never even sent a request" (no list
+ *  endpoint / no owner resource). De-dupes by (method, path); a later pass's
+ *  entry for the same var wins. */
 export function gapsFromItems(items: DiscoveryItem[]): FixtureGap[] {
   const byKey = new Map<string, FixtureGap>();
   for (const item of items) {
-    if (item.status !== "miss-status" && item.status !== "miss-empty") continue;
+    if (
+      item.status !== "miss-status" &&
+      item.status !== "miss-empty" &&
+      item.status !== "miss-needs-value"
+    ) continue;
     if (!item.listPath) continue;
     byKey.set(`GET ${item.listPath}`, {
       method: "GET",
@@ -595,6 +514,57 @@ export async function readFixtureManifest(apiDir: string): Promise<FixtureManife
  *  via `inferOwnerFromVarName` (singular ↔ plural matching) so vars whose
  *  name doesn't appear in the resource map's idParam table still get
  *  attempted. */
+/** ARV-382: for a fixture var that resolved to no confident owner list
+ *  endpoint, surface the structurally-plausible GET/list endpoints instead of
+ *  dead-ending. We walk back from each `{param}` segment in the endpoints the
+ *  var affects and collect any GET whose path is that collection prefix (or
+ *  prefix + a list verb), ranked by proximity (deeper prefix = closer). This
+ *  is deterministic candidate EVIDENCE — zond does not pick a value or a
+ *  winner; the agent judges. Reuses the existing list-verb set (no new
+ *  markers). Returns [] when nothing plausible exists. */
+export function findCandidateListEndpoints(
+  affectedLabels: string[],
+  endpoints: Array<{ method: string; path: string; deprecated?: boolean }>,
+): string[] {
+  const strip = (p: string) => (p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p);
+  const isParam = (s: string | undefined) => !!s && /^\{[^}]+\}$/.test(s);
+  // Prefer live endpoints; still surface a deprecated-only list (marked) so the
+  // agent — not zond — decides whether an EOL read is acceptable to seed an id.
+  const getByPath = new Map<string, { label: string; deprecated: boolean }>();
+  for (const e of endpoints) {
+    if (e.method.toUpperCase() !== "GET") continue;
+    const key = strip(e.path);
+    const entry = { label: `${e.method.toUpperCase()} ${e.path}`, deprecated: !!e.deprecated };
+    const prev = getByPath.get(key);
+    if (!prev || (prev.deprecated && !entry.deprecated)) getByPath.set(key, entry); // live wins
+  }
+  const VERBS = ["", "/list", "/search", "/find"];
+  const scored = new Map<string, number>();
+  const consider = (label: string, score: number) => {
+    if ((scored.get(label) ?? -1) < score) scored.set(label, score);
+  };
+  for (const label of affectedLabels) {
+    const path = label.slice(label.indexOf(" ") + 1);
+    const segs = strip(path).split("/");
+    for (let i = 0; i < segs.length; i++) {
+      if (!isParam(segs[i])) continue;
+      // Walk back over the run of non-param segments before this param.
+      for (let k = i; k >= 1; k--) {
+        if (isParam(segs[k - 1])) break;
+        const prefix = segs.slice(0, k).join("/");
+        if (prefix.includes("{")) continue; // an inner param — not a concrete GET path
+        for (const v of VERBS) {
+          const hit = getByPath.get(prefix + v);
+          if (!hit) continue;
+          // deeper prefix = closer; deprecated candidates rank below all live.
+          consider(hit.deprecated ? `${hit.label} (deprecated)` : hit.label, (hit.deprecated ? 0 : 1000) + k);
+        }
+      }
+    }
+  }
+  return [...scored.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0]).slice(0, 5);
+}
+
 export function collectTargets(
   map: ApiResourceMapYaml,
   manifest?: FixtureManifestYaml,
@@ -751,52 +721,32 @@ export async function probeOne(
     item.reason = `${parsed.method} ${parsed.path} → ${resp.status}${hint}`;
     return item;
   }
+  // ARV-362 (m-25): discover no longer harvests a value from the list —
+  // which record/field fills the slot is the agent's call (ARV-334 lived in
+  // that guess). We only classify the gap so the agent knows the next step.
   const respBody = resp.body_parsed ?? resp.body;
-  const id = extractFirstField(respBody, preferredFieldFromVar(target.varName));
-  if (id === undefined) {
-    // TASK-273: empty target-API is the most common cause of miss-no-id on
-    // fresh workspaces. Distinguish "list is well-shaped but empty" from
-    // "list shape unrecognized" so the user gets actionable guidance instead
-    // of guessing for 30 minutes whether zond is broken.
-    if (isEmptyListBody(respBody)) {
-      item.status = "miss-empty";
-      // ARV-336: prepare-fixtures is single-pass and deterministic — it
-      // can't invent a record for an empty list. Create the resource
-      // yourself (product UI / API), then harvest its id by hand into
-      // .env.yaml (or `zond fixtures add`) and re-run discover.
-      item.reason =
-        `no ${target.ownerResource} in target API — create the resource yourself ` +
-        `(in the product UI or via API), then set its id in .env.yaml (or run ` +
-        `\`zond fixtures add\`) and re-run \`zond prepare-fixtures --api <name> --apply\``;
-    } else {
-      item.status = "miss-no-id";
-      item.reason = `response shape has no extractable first id (no array/data/items/results/records field)`;
-    }
-    return item;
-  }
-  if (current && current === id) {
-    item.discovered = id;
-    item.status = "skip-already-equal";
-    return item;
-  }
-  // ARV-334: don't silently write a numeric `id` into a slot like {owner}
-  // when the list item also exposes a string identifier — that mismatch is
-  // the GitHub owner→login crash. zond can't know which the path wants
-  // (agent's call), so it reports the ambiguity instead of guessing. Only
-  // fires on the hint-less default harvest; `foo_slug`/`foo_id` stay trusted.
-  const ambiguous = ambiguousStringIdSibling(respBody, target.varName);
-  if (ambiguous) {
-    item.discovered = id;
-    item.status = "miss-ambiguous-id";
+  if (isEmptyListBody(respBody)) {
+    // TASK-273: empty target API — nothing to pick. Point the agent at
+    // creating the resource first.
+    item.status = "miss-empty";
     item.reason =
-      `ambiguous identifier for {${target.varName}}: ${target.ownerResource} list item exposes both ` +
-      `numeric \`id\` (${id}) and string \`${ambiguous}\` — path slots usually want the string. zond ` +
-      `won't guess: set {${target.varName}} in .env.yaml, or add a capture-field hint to ` +
-      `.api-resources.yaml, then re-run \`zond prepare-fixtures --api <name> --apply\`.`;
+      `no ${target.ownerResource} in target API — create the resource yourself ` +
+      `(in the product UI or via API), then set its id in .env.yaml (or run ` +
+      `\`zond fixtures add\`) and re-run \`zond prepare-fixtures --api <name>\``;
     return item;
   }
-  item.discovered = id;
-  item.status = "write";
+  if (!firstListItem(respBody)) {
+    item.status = "miss-no-id";
+    item.reason = `response shape unrecognized (no array/data/items/results/records field)`;
+    return item;
+  }
+  // Non-empty recognized list: the resource exists, but discover won't choose
+  // a record/field — the agent picks and fills .env.yaml by hand.
+  item.status = "miss-needs-value";
+  item.reason =
+    `${target.ownerResource} list has records but discover won't choose one — ` +
+    `pick a value and set {${target.varName}} in .env.yaml (or run \`zond fixtures add\`), ` +
+    `then re-run \`zond prepare-fixtures --api <name>\``;
   return item;
 }
 
@@ -1009,33 +959,15 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
         items.push(item);
       }
 
-      // For each stale fixture, drop it from env so the upcoming probeOne call
-      // treats it as a placeholder and re-resolves through the list endpoint.
-      // Without --apply we stop here — verify is read-only by default.
+      // ARV-362 (m-25): --refresh drops the known-bad stale id (unsets it in
+      // .env.yaml, disk-write below) so the var resurfaces as a gap. discover
+      // no longer re-resolves a replacement value — the agent picks the new
+      // one. `wasStale` marks which vars to unset on disk.
       if (options.apply) {
         for (const item of items) {
-          if (item.status === "verify-stale") delete env[item.varName];
-        }
-        // Re-resolve only the previously-stale targets — leaves unverified live
-        // ones in place (no point hitting the list endpoint for them).
-        const staleTargets = targets.filter(t => items.some(i => i.varName === t.varName && i.status === "verify-stale"));
-        for (const target of staleTargets) {
-          const refreshed = await probeOne(
-            target,
-            env[target.varName],
-            endpoints,
-            securitySchemes,
-            env,
-            baseUrl,
-            options.timeoutMs ?? 30000,
-          );
-          // Replace the verify-stale entry with the refresh outcome.
-          // ARV-142: preserve the wasStale marker so summary can count
-          // stale_fixed (refresh succeeded) vs still_stale (refresh failed).
-          const idx = items.findIndex(i => i.varName === target.varName);
-          if (idx >= 0) {
-            refreshed.wasStale = true;
-            items[idx] = refreshed;
+          if (item.status === "verify-stale") {
+            delete env[item.varName];
+            item.wasStale = true;
           }
         }
       }
@@ -1135,9 +1067,17 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
           if (inferred) target = inferred;
         }
         if (!target) {
+          // ARV-382: no confident owner — surface plausible list endpoints as
+          // evidence instead of dead-ending. The agent picks (zond doesn't).
+          const candidates = findCandidateListEndpoints(entry.affectedEndpoints ?? [], endpoints);
           placeholder.status = "miss-no-list";
           placeholder.manifestStatus = "failed:no-list-endpoint";
-          placeholder.reason = `${entry.source}-source var has no owner resource in .api-resources.yaml — cannot derive a list endpoint`;
+          if (candidates.length > 0) {
+            placeholder.candidates = candidates;
+            placeholder.reason = `${entry.source}-source var has no confident owner in .api-resources.yaml — ${candidates.length} candidate list endpoint(s) surfaced; GET one, pick a record, set the value`;
+          } else {
+            placeholder.reason = `${entry.source}-source var has no owner resource in .api-resources.yaml — cannot derive a list endpoint`;
+          }
           items.push(placeholder);
           continue;
         }
@@ -1179,10 +1119,15 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
       if (action) it.recommended_action = action;
     }
 
-    const writes = items.filter(i => i.status === "write");
+    // ARV-362 (m-25): discover never writes discovered values — that's the
+    // agent's call. The only disk mutation is --refresh unsetting stale ids so
+    // the known-bad value is removed and the var resurfaces as a gap.
+    const unsets = options.verify && options.apply
+      ? items.filter(i => i.wasStale === true).map(i => i.varName)
+      : [];
     let applied = false;
     let backupPath: string | null = null;
-    if (options.apply && writes.length > 0) {
+    if (unsets.length > 0) {
       backupPath = `${envPath}.bak`;
       try {
         await copyFile(envPath, backupPath);
@@ -1192,8 +1137,8 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
       }
       const file = Bun.file(envPath);
       let text = (await file.exists()) ? await file.text() : "";
-      for (const w of writes) {
-        text = upsertEnvLine(text, w.varName, w.discovered!);
+      for (const v of unsets) {
+        text = upsertEnvLine(text, v, "");
       }
       if (!text.endsWith("\n")) text += "\n";
       await Bun.write(envPath, text);
@@ -1233,8 +1178,9 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     try {
       const { suites } = await parseSafe(join(options.apiDir, "tests"));
       if (suites.length > 0) {
+        // ARV-362: discover writes nothing, so the effective env is just what's
+        // already on disk (minus any stale ids --refresh unset above).
         const effectiveEnv: Record<string, string> = { ...env };
-        for (const w of writes) effectiveEnv[w.varName] = w.discovered!;
         // Required manifest vars still empty after this pass = candidate
         // chain-roots. Source-agnostic: real specs model these as `path`
         // required:true with an empty default, not only `capture-chain`.
@@ -1250,15 +1196,14 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
     const requiredManifestCount = manifest
       ? manifest.fixtures.filter(f => f.required).length
       : 0;
-    // ARV-143: in verify/refresh mode `manifestStatus` is not populated by
-    // the verify loop (it uses verify-* statuses instead). Count verify-live
-    // and verify-user-config as "filled" so the "Filled X/Y" line agrees with
+    // ARV-362: discover never fills a value, so "filled" means "already set on
+    // disk". Manifest-driven mode reports skip-already-set; verify mode reports
+    // verify-live / verify-user-config. The "Filled X/Y" line agrees with
     // doctor and the user_config bucket isn't double-counted as UNSET.
     const filledCount = items.filter(i =>
-      i.manifestStatus === "filled" ||
+      i.manifestStatus === "skipped:already-set" ||
       i.status === "verify-live" ||
-      i.status === "verify-user-config" ||
-      (i.wasStale === true && i.status === "write"),
+      i.status === "verify-user-config",
     ).length;
 
     if (options.json) {
@@ -1274,7 +1219,8 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
         items: safeItems,
         summary: {
           total: items.length,
-          writes: writes.length,
+          // ARV-362: discover writes no values; --refresh may unset stale ids.
+          unset: unsets.length,
           alreadySet: items.filter(i => i.status === "skip-already-set").length,
           misses: items.filter(i => i.status.startsWith("miss-")).length,
           // ARV-349/350: gaps prepare-fixtures cannot resolve deterministically.
@@ -1290,14 +1236,11 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
           ...(options.verify ? {
             verify: {
               live: items.filter(i => i.status === "verify-live").length,
-              // ARV-142: items currently classified as stale (refresh didn't
-              // overwrite them — either --apply was off, or refresh failed).
+              // Items classified stale. With --refresh they are also unset on
+              // disk (see `dropped`); without it they stay for the agent to fix.
               stale: items.filter(i => i.status === "verify-stale").length,
-              // ARV-142: stale items that --refresh successfully re-resolved.
-              stale_fixed: items.filter(i => i.wasStale === true && i.status === "write").length,
-              // ARV-142: stale items where --refresh ran but couldn't write a
-              // new value (e.g. list endpoint empty / unreachable).
-              still_stale: items.filter(i => i.wasStale === true && i.status !== "write").length,
+              // ARV-362: stale ids --refresh removed from .env.yaml (now gaps).
+              dropped: items.filter(i => i.wasStale === true).length,
               unknown: items.filter(i => i.status === "verify-unknown").length,
               skipped: items.filter(i => i.status === "verify-skip-empty" || i.status === "verify-no-read").length,
               // ARV-143: filled vars with no verify path (user-config /
@@ -1318,25 +1261,21 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
         i.resource || "—",
         i.listPath || "—",
         i.manifestStatus ?? i.status,
-        i.status === "write"
-          ? i.discovered!
-          : i.status === "skip-already-set"
-            ? `(kept: ${i.current})`
-            : i.status === "skip-already-equal"
-              ? `(unchanged: ${i.current})`
-              : i.status === "skip-not-required"
-                ? `(not owned by discover)`
-                : i.status === "verify-live"
-                  ? `(live: ${i.current})`
-                  : i.status === "verify-stale"
-                    ? `(stale: ${i.current})${i.reason ? ` — ${i.reason}` : ""}`
-                    : i.status === "verify-user-config"
-                      // ARV-143 follow-up: never echo the raw value here —
-                      // auth/header sources routinely carry tokens, and even
-                      // server URLs can be sensitive. Mirror doctor's
-                      // set/length-only contract from .secrets.yaml handling.
-                      ? `(trusted, length=${(i.current ?? "").length})`
-                      : (i.reason ?? ""),
+        i.status === "skip-already-set"
+          ? `(kept: ${i.current})`
+          : i.status === "skip-not-required"
+            ? `(not owned by discover)`
+            : i.status === "verify-live"
+              ? `(live: ${i.current})`
+              : i.status === "verify-stale"
+                ? `(stale: ${i.current})${i.reason ? ` — ${i.reason}` : ""}`
+                : i.status === "verify-user-config"
+                  // ARV-143 follow-up: never echo the raw value here —
+                  // auth/header sources routinely carry tokens, and even
+                  // server URLs can be sensitive. Mirror doctor's
+                  // set/length-only contract from .secrets.yaml handling.
+                  ? `(trusted, length=${(i.current ?? "").length})`
+                  : (i.reason ?? ""),
       ]);
       // ARV-143 follow-up: redact every text cell through SecretRegistry so
       // an `auth_token` that happens to slip into a `(kept: ...)` /
@@ -1355,20 +1294,17 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
         const live = items.filter(i => i.status === "verify-live").length;
         const stale = items.filter(i => i.status === "verify-stale").length;
         const unknown = items.filter(i => i.status === "verify-unknown").length;
-        // ARV-142: split stale-fixed vs still-stale so refresh telemetry no
-        // longer hides "0 stale" while quietly overwriting on disk.
-        const staleFixed = items.filter(i => i.wasStale === true && i.status === "write").length;
-        const stillStale = items.filter(i => i.wasStale === true && i.status !== "write").length;
+        // ARV-362: stale ids --refresh removed from .env.yaml (now gaps).
+        const dropped = items.filter(i => i.wasStale === true).length;
         // ARV-143: filled vars verify can't reach — call them out as trusted.
         const userConfig = items.filter(i => i.status === "verify-user-config").length;
         const parts = [`${live} live`, `${stale} stale`];
-        if (staleFixed > 0) parts.push(`${staleFixed} stale-fixed`);
-        if (stillStale > 0) parts.push(`${stillStale} still-stale`);
+        if (dropped > 0) parts.push(`${dropped} dropped`);
         parts.push(`${unknown} unknown`);
         if (userConfig > 0) parts.push(`${userConfig} trusted (no-verify-path)`);
         console.log(`Verify summary: ${parts.join(", ")}.`);
         if (stale > 0 && !options.apply) {
-          printWarning(`${stale} stale fixture(s) detected. Re-run with --refresh to drop and re-resolve them.`);
+          printWarning(`${stale} stale fixture(s) detected. Re-run with --refresh to drop them (agent refills .env.yaml).`);
         }
       }
       if (manifest) {
@@ -1397,11 +1333,9 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
         );
       }
       if (applied) {
-        printSuccess(`Wrote ${writes.length} value(s) to ${envPath}` + (backupPath ? ` (backup: ${backupPath})` : ""));
-      } else if (writes.length === 0) {
-        if (!options.verify) console.log("Nothing to write (all targets already set or no discoveries succeeded).");
-      } else {
-        printWarning(`Dry-run: ${writes.length} value(s) ready. Re-run with --apply to write ${envPath}.`);
+        printSuccess(`Unset ${unsets.length} stale fixture(s) in ${envPath}` + (backupPath ? ` (backup: ${backupPath})` : "") + ` — refill by hand / \`fixtures add\`.`);
+      } else if (!options.verify) {
+        console.log("discover reports gaps only — it never writes values (fill .env.yaml by hand or via `fixtures add`).");
       }
     }
     return 0;

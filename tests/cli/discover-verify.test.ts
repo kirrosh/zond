@@ -125,7 +125,10 @@ describe("zond discover --verify (TASK-281)", () => {
     expect(after).toBe(before);
   });
 
-  test("--refresh drops stale id and re-resolves it via list endpoint", async () => {
+  // ARV-362 (m-25): --refresh drops the known-bad stale id (unsets it in
+  // .env.yaml) so the var resurfaces as a gap. discover no longer re-resolves a
+  // replacement — the agent picks the new value.
+  test("--refresh unsets stale id (agent refills); live vars untouched", async () => {
     const envPath = join(apiDir, ".env.refresh.yaml");
     await writeFile(envPath, [
       `base_url: ${baseUrl}`,
@@ -138,16 +141,16 @@ describe("zond discover --verify (TASK-281)", () => {
     expect(exit).toBe(0);
 
     const after = await readFile(envPath, "utf8");
-    expect(after).toContain(`audience_id: "aud_real_42"`); // re-resolved via list
+    expect(after).toContain(`audience_id: ""`); // stale value dropped, now a gap
     expect(after).not.toContain(`aud_stale_999`);
+    // discover never harvests a replacement value.
+    expect(after).not.toContain(`aud_real_42`);
     // team_id was live → not touched (still raw, not JSON-quoted by upsertEnvLine).
     expect(after).toMatch(/team_id:\s*team_real_7/);
   });
 
-  // ARV-142: --refresh used to report "0 stale" while quietly overwriting on
-  // disk because the verify-stale item was replaced by the write-outcome before
-  // counting. Summary must surface stale_fixed/still_stale counters.
-  test("--refresh summary reports stale_fixed>=1 after re-resolving a stale id", async () => {
+  // ARV-362: --refresh reports how many stale ids it dropped (no auto-fix).
+  test("--refresh summary reports dropped>=1 after unsetting a stale id", async () => {
     const envPath = join(apiDir, ".env.refresh-counter.yaml");
     await writeFile(envPath, [
       `base_url: ${baseUrl}`,
@@ -160,10 +163,9 @@ describe("zond discover --verify (TASK-281)", () => {
     expect(exit).toBe(0);
     const env = JSON.parse(out.out);
     expect(env.ok).toBe(true);
-    expect(env.data.summary.verify.stale_fixed).toBeGreaterThanOrEqual(1);
-    // After successful refresh, currently-stale count drops to 0.
-    expect(env.data.summary.verify.stale).toBe(0);
-    expect(env.data.summary.verify.still_stale).toBe(0);
+    expect(env.data.summary.verify.dropped).toBeGreaterThanOrEqual(1);
+    // The dropped item is still classified stale (it just no longer has a value).
+    expect(env.data.summary.verify.stale).toBeGreaterThanOrEqual(1);
   });
 
   // ARV-143: filled vars without a read-by-id endpoint used to be invisible
@@ -253,7 +255,7 @@ describe("zond discover --verify (TASK-281)", () => {
     await rm(manifestPath, { force: true });
   });
 
-  test("--refresh text summary surfaces stale-fixed in addition to stale", async () => {
+  test("--refresh text summary surfaces dropped count in addition to stale", async () => {
     const envPath = join(apiDir, ".env.refresh-text.yaml");
     await writeFile(envPath, [
       `base_url: ${baseUrl}`,
@@ -264,7 +266,7 @@ describe("zond discover --verify (TASK-281)", () => {
     const out = captureOutput({ console: true });
     const exit = await discoverCommand({ specPath, apiDir, envPath, verify: true, apply: true, json: false });
     expect(exit).toBe(0);
-    expect(out.out).toMatch(/Verify summary:.*stale-fixed/);
+    expect(out.out).toMatch(/Verify summary:.*dropped/);
   });
 
   test("5xx on read-by-id is classified unknown — fixture is preserved", async () => {

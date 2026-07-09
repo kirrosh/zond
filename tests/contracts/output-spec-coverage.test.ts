@@ -94,6 +94,7 @@ const LEGACY_ALLOW_LIST: Record<string, string> = {
   "api annotate apply": "ARV-187: applies the agent's YAML responses to .api-resources.local.yaml; --json wraps the merge summary. OutputSpec migration not scheduled.",
   "fixtures add": "ARV-195: --json envelope via printJson. OutputSpec migration not scheduled — single-shape command (writes + validations).",
   "fixtures import": "ARV-195: --json envelope via printJson. OutputSpec migration not scheduled — single-shape command (writes + source).",
+  "secrets set": "ARV-377: --json envelope via printJson (key + metadata; value never echoed). Single-shape command; OutputSpec migration not scheduled.",
 };
 
 interface LeafEntry {

@@ -586,7 +586,19 @@ describe("generateCrudSuite", () => {
 
   test("DELETE step in CRUD is marked always: true (T44)", () => {
     const endpoints = [
-      makeEndpoint({ path: "/orders", method: "POST" }),
+      makeEndpoint({
+        path: "/orders",
+        method: "POST",
+        // ARV-368: create must yield an id for the chain to self-capture,
+        // otherwise PUT/DELETE are gated out (they'd hit a read-fixture).
+        responses: [
+          {
+            statusCode: 200,
+            description: "OK",
+            schema: { type: "object", properties: { id: { type: "string" } } },
+          },
+        ],
+      }),
       makeEndpoint({ path: "/orders/{orderId}", method: "GET" }),
       makeEndpoint({ path: "/orders/{orderId}", method: "DELETE" }),
     ];
@@ -596,6 +608,27 @@ describe("generateCrudSuite", () => {
     expect((deleteStep as any).always).toBe(true);
     const verifyStep = suite.tests.find(t => /verify.*deleted/i.test(t.name))!;
     expect((verifyStep as any).always).toBe(true);
+  });
+
+  test("ARV-368: no PUT/DELETE when create yields no id (data-loss guard)", () => {
+    // POST returns 204 (no body) → the runtime capture of {{orderId}} is empty
+    // and would fall back to the read-fixture (a real, harvested id). A DELETE
+    // there wipes pre-existing data. The generator must skip the mutating steps
+    // and keep only the non-destructive create + read for coverage.
+    const endpoints = [
+      makeEndpoint({
+        path: "/orders",
+        method: "POST",
+        responses: [{ statusCode: 204, description: "No Content" }],
+      }),
+      makeEndpoint({ path: "/orders/{orderId}", method: "GET" }),
+      makeEndpoint({ path: "/orders/{orderId}", method: "PUT" }),
+      makeEndpoint({ path: "/orders/{orderId}", method: "DELETE" }),
+    ];
+    const suite = generateCrudSuite(detectCrudGroups(endpoints)[0]!, noSecurity);
+    expect(suite.tests.find(t => t["DELETE"] !== undefined)).toBeUndefined();
+    expect(suite.tests.find(t => t["PUT"] !== undefined)).toBeUndefined();
+    expect(suite.tests.find(t => t["POST"] !== undefined)).toBeDefined();
   });
 
   test("CRUD suite WITHOUT delete is tagged persistent-write", () => {
