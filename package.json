@@ -4,6 +4,14 @@
   "description": "API hygiene scanner for small teams and their coding agents — test REST API endpoints against the OpenAPI spec, catch contract drift, track coverage.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kirrosh/zond.git"
+  },
+  "homepage": "https://github.com/kirrosh/zond#readme",
+  "bugs": {
+    "url": "https://github.com/kirrosh/zond/issues"
+  },
   "keywords": [
     "api-testing",
     "rest-api",
