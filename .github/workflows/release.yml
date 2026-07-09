@@ -17,16 +17,31 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux-x64
+            bun_target: bun-linux-x64
             artifact: zond
             archive: tar.gz
             raw: zond-linux-x64
+          - os: ubuntu-latest
+            target: linux-arm64
+            bun_target: bun-linux-arm64
+            artifact: zond
+            archive: tar.gz
+            raw: zond-linux-arm64
           - os: macos-latest
             target: darwin-arm64
+            bun_target: bun-darwin-arm64
             artifact: zond
             archive: tar.gz
             raw: zond-darwin-arm64
+          - os: macos-latest
+            target: darwin-x64
+            bun_target: bun-darwin-x64
+            artifact: zond
+            archive: tar.gz
+            raw: zond-darwin-x64
           - os: windows-latest
             target: win-x64
+            bun_target: bun-windows-x64
             artifact: zond.exe
             archive: zip
             raw: zond-win-x64.exe
@@ -41,7 +56,7 @@ jobs:
       - run: bun install
 
       - name: Build binary
-        run: bun build --compile src/cli/index.ts --outfile zond
+        run: bun build --compile --target=${{ matrix.bun_target }} src/cli/index.ts --outfile zond
 
       - name: Package (tar.gz)
         if: matrix.archive == 'tar.gz'

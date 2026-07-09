@@ -9,7 +9,12 @@ $REPO = "kirrosh/zond"
 # on x64 Windows running an ARM64 build of PowerShell it'll say ARM64, etc.
 switch ($env:PROCESSOR_ARCHITECTURE) {
     "AMD64" { $ARCH_SUFFIX = "x64" }
-    "ARM64" { $ARCH_SUFFIX = "arm64" }
+    # No win-arm64 artifact (bun has no windows-arm64 compile target);
+    # Windows 11 on ARM runs the x64 binary through emulation.
+    "ARM64" {
+        $ARCH_SUFFIX = "x64"
+        Write-Host "Note: no native ARM64 build - installing x64 (runs via Windows emulation)" -ForegroundColor Yellow
+    }
     default {
         Write-Host "Error: Unsupported architecture: $env:PROCESSOR_ARCHITECTURE" -ForegroundColor Red
         exit 1
