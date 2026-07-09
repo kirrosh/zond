@@ -919,6 +919,21 @@ zond run tests/ --env staging
 
 `zond init` creates a `.gitignore` with `.env*.yaml` in the API directory to prevent secrets from being committed.
 
+### TLS policy (ARV-367)
+
+Runtime HTTP (run / audit / checks / probe) does **not** verify server
+certificates by default — zond's primary targets are internal/dev APIs
+behind self-signed corp CAs, where strict verification would hard-fail
+every request. Two knobs:
+
+- `ZOND_STRICT_TLS=1` — verify certificates on every runtime request.
+  Use when auditing a **public** API, where an untrusted cert is a
+  finding, not noise.
+- Spec-fetch (`zond add api --spec <https-url>`) is separate and **does**
+  verify by default; for corp CAs pass `--ca <pem>` or set
+  `NODE_EXTRA_CA_CERTS` (appended to the public roots, never replacing
+  them). `--insecure` remains the last resort.
+
 ### Rate limiting & 429 handling
 
 `zond run` throttles outgoing requests when a limit is configured and automatically retries on `429 Too Many Requests`.

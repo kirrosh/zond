@@ -22,6 +22,9 @@ export interface AuditRecord {
 
 let _auditRecorder: ((rec: AuditRecord) => void) | null = null;
 
+// ARV-367: opt-in strict certificate verification for public-API audits.
+const STRICT_TLS = process.env.ZOND_STRICT_TLS === "1" || process.env.ZOND_STRICT_TLS === "true";
+
 export function setHttpAuditRecorder(recorder: ((rec: AuditRecord) => void) | null): void {
   if (recorder && _auditRecorder) {
     process.stderr.write("zond: nested HTTP audit recorder — overriding the outer scope.\n");
@@ -126,7 +129,12 @@ export async function executeRequest(
         body: request.formData ?? request.body ?? undefined,
         signal: controller.signal,
         redirect: opts.follow_redirects ? "follow" : "manual",
-        tls: { rejectUnauthorized: false },
+        // ARV-367: lax TLS by default — zond's bread and butter is internal/
+        // dev targets behind self-signed corp CAs, where strict verification
+        // would hard-fail every request. Set ZOND_STRICT_TLS=1 to verify
+        // certs when auditing a public API (spec-fetch has its own knobs:
+        // `add api --ca <pem>` / NODE_EXTRA_CA_CERTS).
+        tls: { rejectUnauthorized: STRICT_TLS },
       });
 
       clearTimeout(timeoutId);

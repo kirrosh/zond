@@ -67,6 +67,12 @@ Pragmatic режим (default) — реалистичный для production AP
   `--live` to opt into mutating traffic — **only against a throwaway/sandbox
   account.** Same vocabulary as `zond audit --safe/--live`. `probe static`
   only generates suites, so it's always safe (`--live` is a no-op there).
+- **TLS is lax by default (ARV-367).** Runtime requests skip certificate
+  verification — internal/dev targets behind self-signed corp CAs are the
+  norm. Auditing a **public** API? Set `ZOND_STRICT_TLS=1` so an untrusted
+  cert surfaces as a finding instead of being silently accepted. Spec-fetch
+  is stricter: it verifies by default; use `add api --ca <pem>` /
+  `NODE_EXTRA_CA_CERTS` for corp CAs.
 - **NEVER hand-roll these checks in YAML.** The catalog encodes
   schemathesis V4 semantics 1-to-1 — replicating them in YAML drifts
   silently. `zond checks run` is the single source of truth.
