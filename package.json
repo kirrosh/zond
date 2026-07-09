@@ -46,11 +46,12 @@
     "test": "bun run test:unit && bun run test:mocked",
     "test:unit": "bun test tests/",
     "test:mocked": "bun run scripts/run-mocked-tests.ts",
-    "check": "tsc --noEmit --project tsconfig.json",
+    "check": "tsc --noEmit --project tsconfig.json && bun run scripts/sync-plugin-skills.ts --check",
     "schemas": "bun run scripts/emit-json-schemas.ts",
     "schemas:check": "bun run scripts/emit-json-schemas.ts --check",
     "lint:dead": "knip --reporter compact",
-    "build": "bun build --compile src/cli/index.ts --outfile dist/zond && bun run scripts/codesign-darwin.ts ./dist/zond"
+    "build": "bun build --compile src/cli/index.ts --outfile dist/zond && bun run scripts/codesign-darwin.ts ./dist/zond",
+    "sync:plugin": "bun run scripts/sync-plugin-skills.ts"
   },
   "devDependencies": {
     "@readme/openapi-parser": "^5.5.0",

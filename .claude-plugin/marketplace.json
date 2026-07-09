@@ -1,0 +1,17 @@
+{
+  "name": "zond",
+  "description": "zond plugin marketplace — API hygiene scanner skills for coding agents (audit, depth checks, fixture seeding, triage).",
+  "owner": {
+    "name": "Kirill Koshelev",
+    "url": "https://github.com/kirrosh"
+  },
+  "plugins": [
+    {
+      "name": "zond",
+      "source": "./",
+      "description": "API hygiene scanner for small teams and their coding agents — test REST API endpoints against the OpenAPI spec, catch contract drift, track coverage.",
+      "category": "testing",
+      "keywords": ["api-testing", "openapi", "contract-testing", "api-coverage", "sarif"]
+    }
+  ]
+}

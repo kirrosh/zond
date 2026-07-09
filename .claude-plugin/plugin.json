@@ -1,0 +1,13 @@
+{
+  "name": "zond",
+  "description": "API hygiene scanner for small teams and their coding agents — test REST API endpoints against the OpenAPI spec, catch contract drift, track coverage.",
+  "version": "0.27.0",
+  "author": {
+    "name": "Kirill Koshelev",
+    "url": "https://github.com/kirrosh"
+  },
+  "homepage": "https://github.com/kirrosh/zond",
+  "repository": "https://github.com/kirrosh/zond",
+  "license": "MIT",
+  "keywords": ["api-testing", "openapi", "contract-testing", "api-coverage", "sarif"]
+}
