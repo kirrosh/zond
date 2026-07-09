@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.26.1] — 2026-07-09
+
+Follow-up from the v0.26.0 petstore verify audit (report-zond findings).
+
+### Fixed
+- **`zond run` on a non-existent path is now a hard error (ARV-383):** a path
+  absent on disk exits 2 with `No such file or directory: <path> — nothing to
+  run`, instead of falling through to the ARV-357 empty-report path and
+  reporting a green 0-test "pass". Real trigger: a probe that matched 0 fields
+  never created its output dir, then `zond run <that-dir>` went silently green.
+  An existing-but-empty dir keeps its ARV-357 advisory exit-0 behavior.
+
 ## [0.26.0] — 2026-07-09
 
 Deterministic gap-fills surfaced by a docgen-core-service audit — all pass the
