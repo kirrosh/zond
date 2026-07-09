@@ -4,7 +4,7 @@ title: clean-machine E2E validation of every install channel (DoD gate)
 status: To Do
 assignee: []
 created_date: '2026-07-09 12:56'
-updated_date: '2026-07-09 13:49'
+updated_date: '2026-07-09 13:56'
 labels:
   - m-27
 dependencies: []
@@ -26,5 +26,5 @@ Prove distribution works for a stranger: fresh container/VM per channel (curl, n
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Blocked until the next tagged release: needs (1) v0.27.0 release with raw binaries + checksums.txt (pipeline ready, ARV-386/388/389), (2) NPM_TOKEN secret present for npm publish. Channels to validate: curl, npm, windows (brew deferred until first users — ARV-387, excluded from this gate). Local simulations already green: npm i -g via fake release (ARV-386), cold-start walk to audit --safe (ARV-390).
+Blocked only on the next tagged release now: NPM_TOKEN confirmed present in repo secrets (gh secret list, updated 2026-07-08). Pipeline fully ready (ARV-386/388/389); brew excluded from the gate (ARV-387 deferred). Once feature/m-27-distribution is merged and v0.27.0 tagged, run clean-machine E2E for curl / npm / windows channels.
 <!-- SECTION:NOTES:END -->
