@@ -81,6 +81,30 @@ decision-8 (positioning) и litmus test остаются в силе.
   win): install → `zond init` в чужом публичном репо → первый `audit` с нулевым
   знанием внутренностей. Зафиксировать каждую точку трения; трение = баг канала.
 
+## Bucket E — Agentic discoverability (второй эшелон, вне DoD-гейта A–D)
+
+Прогруммлено 2026-07-09 из research-пака по agentic distribution (AEO/GEO).
+Ключевой сдвиг: у агента другая воронка обнаружения — реестры, харнесс-маркетплейсы,
+веб-поиск в рантайме, обучающий корпус. Description = поисковый сниппет для агентов;
+писать под задачные формулировки, не под маркетинг.
+
+- **ARV-393** (high) — canonical tagline + npm description/keywords + agent-first
+  README-верх. Фундамент: единый metadata-pack для всех каналов.
+- **ARV-394** (high) — llms.txt + AGENTS.md в репо zond.
+- **ARV-395** (high) — Claude Code plugin + подача в официальный и community
+  маркетплейсы. Главный канал для zond.
+- **ARV-396** (medium) — decision-ревизия: тонкая MCP-обёртка как discovery-канал
+  (конфликт с decision-2, сначала решение, потом код).
+- **ARV-397** (medium) — description-eval: количественный agent-recall через
+  skill-eval систему.
+- **ARV-398** (low, ongoing) — корпус-трек: контент под задачные запросы,
+  tagline дословно везде.
+- **ARV-399** (low) — мониторинг: recall-probe свежих моделей; краулер-логи
+  отложены (GH Pages без логов).
+
+Порядок: 393 → (394 ∥ 395 ∥ 396) → 397 → 398/399. Launch/маркетинг из Bucket C
+остаётся отдельным треком; E — про то, чтобы агенты находили zond сами.
+
 ## Definition of done
 
 - A: `npm i -g` **и** `brew install` **и** `curl | sh` дают рабочий `zond` на
