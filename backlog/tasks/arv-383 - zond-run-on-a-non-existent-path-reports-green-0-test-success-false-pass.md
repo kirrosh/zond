@@ -1,9 +1,10 @@
 ---
 id: ARV-383
 title: zond run on a non-existent path reports green 0-test success (false pass)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-09 11:41'
+updated_date: '2026-07-09 11:54'
 labels:
   - zond-audit
   - ux
@@ -23,3 +24,9 @@ Root: parseDirectorySafe globs a non-existent cwd -> empty, no error (src/core/p
 
 Fix: a path that does not exist on disk is a hard error (non-zero); an existing-but-empty dir keeps ARV-357 advisory behaviour.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fix complete on branch fix/arv-383-run-missing-path (commit 012658a): non-existent path -> exit 2, existing-empty dir keeps ARV-357. Test added, full suite 2446/0, build+install+live-smoke pass. Pending merge to master -> flip to Done on merge.
+<!-- SECTION:NOTES:END -->
