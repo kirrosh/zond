@@ -102,4 +102,29 @@ describe("disambiguateGenericPathParams", () => {
     expect(eps[0]!.path).toBe("/articles/{article_slug}");
     expect(eps[1]!.path).toBe("/pages/{page_slug}");
   });
+
+  // ARV-381: version segments between collection and param must be skipped in
+  // the parent-walk, so the owning collection (not `v30`) names the param —
+  // aligning with owningCollectionForPathParam which already strips versions.
+  test("skips a version segment to reach the owning collection", () => {
+    const eps = [
+      ep("/api/macros/v30/{code}", "code"),
+      ep("/api/templates/v30/{code}", "code"),
+    ];
+    // stems are singularized (segToStem), same as /templates/{id} → template_id
+    disambiguateGenericPathParams(eps);
+    expect(eps[0]!.path).toBe("/api/macros/v30/{macro_code}");
+    expect(eps[1]!.path).toBe("/api/templates/v30/{template_code}");
+  });
+
+  // ARV-376 + ARV-381 together: accessor marker AND version segment stacked.
+  test("skips a version segment behind a byid accessor marker", () => {
+    const eps = [
+      ep("/api/things/v2/byid/{id}"),
+      ep("/api/others/v2/byid/{id}"),
+    ];
+    disambiguateGenericPathParams(eps);
+    expect(eps[0]!.path).toBe("/api/things/v2/byid/{thing_id}");
+    expect(eps[1]!.path).toBe("/api/others/v2/byid/{other_id}");
+  });
 });
