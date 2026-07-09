@@ -348,10 +348,10 @@ whole distribution pass in one go — no manual per-arch assembly:
    Each target uploads a `tar.gz`/`zip` archive **and** a raw binary
    (used by the npm postinstall).
 2. **release**: computes `checksums.txt` over every artifact, attaches
-   everything to the GitHub Release, regenerates `Formula/zond.rb` via
-   `scripts/release/generate-brew-formula.mjs` and pushes it to
-   `kirrosh/homebrew-tap` (requires the `TAP_GITHUB_TOKEN` secret — a
-   fine-grained PAT with contents:write on the tap repo).
+   everything to the GitHub Release. The brew-bump step (regenerate
+   `Formula/zond.rb` via `scripts/release/generate-brew-formula.mjs`,
+   push to `kirrosh/homebrew-tap`) self-skips while `TAP_GITHUB_TOKEN`
+   is unset — the brew channel is deferred until first users (ARV-387).
 3. **publish**: `npm publish` of the thin launcher package; node-only
    users get the platform binary via `scripts/npm/postinstall.mjs`
    (checksum-verified against `checksums.txt`).

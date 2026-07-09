@@ -1,14 +1,14 @@
 ---
 id: ARV-387
 title: brew tap + formula (brew install kirrosh/tap/zond)
-status: In Progress
+status: To Do
 assignee: []
 created_date: '2026-07-09 12:56'
-updated_date: '2026-07-09 13:42'
+updated_date: '2026-07-09 13:45'
 labels:
   - m-27
 dependencies: []
-priority: high
+priority: low
 ---
 
 ## Description
@@ -26,5 +26,5 @@ No brew formula exists. Add a tap (kirrosh/homebrew-tap or Formula in-repo) that
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Formula generator + release-pipeline bump step are merged on feature/m-27-distribution. BLOCKED on creating the public repo kirrosh/homebrew-tap — auto-mode classifier denied 'gh repo create --public' (needs user approval). Seed content ready in scratchpad (Formula/zond.rb pinned to v0.26.1 darwin-arm64/linux-x64 tar.gz + README). After repo exists: push seed, add TAP_GITHUB_TOKEN secret, then 'brew install kirrosh/tap/zond' is testable on this machine.
+DEFERRED by user decision (2026-07-09): no tap until first users — trigger event = первые реальные пользователи/спрос на brew. Generator (scripts/release/generate-brew-formula.mjs + tests) and the pipeline bump step stay in the repo; the step self-skips when TAP_GITHUB_TOKEN is absent. README/docs mentions of brew removed until the channel exists. Seed formula draft was prepared in session scratchpad (ephemeral).
 <!-- SECTION:NOTES:END -->

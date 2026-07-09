@@ -18,7 +18,6 @@ Zond reads your OpenAPI spec and gives your AI agent everything it needs to test
 | Channel | Command |
 |---|---|
 | **curl** (macOS/Linux) | `curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh \| sh` |
-| **Homebrew** | `brew install kirrosh/tap/zond` |
 | **npm** (needs Node 20+) | `npm install -g @kirrosh/zond` |
 | **Windows** | `iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 \| iex` |
 | **Manual** | grab a binary from [releases](https://github.com/kirrosh/zond/releases/latest) (darwin arm64/x64, linux x64/arm64, win x64) |
@@ -119,9 +118,6 @@ Claude Code can write pytest from scratch — but it takes 30-60 minutes per flo
 ```bash
 # macOS / Linux — re-run the installer
 curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
-
-# Homebrew
-brew upgrade zond
 
 # npm
 npm install -g @kirrosh/zond@latest
