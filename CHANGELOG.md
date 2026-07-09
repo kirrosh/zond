@@ -4,6 +4,53 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-07-09
+
+m-27 start-distribution: every install channel works on a clean machine,
+one-run release pipeline, cold-start onboarding pass. Engine untouched.
+
+### Added
+- **npm channel for node-only users (ARV-386):** the published package is a
+  thin node launcher (`bin/zond.mjs`) + `postinstall` that downloads the
+  platform binary from the matching GitHub release and verifies its sha256
+  against `checksums.txt` (`ZOND_DOWNLOAD_BASE` override for mirrors/E2E).
+  Zero runtime deps, no `src/` TS execution, no bun required.
+- **Full platform matrix (ARV-388):** releases now ship `darwin-x64` and
+  `linux-arm64` on top of `darwin-arm64`/`linux-x64`/`win-x64`, cross-compiled
+  via `bun build --compile --target`. `install.sh` fails with a clear message
+  + releases link instead of a raw 404; `install.ps1` falls back ARM64 → x64
+  with an emulation note.
+- **One-run release pipeline (ARV-389):** tag push cross-compiles all 5
+  targets, adhoc-codesigns darwin, emits `checksums.txt`, attaches everything
+  to the GH release and publishes npm — documented in `docs/ci.md`. A brew
+  formula generator (`scripts/release/generate-brew-formula.mjs`) is in-repo
+  but the channel is deferred until first users (ARV-387); its pipeline step
+  self-skips while `TAP_GITHUB_TOKEN` is unset.
+- **`zond audit --safe` (ARV-390):** explicit alias of the default safe mode
+  (docs and skills always said `--safe`, but the flag didn't exist — a
+  stranger's first command died on `unknown option`). Conflicts with `--live`.
+- **Strict-TLS opt-in (ARV-367):** runtime HTTP keeps lax TLS by default
+  (internal/dev targets behind corp CAs); `ZOND_STRICT_TLS=1` turns
+  certificate verification on for public-API audits. Documented as a TLS
+  policy section in ZOND.md + the zond-checks skill.
+- **Raw-apiKey hint (ARV-367):** `doctor` warns when a securityScheme is
+  `apiKey` in the `Authorization` header — set `auth_token` to the RAW key,
+  no `Bearer ` prefix.
+
+### Fixed
+- **Serializer dropped OPTIONS/HEAD/TRACE method keys (ARV-390):** emitted
+  probe-methods suites failed the runner's own validation and were skipped
+  with a scary warning on a stranger's first run. Empty `json: {}` bodies no
+  longer degrade to a bare `json:` (null). Round-trip regression tests added.
+- **Cold-start dead-ends (ARV-390):** `init` next-steps now end at
+  `zond audit --api <name> --safe`; `doctor`'s all-set output points at the
+  same next action instead of stopping silently.
+
+### Docs
+- **README distribution pass (ARV-391):** install matrix (curl/npm/win/manual),
+  safe-by-default trust note above the fold, animated SVG terminal demo
+  (`docs/demo.svg`), one-liner positioning for strangers.
+
 ## [0.26.1] — 2026-07-09
 
 Follow-up from the v0.26.0 petstore verify audit (report-zond findings).

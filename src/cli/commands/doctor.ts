@@ -364,8 +364,29 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   const placeholderRows = [...requiredOut, ...optionalOut].filter(r => r.placeholder);
   if (placeholderRows.length > 0) {
     warnings.push(
-      `${placeholderRows.length} path fixture${placeholderRows.length === 1 ? "" : "s"} hold placeholder values (${placeholderRows.map(r => r.name).join(", ")}); positive/CRUD suites will hit fake ids — replace with real values in .env.yaml`,
+      `${placeholderRows.length} path fixture${placeholderRows.length === 1 ? " holds" : "s hold"} placeholder values (${placeholderRows.map(r => r.name).join(", ")}); positive/CRUD suites will hit fake ids — replace with real values in .env.yaml`,
     );
+  }
+
+  // ARV-367 (UX1): apiKey scheme living in the Authorization header is a
+  // trap — the server expects the RAW key, but muscle memory prefixes
+  // "Bearer ", which yields an opaque 401. Call it out deterministically.
+  if (specExists && specAbsPath) {
+    try {
+      const spec = JSON.parse(readFileSync(specAbsPath, "utf-8")) as {
+        components?: { securitySchemes?: Record<string, { type?: string; in?: string; name?: string }> };
+      };
+      const rawAuthHeader = Object.entries(spec.components?.securitySchemes ?? {}).find(
+        ([, s]) => s?.type === "apiKey" && s.in === "header" && (s.name ?? "").toLowerCase() === "authorization",
+      );
+      if (rawAuthHeader) {
+        warnings.push(
+          `securityScheme '${rawAuthHeader[0]}' is apiKey in the Authorization header — set auth_token to the RAW key, no 'Bearer ' prefix (Bearer is for http/bearer schemes only)`,
+        );
+      }
+    } catch {
+      // unreadable spec — surfaced by the spec check above
+    }
   }
 
   // Endpoint counts from .api-catalog.yaml — read what `zond add api` already
@@ -578,6 +599,7 @@ function printHuman(
   // Suggested next
   if (opts.missingOnly && r.blockedRequired === 0 && r.staleArtifacts.length === 0) {
     out.write(`No missing items. Workspace is ready.\n`);
+    out.write(`Next: zond audit --api ${r.api} --safe   (read-only first pass), then zond audit --api ${r.api} for full depth.\n`);
   } else if (r.blockedRequired > 0) {
     // ARV-16: align with `zond coverage`, which points users at the same
     // remedy. `prepare-fixtures` auto-seeds from list endpoints; manual edit
@@ -587,6 +609,7 @@ function printHuman(
     out.write(`Next: artifacts are out of sync — run \`zond refresh-api ${r.api}\`.\n`);
   } else {
     out.write(`All checks passed. Workspace is ready.\n`);
+    out.write(`Next: zond audit --api ${r.api} --safe   (read-only first pass), then zond audit --api ${r.api} for full depth.\n`);
   }
 
   for (const w of r.warnings) out.write(`Warning: ${w}\n`);

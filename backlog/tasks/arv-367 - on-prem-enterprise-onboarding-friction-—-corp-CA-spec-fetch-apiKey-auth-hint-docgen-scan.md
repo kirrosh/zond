@@ -3,10 +3,10 @@ id: ARV-367
 title: >-
   on-prem/enterprise onboarding friction — corp CA spec-fetch + apiKey auth hint
   (docgen scan)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-08 09:22'
-updated_date: '2026-07-09 12:56'
+updated_date: '2026-07-09 13:39'
 labels:
   - m-27
 dependencies: []
@@ -32,12 +32,15 @@ UX2 (stretch, вне scope): dev-стенд захлёбывался на --work
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 zond add api --spec <https-url> подхватывает системный trust store / NODE_EXTRA_CA_CERTS при fetch спека — внутренний/корп CA работает без --insecure
-- [ ] #2 runner TLS-политика (безусловный rejectUnauthorized:false) задокументирована в zond-checks/README; опц. --strict-tls для валидации против публичного API
-- [ ] #3 doctor (или add api) для apiKey-схемы в Authorization подсказывает: писать raw-токен без Bearer-префикса
+- [x] #2 runner TLS-политика (безусловный rejectUnauthorized:false) задокументирована в zond-checks/README; опц. --strict-tls для валидации против публичного API
+- [x] #3 doctor (или add api) для apiKey-схемы в Authorization подсказывает: писать raw-токен без Bearer-префикса
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-AC1 (system trust store) done: readOpenApiSpec now honors NODE_EXTRA_CA_CERTS + a new 'zond add api --ca <pem>' flag, appending the extra CA to the public roots (node:tls rootCertificates) — never replacing them, so public specs keep validating. resolveSpecFetchTls() precedence: insecure > caPath/env > default; throws on unreadable CA path. Verified end-to-end: registered the internal docgen v30 spec over its self-signed corp CA WITHOUT --insecure by exporting the keychain roots to a PEM and passing --ca. Unit tests in openapi-reader.test.ts. AC2 (runner TLS docs + --strict-tls) and AC3 (apiKey raw-token hint) still open.
+AC2: runtime TLS stays lax by default (documented rationale at the tls: line in http-client.ts); opt-in strict verification via ZOND_STRICT_TLS=1 env (one knob covers run/audit/checks/probe without per-command flag plumbing — chose env over --strict-tls flag deliberately). Documented in ZOND.md 'TLS policy' + zond-checks skill iron rule. Verified live against self-signed.badssl.com: strict rejects, lax 200s.
+AC3: doctor now warns deterministically when a securityScheme is apiKey in the Authorization header — 'set auth_token to the RAW key, no Bearer prefix'. Verified with a modified petstore-auth spec.
+AC1 was done earlier (add api --ca / NODE_EXTRA_CA_CERTS).
+UX2 (auto-concurrency downshift) explicitly out of scope per task.
 <!-- SECTION:NOTES:END -->

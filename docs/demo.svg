@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 460" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">
+  <!-- Animated cold-start demo: init → add api → doctor → fixtures → audit (safe mode).
+       Text is real zond output (condensed). 24s loop, pure CSS — renders on GitHub. -->
+  <style>
+    .g0 { animation: s0 24s linear infinite; }
+    .g1 { animation: s1 24s linear infinite; }
+    .g2 { animation: s2 24s linear infinite; }
+    .g3 { animation: s3 24s linear infinite; }
+    .g4 { animation: s4 24s linear infinite; }
+    .g5 { animation: s5 24s linear infinite; }
+    @keyframes s0 { 0%,2%   { opacity: 0; } 4%,98%  { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes s1 { 0%,14%  { opacity: 0; } 16%,98% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes s2 { 0%,30%  { opacity: 0; } 32%,98% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes s3 { 0%,50%  { opacity: 0; } 52%,98% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes s4 { 0%,64%  { opacity: 0; } 66%,98% { opacity: 1; } 100% { opacity: 0; } }
+    @keyframes s5 { 0%,82%  { opacity: 0; } 84%,98% { opacity: 1; } 100% { opacity: 0; } }
+    .p  { fill: #7ee787; }
+    .c  { fill: #e6edf3; }
+    .d  { fill: #8b949e; }
+    .ok { fill: #7ee787; }
+    .warn { fill: #f0883e; }
+    .err { fill: #f85149; }
+  </style>
+  <rect width="760" height="460" rx="10" fill="#0d1117"/>
+  <circle cx="22" cy="20" r="6" fill="#f85149"/>
+  <circle cx="42" cy="20" r="6" fill="#f0883e"/>
+  <circle cx="62" cy="20" r="6" fill="#7ee787"/>
+  <text x="380" y="24" text-anchor="middle" class="d">zond — first audit in five minutes</text>
+
+  <g class="g0">
+    <text x="20" y="56"><tspan class="p">$</tspan><tspan class="c" dx="8">zond init</tspan></text>
+    <text x="20" y="74" class="d">Workspace ready. See AGENTS.md for the CLI workflow.</text>
+  </g>
+
+  <g class="g1">
+    <text x="20" y="104"><tspan class="p">$</tspan><tspan class="c" dx="8">zond add api petstore --spec ./openapi.json</tspan></text>
+    <text x="20" y="122" class="d">Registered API 'petstore' (4 endpoints)</text>
+    <text x="20" y="140" class="d">Artifacts: spec.json + catalog + resources + fixtures manifest</text>
+  </g>
+
+  <g class="g2">
+    <text x="20" y="170"><tspan class="p">$</tspan><tspan class="c" dx="8">zond doctor --api petstore</tspan></text>
+    <text x="20" y="188"><tspan class="ok">✓</tspan><tspan class="d" dx="8">base_url    http://localhost:3456    [server]</tspan></text>
+    <text x="20" y="206"><tspan class="err">✗</tspan><tspan class="d" dx="8">petId       UNSET    [path] (blocks 2 endpoints)</tspan></text>
+  </g>
+
+  <g class="g3">
+    <text x="20" y="236"><tspan class="p">$</tspan><tspan class="c" dx="8">zond fixtures add petId=1 --api petstore --apply</tspan></text>
+    <text x="20" y="254"><tspan class="ok">✓</tspan><tspan class="d" dx="8">All checks passed. Workspace is ready.</tspan></text>
+  </g>
+
+  <g class="g4">
+    <text x="20" y="284"><tspan class="p">$</tspan><tspan class="c" dx="8">zond audit --api petstore --safe</tspan></text>
+    <text x="20" y="302" class="d">==&gt; Stage 2/8: generate (smoke + crud)</text>
+    <text x="20" y="320" class="d">==&gt; Stage 3/8: probe static (validation+methods) — 51 probe(s)</text>
+    <text x="20" y="338" class="d">==&gt; Stage 5/8: run tests</text>
+    <text x="20" y="356"><tspan class="ok" dx="16">✓</tspan><tspan class="d" dx="8">path param petId="abc" (non-numeric) — must reject (no 5xx)</tspan></text>
+    <text x="20" y="374"><tspan class="ok" dx="16">✓</tspan><tspan class="d" dx="8">GET /pets — 200, schema valid</tspan></text>
+    <text x="20" y="392" class="d">==&gt; Stage 8/8: coverage (session union)</text>
+  </g>
+
+  <g class="g5">
+    <text x="20" y="422"><tspan class="warn">Audit complete</tspan><tspan class="d" dx="8">(8 stages, 0.7s) → audit-report.html</tspan></text>
+    <text x="20" y="440" class="d">read-only pass: GET-only traffic, no state touched</text>
+  </g>
+</svg>
