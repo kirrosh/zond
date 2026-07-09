@@ -139,6 +139,34 @@ describe("serializeSuite", () => {
     expect(yaml).toContain('skip_if: "{{user_id}} =="');
   });
 
+  test("ARV-390 — OPTIONS/HEAD/TRACE method keys survive serialization (round-trip valid)", () => {
+    const suite: RawSuite = {
+      name: "probe methods /pets",
+      tests: [
+        { name: "options", OPTIONS: "/pets", expect: { status: [200, 204, 405] } },
+        { name: "head", HEAD: "/pets", expect: { status: [200, 405] } },
+        { name: "trace", TRACE: "/pets", expect: { status: [405] } },
+      ],
+    };
+    const yaml = serializeSuite(suite);
+    expect(yaml).toContain("OPTIONS: /pets");
+    expect(yaml).toContain("HEAD: /pets");
+    expect(yaml).toContain("TRACE: /pets");
+    // Round-trip: the runner must accept what the generator emits.
+    expect(() => validateSuite(yamlToObject(yaml))).not.toThrow();
+  });
+
+  test("ARV-390 — empty json body emits inline `json: {}` not bare `json:` (null)", () => {
+    const suite: RawSuite = {
+      name: "probe",
+      tests: [{ name: "put", PUT: "/pets", json: {}, expect: { status: [405] } }],
+    };
+    const yaml = serializeSuite(suite);
+    expect(yaml).toContain("json: {}");
+    const parsed = yamlToObject(yaml) as { tests: Array<{ json: unknown }> };
+    expect(parsed.tests[0]!.json).toEqual({});
+  });
+
   test("TASK-221 / F13 — empty {} value emits inline `{}` not bare key (which YAML re-parses as null)", () => {
     const suite: RawSuite = {
       name: "test-suite",

@@ -364,7 +364,7 @@ export async function doctorCommand(opts: DoctorOptions): Promise<number> {
   const placeholderRows = [...requiredOut, ...optionalOut].filter(r => r.placeholder);
   if (placeholderRows.length > 0) {
     warnings.push(
-      `${placeholderRows.length} path fixture${placeholderRows.length === 1 ? "" : "s"} hold placeholder values (${placeholderRows.map(r => r.name).join(", ")}); positive/CRUD suites will hit fake ids — replace with real values in .env.yaml`,
+      `${placeholderRows.length} path fixture${placeholderRows.length === 1 ? " holds" : "s hold"} placeholder values (${placeholderRows.map(r => r.name).join(", ")}); positive/CRUD suites will hit fake ids — replace with real values in .env.yaml`,
     );
   }
 
@@ -578,6 +578,7 @@ function printHuman(
   // Suggested next
   if (opts.missingOnly && r.blockedRequired === 0 && r.staleArtifacts.length === 0) {
     out.write(`No missing items. Workspace is ready.\n`);
+    out.write(`Next: zond audit --api ${r.api} --safe   (read-only first pass), then zond audit --api ${r.api} for full depth.\n`);
   } else if (r.blockedRequired > 0) {
     // ARV-16: align with `zond coverage`, which points users at the same
     // remedy. `prepare-fixtures` auto-seeds from list endpoints; manual edit
@@ -587,6 +588,7 @@ function printHuman(
     out.write(`Next: artifacts are out of sync — run \`zond refresh-api ${r.api}\`.\n`);
   } else {
     out.write(`All checks passed. Workspace is ready.\n`);
+    out.write(`Next: zond audit --api ${r.api} --safe   (read-only first pass), then zond audit --api ${r.api} for full depth.\n`);
   }
 
   for (const w of r.warnings) out.write(`Warning: ${w}\n`);
