@@ -3,9 +3,10 @@ id: ARV-369
 title: >-
   Fixture manifest: disambiguate path-param vars by owning resource, not raw
   param name
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-08 10:46'
+updated_date: '2026-07-09 06:30'
 labels:
   - fixtures
   - doctor

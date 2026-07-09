@@ -3,9 +3,10 @@ id: ARV-372
 title: >-
   generate: multiple CRUD suites collide on the same output filename, silently
   overwriting each other
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-08 10:48'
+updated_date: '2026-07-09 06:30'
 labels:
   - generate
   - bug
