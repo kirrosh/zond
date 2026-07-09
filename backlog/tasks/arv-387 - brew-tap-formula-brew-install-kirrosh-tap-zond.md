@@ -1,9 +1,10 @@
 ---
 id: ARV-387
 title: brew tap + formula (brew install kirrosh/tap/zond)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-09 12:56'
+updated_date: '2026-07-09 13:19'
 labels:
   - m-27
 dependencies: []

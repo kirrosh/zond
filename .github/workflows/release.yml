@@ -83,6 +83,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v5
+
       - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
@@ -97,6 +99,23 @@ jobs:
           files: |
             zond-*
             checksums.txt
+
+      # Bump the homebrew tap (kirrosh/homebrew-tap). TAP_GITHUB_TOKEN is a
+      # fine-grained PAT with contents:write on that repo.
+      - name: Bump homebrew tap
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          node scripts/release/generate-brew-formula.mjs "${GITHUB_REF_NAME#v}" checksums.txt > zond.rb
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/kirrosh/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp zond.rb tap/Formula/zond.rb
+          cd tap
+          git config user.name "zond-release"
+          git config user.email "noreply@github.com"
+          git add Formula/zond.rb
+          git diff --cached --quiet || git commit -m "zond ${GITHUB_REF_NAME}"
+          git push
 
   publish:
     name: Publish to npm
