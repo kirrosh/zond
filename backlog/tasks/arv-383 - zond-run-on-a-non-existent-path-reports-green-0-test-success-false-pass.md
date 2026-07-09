@@ -1,7 +1,7 @@
 ---
 id: ARV-383
 title: zond run on a non-existent path reports green 0-test success (false pass)
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-09 11:41'
 updated_date: '2026-07-09 11:54'
