@@ -3,10 +3,10 @@ id: ARV-395
 title: >-
   Claude Code plugin: упаковка skills+команд + подача в официальный и community
   маркетплейсы
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-09 14:17'
-updated_date: '2026-07-09 15:05'
+updated_date: '2026-07-09 15:47'
 labels:
   - m-27
 dependencies:
@@ -25,10 +25,10 @@ priority: high
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Plugin-манифест собран из существующих skills/команд, ставится и активируется в чистой установке Claude Code
-- [ ] #2 PR/подача минимум в 3 community-каталога или awesome-списка
+- [x] #2 PR/подача минимум в 3 community-каталога или awesome-списка
 - [x] #3 SKILL.md descriptions согласованы с canonical tagline (ARV-393)
 - [x] #4 Self-serve маркетплейс живой: .claude-plugin/{plugin,marketplace}.json в репо, claude plugin validate зелёный, /plugin marketplace add kirrosh/zond работает
-- [ ] #5 Подача в claude-plugins-community через форму platform.claude.com/plugins/submit (официальный маркетплейс self-serve недостижим — см. skill-distribution-channels.md)
+- [x] #5 Подача в claude-plugins-community через форму platform.claude.com/plugins/submit (официальный маркетплейс self-serve недостижим — см. skill-distribution-channels.md)
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -48,4 +48,6 @@ priority: high
 Упаковка сделана (2026-07-09): .claude-plugin/{plugin,marketplace}.json; скиллы синкаются из init-шаблонов в корневой skills/<name>/SKILL.md скриптом scripts/sync-plugin-skills.ts (bun run sync:plugin), drift ловится в bun run check (--check). claude plugin validate — чисто; локальный E2E: marketplace add → install zond@zond (enabled) → uninstall. README/llms.txt — инструкции /plugin marketplace add kirrosh/zond и npx skills add kirrosh/zond.
 
 Осталось (нужен владелец аккаунта): push ветки, подача формой platform.claude.com/plugins/submit (AC#5), issue-форма awesome-claude-code (AC#2); SkillsMP/skills.sh подхватят skills/ сами после мержа в master.
+
+Подачи выполнены пользователем 2026-07-09: форма claude-plugins-community (platform.claude.com/plugins/submit) + issue-форма awesome-claude-code + Context7 + DeepWiki (≥3 каталогов). Self-serve канал живой с релиза v0.27.1. VoltAgent/awesome-agent-skills — отложен до adoption (trigger event).
 <!-- SECTION:NOTES:END -->

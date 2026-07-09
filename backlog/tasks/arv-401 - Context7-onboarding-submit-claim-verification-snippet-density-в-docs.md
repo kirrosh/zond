@@ -1,9 +1,10 @@
 ---
 id: ARV-401
 title: 'Context7 onboarding: submit + claim + verification + snippet-density в docs'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-09 14:45'
+updated_date: '2026-07-09 15:47'
 labels:
   - m-27
 dependencies:
@@ -23,8 +24,14 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 kirrosh/zond в индексе Context7, resolve-library-id находит zond
+- [x] #1 kirrosh/zond в индексе Context7, resolve-library-id находит zond
 - [ ] #2 Library claimed + подана заявка на manual verification
 - [ ] #3 Context7 refresh GitHub Action в CI
 - [ ] #4 docs/*.md прогнаны на snippet-density: каждая страница несёт рабочие fenced-примеры
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Submit выполнен 2026-07-09, индекс живой: context7.com/kirrosh/zond — 118 snippets, 7,901 tokens, Trust Score 5.4. Осталось: claim + manual verification, GitHub Action refresh, snippet-density pass по docs/*.md.
+<!-- SECTION:NOTES:END -->

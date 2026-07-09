@@ -4,6 +4,7 @@ title: 'внешние discovery-индексы: DeepWiki + Ref.tools + Chroma p
 status: To Do
 assignee: []
 created_date: '2026-07-09 14:45'
+updated_date: '2026-07-09 15:47'
 labels:
   - m-27
 dependencies:
@@ -24,7 +25,13 @@ priority: low
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 deepwiki.com/kirrosh/zond проиндексирован, бейдж в README
+- [x] #1 deepwiki.com/kirrosh/zond проиндексирован, бейдж в README
 - [ ] #2 Письмо в Ref.tools отправлено
 - [ ] #3 PR в chroma-core/package-search открыт (или зафиксирован мотивированный отказ)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+DeepWiki проиндексирован 2026-07-09 (по 488dde2), бейдж добавлен в README (+ npm-бейдж). Осталось: письмо hello@ref.tools, PR в chroma-core/package-search.
+<!-- SECTION:NOTES:END -->
