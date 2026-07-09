@@ -33,7 +33,7 @@ export interface AddApiOptions {
 export async function addApiCommand(opts: AddApiOptions): Promise<number> {
   const ws = findWorkspaceRoot();
   if (ws.fromFallback) {
-    const m = `No workspace detected (no zond.config.yml / .zond / zond.db / apis marker). Run \`zond init\` first to bootstrap a workspace.`;
+    const m = `No workspace detected (no zond.config.yml / .zond / apis marker). Run \`zond init\` first to bootstrap a workspace.`;
     if (opts.json) printJson(jsonError("add-api", [m])); else printError(m);
     return 2;
   }

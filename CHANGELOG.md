@@ -4,8 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-07-09
+
 Deterministic gap-fills surfaced by a docgen-core-service audit — all pass the
-litmus test (same input → same output, no severity/FP/blame judgment).
+litmus test (same input → same output, no severity/FP/blame judgment). Plus an
+m-25 distribution cleanup that collapses the workspace layout to one convention.
 
 ### Added
 - **Multi-spec merge (ARV-375):** `zond add api <name> --spec a --spec b …`
@@ -46,6 +49,17 @@ litmus test (same input → same output, no severity/FP/blame judgment).
 - **`fixtures add` batch (ARV-378):** confirmed `fixtures add <pairs...>`
   already applies N `key=value` pairs in one call (one write + one `.bak`) —
   no shell loop needed.
+
+### Removed
+- **Flat `zond.db` workspace layout (m-25):** dropped the legacy root-level
+  `zond.db` marker and its implicit default-DB resolution. The DB now lives
+  only at `.zond/zond.db`; `zond.config.yml` / `.zond/` / `apis/` remain the
+  workspace markers. Migrate an old workspace with `mv zond.db .zond/` (or
+  re-`zond init`); an explicit `--db <path>` still opens any file. Removes the
+  dual-layout confusion that let a root `zond.db` and `.zond/zond.db` coexist.
+- **Dead `benchmarks/` references (m-25):** pruned the never-committed
+  `benchmarks/**` entries from `knip.json` and the dead `bench:api` script from
+  `package.json` (`knip` is now clean).
 
 ## [0.25.0] — 2026-07-07
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -62,7 +62,7 @@ describe("workspace config (TASK-301)", () => {
     expect(resolveTimeoutMs(undefined, undefined, root)).toBe(9000); // workspace
     _resetWorkspaceConfigCache();
     rmSync(join(root, "zond.config.yml"));
-    writeFileSync(join(root, "zond.db"), ""); // keep workspace marker; no config
+    mkdirSync(join(root, ".zond")); // keep workspace marker; no config
     expect(resolveTimeoutMs(undefined, undefined, root)).toBe(HARD_DEFAULT_TIMEOUT_MS);
   });
 
@@ -73,7 +73,7 @@ describe("workspace config (TASK-301)", () => {
     expect(resolveRateLimit(undefined, undefined, root)).toBe(4); // workspace
     _resetWorkspaceConfigCache();
     rmSync(join(root, "zond.config.yml"));
-    writeFileSync(join(root, "zond.db"), "");
+    mkdirSync(join(root, ".zond"));
     expect(resolveRateLimit(undefined, undefined, root)).toBeUndefined();
   });
 });
