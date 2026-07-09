@@ -48,9 +48,16 @@ export function resourceVar(resource: string, suffix: string): string {
   return `${singular.replace(/[^a-zA-Z0-9]+/g, "_")}_${suffix}`.toLowerCase();
 }
 
-/** Convert OpenAPI path params {param} to test interpolation {{param}} */
-function convertPath(path: string): string {
-  return path.replace(/\{([^}]+)\}/g, "{{$1}}");
+/** Convert OpenAPI path params {param} to test interpolation {{param}}.
+ *  When `ambiguous` is given (ARV-369), a param name reused across
+ *  distinct resources becomes a resource-scoped var (`{{templates_code}}`)
+ *  instead of the raw name, so `.env.yaml` can hold distinct values per
+ *  resource instead of one value silently applying everywhere. */
+function convertPath(path: string, ambiguous?: Set<string>): string {
+  if (!ambiguous || ambiguous.size === 0) {
+    return path.replace(/\{([^}]+)\}/g, "{{$1}}");
+  }
+  return path.replace(/\{([^}]+)\}/g, (_, name) => `{{${fixtureVarNameForPathParam(path, name, ambiguous)}}}`);
 }
 
 /**
@@ -94,6 +101,65 @@ function endpointHasPathParams(ep: EndpointInfo): boolean {
 
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+/** Strip trailing API-version path segments (`v1`, `v30`, `version2`) so
+ *  resource-name derivation doesn't mistake a version marker for the
+ *  resource itself on APIs shaped `/api/<resource>/v{N}` (ARV-372). */
+export function stripTrailingVersionSegments(segments: string[]): string[] {
+  const out = [...segments];
+  while (out.length > 1 && /^v(ersion)?\d+$/i.test(out[out.length - 1]!)) {
+    out.pop();
+  }
+  return out;
+}
+
+/** Owning collection for a path-param: the last non-version path segment
+ *  before its `{name}` placeholder. Used to disambiguate a path-param name
+ *  (`code`, `id`, `key`) that's reused across genuinely distinct resources
+ *  (ARV-369) — e.g. `/api/templates/v30/{code}` → "templates" vs
+ *  `/api/macros/v30/{code}` → "macros". */
+export function owningCollectionForPathParam(path: string, paramName: string): string | null {
+  const marker = `{${paramName}}`;
+  const idx = path.indexOf(marker);
+  if (idx === -1) return null;
+  const segments = stripTrailingVersionSegments(path.slice(0, idx).split("/").filter(Boolean));
+  return segments.length > 0 ? segments[segments.length - 1]! : null;
+}
+
+/** Path-param names reused by more than one distinct owning collection
+ *  across the whole spec — these need a resource-scoped fixture var name
+ *  (`templates_code`) instead of the raw name (`code`), otherwise one
+ *  `.env.yaml` value silently applies to unrelated resources (ARV-369). */
+export function computeAmbiguousPathParams(endpoints: EndpointInfo[]): Set<string> {
+  const owners = new Map<string, Set<string>>();
+  for (const ep of endpoints) {
+    for (const p of ep.parameters) {
+      if (p.in !== "path" || p.required === false) continue;
+      const owner = owningCollectionForPathParam(ep.path, p.name) ?? "";
+      if (!owners.has(p.name)) owners.set(p.name, new Set());
+      owners.get(p.name)!.add(owner);
+    }
+  }
+  const ambiguous = new Set<string>();
+  for (const [name, ownerSet] of owners) {
+    if (ownerSet.size > 1) ambiguous.add(name);
+  }
+  return ambiguous;
+}
+
+/** Resource-scoped fixture var name for a path-param, when ambiguous;
+ *  otherwise the raw param name (single-owner APIs — the common case —
+ *  keep producing the same var names as before ARV-369). */
+export function fixtureVarNameForPathParam(
+  path: string,
+  paramName: string,
+  ambiguous: Set<string>,
+): string {
+  if (!ambiguous.has(paramName)) return paramName;
+  const owner = owningCollectionForPathParam(path, paramName);
+  if (!owner) return paramName;
+  return `${owner.replace(/[^a-zA-Z0-9]+/g, "_")}_${paramName}`;
 }
 
 function escapeRegex(s: string): string {
@@ -241,6 +307,13 @@ function getSuiteHeaders(
 // sites. Always reset to null at the end of generateSuites so the helper
 // stays stateless from the caller's perspective.
 let _suiteDefaultAuthVar: string | null = null;
+
+/** Same module-scoping rationale as `_suiteDefaultAuthVar` above: computed
+ *  once from the full endpoint list at the top of generateSuites (ARV-369
+ *  needs the whole spec to detect a param-name collision), consulted by
+ *  `generateStep`'s path conversion. Reset to empty at the end of
+ *  generateSuites. */
+let _ambiguousPathParams: Set<string> = new Set();
 
 /** Common id-like field names looked up after `id` itself.
  *  TASK-139: many real-world APIs return `slug`, `uuid`, `version`, `key`,
@@ -391,7 +464,7 @@ export function generateStep(
 ): RawStep {
   const method = ep.method.toUpperCase();
   const name = ep.operationId ?? ep.summary ?? `${method} ${ep.path}`;
-  const path = convertPath(ep.path);
+  const path = convertPath(ep.path, _ambiguousPathParams);
 
   const step: RawStep = {
     name,
@@ -486,7 +559,13 @@ export function detectCrudGroupsWithDiagnostics(
 
   for (const createEp of postEndpoints) {
     const basePath = stripTrailingSlash(createEp.path);
-    const resource = basePath.split("/").filter(Boolean).pop() ?? "resource";
+    // ARV-372: skip trailing version segments (`v1`, `v30`) before taking the
+    // last segment as the resource name — otherwise every collection on a
+    // spec shaped `/api/<resource>/v{N}` (a common convention) resolves to
+    // the SAME resource name ("v30"), and multiple CRUD suites collide on
+    // the same `crud-<resource>.yaml` output filename, silently overwriting
+    // each other.
+    const resource = stripTrailingVersionSegments(basePath.split("/").filter(Boolean)).pop() ?? "resource";
 
     // Match `<basePath>/{param}` with optional trailing slash. Tolerates
     // both `POST /alerts/` + `GET /alerts/{id}` and `POST /alerts` +
@@ -996,6 +1075,7 @@ export function generateSuites(opts: {
 }): RawSuite[] {
   const { endpoints, securitySchemes, specPath, includeDeprecated, defaultAuthVar } = opts;
   _suiteDefaultAuthVar = defaultAuthVar ?? null;
+  _ambiguousPathParams = computeAmbiguousPathParams(endpoints);
 
   // Filter deprecated unless caller opted in. The list of skipped paths is
   // exposed separately via `getSkippedDeprecated` for stdout reporting.
@@ -1202,5 +1282,6 @@ export function generateSuites(opts: {
   }
 
   _suiteDefaultAuthVar = null;                                                                  // ARV-212
+  _ambiguousPathParams = new Set();                                                              // ARV-369
   return allSuites;
 }
