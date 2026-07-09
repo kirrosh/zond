@@ -3,9 +3,10 @@ id: ARV-382
 title: >-
   prepare-fixtures: emit candidates instead of dead-ending miss-no-list
   (evidence-over-inference)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-09 10:06'
+updated_date: '2026-07-09 10:24'
 labels:
   - feature
   - generator
@@ -25,3 +26,9 @@ ARV-376 follow-up, class 2 + the META principle. The deeply-nested tail (templat
 - [ ] #2 candidates ranked by structural proximity, NOT decided (zond does not pick a value)
 - [ ] #3 no new hardcoded marker/verb lists added to close specific shapes
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+miss-no-list now populates item.candidates (findCandidateListEndpoints in discover.ts): plausible GET/list endpoints ranked by structural proximity from the var's affectedEndpoints; deprecated-only lists marked '(deprecated)', live preferred, inner-param prefixes excluded (not directly actionable). zond never picks the value — agent judgment. No new marker lists (reuses existing verb set). docgen-core-merged: 9/22 miss-no-list now carry candidates, rest are honest dead-ends (no listable source). Tests: discover-collect-targets.test.ts. Skill zond-seed.md updated.
+<!-- SECTION:NOTES:END -->

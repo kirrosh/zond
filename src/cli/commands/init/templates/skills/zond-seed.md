@@ -62,6 +62,14 @@ whose FK points at another must be created *after* its parent (parent id is
 captured first, then referenced). Sort parent-before-child yourself; skip
 cycles and resources whose only dep is external input.
 
+**miss-no-list `candidates` (ARV-382):** when prepare-fixtures can't confidently
+derive the owner list for a fixture var, the item carries a `candidates[]` of
+plausible GET/list endpoints (ranked by structural proximity; deprecated ones
+marked `(deprecated)`). zond does NOT pick — that's your call: `zond request`
+the top candidate, read a record, `zond fixtures add <var>=<id>`. An empty
+`candidates` (and no owner) is an honest dead-end: no listable source exists —
+create the resource or obtain the id from a parent flow.
+
 ## The loop
 
 For each root, parent-first:

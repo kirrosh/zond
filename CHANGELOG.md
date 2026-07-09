@@ -26,6 +26,15 @@ litmus test (same input → same output, no severity/FP/blame judgment).
   from "deprecated, skip by design" without re-reading spec.json.
 
 ### Fixed
+- **`db diagnose --union` version follow-up + candidate-surfacing (ARV-381/382):**
+  disambig's parent-walk now skips version segments (`/v30/{code}`), aligning
+  with `owningCollectionForPathParam` which already strips them — resolves the
+  `_v30_code` miss-no-list class. And when prepare-fixtures can't confidently
+  derive an owner list, the item carries `candidates[]` — plausible GET/list
+  endpoints ranked by proximity (deprecated ones marked) — instead of
+  dead-ending; zond surfaces the evidence, the agent picks the value. On
+  docgen-core-merged: `miss-no-list` 40 → 22 total, 9 of those now carry
+  candidates, the rest are honest dead-ends (no listable source in the spec).
 - **Resource graph misses `/list`-style owners (ARV-376):** `resolveOwnerListPaths`
   now links `/list` (and `/search`, `/find`) endpoints to their sibling
   `/{code}` and `/byid/{id}` params; the `byid` accessor marker no longer
