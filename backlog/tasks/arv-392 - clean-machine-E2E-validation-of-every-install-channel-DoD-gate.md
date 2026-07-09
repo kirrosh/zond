@@ -4,6 +4,7 @@ title: clean-machine E2E validation of every install channel (DoD gate)
 status: To Do
 assignee: []
 created_date: '2026-07-09 12:56'
+updated_date: '2026-07-09 13:42'
 labels:
   - m-27
 dependencies: []
@@ -21,3 +22,9 @@ Prove distribution works for a stranger: fresh container/VM per channel (curl, n
 - [ ] #1 curl | sh, npm i -g, brew install, win installer each verified on a clean environment
 - [ ] #2 Friction log captured and each item filed or fixed
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Blocked until the next tagged release: needs (1) v0.27.0 release with raw binaries + checksums.txt (pipeline ready, ARV-386/388/389), (2) kirrosh/homebrew-tap repo created + seeded (prepared in ARV-387, awaiting user approval to create the public repo), (3) TAP_GITHUB_TOKEN + NPM_TOKEN secrets in the zond repo. Local simulations already green: npm i -g via fake release (ARV-386), cold-start walk to audit --safe (ARV-390).
+<!-- SECTION:NOTES:END -->
