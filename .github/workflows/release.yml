@@ -58,6 +58,10 @@ jobs:
       - name: Build binary
         run: bun build --compile --target=${{ matrix.bun_target }} src/cli/index.ts --outfile zond
 
+      - name: Codesign (darwin adhoc)
+        if: startsWith(matrix.target, 'darwin')
+        run: bun run scripts/codesign-darwin.ts ./zond
+
       - name: Package (tar.gz)
         if: matrix.archive == 'tar.gz'
         run: tar -czf zond-${{ matrix.target }}.tar.gz ${{ matrix.artifact }}

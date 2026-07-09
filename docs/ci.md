@@ -336,3 +336,28 @@ and degrades gracefully (warn-only) when `codesign` isn't on PATH.
 > strips xattrs (`xattr -c`) and re-signs (`codesign --force --sign -`)
 > in place — without that, the binary works in the build directory but
 > dies as soon as it's installed.
+
+## Release pipeline (one run per tag)
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which does the
+whole distribution pass in one go — no manual per-arch assembly:
+
+1. **build** (matrix): cross-compiles all 5 targets with
+   `bun build --compile --target=...` — `darwin-{arm64,x64}`,
+   `linux-{x64,arm64}`, `win-x64` — and adhoc-codesigns the darwin ones.
+   Each target uploads a `tar.gz`/`zip` archive **and** a raw binary
+   (used by the npm postinstall).
+2. **release**: computes `checksums.txt` over every artifact, attaches
+   everything to the GitHub Release, regenerates `Formula/zond.rb` via
+   `scripts/release/generate-brew-formula.mjs` and pushes it to
+   `kirrosh/homebrew-tap` (requires the `TAP_GITHUB_TOKEN` secret — a
+   fine-grained PAT with contents:write on the tap repo).
+3. **publish**: `npm publish` of the thin launcher package; node-only
+   users get the platform binary via `scripts/npm/postinstall.mjs`
+   (checksum-verified against `checksums.txt`).
+
+So the release command is just:
+
+```bash
+git tag v0.X.Y && git push origin v0.X.Y
+```
