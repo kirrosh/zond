@@ -10,7 +10,8 @@ sends read-only GET traffic only. zond never calls an LLM itself — it is the
 deterministic tool a coding agent (Claude Code, Cursor, Codex) drives.
 
 Install: `curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh`
-or `npm i -g @kirrosh/zond`.
+or `npm i -g @kirrosh/zond`. Agent skills: `/plugin marketplace add kirrosh/zond`
+(Claude Code) or `npx skills add kirrosh/zond`.
 
 ## Docs
 
@@ -23,13 +24,14 @@ or `npm i -g @kirrosh/zond`.
 
 ## Agent skills
 
-Installed into a project by `zond init`; source of truth in the repo:
+Installed into a project by `zond init`, as a Claude Code plugin
+(`/plugin marketplace add kirrosh/zond`), or via `npx skills add kirrosh/zond`:
 
-- [zond (primary)](https://raw.githubusercontent.com/kirrosh/zond/master/src/cli/commands/init/templates/skills/zond.md): full audit pipeline — generate, run, coverage, report
-- [zond-checks](https://raw.githubusercontent.com/kirrosh/zond/master/src/cli/commands/init/templates/skills/zond-checks.md): depth checks — conformance + security probes, SARIF, stateful invariants
-- [zond-seed](https://raw.githubusercontent.com/kirrosh/zond/master/src/cli/commands/init/templates/skills/zond-seed.md): agent-orchestrated fixture seeding via the API's own POST endpoints
-- [zond-triage](https://raw.githubusercontent.com/kirrosh/zond/master/src/cli/commands/init/templates/skills/zond-triage.md): last-run triage routed by the recommended_action enum
-- [warm-up-target](https://raw.githubusercontent.com/kirrosh/zond/master/src/cli/commands/init/templates/skills/warm-up-target.md): warm the target API's state so honest-2xx coverage isn't capped by empty data
+- [zond (primary)](https://raw.githubusercontent.com/kirrosh/zond/master/skills/zond/SKILL.md): full audit pipeline — generate, run, coverage, report
+- [zond-checks](https://raw.githubusercontent.com/kirrosh/zond/master/skills/zond-checks/SKILL.md): depth checks — conformance + security probes, SARIF, stateful invariants
+- [zond-seed](https://raw.githubusercontent.com/kirrosh/zond/master/skills/zond-seed/SKILL.md): agent-orchestrated fixture seeding via the API's own POST endpoints
+- [zond-triage](https://raw.githubusercontent.com/kirrosh/zond/master/skills/zond-triage/SKILL.md): last-run triage routed by the recommended_action enum
+- [warm-up-target](https://raw.githubusercontent.com/kirrosh/zond/master/skills/warm-up-target/SKILL.md): warm the target API's state so honest-2xx coverage isn't capped by empty data
 
 ## Optional
 

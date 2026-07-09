@@ -31,6 +31,12 @@ Zond reads your OpenAPI spec and gives your AI agent everything it needs to test
 | **npm** (needs Node 20+) | `npm install -g @kirrosh/zond` |
 | **Windows** | `iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 \| iex` |
 | **Manual** | grab a binary from [releases](https://github.com/kirrosh/zond/releases/latest) (darwin arm64/x64, linux x64/arm64, win x64) |
+| **Claude Code plugin** | `/plugin marketplace add kirrosh/zond` then `/plugin install zond@zond` — the agent skills without `zond init` |
+| **Agent skills** ([skills.sh](https://www.skills.sh)) | `npx skills add kirrosh/zond` |
+
+The plugin/skills channels ship the [five zond skills](skills/) (audit
+pipeline, depth checks, fixture seeding, triage, target warm-up); the zond
+binary itself still comes from any of the channels above.
 
 Every channel ships the same self-contained binary — no Bun or Node
 required at runtime (npm uses Node only as a thin launcher).
