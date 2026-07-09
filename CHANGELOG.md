@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.27.1] — 2026-07-09
+
+m-27 Bucket E (agentic discoverability): metadata release — no engine changes.
+
+### Added
+- **Claude Code plugin / self-serve marketplace (ARV-395):**
+  `.claude-plugin/{plugin,marketplace}.json` — install skills via
+  `/plugin marketplace add kirrosh/zond`; skills mirrored to root
+  `skills/<name>/SKILL.md` (synced from init templates, drift-checked in
+  `bun run check`), also picked up by SkillsMP / `npx skills add kirrosh/zond`.
+- **Agent discovery files (ARV-394):** `llms.txt` (machine index of docs) and
+  `context7.json` (Context7 config with agent rules) at the repo root.
+
+### Changed
+- **Agentic metadata (ARV-393, ARV-400):** canonical tagline in npm
+  `description`, task-shaped `keywords`, `repository`/`homepage`/`bugs` links;
+  agent-first README top (what → when → install → minimal example).
+
 ## [0.27.0] — 2026-07-09
 
 m-27 start-distribution: every install channel works on a clean machine,
