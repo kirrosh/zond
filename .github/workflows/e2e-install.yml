@@ -1,0 +1,36 @@
+name: E2E install channels
+
+# ARV-392 DoD gate: every install channel verified on a clean machine.
+# Manual dispatch — run after each release to re-validate the channels.
+on:
+  workflow_dispatch:
+
+jobs:
+  curl-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
+      - run: zond --version
+
+  curl-macos:
+    runs-on: macos-latest
+    steps:
+      - run: curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
+      - run: zond --version
+
+  npm-node-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: npm install -g @kirrosh/zond
+      - run: zond --version
+
+  win-installer:
+    runs-on: windows-latest
+    steps:
+      - shell: pwsh
+        run: iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex
+      - shell: pwsh
+        run: '& "$env:LOCALAPPDATA\zond\zond.exe" --version'
