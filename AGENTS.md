@@ -5,8 +5,11 @@
 
 ## Project overview
 
-`zond` — AI-native API testing tool. См. [README.md](README.md), полный CLI-референс
-в [ZOND.md](ZOND.md), внутренние документы — в `docs/`.
+zond is an API hygiene scanner for small teams and their coding agents —
+test REST API endpoints against the OpenAPI spec, catch contract drift,
+track coverage. См. [README.md](README.md), полный CLI-референс
+в [ZOND.md](ZOND.md), внутренние документы — в `docs/`, машинный индекс
+документации — в [llms.txt](llms.txt).
 
 ## Workspace contract (читай перед любым изменением fixture-pipeline)
 
