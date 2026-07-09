@@ -187,6 +187,13 @@ export interface DiscoveryItem {
   /** ARV-46: source classification copied from `.api-fixtures.yaml`. */
   manifestSource?: FixtureManifestEntry["source"];
   reason?: string;
+  /** ARV-382: when zond can't CONFIDENTLY derive the owner list endpoint
+   *  (miss-no-list), it surfaces the plausible GET/list endpoints — ranked by
+   *  structural proximity to where the id is consumed — instead of dead-ending.
+   *  zond does NOT pick a value; the agent reads these, picks one, and sets the
+   *  fixture (or fires one `zond request` against the top candidate). Empty
+   *  when nothing structurally plausible exists. */
+  candidates?: string[];
   /** TASK-294: agent-routable action for items the user must fix.
    *  miss-* / verify-stale / verify-unknown → `fix_fixture`.
    *  miss-network → `fix_network_config`.
@@ -507,6 +514,57 @@ export async function readFixtureManifest(apiDir: string): Promise<FixtureManife
  *  via `inferOwnerFromVarName` (singular ↔ plural matching) so vars whose
  *  name doesn't appear in the resource map's idParam table still get
  *  attempted. */
+/** ARV-382: for a fixture var that resolved to no confident owner list
+ *  endpoint, surface the structurally-plausible GET/list endpoints instead of
+ *  dead-ending. We walk back from each `{param}` segment in the endpoints the
+ *  var affects and collect any GET whose path is that collection prefix (or
+ *  prefix + a list verb), ranked by proximity (deeper prefix = closer). This
+ *  is deterministic candidate EVIDENCE — zond does not pick a value or a
+ *  winner; the agent judges. Reuses the existing list-verb set (no new
+ *  markers). Returns [] when nothing plausible exists. */
+export function findCandidateListEndpoints(
+  affectedLabels: string[],
+  endpoints: Array<{ method: string; path: string; deprecated?: boolean }>,
+): string[] {
+  const strip = (p: string) => (p.length > 1 && p.endsWith("/") ? p.slice(0, -1) : p);
+  const isParam = (s: string | undefined) => !!s && /^\{[^}]+\}$/.test(s);
+  // Prefer live endpoints; still surface a deprecated-only list (marked) so the
+  // agent — not zond — decides whether an EOL read is acceptable to seed an id.
+  const getByPath = new Map<string, { label: string; deprecated: boolean }>();
+  for (const e of endpoints) {
+    if (e.method.toUpperCase() !== "GET") continue;
+    const key = strip(e.path);
+    const entry = { label: `${e.method.toUpperCase()} ${e.path}`, deprecated: !!e.deprecated };
+    const prev = getByPath.get(key);
+    if (!prev || (prev.deprecated && !entry.deprecated)) getByPath.set(key, entry); // live wins
+  }
+  const VERBS = ["", "/list", "/search", "/find"];
+  const scored = new Map<string, number>();
+  const consider = (label: string, score: number) => {
+    if ((scored.get(label) ?? -1) < score) scored.set(label, score);
+  };
+  for (const label of affectedLabels) {
+    const path = label.slice(label.indexOf(" ") + 1);
+    const segs = strip(path).split("/");
+    for (let i = 0; i < segs.length; i++) {
+      if (!isParam(segs[i])) continue;
+      // Walk back over the run of non-param segments before this param.
+      for (let k = i; k >= 1; k--) {
+        if (isParam(segs[k - 1])) break;
+        const prefix = segs.slice(0, k).join("/");
+        if (prefix.includes("{")) continue; // an inner param — not a concrete GET path
+        for (const v of VERBS) {
+          const hit = getByPath.get(prefix + v);
+          if (!hit) continue;
+          // deeper prefix = closer; deprecated candidates rank below all live.
+          consider(hit.deprecated ? `${hit.label} (deprecated)` : hit.label, (hit.deprecated ? 0 : 1000) + k);
+        }
+      }
+    }
+  }
+  return [...scored.entries()].sort((a, b) => b[1] - a[1]).map((e) => e[0]).slice(0, 5);
+}
+
 export function collectTargets(
   map: ApiResourceMapYaml,
   manifest?: FixtureManifestYaml,
@@ -1009,9 +1067,17 @@ export async function discoverCommand(options: DiscoverOptions): Promise<number>
           if (inferred) target = inferred;
         }
         if (!target) {
+          // ARV-382: no confident owner — surface plausible list endpoints as
+          // evidence instead of dead-ending. The agent picks (zond doesn't).
+          const candidates = findCandidateListEndpoints(entry.affectedEndpoints ?? [], endpoints);
           placeholder.status = "miss-no-list";
           placeholder.manifestStatus = "failed:no-list-endpoint";
-          placeholder.reason = `${entry.source}-source var has no owner resource in .api-resources.yaml — cannot derive a list endpoint`;
+          if (candidates.length > 0) {
+            placeholder.candidates = candidates;
+            placeholder.reason = `${entry.source}-source var has no confident owner in .api-resources.yaml — ${candidates.length} candidate list endpoint(s) surfaced; GET one, pick a record, set the value`;
+          } else {
+            placeholder.reason = `${entry.source}-source var has no owner resource in .api-resources.yaml — cannot derive a list endpoint`;
+          }
           items.push(placeholder);
           continue;
         }
