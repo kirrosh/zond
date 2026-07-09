@@ -160,6 +160,26 @@ export async function runCommand(options: RunOptions): Promise<number> {
   // the rogue character. Mutating options.paths so downstream lookups
   // (collection by test_path, env-file search) see the cleaned form.
   options.paths = options.paths.map((p) => p.trim());
+
+  // ARV-383: a path that does not exist on disk is a hard error, not an
+  // empty (exit-0) run. Without this, `parseDirectorySafe` globs a missing
+  // cwd -> 0 suites and run falls through to the ARV-357 empty-report path,
+  // reporting a green 0-test "pass". Real-world trigger: a probe that matched
+  // 0 fields never created its output dir, then `zond run <that-dir>` went
+  // silently green. An existing-but-empty dir still flows to ARV-357.
+  const missingPaths: string[] = [];
+  for (const p of options.paths) {
+    try {
+      await stat(p);
+    } catch {
+      missingPaths.push(p);
+    }
+  }
+  if (missingPaths.length > 0) {
+    printError(`No such file or directory: ${missingPaths.join(", ")} — nothing to run`);
+    return 2;
+  }
+
   const primaryPath = options.paths[0]!;
 
   // 1. Parse test files from every input path (collect parse errors instead
