@@ -1,16 +1,23 @@
 {
   "name": "@kirrosh/zond",
   "version": "0.27.0",
-  "description": "API testing platform — define tests in YAML, run from CLI, generate from OpenAPI specs",
+  "description": "API hygiene scanner for small teams and their coding agents — test REST API endpoints against the OpenAPI spec, catch contract drift, track coverage.",
   "license": "MIT",
   "type": "module",
   "keywords": [
-    "api",
-    "testing",
+    "api-testing",
+    "rest-api",
     "openapi",
-    "yaml",
+    "contract-testing",
+    "contract-drift",
+    "schema-validation",
+    "api-coverage",
+    "api-hygiene",
+    "coding-agents",
+    "ai-agents",
+    "claude-code",
+    "sarif",
     "cli",
-    "rest",
     "http"
   ],
   "files": [
