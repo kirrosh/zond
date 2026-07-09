@@ -1,5 +1,8 @@
 # zond
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/kirrosh/zond)
+[![npm](https://img.shields.io/npm/v/%40kirrosh%2Fzond)](https://www.npmjs.com/package/@kirrosh/zond)
+
 API hygiene scanner for small teams and their coding agents — test REST API endpoints against the OpenAPI spec, catch contract drift, track coverage.
 
 **Use it when you need to:** test REST API endpoints from an OpenAPI spec,
