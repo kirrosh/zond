@@ -49,13 +49,13 @@ describe("bucketRows (TASK-280)", () => {
 
     const buckets = bucketRows(matrix);
     expect(buckets.covered2xx).toEqual([
-      { endpoint: "GET /a", method: "GET", path: "/a", lastStatus: 200 },
+      { endpoint: "GET /a", method: "GET", path: "/a", lastStatus: 200, deprecated: false },
     ]);
     expect(buckets.coveredButNon2xx).toEqual([
-      { endpoint: "PUT /b", method: "PUT", path: "/b", lastStatus: 502 },
+      { endpoint: "PUT /b", method: "PUT", path: "/b", lastStatus: 502, deprecated: false },
     ]);
     expect(buckets.unhit).toEqual([
-      { endpoint: "GET /c", method: "GET", path: "/c", lastStatus: null },
+      { endpoint: "GET /c", method: "GET", path: "/c", lastStatus: null, deprecated: false },
     ]);
   });
 
@@ -90,6 +90,17 @@ describe("bucketRows (TASK-280)", () => {
     expect(buckets.covered2xx.length + buckets.coveredButNon2xx.length).toBe(2);
   });
 
+  test("ARV-379: per-entry deprecated flag flows from the matrix row", () => {
+    const dep: MatrixRow = { ...row("GET", "/old", { "2xx": emptyCell(), "4xx": emptyCell(), "5xx": emptyCell() }), deprecated: true };
+    const matrix: CoverageMatrix = {
+      rows: [dep, row("GET", "/new", { "2xx": cell([ref("pass", 200)]), "4xx": emptyCell(), "5xx": emptyCell() })],
+      totals: { endpoints: 2, cells: 6, covered: 1, partial: 0, uncovered: 1, byReason: {} as never },
+    };
+    const buckets = bucketRows(matrix);
+    expect(buckets.unhit[0]?.deprecated).toBe(true);
+    expect(buckets.covered2xx[0]?.deprecated).toBe(false);
+  });
+
   test("network-error-only result (responseStatus=null) is still 'hit' but lastStatus=null", () => {
     const matrix: CoverageMatrix = {
       rows: [
@@ -99,7 +110,7 @@ describe("bucketRows (TASK-280)", () => {
     };
     const buckets = bucketRows(matrix);
     expect(buckets.coveredButNon2xx).toEqual([
-      { endpoint: "GET /net", method: "GET", path: "/net", lastStatus: null },
+      { endpoint: "GET /net", method: "GET", path: "/net", lastStatus: null, deprecated: false },
     ]);
     expect(buckets.unhit).toEqual([]);
   });

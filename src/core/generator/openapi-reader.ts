@@ -58,6 +58,29 @@ export async function readOpenApiSpec(specPath: string, options?: SpecFetchTlsOp
   return api as OpenAPIV3.Document;
 }
 
+/** ARV-376: align declared path-param names with the path template when they
+ *  diverge (spec quirk: path `/byid/{id}` but param declared `byid_id`). The
+ *  template is authoritative for substitution, so unmatched params are renamed
+ *  to the unmatched template segment names, in positional order. No-op when
+ *  names already agree (the common, well-formed case). Mutates in place. */
+export function reconcilePathParamNames(
+  path: string,
+  parameters: OpenAPIV3.ParameterObject[],
+): void {
+  const tplNames = [...path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]!);
+  if (tplNames.length === 0) return;
+  const pathParams = parameters.filter((p) => p.in === "path");
+  const declared = new Set(pathParams.map((p) => p.name));
+  const unmatchedTpl = tplNames.filter((n) => !declared.has(n));
+  const unmatchedParams = pathParams.filter((p) => !tplNames.includes(p.name));
+  // Only reconcile a clean 1:1 correspondence — if the counts differ we can't
+  // safely guess the mapping, so leave the (already odd) spec untouched.
+  if (unmatchedTpl.length === 0 || unmatchedTpl.length !== unmatchedParams.length) return;
+  unmatchedParams.forEach((p, i) => {
+    (p as { name: string }).name = unmatchedTpl[i]!;
+  });
+}
+
 export function extractSecuritySchemes(doc: OpenAPIV3.Document): SecuritySchemeInfo[] {
   const schemes: SecuritySchemeInfo[] = [];
   const securitySchemes = doc.components?.securitySchemes;
@@ -125,6 +148,15 @@ export function extractEndpoints(doc: OpenAPIV3.Document): EndpointInfo[] {
           }
         }
       }
+
+      // ARV-376: reconcile a malformed spec where a path *template* segment
+      // (`/byid/{id}`) disagrees with the declared path *parameter* name
+      // (`byid_id`) — a docgen-style quirk. The path template is what the
+      // runner substitutes, so it wins: rename the diverging param(s) to the
+      // template segment name(s), positionally. Without this the fixture var
+      // (from the param) never matches the `{...}` in the path, and every
+      // downstream layer (disambig, manifest, resource-graph) diverges.
+      reconcilePathParamNames(path, parameters);
 
       // Request body schema + content type
       let requestBodySchema: OpenAPIV3.SchemaObject | undefined;

@@ -1,9 +1,10 @@
 ---
 id: ARV-375
 title: add multi-spec merge/union support (zond add api --merge / merge-api command)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-09 08:52'
+updated_date: '2026-07-09 09:54'
 labels:
   - feature
   - generator
@@ -30,3 +31,9 @@ Must handle: path-key collisions (two specs declaring the same path — need an 
 
 Litmus test: pure deterministic JSON merge, no severity/FP/blame judgment — belongs in zond core.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+--spec repeatable → deterministic union in src/core/spec/merge-specs.ts (last-wins on path/component collision, surfaced as warnings). Wired via setupApi specs[]. Verified: docgen v20+v30 → 34 paths, version v20+v30. Tests: tests/spec/merge-specs.test.ts.
+<!-- SECTION:NOTES:END -->

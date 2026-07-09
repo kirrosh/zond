@@ -3,9 +3,10 @@ id: ARV-376
 title: >-
   resource-graph builder misses /list-style owner endpoints, forcing
   prepare-fixtures into miss-no-list on discoverable resources
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-09 08:52'
+updated_date: '2026-07-09 09:54'
 labels:
   - bug
   - generator
@@ -36,3 +37,9 @@ repro: `apis/docgen-core-merged` in ~/Projects/zond-scans (or re-derive from doc
 
 Litmus test: deterministic resource-graph construction from spec shape (list-endpoint-to-id-param linking), no judgment — belongs in zond core (resources-builder.ts), likely the same family as the {code}/byid_id path-param work in ARV-373.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+resolveOwnerListPaths now links /list,/search,/find to sibling id/code params; accessor-marker (byid) skip in disambig + owningCollectionForPathParam; 'code' added to generic params; reconcilePathParamNames fixes malformed path{id}!=param(byid_id); secondary keys surfaced as self-FK deps. docgen-core-merged: miss-no-list 40→30, byid_id collision gone.
+<!-- SECTION:NOTES:END -->

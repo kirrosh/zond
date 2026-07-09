@@ -14,6 +14,7 @@ import {
   serializeApiFixtureManifest,
 } from "./generator/index.ts";
 import { decycleSchema } from "./generator/schema-utils.ts";
+import { mergeOpenApiDocs } from "./spec/merge-specs.ts";
 import { schemeVarName } from "./generator/suite-generator.ts";
 import type { SecuritySchemeInfo } from "./generator/types.ts";
 import { hashSpec } from "./meta/meta-store.ts";
@@ -179,6 +180,11 @@ function toYaml(vars: Record<string, string>): string {
 export interface SetupApiOptions {
   name?: string;
   spec?: string;
+  /** ARV-375: additional specs to union into one merged document. When
+   *  set (length > 1), takes precedence over `spec`; the specs are
+   *  dereferenced individually then merged deterministically (last-wins on
+   *  path/component collision, collisions surfaced as warnings). */
+  specs?: string[];
   dir?: string;
   envVars?: Record<string, string>;
   dbPath?: string;
@@ -222,7 +228,13 @@ function deriveAuthVarNames(schemes: SecuritySchemeInfo[]): string[] {
 }
 
 export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult> {
-  const { spec, dbPath } = options;
+  const { dbPath } = options;
+  // ARV-375: `--spec` may be repeated. `specs` (from the variadic CLI
+  // collector) wins; fall back to the single `spec` for back-compat.
+  const specList = options.specs && options.specs.length > 0
+    ? options.specs
+    : (options.spec ? [options.spec] : []);
+  const spec = specList[0];
 
   getDb(dbPath);
 
@@ -239,22 +251,47 @@ export async function setupApi(options: SetupApiOptions): Promise<SetupApiResult
   // a self-contained file — no external $ref resolution at runtime.
   let dereferencedDoc: unknown = null;
   let authVarNames: string[] = [];
-  if (spec) {
-    const doc = await readOpenApiSpec(spec, { insecure: options.insecure, caPath: options.caPath });
-    // Validate the document looks like OpenAPI/Swagger before we snapshot it.
-    // dereference() happily round-trips arbitrary JSON (e.g. a marketing-site
-    // landing payload), so without this guard `zond add api foo --spec
-    // https://example.com` silently registers a 0-endpoint API.
-    const docAny = doc as any;
-    const hasOpenApiField = typeof docAny?.openapi === "string";
-    const hasSwaggerField = typeof docAny?.swagger === "string";
-    if (!hasOpenApiField && !hasSwaggerField) {
-      throw new Error(
-        `Spec at ${spec} is not an OpenAPI/Swagger document — missing top-level 'openapi' (3.x) or 'swagger' (2.x) field. Check the URL points to the JSON spec, not the API root.`,
-      );
+  if (specList.length > 0) {
+    // Read + validate each spec independently. dereference() happily
+    // round-trips arbitrary JSON (e.g. a marketing-site landing payload),
+    // so without this guard `zond add api foo --spec https://example.com`
+    // silently registers a 0-endpoint API.
+    const loaded: { source: string; doc: any }[] = [];
+    for (const s of specList) {
+      const d = await readOpenApiSpec(s, { insecure: options.insecure, caPath: options.caPath });
+      const dAny = d as any;
+      if (typeof dAny?.openapi !== "string" && typeof dAny?.swagger !== "string") {
+        throw new Error(
+          `Spec at ${s} is not an OpenAPI/Swagger document — missing top-level 'openapi' (3.x) or 'swagger' (2.x) field. Check the URL points to the JSON spec, not the API root.`,
+        );
+      }
+      loaded.push({ source: s, doc: d });
+    }
+
+    let doc: any;
+    if (loaded.length === 1) {
+      doc = loaded[0]!.doc;
+      openapiSpec = spec!;
+    } else {
+      // ARV-375: deterministic union of N specs into one audit target.
+      const { merged, summary } = mergeOpenApiDocs(loaded);
+      doc = merged;
+      openapiSpec = null; // no single source path — rely on the local snapshot
+      const per = summary.sources.map((s) => `${s.paths} from ${s.source}`).join(", ");
+      warnings.push(`Merged ${summary.sources.length} specs → ${summary.totalPaths} paths (${per}).`);
+      if (summary.pathCollisions.length > 0) {
+        warnings.push(
+          `${summary.pathCollisions.length} path collision(s) — later spec wins: ${summary.pathCollisions.join(", ")}.`,
+        );
+      }
+      if (summary.schemaConflicts.length > 0) {
+        warnings.push(
+          `${summary.schemaConflicts.length} component collision(s) with differing shapes (later wins, verify): ${summary.schemaConflicts.join(", ")}.`,
+        );
+      }
     }
     dereferencedDoc = doc;
-    openapiSpec = spec;
+    const docAny = doc as any;
     if ((doc as any).servers?.[0]?.url) {
       baseUrl = (doc as any).servers[0].url;
       // Resolve OpenAPI server variables (e.g. {region}) using their declared defaults.

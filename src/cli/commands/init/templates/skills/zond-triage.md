@@ -87,6 +87,11 @@ zond db diagnose --json              # last failing run (default — TASK-266)
 zond db diagnose <run-id> --json     # explicit run
 zond db diagnose --latest --json     # last run, even if it passed
 zond db diagnose --report yaml       # same payload as YAML (ARV-338) — for run snapshots you keep/diff as text
+# ARV-380: aggregate by_recommended_action across a run SET (same --union
+# vocabulary as `zond coverage`) instead of looping per run and merging:
+zond db diagnose --union session --json                # all runs in the active session
+zond db diagnose --union since:2h --api <name> --json  # runs in a time window (scoped to a collection)
+zond db diagnose --union runs:263,266,269 --json       # an explicit run-id set
 ```
 
 The shape (relevant fields only):

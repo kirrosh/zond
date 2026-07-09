@@ -634,4 +634,51 @@ describe("buildApiResourceMap — ARV-134 fixes", () => {
     expect(foo).toBeDefined();
     expect(foo!.idParam).toBe("foo_id");
   });
+
+  // ARV-376: /list-style listing + read-by-{code} / /byid/{id} siblings.
+  // Mirrors the docgen-core shape (two resources so `code`/`id` collide and
+  // disambiguate per-resource, matching real specs).
+  const pparam = (name: string) => ({ name, in: "path", required: true });
+  const DOCGEN_SHAPE: any = {
+    openapi: "3.0.0",
+    info: { title: "docgen-shape", version: "v20" },
+    paths: {
+      "/api/business-segment20/list": { get: { responses: { "200": {} } } },
+      "/api/business-segment20/{code}": { get: { parameters: [pparam("code")], responses: { "200": {} } } },
+      "/api/business-segment20/byid/{id}": { get: { parameters: [pparam("id")], responses: { "200": {} } } },
+      "/api/deal-kind20/list": { get: { responses: { "200": {} } } },
+      "/api/deal-kind20/{code}": { get: { parameters: [pparam("code")], responses: { "200": {} } } },
+      "/api/deal-kind20/byid/{id}": { get: { parameters: [pparam("id")], responses: { "200": {} } } },
+    },
+  };
+
+  test("resolveOwnerListPaths links /list endpoints to sibling id/code params", () => {
+    const eps = extractEndpoints(DOCGEN_SHAPE);
+    const owners = resolveOwnerListPaths(eps);
+    // business-segment20's id + code both resolve to its /list endpoint
+    expect(owners.get("business_segment20_id")).toBe("/api/business-segment20/list");
+    expect(owners.get("business_segment20_code")).toBe("/api/business-segment20/list");
+
+    const map = buildApiResourceMap({ endpoints: eps, specHash: "t" });
+    const withList = map.resources.find(r => r.endpoints.list === "GET /api/business-segment20/list");
+    expect(withList).toBeDefined();
+    // BOTH the id and code lookup keys must be reachable — one as the
+    // canonical idParam, the other surfaced as a self-referential fkDep — so
+    // prepare-fixtures reports candidates for each instead of miss-no-list.
+    const reachable = new Set([withList!.idParam, ...withList!.fkDependencies.map(d => d.var)]);
+    expect(reachable.has("business_segment20_id")).toBe(true);
+    expect(reachable.has("business_segment20_code")).toBe(true);
+    // every surfaced secondary key points back at this resource's own list.
+    for (const d of withList!.fkDependencies) expect(d.ownerResource).toBe(withList!.resource);
+  });
+
+  // ARV-376: the `byid` accessor marker must not collapse every resource's
+  // read-by-id param into one global `byid_id`.
+  test("byid accessor marker doesn't collapse per-resource id params", () => {
+    const eps = extractEndpoints(DOCGEN_SHAPE);
+    const names = eps.flatMap(e => e.parameters.filter(p => p.in === "path").map(p => p.name));
+    expect(names).toContain("business_segment20_id");
+    expect(names).toContain("deal_kind20_id");
+    expect(names).not.toContain("byid_id");
+  });
 });
