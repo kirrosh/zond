@@ -1,7 +1,9 @@
 ---
 name: zond
 description: |
-  Primary skill for any zond work. Loads on workspace touch
+  zond is an API hygiene scanner for small teams and their coding agents —
+  test REST API endpoints against the OpenAPI spec, catch contract drift,
+  track coverage. Primary skill for any zond work. Loads on workspace touch
   (`apis/<name>/`, `.env.yaml`, `.api-fixtures.yaml`) AND on intent —
   full API audit, "find bugs", "raise coverage", "test the whole API",
   contract-drift check, schema-drift detection, post-deploy regression,

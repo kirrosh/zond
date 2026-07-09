@@ -1,0 +1,39 @@
+# zond
+
+> API hygiene scanner for small teams and their coding agents — test REST API endpoints against the OpenAPI spec, catch contract drift, track coverage.
+
+zond is a self-contained CLI (single binary, no runtime deps). It reads an
+OpenAPI spec, generates YAML test suites, runs them with schemathesis-style
+conformance and security checks, and stores every run in SQLite for coverage
+and regression tracking. Safe by default: the first pass (`zond audit --safe`)
+sends read-only GET traffic only. zond never calls an LLM itself — it is the
+deterministic tool a coding agent (Claude Code, Cursor, Codex) drives.
+
+Install: `curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh`
+or `npm i -g @kirrosh/zond`. Agent skills: `/plugin marketplace add kirrosh/zond`
+(Claude Code) or `npx skills add kirrosh/zond`.
+
+## Docs
+
+- [README](https://raw.githubusercontent.com/kirrosh/zond/master/README.md): what zond is, install channels (curl/npm/win/binaries), quick start, capability matrix
+- [CLI reference (ZOND.md)](https://raw.githubusercontent.com/kirrosh/zond/master/ZOND.md): every command with flags, JSON envelopes, report formats (SARIF/JUnit/NDJSON/HTML)
+- [AGENTS.md](https://raw.githubusercontent.com/kirrosh/zond/master/AGENTS.md): contract for coding agents — workspace layout, fixtures manifest vs values split, fill-the-env loop
+- [Quickstart, RU](https://raw.githubusercontent.com/kirrosh/zond/master/docs/quickstart.md): step-by-step from install to first green run
+- [CI integration](https://raw.githubusercontent.com/kirrosh/zond/master/docs/ci.md): GitHub Actions / GitLab CI workflows, SARIF upload to Code Scanning
+- [Glossary](https://raw.githubusercontent.com/kirrosh/zond/master/docs/GLOSSARY.md): terms — depth checks, probes, fixtures manifest, honest-2xx coverage
+
+## Agent skills
+
+Installed into a project by `zond init`, as a Claude Code plugin
+(`/plugin marketplace add kirrosh/zond`), or via `npx skills add kirrosh/zond`:
+
+- [zond (primary)](https://raw.githubusercontent.com/kirrosh/zond/master/skills/zond/SKILL.md): full audit pipeline — generate, run, coverage, report
+- [zond-checks](https://raw.githubusercontent.com/kirrosh/zond/master/skills/zond-checks/SKILL.md): depth checks — conformance + security probes, SARIF, stateful invariants
+- [zond-seed](https://raw.githubusercontent.com/kirrosh/zond/master/skills/zond-seed/SKILL.md): agent-orchestrated fixture seeding via the API's own POST endpoints
+- [zond-triage](https://raw.githubusercontent.com/kirrosh/zond/master/skills/zond-triage/SKILL.md): last-run triage routed by the recommended_action enum
+- [warm-up-target](https://raw.githubusercontent.com/kirrosh/zond/master/skills/warm-up-target/SKILL.md): warm the target API's state so honest-2xx coverage isn't capped by empty data
+
+## Optional
+
+- [CHANGELOG](https://raw.githubusercontent.com/kirrosh/zond/master/CHANGELOG.md): release history
+- [Capabilities snapshot](https://raw.githubusercontent.com/kirrosh/zond/master/docs/capabilities-snapshot.md): current feature inventory and roadmap direction

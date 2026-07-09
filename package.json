@@ -1,16 +1,31 @@
 {
   "name": "@kirrosh/zond",
-  "version": "0.27.0",
-  "description": "API testing platform — define tests in YAML, run from CLI, generate from OpenAPI specs",
+  "version": "0.27.1",
+  "description": "API hygiene scanner for small teams and their coding agents — test REST API endpoints against the OpenAPI spec, catch contract drift, track coverage.",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kirrosh/zond.git"
+  },
+  "homepage": "https://github.com/kirrosh/zond#readme",
+  "bugs": {
+    "url": "https://github.com/kirrosh/zond/issues"
+  },
   "keywords": [
-    "api",
-    "testing",
+    "api-testing",
+    "rest-api",
     "openapi",
-    "yaml",
+    "contract-testing",
+    "contract-drift",
+    "schema-validation",
+    "api-coverage",
+    "api-hygiene",
+    "coding-agents",
+    "ai-agents",
+    "claude-code",
+    "sarif",
     "cli",
-    "rest",
     "http"
   ],
   "files": [
@@ -31,11 +46,12 @@
     "test": "bun run test:unit && bun run test:mocked",
     "test:unit": "bun test tests/",
     "test:mocked": "bun run scripts/run-mocked-tests.ts",
-    "check": "tsc --noEmit --project tsconfig.json",
+    "check": "tsc --noEmit --project tsconfig.json && bun run scripts/sync-plugin-skills.ts --check",
     "schemas": "bun run scripts/emit-json-schemas.ts",
     "schemas:check": "bun run scripts/emit-json-schemas.ts --check",
     "lint:dead": "knip --reporter compact",
-    "build": "bun build --compile src/cli/index.ts --outfile dist/zond && bun run scripts/codesign-darwin.ts ./dist/zond"
+    "build": "bun build --compile src/cli/index.ts --outfile dist/zond && bun run scripts/codesign-darwin.ts ./dist/zond",
+    "sync:plugin": "bun run scripts/sync-plugin-skills.ts"
   },
   "devDependencies": {
     "@readme/openapi-parser": "^5.5.0",

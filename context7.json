@@ -1,0 +1,14 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "zond",
+  "description": "API hygiene scanner for small teams and their coding agents — test REST API endpoints against the OpenAPI spec, catch contract drift, track coverage",
+  "folders": ["docs"],
+  "excludeFolders": ["backlog", "apis", "node_modules", "dist", "tests", "scripts"],
+  "excludeFiles": ["SOYUZ.md"],
+  "rules": [
+    "Run `zond init` once per project, then `zond add api <name> --spec <openapi>` to register an API",
+    "The first audit pass is read-only: `zond audit --api <name> --safe` — mutating probes need an explicit --live opt-in on a sandbox",
+    "zond is deterministic and never calls an LLM — it emits raw evidence and closed-enum recommended_action hints; severity and triage judgment belong to the agent",
+    ".api-fixtures.yaml is the read-only manifest of required vars; .env.yaml holds only their values — never sync the list into .env.yaml"
+  ]
+}

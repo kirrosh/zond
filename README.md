@@ -1,8 +1,18 @@
 # zond
 
-API hygiene scanner for small teams — AI-powered API testing for Claude Code, Cursor, and CI/CD.
+API hygiene scanner for small teams and their coding agents — test REST API endpoints against the OpenAPI spec, catch contract drift, track coverage.
 
-Say "test my API" — get working tests, coverage dashboard, and CI config in minutes.
+**Use it when you need to:** test REST API endpoints from an OpenAPI spec,
+verify an API contract after a deploy, debug a failing HTTP request with
+stored run history, or raise endpoint coverage. Works standalone or through
+a coding agent (Claude Code, Cursor) — say "test my API" and the agent
+drives zond for you.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh   # or: npm i -g @kirrosh/zond
+zond init && zond add api my-api --spec ./openapi.json
+zond audit --api my-api --safe    # read-only pass: spec lint → probes → tests → coverage → HTML report
+```
 
 > **Safe by default.** The first run (`zond audit --safe`) sends read-only
 > GET traffic — no writes, no deletes, nothing destructive. Mutating
@@ -21,6 +31,12 @@ Zond reads your OpenAPI spec and gives your AI agent everything it needs to test
 | **npm** (needs Node 20+) | `npm install -g @kirrosh/zond` |
 | **Windows** | `iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 \| iex` |
 | **Manual** | grab a binary from [releases](https://github.com/kirrosh/zond/releases/latest) (darwin arm64/x64, linux x64/arm64, win x64) |
+| **Claude Code plugin** | `/plugin marketplace add kirrosh/zond` then `/plugin install zond@zond` — the agent skills without `zond init` |
+| **Agent skills** ([skills.sh](https://www.skills.sh)) | `npx skills add kirrosh/zond` |
+
+The plugin/skills channels ship the [five zond skills](skills/) (audit
+pipeline, depth checks, fixture seeding, triage, target warm-up); the zond
+binary itself still comes from any of the channels above.
 
 Every channel ships the same self-contained binary — no Bun or Node
 required at runtime (npm uses Node only as a thin launcher).
