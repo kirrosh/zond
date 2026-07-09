@@ -3,9 +3,10 @@ id: ARV-381
 title: >-
   disambig parent-walk should skip version segments (align with
   owningCollectionForPathParam)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-09 10:06'
+updated_date: '2026-07-09 10:14'
 labels:
   - bug
   - generator
@@ -25,3 +26,9 @@ ARV-376 follow-up, class 1 of remaining miss-no-list. /api/macros/v30/{code}: di
 - [ ] #2 macros_v30_code / templates_v30_code resolve to their resource on docgen-core-merged
 - [ ] #3 no regression in path-param-disambig.test.ts / resources-builder.test.ts
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+disambig parent-walk now skips version segments (isVersionSeg, same regex as stripTrailingVersionSegments) alongside accessor markers → aligns with owningCollectionForPathParam which already strips versions. docgen-core-merged: miss-no-list 30→22 (all /v30/{code} resolved). Tests in path-param-disambig.test.ts.
+<!-- SECTION:NOTES:END -->

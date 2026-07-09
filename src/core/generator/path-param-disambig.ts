@@ -33,8 +33,24 @@ const GENERIC_PARAM_NAMES = new Set(["id", "slug", "uuid", "key", "name", "ident
 // var with no owner resource, so prepare-fixtures reports `miss-no-list`.
 const ACCESSOR_MARKER_SEGS = new Set(["byid", "by-id", "by_id"]);
 
+// ARV-381: version segments (`v30`, `v2`) sit between the collection and its
+// id/code param (`/api/macros/v30/{code}`). owningCollectionForPathParam +
+// CRUD resource-name derivation ALREADY strip these via
+// stripTrailingVersionSegments; the disambig parent-walk must skip them too,
+// or `macros_v30_code` (scoped past the version) has no matching resource in
+// the graph → miss-no-list. Same regex as stripTrailingVersionSegments.
+function isVersionSeg(seg: string): boolean {
+  return /^v(ersion)?\d+$/i.test(seg);
+}
+
 function isParamSeg(seg: string | undefined): boolean {
   return !!seg && /^\{[^}]+\}$/.test(seg);
+}
+
+/** Segments the parent-walk steps over to reach the owning collection:
+ *  read-by-id accessor markers and version segments. */
+function isSkippableSeg(seg: string): boolean {
+  return ACCESSOR_MARKER_SEGS.has(seg.toLowerCase()) || isVersionSeg(seg);
 }
 
 /** English singularization sufficient for resource-collection nouns. */
@@ -69,12 +85,13 @@ export function disambiguateGenericPathParams(endpoints: EndpointInfo[]): Endpoi
       const paramName = m[1]!;
       if (!GENERIC_PARAM_NAMES.has(paramName.toLowerCase())) continue;
       // Walk back to nearest non-param non-empty segment as "parent",
-      // skipping read-by-id accessor markers (`byid`, `by-id`) so the owning
-      // collection — not the accessor verb — names the param (ARV-376).
+      // skipping read-by-id accessor markers (`byid`, ARV-376) and version
+      // segments (`v30`, ARV-381) so the owning collection — not an accessor
+      // verb or version marker — names the param.
       let parent: string | undefined;
       for (let j = i - 1; j >= 0; j--) {
         const s = segs[j]!;
-        if (s && !isParamSeg(s) && !ACCESSOR_MARKER_SEGS.has(s.toLowerCase())) {
+        if (s && !isParamSeg(s) && !isSkippableSeg(s)) {
           parent = s;
           break;
         }
