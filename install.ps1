@@ -26,24 +26,9 @@ $ARTIFACT = "zond-$TARGET.zip"
 
 Write-Host "Detected platform: $TARGET" -ForegroundColor Cyan
 
-# Get latest release tag
-Write-Host "Fetching latest release..." -ForegroundColor Yellow
-$RELEASE_URL = "https://api.github.com/repos/$REPO/releases/latest"
-try {
-    $TAG = (Invoke-RestMethod $RELEASE_URL).tag_name
-} catch {
-    Write-Host "Error: Could not fetch latest release ($($_.Exception.Message))" -ForegroundColor Red
-    exit 1
-}
-
-if (-not $TAG) {
-    Write-Host "Error: Could not determine latest release tag" -ForegroundColor Red
-    exit 1
-}
-Write-Host "Latest release: $TAG" -ForegroundColor Green
-
-# Download binary
-$DOWNLOAD_URL = "https://github.com/$REPO/releases/download/$TAG/$ARTIFACT"
+# Download binary. `releases/latest/download/...` avoids the api.github.com
+# call and its unauthenticated rate-limit 403s (shared NAT / CI runners).
+$DOWNLOAD_URL = "https://github.com/$REPO/releases/latest/download/$ARTIFACT"
 Write-Host "Downloading $DOWNLOAD_URL ..." -ForegroundColor Yellow
 
 $TEMP_DIR = [System.IO.Path]::GetTempPath()

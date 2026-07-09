@@ -32,27 +32,18 @@ esac
 TARGET="${PLATFORM}-${ARCH_SUFFIX}"
 echo "Detected platform: $TARGET"
 
-# Get latest release tag
-echo "Fetching latest release..."
-RELEASE_URL="https://api.github.com/repos/$REPO/releases/latest"
-TAG=$(curl -fsSL "$RELEASE_URL" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"//;s/".*//')
-
-if [ -z "$TAG" ]; then
-  echo "Error: Could not determine latest release tag"
-  exit 1
-fi
-echo "Latest release: $TAG"
-
-# Download binary
+# Download binary. `releases/latest/download/...` follows GitHub's redirect
+# to the newest release — no api.github.com call, so no unauthenticated
+# rate-limit 403s (shared NAT / CI runners hit those constantly).
 ARTIFACT="zond-${TARGET}.tar.gz"
-DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG/$ARTIFACT"
+DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$ARTIFACT"
 echo "Downloading $DOWNLOAD_URL ..."
 
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
 if ! curl -fsSL "$DOWNLOAD_URL" -o "$TMPDIR/$ARTIFACT"; then
-  echo "Error: no prebuilt binary for $TARGET in release $TAG."
+  echo "Error: no prebuilt binary for $TARGET in the latest release."
   echo "Check available artifacts: https://github.com/$REPO/releases/latest"
   exit 1
 fi
