@@ -3,9 +3,10 @@ id: ARV-378
 title: >-
   zond fixtures add only accepts one key=value per call, forcing a bash for-loop
   to bulk-apply
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-09 08:53'
+updated_date: '2026-07-09 09:54'
 labels:
   - feature
   - cli
@@ -28,3 +29,9 @@ Proposed (either, or both):
 
 Litmus test: batch application of agent-supplied values is mechanical I/O, not judgment (which value to pick IS the agent's judgment and stays that way) — belongs in zond core.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Already implemented — 'fixtures add <pairs...>' accepts multiple key=value in one call (one .env.yaml write + one .bak). Verified on docgen: 3 fixtures, single .bak.
+<!-- SECTION:NOTES:END -->

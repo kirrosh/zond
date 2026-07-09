@@ -119,12 +119,22 @@ export function stripTrailingVersionSegments(segments: string[]): string[] {
  *  (`code`, `id`, `key`) that's reused across genuinely distinct resources
  *  (ARV-369) — e.g. `/api/templates/v30/{code}` → "templates" vs
  *  `/api/macros/v30/{code}` → "macros". */
+// ARV-376: read-by-id accessor markers — kept in sync with the set in
+// path-param-disambig.ts. `/business-segment20/byid/{id}` is owned by
+// `business-segment20`, not the `byid` accessor verb.
+const ACCESSOR_MARKER_SEGS = new Set(["byid", "by-id", "by_id"]);
+
 export function owningCollectionForPathParam(path: string, paramName: string): string | null {
   const marker = `{${paramName}}`;
   const idx = path.indexOf(marker);
   if (idx === -1) return null;
   const segments = stripTrailingVersionSegments(path.slice(0, idx).split("/").filter(Boolean));
-  return segments.length > 0 ? segments[segments.length - 1]! : null;
+  // Skip trailing accessor markers so the owner is the collection, not the
+  // `byid`/`by-code` verb — otherwise a param behind `/byid/{id}` and its
+  // sibling `DELETE /{id}` disagree on owner and get double-scoped.
+  let end = segments.length - 1;
+  while (end >= 0 && ACCESSOR_MARKER_SEGS.has(segments[end]!.toLowerCase())) end--;
+  return end >= 0 ? segments[end]! : null;
 }
 
 /** Path-param names reused by more than one distinct owning collection
@@ -615,11 +625,15 @@ export function detectCrudGroupsWithDiagnostics(
       ep => ["PUT", "PATCH"].includes(ep.method.toUpperCase()),
     );
     const del = resolvedItemEndpoints.find(ep => ep.method.toUpperCase() === "DELETE");
-    // List endpoint matches with the same trailing-slash tolerance.
+    // List endpoint matches with the same trailing-slash tolerance. ARV-376:
+    // also accept a `/list`, `/search`, `/find` verb suffix on the base path
+    // (`GET /api/deal-kind20/list`) — common in RPC-flavoured REST specs
+    // where the bare collection path has no GET.
+    const listStems = [basePath, `${basePath}/list`, `${basePath}/search`, `${basePath}/find`];
     const list = endpoints.find(
       ep =>
         ep.method.toUpperCase() === "GET" &&
-        stripTrailingSlash(ep.path) === basePath &&
+        listStems.includes(stripTrailingSlash(ep.path)) &&
         !ep.deprecated,
     );
 

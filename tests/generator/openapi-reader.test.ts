@@ -3,7 +3,8 @@ import { rootCertificates } from "node:tls";
 import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, resolveSpecFetchTls } from "../../src/core/generator/openapi-reader.ts";
+import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes, resolveSpecFetchTls, reconcilePathParamNames } from "../../src/core/generator/openapi-reader.ts";
+import type { OpenAPIV3 } from "openapi-types";
 
 const FIXTURE = "tests/fixtures/petstore-auth.json";
 
@@ -317,5 +318,28 @@ describe("resolveSpecFetchTls (MF1 / ARV-367)", () => {
   test("unreadable CA path throws (surfaces misconfig, no silent fallthrough)", () => {
     delete process.env.NODE_EXTRA_CA_CERTS;
     expect(() => resolveSpecFetchTls({ caPath: "/nonexistent/zond-ca.pem" })).toThrow(/CA bundle not readable/);
+  });
+});
+
+describe("reconcilePathParamNames (ARV-376)", () => {
+  const mk = (name: string): OpenAPIV3.ParameterObject => ({ name, in: "path", required: true });
+
+  test("renames a param whose name diverges from the path template segment", () => {
+    // docgen quirk: path template says {id}, param declared as byid_id.
+    const params = [mk("byid_id")];
+    reconcilePathParamNames("/api/business-segment20/byid/{id}", params);
+    expect(params[0]!.name).toBe("id");
+  });
+
+  test("no-op when names already agree", () => {
+    const params = [mk("id")];
+    reconcilePathParamNames("/api/things/{id}", params);
+    expect(params[0]!.name).toBe("id");
+  });
+
+  test("leaves it untouched when counts differ (can't guess mapping)", () => {
+    const params = [mk("a"), mk("b")];
+    reconcilePathParamNames("/x/{id}", params); // 1 unmatched template, 2 unmatched params
+    expect(params.map((p) => p.name)).toEqual(["a", "b"]);
   });
 });

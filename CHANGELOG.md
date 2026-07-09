@@ -4,7 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-(Empty — next development cycle.)
+Deterministic gap-fills surfaced by a docgen-core-service audit — all pass the
+litmus test (same input → same output, no severity/FP/blame judgment).
+
+### Added
+- **Multi-spec merge (ARV-375):** `zond add api <name> --spec a --spec b …`
+  unions N specs into one audit target. Deterministic last-wins on path /
+  component collisions, surfaced as warnings (path collisions + same-name /
+  different-shape schema collisions). Core in `src/core/spec/merge-specs.ts`.
+- **`zond secrets set <key> <value>` (ARV-377):** writes `apis/<name>/.secrets.yaml`
+  with a `.bak` backup, never echoes the value, and auto-strips a pasted
+  `Bearer ` prefix (`--literal` keeps it verbatim). Closes the "hand-rolled
+  python to rotate an expired token" gap and ARV-367/AC3.
+- **`zond db diagnose --union <spec>` (ARV-380):** aggregate
+  `by_recommended_action` (+ summary counts, deduped examples) across a run
+  set, reusing coverage's `--union` vocabulary (`session` / `since:<dur>` /
+  `tag:<name>` / `runs:<ids>`). `--api` scopes `since:`/`tag:` to a collection.
+- **Coverage deprecated flags (ARV-379):** `coverage --json` now carries a
+  per-entry `deprecated` boolean on the `*Endpoints` bucket arrays plus a
+  top-level `deprecatedEndpoints` list, so a consumer can split "real gap"
+  from "deprecated, skip by design" without re-reading spec.json.
+
+### Fixed
+- **Resource graph misses `/list`-style owners (ARV-376):** `resolveOwnerListPaths`
+  now links `/list` (and `/search`, `/find`) endpoints to their sibling
+  `/{code}` and `/byid/{id}` params; the `byid` accessor marker no longer
+  collapses every read-by-id param into one global `byid_id`; a malformed spec
+  whose path template (`/byid/{id}`) disagrees with the declared param name
+  (`byid_id`) is reconciled to the template; secondary lookup keys (`{code}`)
+  surface as candidates. On the docgen-core-merged spec this cut
+  prepare-fixtures `miss-no-list` from 40 → 30.
+- **`fixtures add` batch (ARV-378):** confirmed `fixtures add <pairs...>`
+  already applies N `key=value` pairs in one call (one write + one `.bak`) —
+  no shell loop needed.
 
 ## [0.25.0] — 2026-07-07
 

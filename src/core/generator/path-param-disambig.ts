@@ -24,9 +24,16 @@
 
 import type { EndpointInfo } from "./types.ts";
 
-const GENERIC_PARAM_NAMES = new Set(["id", "slug", "uuid", "key", "name", "identifier"]);
+const GENERIC_PARAM_NAMES = new Set(["id", "slug", "uuid", "key", "name", "identifier", "code"]);
 
-function isParamSeg(seg: string | undefined): seg is string {
+// ARV-376: read-by-id accessor markers. `/business-segment20/byid/{id}` names
+// the resource `business-segment20`, not `byid` — the `byid` (or `by-id`)
+// segment is a "get by id" verb, not the owning collection. Without skipping
+// it, every `/*/byid/{id}` across the spec collapses to one global `byid_id`
+// var with no owner resource, so prepare-fixtures reports `miss-no-list`.
+const ACCESSOR_MARKER_SEGS = new Set(["byid", "by-id", "by_id"]);
+
+function isParamSeg(seg: string | undefined): boolean {
   return !!seg && /^\{[^}]+\}$/.test(seg);
 }
 
@@ -61,11 +68,13 @@ export function disambiguateGenericPathParams(endpoints: EndpointInfo[]): Endpoi
       if (!m) continue;
       const paramName = m[1]!;
       if (!GENERIC_PARAM_NAMES.has(paramName.toLowerCase())) continue;
-      // Walk back to nearest non-param non-empty segment as "parent".
+      // Walk back to nearest non-param non-empty segment as "parent",
+      // skipping read-by-id accessor markers (`byid`, `by-id`) so the owning
+      // collection — not the accessor verb — names the param (ARV-376).
       let parent: string | undefined;
       for (let j = i - 1; j >= 0; j--) {
         const s = segs[j]!;
-        if (s && !isParamSeg(s)) {
+        if (s && !isParamSeg(s) && !ACCESSOR_MARKER_SEGS.has(s.toLowerCase())) {
           parent = s;
           break;
         }

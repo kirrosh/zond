@@ -14,6 +14,7 @@ import { registerRequest } from "./commands/request.ts";
 import { registerGenerate } from "./commands/generate.ts";
 import { registerPrepareFixtures } from "./commands/prepare-fixtures.ts";
 import { registerFixtures } from "./commands/fixtures.ts";
+import { registerSecrets } from "./commands/secrets.ts";
 import { registerProbes } from "./commands/probe.ts";
 import { bootstrapProbes } from "../core/probe/bootstrap.ts";
 import { registerReport } from "./commands/report.ts";
@@ -103,6 +104,7 @@ export function buildProgram(): Command {
   registerGenerate(program);
   registerPrepareFixtures(program);
   registerFixtures(program);
+  registerSecrets(program);
   registerAudit(program);
 
   // m-17 / ARV-49: validate registered probes implement the Probe
@@ -128,6 +130,7 @@ export function buildProgram(): Command {
     "add":          "Setup:",
     "remove":       "Setup:",
     "use":          "Setup:",
+    "secrets":      "Setup:",
     "refresh-api":  "Setup:",
     "doctor":       "Setup:",
     "clean":        "Setup:",

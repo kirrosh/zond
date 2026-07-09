@@ -1,9 +1,10 @@
 ---
 id: ARV-379
 title: zond coverage does not flag deprecated endpoints in the uncovered bucket
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-09 08:53'
+updated_date: '2026-07-09 09:54'
 labels:
   - feature
   - coverage
@@ -20,3 +21,9 @@ Proposed: add a `deprecated: boolean` field per entry in `data.uncoveredEndpoint
 
 Litmus test: `deprecated` is a spec-declared boolean, zero judgment involved — belongs in zond core.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+coverage --json: RowBucket entries (covered2xx/coveredButNon2xx/unhit) now carry per-entry 'deprecated'; added top-level 'deprecatedEndpoints' (method+path list). Verified docgen: deprecatedEndpoints=48 matches text-summary. Tests: coverage-buckets.test.ts.
+<!-- SECTION:NOTES:END -->

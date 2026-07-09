@@ -3,9 +3,10 @@ id: ARV-377
 title: >-
   no CLI to write .secrets.yaml — forced hand-rolled python to rotate an expired
   auth_token
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-09 08:53'
+updated_date: '2026-07-09 09:54'
 labels:
   - feature
   - cli
@@ -26,3 +27,9 @@ This closes AC3 of ARV-367 (still open) with an actual command instead of just a
 
 Litmus test: deterministic file write + deterministic prefix-strip, no severity/FP/blame judgment — belongs in zond core.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+New src/cli/commands/secrets.ts — 'zond secrets set <key> <value>': writes .secrets.yaml with .bak, never echoes value, auto-strips Bearer (--literal keeps). Tests: tests/cli/secrets.test.ts. Skill zond.md updated.
+<!-- SECTION:NOTES:END -->
