@@ -1,6 +1,6 @@
 {
   "name": "@kirrosh/zond",
-  "version": "0.27.0",
+  "version": "0.27.1",
   "description": "API hygiene scanner for small teams and their coding agents — test REST API endpoints against the OpenAPI spec, catch contract drift, track coverage.",
   "license": "MIT",
   "type": "module",
