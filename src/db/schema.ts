@@ -9,14 +9,11 @@ let _dbPath: string | null = null;
 
 /**
  * Default DB path lives under `<workspace>/.zond/zond.db` to keep runtime
- * artifacts out of the project root. For back-compat we still recognise a
- * legacy `<workspace>/zond.db` if it exists — old workspaces keep working
- * without migration.
+ * artifacts out of the project root. (The flat `<workspace>/zond.db` layout
+ * was dropped in m-25 — pass an explicit `--db` to target a legacy file.)
  */
 function defaultDbPath(): string {
   const root = findWorkspaceRoot().root;
-  const legacy = resolve(root, "zond.db");
-  if (existsSync(legacy)) return legacy;
   return resolve(root, ".zond", "zond.db");
 }
 

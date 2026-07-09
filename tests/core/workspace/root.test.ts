@@ -59,7 +59,7 @@ describe("findWorkspaceRoot", () => {
 
   test("prefers earlier marker when multiple are present", () => {
     writeFileSync(join(root, "zond.config.yml"), "");
-    writeFileSync(join(root, "zond.db"), "");
+    mkdirSync(join(root, ".zond"));
     mkdirSync(join(root, "apis"));
     const info = findWorkspaceRoot(root);
     expect(info.marker).toBe("zond.config.yml");

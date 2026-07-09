@@ -7,11 +7,10 @@ import { homedir } from "node:os";
  * markers win when more than one is present in the same directory.
  *
  *   zond.config.yml — explicit project config (T12)
- *   .zond/          — `zond init --here` subdir convention (T19)
- *   zond.db         — flat layout from `zond init`
- *   apis/           — flat layout (collections directory)
+ *   .zond/          — runtime state subdir (holds zond.db, current-api, …)
+ *   apis/           — collections directory
  */
-export const WORKSPACE_MARKERS = ["zond.config.yml", ".zond", "zond.db", "apis"] as const;
+export const WORKSPACE_MARKERS = ["zond.config.yml", ".zond", "apis"] as const;
 export type WorkspaceMarker = (typeof WORKSPACE_MARKERS)[number];
 
 export interface WorkspaceInfo {
@@ -29,7 +28,7 @@ function hasMarker(dir: string): WorkspaceMarker | null {
   for (const m of WORKSPACE_MARKERS) {
     const p = join(dir, m);
     if (!existsSync(p)) continue;
-    // .zond and apis must be directories; zond.config.yml and zond.db must be files
+    // .zond and apis must be directories; zond.config.yml must be a file
     try {
       const st = statSync(p);
       if (m === ".zond" || m === "apis") {
@@ -47,7 +46,7 @@ function hasMarker(dir: string): WorkspaceMarker | null {
 /**
  * Walk-up from `cwd` (default `process.cwd()`) to the nearest workspace
  * marker. The walk stops at `os.homedir()` to avoid accidentally picking up
- * `~/apis` or `~/zond.db` when the user runs zond from somewhere unrelated.
+ * `~/apis` or `~/.zond` when the user runs zond from somewhere unrelated.
  *
  * When no marker is found, returns `{ root: cwd, fromFallback: true }` and
  * prints a one-time stderr warning so the user knows zond is operating in
