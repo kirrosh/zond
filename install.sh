@@ -51,7 +51,11 @@ echo "Downloading $DOWNLOAD_URL ..."
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-curl -fsSL "$DOWNLOAD_URL" -o "$TMPDIR/$ARTIFACT"
+if ! curl -fsSL "$DOWNLOAD_URL" -o "$TMPDIR/$ARTIFACT"; then
+  echo "Error: no prebuilt binary for $TARGET in release $TAG."
+  echo "Check available artifacts: https://github.com/$REPO/releases/latest"
+  exit 1
+fi
 tar -xzf "$TMPDIR/$ARTIFACT" -C "$TMPDIR"
 
 # Install binary

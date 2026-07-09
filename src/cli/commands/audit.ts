@@ -745,6 +745,10 @@ export function registerAudit(program: Command): void {
     .option("--with-mass-assignment", "Include 'probe mass-assignment' as an extra stage. Requires --live.")
     .option("--with-security", "Include 'probe security ssrf,crlf,open-redirect' as an extra stage. Requires --live.")
     .option("--live", "ARV-264: opt into the full pipeline against a real-traffic API. Without this flag, audit runs in safe mode: no mass-assignment / security probes, no destructive traffic. Use only against throwaway/sandbox accounts.")
+    // ARV-390: safe IS the default, but every doc/skill says `audit --safe` —
+    // accept it as an explicit alias so a stranger's first command doesn't
+    // die on "unknown option".
+    .option("--safe", "Explicit alias of the default safe mode (read-only pipeline). Conflicts with --live.")
     .option("--out <path>", "HTML report output path (default: audit-report.html)")
     .option("--dry-run", "Print the stage plan without executing anything")
     .option("--force", "Disable mtime-based skip (always regenerate, even if tests/ newer than spec)")
@@ -761,6 +765,11 @@ export function registerAudit(program: Command): void {
         return;
       }
       opts.api = apiName;
+      if (opts.safe === true && opts.live === true) {
+        printError("--safe and --live are mutually exclusive");
+        process.exitCode = 2;
+        return;
+      }
       let budget: Budget | undefined;
       if (opts.budget !== undefined) {
         if (!isBudget(opts.budget)) {

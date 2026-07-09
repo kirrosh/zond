@@ -83,8 +83,11 @@ export function serializeSuite(suite: RawSuite): string {
       serializeValue(test.source, 3, lines);
     }
 
-    // Write method-as-key (the shorthand)
-    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE"]) {
+    // Write method-as-key (the shorthand). Keep in sync with the runner's
+    // method enum — dropping a key here emits a step with no method/path
+    // that `zond run` then rejects at validation time (ARV-390: OPTIONS/
+    // TRACE probes were silently skipping whole probe-methods suites).
+    for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"]) {
       if (method in test) {
         lines.push(`    ${method}: ${test[method]}`);
       }
@@ -98,10 +101,14 @@ export function serializeSuite(suite: RawSuite): string {
       }
     }
 
-    // json body
+    // json body (empty {} must stay inline — a bare `json:` re-parses as null)
     if (test.json !== undefined) {
-      lines.push("    json:");
-      serializeValue(test.json, 3, lines);
+      if (isEmptyContainer(test.json)) {
+        lines.push(`    json: ${Array.isArray(test.json) ? "[]" : "{}"}`);
+      } else {
+        lines.push("    json:");
+        serializeValue(test.json, 3, lines);
+      }
     }
 
     // ARV-149: form body (application/x-www-form-urlencoded). The runner

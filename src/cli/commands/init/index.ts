@@ -164,6 +164,7 @@ function printBootstrapResult(b: BootstrapResult, writeAgents: boolean): void {
       `  1. zond add api <name> --spec <path|url>   # register API → builds .api-fixtures.yaml (manifest)\n` +
       `  2. zond doctor --api <name>                 # gap report: which vars are UNSET in .env.yaml\n` +
       `  3. zond prepare-fixtures --api <name> --apply   # fill .env.yaml values (single-pass); fill any gaps by hand\n` +
+      `  4. zond audit --api <name> --safe           # first read-only pass (GET only — safe against any environment)\n` +
       `\nNote: zond init only refreshes workspace files (skills, AGENTS.md, zond.config.yml).\n` +
       `      It does NOT touch fixtures or .env.yaml — that's the doctor/prepare-fixtures loop above.\n`
     );
@@ -173,7 +174,8 @@ function printBootstrapResult(b: BootstrapResult, writeAgents: boolean): void {
       `\nFixtures untouched. zond init only refreshes skills/AGENTS.md/zond.config.yml.\n` +
       `Verify env state with:\n` +
       `  zond doctor --api ${sample} --missing-only   # show UNSET vars + blocked endpoints\n` +
-      `  zond prepare-fixtures --api ${sample} --apply   # discover values (single-pass); fill any gaps by hand\n`
+      `  zond prepare-fixtures --api ${sample} --apply   # discover values (single-pass); fill any gaps by hand\n` +
+      `  zond audit --api ${sample} --safe            # read-only audit pass (GET only)\n`
     );
   }
 }

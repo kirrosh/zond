@@ -1,19 +1,31 @@
 # zond
 
-AI-powered API testing for Claude Code, Cursor, and CI/CD.
+API hygiene scanner for small teams — AI-powered API testing for Claude Code, Cursor, and CI/CD.
 
 Say "test my API" — get working tests, coverage dashboard, and CI config in minutes.
 
+> **Safe by default.** The first run (`zond audit --safe`) sends read-only
+> GET traffic — no writes, no deletes, nothing destructive. Mutating
+> probes require an explicit `--live` opt-in, meant for throwaway/sandbox
+> accounts only. Running zond against your API won't break it.
+
+![zond demo — install to first audit](docs/demo.svg)
+
 Zond reads your OpenAPI spec and gives your AI agent everything it needs to test your API: a focused CLI, safety guardrails, coverage tracking, and run history. You don't need to learn anything new — just describe what you want and the agent runs `zond` commands.
 
+## Install
+
+| Channel | Command |
+|---|---|
+| **curl** (macOS/Linux) | `curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh \| sh` |
+| **npm** (needs Node 20+) | `npm install -g @kirrosh/zond` |
+| **Windows** | `iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 \| iex` |
+| **Manual** | grab a binary from [releases](https://github.com/kirrosh/zond/releases/latest) (darwin arm64/x64, linux x64/arm64, win x64) |
+
+Every channel ships the same self-contained binary — no Bun or Node
+required at runtime (npm uses Node only as a thin launcher).
+
 ## Quick Start
-
-Install the binary (no Node.js required):
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh   # macOS/Linux
-iwr https://raw.githubusercontent.com/kirrosh/zond/master/install.ps1 | iex        # Windows
-```
 
 Bootstrap a workspace, register your first API, then fill its fixtures:
 
@@ -56,20 +68,12 @@ upstream spec changes.
 
 Then say to your agent: _"Safely cover the API from openapi.json with tests."_
 
-Want the whole pipeline at once? `zond audit --api my-api` runs
+Want the whole pipeline at once? `zond audit --api my-api --safe` runs
 prepare-fixtures → generate → probes → run → coverage → HTML report in a
-single shot.
-
-<details>
-<summary>Other installation methods (npx)</summary>
-
-```bash
-npx -y @kirrosh/zond --version
-```
+single read-only shot (safe is the default even without the flag). Add
+`--live` for the mutating stages once you're pointed at a sandbox.
 
 See [ZOND.md](ZOND.md) for the full CLI reference.
-
-</details>
 
 ## What Happens
 
@@ -117,9 +121,6 @@ curl -fsSL https://raw.githubusercontent.com/kirrosh/zond/master/install.sh | sh
 
 # npm
 npm install -g @kirrosh/zond@latest
-
-# bun
-bun install -g @kirrosh/zond@latest
 ```
 
 ## Shell completions
