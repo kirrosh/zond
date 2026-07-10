@@ -254,7 +254,11 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
   // matches), there is no coverage data — that is the only command-level
   // failure of the matrix path. Everything else (uncovered endpoints remain)
   // is a data point, not a failure, so it must not gate the exit code.
-  const noRuns = (covTest ?? covAudit!).runs.length === 0;
+  // ARV-409: coverage is computable if ANY loaded scope has runs. A checks-only
+  // session (run_kind='check', stripped from test scope) leaves covTest empty
+  // but covAudit full — abort only when both are dry, else audit_coverage still
+  // reports the HTTP touches (ARV-265) instead of falsely claiming zero runs.
+  const noRuns = (covTest?.runs.length ?? 0) === 0 && (covAudit?.runs.length ?? 0) === 0;
 
   // ARV-265: per-source breakdown for audit-coverage. Walks each
   // contributing run, groups its results by (METHOD, path-template), and

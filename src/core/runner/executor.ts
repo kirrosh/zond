@@ -1,6 +1,6 @@
 import { resolve, dirname, basename } from "node:path";
 import type { TestSuite, TestStep, Environment, SourceMetadata, AssertionRule } from "../parser/types.ts";
-import { substituteString, substituteStep, substituteDeep, extractVariableReferences } from "../parser/variables.ts";
+import { substituteString, substituteStep, substituteDeep, extractVariableReferences, UNSAFE_ARM_VAR } from "../parser/variables.ts";
 import type { TestRunResult, StepResult, HttpRequest, AssertionResult } from "./types.ts";
 import { executeRequest, type FetchOptions } from "./http-client.ts";
 import type { RateLimiter } from "./rate-limiter.ts";
@@ -87,6 +87,31 @@ function collectChainCaptures(tests: TestStep[]): Set<string> {
   };
   for (const step of tests) visit(step.expect?.body);
   return out;
+}
+
+/** ARV-414: first {{var}} that survived substitution in the resolved request
+ *  (path or query) — i.e. a fixture var with no producer. `$`-generators are
+ *  excluded (they resolve or throw earlier). Returns null when the request is
+ *  fully resolved. */
+function firstUnresolvedRequestVar(path: string, query: unknown): string | null {
+  const scan = (s: string): string | null => {
+    for (const m of s.matchAll(/\{\{([^{}]+)\}\}/g)) {
+      const k = m[1]!.trim();
+      if (!k.startsWith("$")) return k;
+    }
+    return null;
+  };
+  const inPath = scan(path);
+  if (inPath) return inPath;
+  if (query && typeof query === "object") {
+    for (const v of Object.values(query as Record<string, unknown>)) {
+      if (typeof v === "string") {
+        const hit = scan(v);
+        if (hit) return hit;
+      }
+    }
+  }
+  return null;
 }
 
 function emptyVarSkipReason(varName: string, chainCaptures: Set<string>): string {
@@ -338,8 +363,11 @@ export async function runSuite(
       const exprAfterSubst = String(substituteString(step.skip_if, variables));
       if (evaluateExpr(exprAfterSubst)) {
         const varMatch = step.skip_if.match(/\{\{([^{}]+)\}\}/);
-        const skipMsg = varMatch
-          ? emptyVarSkipReason(varMatch[1]!.trim(), chainCaptures)
+        const skipVar = varMatch?.[1]!.trim();
+        const skipMsg = skipVar === UNSAFE_ARM_VAR
+          ? `unsafe destructive op disarmed — set ${UNSAFE_ARM_VAR}=1 in .env.yaml to run (ARV-412)`
+          : skipVar
+          ? emptyVarSkipReason(skipVar, chainCaptures)
           : step.skip_if;
         pushStep(makeSkippedResult(interpolateName(step.name, variables), skipMsg), step);
         continue;
@@ -399,6 +427,28 @@ export async function runSuite(
         continue;
       }
     }
+    // ARV-414: fail-fast on an unresolved REQUEST var. A {{var}} with no
+    // producer survives substitution as a literal in the path/query (the
+    // empty-var guard above only catches vars present-but-empty in `variables`,
+    // and only in the path). Sending it hits a bogus URL and — for retry_until
+    // steps — spins the whole max_attempts × delay_ms budget on a resource that
+    // can never exist (the 14-min hang). Skip before buildUrl / the retry loop.
+    {
+      const unresolved = firstUnresolvedRequestVar(resolved.path, resolved.query);
+      if (unresolved) {
+        pushStep(makeSkippedResult(
+          interpolateName(step.name, variables),
+          `unresolved variable {{${unresolved}}} in request — no producer (env/capture/generator)`,
+        ), step);
+        if (step.expect.body) {
+          for (const rule of Object.values(step.expect.body)) {
+            if (rule.capture) missingCaptures.add(rule.capture);
+          }
+        }
+        continue;
+      }
+    }
+
     const url = buildUrl(resolvedBaseUrl, resolved.path, resolved.query);
     const headers: Record<string, string> = { ...resolvedSuiteHeaders, ...resolved.headers };
     let body: string | undefined;

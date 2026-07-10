@@ -6,6 +6,7 @@ import { generateFromSchema, generateMultipartFromSchema, isFkFixtureField, cano
 import { groupEndpointsByTag } from "./chunker.ts";
 import { getAuthHeaders as sharedGetAuthHeaders } from "../probe/shared.ts";
 import { flattenToFormFields } from "../runner/form-encode.ts";
+import { UNSAFE_ARM_VAR } from "../parser/variables.ts";
 
 // ──────────────────────────────────────────────
 // Helpers
@@ -175,6 +176,17 @@ export function fixtureVarNameForPathParam(
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+// ARV-412: smoke-unsafe steps bind destructive ops (DELETE /user, PATCH
+// /teams/{{teamId}}, POST /billing/buy) to RAW .env fixtures with no
+// self-create predecessor — a naive `zond run` in live-mode would mutate/delete
+// REAL account resources. Every unsafe step is disarmed by default via this
+// arm-gate; the operator must set `zond_allow_unsafe: 1` in .env.yaml to run
+// them. Fail-safe: any value other than `1` (incl. a real fixture id typed in
+// by mistake) stays disarmed. Unlike crud-*.yaml, these have no POST→capture→
+// delete-own-id chain (ARV-368), so the raw fixture IS a pre-existing resource.
+// `UNSAFE_ARM_VAR` is the single source of truth (also whitelisted in preflight).
+const UNSAFE_ARM_GUARD = `{{${UNSAFE_ARM_VAR}}} != 1`;
 
 const HEALTHCHECK_PATH_RE = /\/(health|healthz|ping|status|ready|readiness|liveness|alive)\b/i;
 const RESET_PATH_RE = /\/(reset|flush|purge|truncate|wipe|clear-data|factory-reset)\b/i;
@@ -878,7 +890,7 @@ export function generateCrudSuite(
 
 /** Find unresolved template variables in a suite (excluding known globals, captured vars, and env keys) */
 export function findUnresolvedVars(suite: RawSuite, envKeys?: Set<string>, extraKnown?: Set<string>): string[] {
-  const KNOWN = new Set(["base_url", "auth_token", "api_key"]);
+  const KNOWN = new Set(["base_url", "auth_token", "api_key", UNSAFE_ARM_VAR]);
   if (envKeys) for (const k of envKeys) KNOWN.add(k);
   if (extraKnown) for (const k of extraKnown) KNOWN.add(k);
   const captured = new Set<string>();
@@ -1246,7 +1258,14 @@ export function generateSuites(opts: {
 
     // Remaining non-GET endpoints → smoke-unsafe suite
     if (unsafeEndpoints.length > 0) {
-      const tests = unsafeEndpoints.map(ep => generateStep(ep, securitySchemes));
+      const tests = unsafeEndpoints.map(ep => {
+        const step = generateStep(ep, securitySchemes);
+        // ARV-412: disarm by default — hits raw fixtures with no self-create.
+        // generateStep never emits skip_if for non-GET, so plain assignment is
+        // safe (evaluateExpr has no ||/paren support to compose guards).
+        step.skip_if = UNSAFE_ARM_GUARD;
+        return step;
+      });
       const headers = getSuiteHeaders(unsafeEndpoints, securitySchemes);
 
       const suite: RawSuite = {

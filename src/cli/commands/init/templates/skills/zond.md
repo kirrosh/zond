@@ -426,6 +426,15 @@ zond session end
 invisible without it. `schema_violation` failures are real backend bugs;
 treat them like 5xx.
 
+**`smoke-*-unsafe` suites are disarmed by default (ARV-412).** They bind
+destructive ops (DELETE/PATCH/POST) to RAW `.env` fixtures with no
+self-create predecessor — i.e. they hit PRE-EXISTING account resources
+(unlike `crud-*.yaml`, which POST→capture→delete-own-id). Every unsafe
+step carries `skip_if: "{{zond_allow_unsafe}} != 1"`, so a plain `zond
+run apis/<name>/tests` SKIPS them. To arm on a throwaway account only:
+set `zond_allow_unsafe: 1` in `.env.yaml`. Prefer `--exclude-tag unsafe`
+on live sweeps as belt-and-suspenders.
+
 **After any `zond run` with failures → delegate to `zond-triage`.** Do
 NOT parse `runs/run-NN.json` with `jq` by hand. The triage skill reads
 `zond db diagnose --json` (which already buckets by `recommended_action`

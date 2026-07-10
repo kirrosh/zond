@@ -1,5 +1,5 @@
 import type { TestSuite, TestStep, AssertionRule } from "../parser/types.ts";
-import { GENERATORS } from "../parser/variables.ts";
+import { GENERATORS, RESERVED_CONTROL_VARS } from "../parser/variables.ts";
 
 const VAR_PATTERN = /\{\{([^{}]+)\}\}/g;
 
@@ -94,7 +94,7 @@ export function preflightCheckVars(
     if (suite.base_url) scanRefs(suite.base_url, suiteRefs);
     if (suite.headers) scanRefs(suite.headers, suiteRefs);
     for (const v of suiteRefs) {
-      if (!known.has(v) && !generatorKeys.has(v)) {
+      if (!known.has(v) && !generatorKeys.has(v) && !RESERVED_CONTROL_VARS.has(v)) {
         hits.push({ suite: suite.name, file: suite.filePath, variable: v });
       }
     }
@@ -102,7 +102,7 @@ export function preflightCheckVars(
     for (const step of suite.tests) {
       const refs = scanStepRefs(step);
       for (const v of refs) {
-        if (!known.has(v) && !generatorKeys.has(v)) {
+        if (!known.has(v) && !generatorKeys.has(v) && !RESERVED_CONTROL_VARS.has(v)) {
           hits.push({
             suite: suite.name,
             file: suite.filePath,

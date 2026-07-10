@@ -78,6 +78,34 @@ describe("ARV-303: matrix-coverage no-runs envelope contract", () => {
     }
   });
 
+  test("ARV-409: checks-only session (run_kind=check) → ok:true, audit_coverage counts touches", async () => {
+    // A session with only `checks run` produces run_kind='check' rows, which
+    // are stripped from test scope but kept in audit scope. Pre-fix, noRuns was
+    // read off the empty covTest → false "coverage cannot be computed against
+    // zero runs". Now it aborts only when BOTH scopes are dry.
+    const collectionId = findCollectionByNameOrId("demo")!.id;
+    const runId = beginAuditRun({ runKind: "check", collectionId, sessionId: "sess-409" });
+    finalizeAuditRun(runId, [{
+      suiteName: "checks",
+      testName: "GET /things",
+      status: "pass",
+      request: { method: "GET", url: "https://api.test/things", headers: {} },
+      response: { status: 200, headers: {}, body: "{}", duration_ms: 1 },
+      durationMs: 1,
+    }]);
+
+    const cap = captureOutput({ console: true });
+    try {
+      const code = await coverageCommand({ apiName: "demo", sessionId: "sess-409", json: true });
+      expect(code).toBe(0);
+      const env = JSON.parse(cap.out.trim());
+      expect(env.ok).toBe(true);
+      expect(env.data.audit_coverage.events).toBeGreaterThan(0);
+    } finally {
+      cap.restore();
+    }
+  });
+
   test("resolvable run with uncovered endpoints → envelope ok:true + exit 0", async () => {
     // ARV-303 corroboration: a run resolves (covered 1/2), yet the pre-fix
     // path returned exit 1 because uncovered endpoints remained — while the
