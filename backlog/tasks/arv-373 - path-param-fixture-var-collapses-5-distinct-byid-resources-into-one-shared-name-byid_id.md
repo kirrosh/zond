@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-09 08:38'
+updated_date: '2026-07-10 07:29'
 labels:
   - bug
   - generator
@@ -31,3 +32,9 @@ impact: setting byid_id to a valid shared-table20 id (39) satisfies that resourc
 
 Litmus test: deterministic path-parsing bug, not a judgment call — belongs in zond core (fixtures-builder.ts / suite-generator.ts owning-resource disambiguation), same helper family as stripTrailingVersionSegments.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+m-28 Bucket C (evidence-first): промотировать в работу, когда corpus-прогон подтверждает класс проблемы на реальном API; не брать спекулятивно.
+<!-- SECTION:NOTES:END -->

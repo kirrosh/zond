@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-08 10:46'
-updated_date: '2026-07-08 11:02'
+updated_date: '2026-07-10 07:29'
 labels:
   - fixtures
   - checks
@@ -27,3 +27,9 @@ CORRECTION (was mis-scoped as a fixture-discovery gap): investigation showed GET
 <!-- SECTION:PLAN:BEGIN -->
 Add a new depth-check (e.g. optional_query_param_conformance): for GET operations with declared query params, build two positive-phase requests — (a) all query params populated from schema, (b) only required-per-spec params populated (optional ones omitted). If (a) succeeds (2xx) and (b) 4xx's, emit a MEDIUM finding: 'query param declared optional but empirically required', evidence = both response statuses + the omitted param name(s). Deterministic — no severity/FP judgment, purely comparing two real HTTP responses.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+m-28 Bucket C (evidence-first): промотировать в работу, когда corpus-прогон подтверждает класс проблемы на реальном API; не брать спекулятивно.
+<!-- SECTION:NOTES:END -->

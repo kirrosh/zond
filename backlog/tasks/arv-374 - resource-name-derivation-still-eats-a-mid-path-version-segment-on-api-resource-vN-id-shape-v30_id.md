@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-09 08:39'
+updated_date: '2026-07-10 07:29'
 labels:
   - bug
   - generator
@@ -27,3 +28,9 @@ Actual: v30_id — the version segment "v30" got treated as the resource-name co
 
 Litmus test: deterministic path-segment parsing, same helper family as stripTrailingVersionSegments (ARV-369/372) — likely needs the same fix applied to param-derivation, not just resource-name-for-CRUD-grouping. Check whether the existing fix only covers the trailing-segment case and this is the same bug in the path-param-naming code path specifically (fixtures-builder.ts step 3 / fixtureVarNameForPathParam in suite-generator.ts).
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+m-28 Bucket C (evidence-first): промотировать в работу, когда corpus-прогон подтверждает класс проблемы на реальном API; не брать спекулятивно.
+<!-- SECTION:NOTES:END -->
