@@ -1,9 +1,10 @@
 ---
 id: ARV-406
 title: 'case studies: формат + публикация первых двух кейсов'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-10 07:28'
+updated_date: '2026-07-10 15:04'
 labels:
   - m-28
 dependencies:
