@@ -807,7 +807,17 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
         process.stdout.write(body);
       }
     } else if (resolved.format === "json") {
-      printJson(jsonOk("checks run", result.data, warnings.length > 0 ? warnings : undefined));
+      // ARV-419: honour `--output <path>` for json (mirrors `zond run` and the
+      // markdown branch above). Without this the envelope silently went to
+      // stdout even when the operator asked for a file.
+      const envelope = jsonOk("checks run", result.data, warnings.length > 0 ? warnings : undefined);
+      if (resolved.channel === "file") {
+        writeFileSync(resolved.path!, JSON.stringify(envelope, null, 2) + "\n");
+        console.error(`JSON report written to ${resolved.path}`);
+        for (const w of warnings) console.error(w);
+      } else {
+        printJson(envelope);
+      }
     } else if (ndjson) {
       // ARV-10: stdout already carries the NDJSON stream (events were
       // flushed inside runChecks via onEvent). Warnings ride on stderr

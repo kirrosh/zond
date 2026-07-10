@@ -32,7 +32,9 @@ import { getApi, MISSING_API_MESSAGE } from "../util/api-context.ts";
 import { resolveApiCollection } from "../resolve.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
-import { readOpenApiSpec } from "../../core/generator/index.ts";
+import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "../../core/generator/index.ts";
+import { liveAuthHeaders } from "../../core/probe/shared.ts";
+import { isSoftDeletedBody } from "../../core/utils.ts";
 import { upsertEnvLine } from "./discover.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
@@ -72,28 +74,6 @@ function resolveApiContext(
     specPath: col.spec,
     envPath: join(col.baseDir, ".env.yaml"),
   };
-}
-
-/**
- * Walk the spec for read-by-id endpoints (GET on a path containing `{var}`
- * exactly). Returns the first one whose template matches `{<varName>}`
- * verbatim — used by `fixtures add --validate` to GET the resource and
- * decide live/stale/unknown.
- */
-async function findReadEndpointForVar(
-  specPath: string,
-  varName: string,
-): Promise<{ method: string; path: string } | null> {
-  const doc = await readOpenApiSpec(specPath);
-  const placeholder = `{${varName}}`;
-  for (const [p, item] of Object.entries(doc.paths ?? {})) {
-    if (!item) continue;
-    if (!p.includes(placeholder)) continue;
-    if ((item as Record<string, unknown>).get) {
-      return { method: "GET", path: p };
-    }
-  }
-  return null;
 }
 
 async function readEnv(envPath: string): Promise<Record<string, string>> {
@@ -172,8 +152,17 @@ async function addAction(
       process.exit(2);
       return;
     }
+    // ARV-417: derive auth headers the same way every other live-call path
+    // does (liveAuthHeaders) instead of firing an anonymous GET — on any authed
+    // API a hand-built header-less request 401s and a genuinely-live fixture
+    // reads back as 'unknown' (or false-'stale').
+    const doc = await readOpenApiSpec(ctx.specPath);
+    const endpoints = extractEndpoints(doc);
+    const schemes = extractSecuritySchemes(doc);
     for (const [k, v] of Object.entries(writes)) {
-      const ep = await findReadEndpointForVar(ctx.specPath, k);
+      const ep = endpoints.find(
+        (e) => e.method.toUpperCase() === "GET" && e.path.includes(`{${k}}`) && !e.deprecated,
+      );
       if (!ep) {
         validations.push({ var: k, status: "unknown", reason: "no GET endpoint with {" + k + "} in path" });
         continue;
@@ -181,11 +170,17 @@ async function addAction(
       const url = `${baseUrl.replace(/\/+$/, "")}${fillPath(ep.path, { ...env, [k]: v })}`;
       try {
         const resp = await executeRequest(
-          { method: "GET", url, headers: { accept: "application/json" } },
+          { method: "GET", url, headers: { accept: "application/json", ...liveAuthHeaders(ep, schemes, env) } },
           { timeout: 10_000, retries: 0, network_retries: 1 },
         );
         if (resp.status >= 200 && resp.status < 300) {
-          validations.push({ var: k, status: "live", httpStatus: resp.status });
+          // ARV-418: HTTP 200 + top-level `deleted: true` is a soft-delete stub
+          // (Stripe et al.), not a live resource.
+          if (isSoftDeletedBody(resp.body_parsed)) {
+            validations.push({ var: k, status: "stale", httpStatus: resp.status, reason: "soft-deleted (body deleted:true)" });
+          } else {
+            validations.push({ var: k, status: "live", httpStatus: resp.status });
+          }
         } else if (resp.status === 404) {
           validations.push({ var: k, status: "stale", httpStatus: 404 });
         } else {
