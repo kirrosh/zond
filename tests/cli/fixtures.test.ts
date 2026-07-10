@@ -4,7 +4,50 @@
  * tests on the CLI flow via a tmp workspace.
  */
 import { describe, test, expect } from "bun:test";
-import { extractUrlFromCurl, extractFixturesFromPath } from "../../src/cli/commands/fixtures.ts";
+import { extractUrlFromCurl, extractFixturesFromPath, resolveReadbackEndpoint } from "../../src/cli/commands/fixtures.ts";
+import { computeAmbiguousPathParams } from "../../src/core/generator/suite-generator.ts";
+import type { EndpointInfo } from "../../src/core/generator/types.ts";
+
+function getEp(path: string): EndpointInfo {
+  const params = [...path.matchAll(/\{([^}]+)\}/g)].map((m) => ({ name: m[1]!, in: "path" as const, required: true }));
+  return {
+    path, method: "GET", tags: [], parameters: params as never,
+    responseContentTypes: ["application/json"], responses: [{ statusCode: 200, description: "ok" }], security: [],
+  };
+}
+
+describe("resolveReadbackEndpoint (ARV-424/423)", () => {
+  // event_id is ambiguous (used by two collections) → manifest namespaces it to
+  // events_event_id / eventids_event_id. Placeholder-matching {events_event_id}
+  // finds nothing; resolving via the manifest's affectedEndpoints (raw {event_id}) works.
+  const endpoints = [getEp("/events/{event_id}/"), getEp("/eventids/{event_id}/"), getEp("/orgs/{org_id}/events/{event_id}/")];
+  const ambiguous = computeAmbiguousPathParams(endpoints);
+
+  test("ARV-424: namespaced var resolves via manifest affectedEndpoints, not storage-key placeholder", () => {
+    const res = resolveReadbackEndpoint(
+      "events_event_id", "EV1", ["GET /events/{event_id}/"], endpoints, ambiguous, { base_url: "x" }, "https://api.test",
+    );
+    expect(res.kind).toBe("url");
+    if (res.kind === "url") expect(res.url).toBe("https://api.test/events/EV1/");
+  });
+
+  test("ARV-423: an empty sibling path-var is reported, not misattributed to the var under test", () => {
+    const res = resolveReadbackEndpoint(
+      "events_event_id", "EV1", ["GET /orgs/{org_id}/events/{event_id}/"], endpoints, ambiguous,
+      { base_url: "x", org_id: "" }, "https://api.test",
+    );
+    expect(res.kind).toBe("stale-sibling");
+    if (res.kind === "stale-sibling") expect(res.sibling).toBe("org_id");
+  });
+
+  test("falls back to spec placeholder search when no manifest affectedEndpoints", () => {
+    const res = resolveReadbackEndpoint(
+      "event_id", "EV9", undefined, [getEp("/single/{event_id}/")], new Set(), { base_url: "x" }, "https://api.test",
+    );
+    expect(res.kind).toBe("url");
+    if (res.kind === "url") expect(res.url).toBe("https://api.test/single/EV9/");
+  });
+});
 
 describe("ARV-195 fixtures helpers", () => {
   describe("extractUrlFromCurl", () => {

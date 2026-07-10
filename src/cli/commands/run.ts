@@ -312,17 +312,23 @@ export async function runCommand(options: RunOptions): Promise<number> {
     }
   }
 
-  // 1c. Safe mode: keep GET, set-only steps, and auth-related requests
+  // 1c. Safe mode: keep GET, set-only steps, and auth-related requests. ARV-427:
+  // mark write steps as skipped (with a reason) instead of deleting them — a
+  // dropped step used to vanish from the report with no skip accounting, and its
+  // downstream capture never ran, so trailing get/verify steps failed against
+  // stale .env.yaml values. Keeping them + skip_reason makes the runner emit an
+  // explicit skip; the chain-capture guard (ARV-428) then also skips the
+  // dependents cleanly instead of running them against pre-existing fixtures.
   if (options.safe) {
+    let anySafe = false;
     for (const suite of suites) {
-      suite.tests = suite.tests.filter(t => {
-        if (t.method === "GET" || !t.method) return true;
-        if (AUTH_PATH_RE.test(t.path)) return true;
-        return false;
-      });
+      for (const t of suite.tests) {
+        const isSafe = t.method === "GET" || !t.method || AUTH_PATH_RE.test(t.path);
+        if (isSafe) { anySafe = true; }
+        else { t.skip_reason = `--safe mode: skipped ${t.method} write step`; }
+      }
     }
-    suites = suites.filter(s => s.tests.length > 0);
-    if (suites.length === 0) {
+    if (!anySafe) {
       printWarning("No safe tests found. Nothing to run in safe mode.");
       return 0;
     }

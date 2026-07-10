@@ -86,6 +86,13 @@ export interface TestStep {
    * skips if a referenced capture is genuinely missing from a response.
    */
   always?: boolean;
+  /**
+   * ARV-427: pre-marked skip. When set, the runner emits an explicit skipped
+   * result carrying this reason instead of executing the step — used by
+   * `--safe` to account for dropped write steps (rather than silently removing
+   * them from the suite, which vanished from the report with no skip count).
+   */
+  skip_reason?: string;
 }
 
 export interface SuiteConfig {

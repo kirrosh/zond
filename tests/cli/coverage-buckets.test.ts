@@ -49,14 +49,29 @@ describe("bucketRows (TASK-280)", () => {
 
     const buckets = bucketRows(matrix);
     expect(buckets.covered2xx).toEqual([
-      { endpoint: "GET /a", method: "GET", path: "/a", lastStatus: 200, deprecated: false },
+      { endpoint: "GET /a", method: "GET", path: "/a", lastStatus: 200, passStatus: 200, deprecated: false },
     ]);
     expect(buckets.coveredButNon2xx).toEqual([
-      { endpoint: "PUT /b", method: "PUT", path: "/b", lastStatus: 502, deprecated: false },
+      { endpoint: "PUT /b", method: "PUT", path: "/b", lastStatus: 502, passStatus: null, deprecated: false },
     ]);
     expect(buckets.unhit).toEqual([
-      { endpoint: "GET /c", method: "GET", path: "/c", lastStatus: null, deprecated: false },
+      { endpoint: "GET /c", method: "GET", path: "/c", lastStatus: null, passStatus: null, deprecated: false },
     ]);
+  });
+
+  test("ARV-426: covered2xx row with a later negative case keeps passStatus=2xx while lastStatus reflects the 4xx", () => {
+    // One endpoint, one positive (200 pass) then one negative (404 fail) case —
+    // the exact shape that made lastStatus contradict bucket membership.
+    const matrix: CoverageMatrix = {
+      rows: [
+        row("GET", "/d", { "2xx": cell([ref("pass", 200)]), "4xx": cell([ref("fail", 404)]), "5xx": emptyCell() }),
+      ],
+      totals: { endpoints: 1, cells: 3, covered: 1, partial: 0, uncovered: 0, byReason: {} as never },
+    };
+    const buckets = bucketRows(matrix);
+    expect(buckets.covered2xx).toHaveLength(1);
+    expect(buckets.covered2xx[0]?.passStatus).toBe(200); // honest health signal
+    expect(buckets.covered2xx[0]?.lastStatus).toBe(404); // chronological-last, no longer read as health
   });
 
   test("hit-but-failed (assertion failure with 4xx) lands in coveredButNon2xx", () => {
@@ -110,7 +125,7 @@ describe("bucketRows (TASK-280)", () => {
     };
     const buckets = bucketRows(matrix);
     expect(buckets.coveredButNon2xx).toEqual([
-      { endpoint: "GET /net", method: "GET", path: "/net", lastStatus: null, deprecated: false },
+      { endpoint: "GET /net", method: "GET", path: "/net", lastStatus: null, passStatus: null, deprecated: false },
     ]);
     expect(buckets.unhit).toEqual([]);
   });
