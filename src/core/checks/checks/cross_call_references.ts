@@ -108,6 +108,15 @@ export const crossCallReferences: CrudStatefulCheck = {
       return { kind: "skip", reason: `read returned ${readResp.status} — broken-baseline guard` };
     }
     const readBody = readResp.body_parsed ?? safeParse(readResp.body);
+    // ARV-416: a 2xx read that yielded no usable resource object (empty or
+    // truncated body — e.g. a transient transport failure that still surfaced
+    // a 2xx status line) gives an empty read-shape. Diffing against it would
+    // report EVERY written field as "state not persisted" — absence of
+    // evidence, not a dropped-state bug. Symmetric with the create-side
+    // broken-baseline guards above.
+    if (readBody == null || typeof readBody !== "object" || Array.isArray(readBody) || Object.keys(readBody).length === 0) {
+      return { kind: "skip", reason: "read returned an empty/non-object body — cannot diff, broken-baseline guard" };
+    }
 
     const cfg = h.resourceConfigs?.get(g.resource)?.readbackDiff;
     const specDeclared = declaredReadFields(read);
