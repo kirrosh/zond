@@ -145,6 +145,29 @@ function estimateTotalSteps(suites: TestSuite[]): number {
   return total;
 }
 
+/** ARV-414: write the --output artifact even when the run aborts early (e.g.
+ *  --strict-vars on undefined refs), mirroring the ARV-357 empty-dir guarantee.
+ *  A scripted pipeline then parses "aborted / N partial results" instead of
+ *  seeing a missing file with nothing to key on. Best-effort: a write failure
+ *  is warned, never masks the abort's own exit code. */
+async function writeAbortArtifact(
+  results: TestRunResult[],
+  options: RunOptions,
+  note: string,
+): Promise<void> {
+  if (!options.output) return;
+  try {
+    const spec = resolveOutput(RUN_OUTPUT_SPEC, { report: options.report, output: options.output });
+    if (spec.channel !== "file") return;
+    const content = spec.format === "junit" ? generateJunitXml(results) : generateJsonReport(results);
+    await mkdir(pathDirname(spec.path!), { recursive: true });
+    await writeFile(spec.path!, content, "utf-8");
+    process.stderr.write(`zond: report written to ${spec.path!} (${note})\n`);
+  } catch (err) {
+    printWarning(`Failed to write --output artifact on abort: ${(err as Error).message}`);
+  }
+}
+
 export async function runCommand(options: RunOptions): Promise<number> {
   if (options.paths.length === 0) {
     printError("No path given");
@@ -558,6 +581,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
     emitMissingVarWarnings(setupHits);
     if (options.strictVars && setupHits.length > 0) {
       printError(`--strict-vars: ${setupHits.length} undefined variable reference(s) in setup suites`);
+      await writeAbortArtifact([], options, "0 tests — aborted on undefined vars");
       return 2;
     }
   }
@@ -581,6 +605,7 @@ export async function runCommand(options: RunOptions): Promise<number> {
     emitMissingVarWarnings(hits);
     if (options.strictVars && hits.length > 0) {
       printError(`--strict-vars: ${hits.length} undefined variable reference(s)`);
+      await writeAbortArtifact(results, options, `${results.length} partial result(s) — aborted on undefined vars`);
       return 2;
     }
   }

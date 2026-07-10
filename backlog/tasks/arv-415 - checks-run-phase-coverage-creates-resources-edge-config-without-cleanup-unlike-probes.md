@@ -3,9 +3,10 @@ id: ARV-415
 title: >-
   checks run --phase coverage creates resources (edge-config) without cleanup,
   unlike probes
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-10 09:46'
+updated_date: '2026-07-10 11:52'
 labels:
   - m-28
 dependencies: []

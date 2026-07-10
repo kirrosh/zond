@@ -3,9 +3,10 @@ id: ARV-414
 title: >-
   zond run: retry_until spins for minutes on never-created resources instead of
   fail-fast (+ no artifact on unresolved-var abort)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-10 09:46'
+updated_date: '2026-07-10 11:52'
 labels:
   - m-28
 dependencies: []

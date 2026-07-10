@@ -3,9 +3,10 @@ id: ARV-412
 title: >-
   generator: smoke-*-unsafe.yaml bind destructive ops to raw .env fixtures with
   no self-create (live = real account deletion)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-10 09:46'
+updated_date: '2026-07-10 11:52'
 labels:
   - m-28
 dependencies: []

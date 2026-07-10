@@ -3,9 +3,10 @@ id: ARV-413
 title: >-
   zond-scan skill: live-mode Step 8 runs unsafe suites without
   destructive-fixture guard (no-mutate-preexisting invariant)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-10 09:46'
+updated_date: '2026-07-10 11:52'
 labels:
   - m-28
 dependencies: []

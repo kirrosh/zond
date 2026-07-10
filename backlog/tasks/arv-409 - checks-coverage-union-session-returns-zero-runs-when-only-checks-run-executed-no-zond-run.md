@@ -3,10 +3,10 @@ id: ARV-409
 title: >-
   checks: coverage --union session returns zero-runs when only checks run
   executed (no zond run)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-10 08:25'
-updated_date: '2026-07-10 09:46'
+updated_date: '2026-07-10 11:52'
 labels:
   - m-28
 dependencies: []

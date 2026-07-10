@@ -560,6 +560,36 @@ describe("flow control", () => {
     expect(result.steps[0]!.status).toBe("pass");
   });
 
+  test("ARV-414: fail-fast (no send, no retry loop) on unresolved request var", async () => {
+    // Without the guard this retry_until step would send 20× with 1000ms delays
+    // (~20s) polling a resource whose id never resolved. The fix skips it before
+    // buildUrl, so the retry loop is never entered and fetch is never called.
+    let calls = 0;
+    globalThis.fetch = mock(async () => {
+      calls++;
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "unresolved-query",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Poll never-seeded id",
+        method: "GET",
+        path: "/things",
+        query: { id: "{{never_seeded_id}}" },
+        retry_until: { condition: "status == 404", max_attempts: 20, delay_ms: 1000 },
+        expect: { status: 404 },
+      }],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("skip");
+    expect(result.steps[0]!.error).toContain("never_seeded_id");
+    expect(calls).toBe(0);
+  });
+
   test("skip_if with variable substitution", async () => {
     mockFetchResponses([]);
 

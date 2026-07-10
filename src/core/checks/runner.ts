@@ -43,6 +43,7 @@ import { nowIso, type NdjsonEvent } from "../reporter/ndjson.ts";
 import { runPool } from "../runner/async-pool.ts";
 import type { RateLimiter } from "../runner/rate-limiter.ts";
 import { recommendForCheck } from "./recommended-action.ts";
+import { cleanupSelfCreatedResource } from "../probe/security/cleanup.ts";
 import { gapKey } from "../workspace/fixture-gaps.ts";
 import { endpointSkipsCheck, reasonForSkip } from "./zond-extensions.ts";
 import {
@@ -870,6 +871,29 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       if (built.case.kind === "positive") {
         localPositiveTotal += 1;
         if (httpResp.status >= 200 && httpResp.status < 300) localPositiveTwoxx += 1;
+      }
+      // ARV-415: a 2xx POST in the examples/coverage phase created a real
+      // resource (positive baseline OR an out-of-bounds body the API wrongly
+      // accepted). Probes self-clean; these phases leaked one resource per run
+      // (e.g. an orphan edge-config). Best-effort DELETE the self-created id.
+      // POST only — a 2xx PUT/PATCH echoes a PRE-EXISTING fixture id we must
+      // never delete (no-mutate-preexisting). Cleanup bypasses the request
+      // budget/rate-limiter, matching probe cleanup.
+      if (op.method.toUpperCase() === "POST" && httpResp.status >= 200 && httpResp.status < 300) {
+        try {
+          const outcome = await cleanupSelfCreatedResource(op, allOps, {
+            baseUrl: opts.baseUrl,
+            headers: opts.authHeaders ?? {},
+            responseBody: httpResp.body_parsed ?? httpResp.body,
+            timeoutMs: opts.timeoutMs,
+          });
+          if (outcome && !outcome.ok && outcome.error) {
+            const key = `coverage_cleanup: ${outcome.error}`;
+            localSkipped[key] = (localSkipped[key] ?? 0) + 1;
+          }
+        } catch {
+          // Cleanup is best-effort — never let a DELETE failure abort the run.
+        }
       }
       const checkResp = {
         status: httpResp.status,
