@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-08 10:46'
+updated_date: '2026-07-10 07:29'
 labels:
   - checks
   - security
@@ -26,3 +27,9 @@ priority: medium
 <!-- SECTION:PLAN:BEGIN -->
 Детерминированный regex-check над телом response: флагать, когда error-status ответ содержит stack-trace-подобные строки (' at <Namespace>.<Class>.<Method>', абсолютные file paths, ':line N', частые exception-class паттерны). Severity: medium, evidence = буквально совпавшая подстрока — без суждения (matches или нет).
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+m-28 Bucket C (evidence-first): промотировать в работу, когда corpus-прогон подтверждает класс проблемы на реальном API; не брать спекулятивно.
+<!-- SECTION:NOTES:END -->
