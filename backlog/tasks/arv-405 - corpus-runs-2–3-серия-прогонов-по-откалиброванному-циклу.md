@@ -1,9 +1,10 @@
 ---
 id: ARV-405
 title: 'corpus runs #2–3: серия прогонов по откалиброванному циклу'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-07-10 07:28'
+updated_date: '2026-07-10 09:47'
 labels:
   - m-28
 dependencies:
