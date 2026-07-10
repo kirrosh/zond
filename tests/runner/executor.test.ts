@@ -144,6 +144,48 @@ describe("runSuite", () => {
     expect(result.steps[1]!.error).toContain("user_id");
   });
 
+  test("ARV-427/428: a skipped create leaves the always:true DELETE skipped, not firing on a stale env id", async () => {
+    // members-crud shape: create captures member_id, DELETE is always:true.
+    // The create is skipped (skip_reason, as --safe sets), and member_id holds a
+    // STALE pre-existing value in env (the real owner id). The DELETE must NOT
+    // fire against that value.
+    const deleteCalls: string[] = [];
+    globalThis.fetch = mock(async (_url: unknown, init?: { method?: string }) => {
+      if ((init?.method ?? "GET") === "DELETE") deleteCalls.push(String(_url));
+      return new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "members-crud",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "Create member",
+          method: "POST",
+          path: "/members",
+          skip_reason: "--safe mode: skipped POST write step", // ARV-427
+          expect: { status: 201, body: { id: { capture: "member_id" } } },
+        },
+        {
+          name: "Delete member",
+          method: "DELETE",
+          path: "/members/{{member_id}}",
+          always: true,
+          expect: { status: 204 },
+        },
+      ],
+    };
+
+    const result = await runSuite(suite, { member_id: "10816603" });
+    const createStep = result.steps.find((s) => s.name === "Create member")!;
+    const deleteStep = result.steps.find((s) => s.name === "Delete member")!;
+    expect(createStep.status).toBe("skip"); // ARV-427: explicit skip, didn't vanish
+    expect(createStep.error).toContain("--safe mode");
+    expect(deleteStep.status).toBe("skip"); // ARV-428: gated, not executed
+    expect(deleteCalls).toEqual([]); // no DELETE against the stale owner id
+  });
+
   test("merges suite-level headers with step headers", async () => {
     let capturedHeaders: Record<string, string> = {};
     globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {

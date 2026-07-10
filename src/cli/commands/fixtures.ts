@@ -33,9 +33,11 @@ import { resolveApiCollection } from "../resolve.ts";
 import { resolveCollectionSpec } from "../../core/setup-api.ts";
 import { findCollectionByNameOrId } from "../../db/queries.ts";
 import { readOpenApiSpec, extractEndpoints, extractSecuritySchemes } from "../../core/generator/index.ts";
+import { computeAmbiguousPathParams, fixtureVarNameForPathParam } from "../../core/generator/suite-generator.ts";
 import { liveAuthHeaders } from "../../core/probe/shared.ts";
 import { isSoftDeletedBody } from "../../core/utils.ts";
-import { upsertEnvLine } from "./discover.ts";
+import { readFixtureManifest, upsertEnvLine } from "./discover.ts";
+import type { EndpointInfo } from "../../core/generator/types.ts";
 import { jsonOk, jsonError, printJson } from "../json-envelope.ts";
 import { printError, printSuccess } from "../output.ts";
 import { globalJson } from "../resolve.ts";
@@ -100,11 +102,44 @@ export async function applyEnvWrites(
   return { backup };
 }
 
-function fillPath(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{([^}]+)\}/g, (_, n) => {
-    const v = vars[n];
-    return typeof v === "string" && v.length > 0 ? encodeURIComponent(v) : `{${n}}`;
+/** ARV-424/423: resolve the read-by-id endpoint for a --validate readback via
+ *  the fixture manifest's own affectedEndpoints (which carry the RAW path param,
+ *  e.g. `{event_id}`) rather than re-deriving a `{k}` placeholder from the
+ *  fixture's storage key (`events_event_id`) — the latter finds nothing for any
+ *  namespaced/disambiguated var. Each path param resolves from its OWN env var;
+ *  an empty SIBLING param is reported as such instead of being misattributed to
+ *  the var under test (which would false-'stale' a genuinely-live id). */
+type ReadbackResolution =
+  | { kind: "url"; url: string; ep: EndpointInfo | undefined }
+  | { kind: "stale-sibling"; sibling: string }
+  | { kind: "no-endpoint" };
+
+export function resolveReadbackEndpoint(
+  k: string,
+  v: string,
+  affectedEndpoints: string[] | undefined,
+  endpoints: EndpointInfo[],
+  ambiguous: Set<string>,
+  env: Record<string, string>,
+  baseUrl: string,
+): ReadbackResolution {
+  const fromManifest = (affectedEndpoints ?? [])
+    .find((l) => l.startsWith("GET "))?.slice(4).trim();
+  const path = fromManifest
+    ?? endpoints.find((e) => e.method.toUpperCase() === "GET" && e.path.includes(`{${k}}`) && !e.deprecated)?.path;
+  if (!path) return { kind: "no-endpoint" };
+
+  let staleSibling: string | null = null;
+  const filled = path.replace(/\{([^}]+)\}/g, (_m, param: string) => {
+    const varForParam = fixtureVarNameForPathParam(path, param, ambiguous);
+    const isTarget = varForParam === k || param === k;
+    const val = isTarget ? v : (env[varForParam] ?? env[param]);
+    if (!isTarget && (val === undefined || val === "")) staleSibling ??= varForParam;
+    return val === undefined || val === "" ? `{${param}}` : encodeURIComponent(val);
   });
+  if (staleSibling) return { kind: "stale-sibling", sibling: staleSibling };
+  const ep = endpoints.find((e) => e.method.toUpperCase() === "GET" && e.path === path);
+  return { kind: "url", url: `${baseUrl.replace(/\/+$/, "")}${filled}`, ep };
 }
 
 async function addAction(
@@ -159,18 +194,25 @@ async function addAction(
     const doc = await readOpenApiSpec(ctx.specPath);
     const endpoints = extractEndpoints(doc);
     const schemes = extractSecuritySchemes(doc);
+    const ambiguous = computeAmbiguousPathParams(endpoints);
+    const manifest = await readFixtureManifest(ctx.baseDir);
+    const manifestByName = new Map((manifest?.fixtures ?? []).map((f) => [f.name, f] as const));
     for (const [k, v] of Object.entries(writes)) {
-      const ep = endpoints.find(
-        (e) => e.method.toUpperCase() === "GET" && e.path.includes(`{${k}}`) && !e.deprecated,
+      const res = resolveReadbackEndpoint(
+        k, v, manifestByName.get(k)?.affectedEndpoints, endpoints, ambiguous, env, baseUrl,
       );
-      if (!ep) {
-        validations.push({ var: k, status: "unknown", reason: "no GET endpoint with {" + k + "} in path" });
+      if (res.kind === "no-endpoint") {
+        validations.push({ var: k, status: "unknown", reason: "no GET endpoint for {" + k + "} in manifest affectedEndpoints or spec" });
         continue;
       }
-      const url = `${baseUrl.replace(/\/+$/, "")}${fillPath(ep.path, { ...env, [k]: v })}`;
+      if (res.kind === "stale-sibling") {
+        // ARV-423: don't blame k for a sibling path-var that's empty/stale.
+        validations.push({ var: k, status: "unknown", reason: `blocked by stale sibling {${res.sibling}} — resolve it first, then re-validate {${k}}` });
+        continue;
+      }
       try {
         const resp = await executeRequest(
-          { method: "GET", url, headers: { accept: "application/json", ...liveAuthHeaders(ep, schemes, env) } },
+          { method: "GET", url: res.url, headers: { accept: "application/json", ...(res.ep ? liveAuthHeaders(res.ep, schemes, env) : {}) } },
           { timeout: 10_000, retries: 0, network_retries: 1 },
         );
         if (resp.status >= 200 && resp.status < 300) {
