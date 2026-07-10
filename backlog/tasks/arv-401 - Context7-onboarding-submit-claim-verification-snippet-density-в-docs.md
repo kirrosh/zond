@@ -4,7 +4,7 @@ title: 'Context7 onboarding: submit + claim + verification + snippet-density в 
 status: In Progress
 assignee: []
 created_date: '2026-07-09 14:45'
-updated_date: '2026-07-10 06:58'
+updated_date: '2026-07-10 07:14'
 labels:
   - m-27
 dependencies:
@@ -36,4 +36,6 @@ priority: medium
 Submit выполнен 2026-07-09, индекс живой: context7.com/kirrosh/zond — 118 snippets, 7,901 tokens, Trust Score 5.4. Осталось: claim + manual verification, GitHub Action refresh, snippet-density pass по docs/*.md.
 
 Trust-профиль владельца дозаполнен (2026-07-10): bio с упоминанием zond, blog → репо zond, профильный README kirrosh/kirrosh опубликован. Осталось из задачи: claim + manual verification на context7.com, GitHub Action refresh, snippet-density в docs.
+
+Хвост после закрытия m-27: claim+verification на context7.com (web, владелец), GH Action refresh, snippet-density. Индекс уже живой — хвост некритичен.
 <!-- SECTION:NOTES:END -->

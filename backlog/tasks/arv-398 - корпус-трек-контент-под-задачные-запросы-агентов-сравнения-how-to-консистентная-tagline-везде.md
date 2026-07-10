@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-09 14:18'
+updated_date: '2026-07-10 07:14'
 labels:
   - m-27
 dependencies:
@@ -26,3 +27,9 @@ priority: low
 - [ ] #1 2–3 материала под задачные формулировки опубликованы (Dev.to/HN/Reddit), включая одно сравнение с конкурентами
 - [ ] #2 Canonical tagline (ARV-393) дословно в каждом материале
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Ongoing-трек, переживает закрытие m-27: opportunistic, вести по мере launch-активностей. Tagline и каналы готовы (393/395/400), материал для первого поста фактически собран в backlog/docs/*.md.
+<!-- SECTION:NOTES:END -->
