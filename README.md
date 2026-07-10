@@ -106,6 +106,13 @@ The agent does all three steps autonomously. It asks you only when it needs an a
 
 Claude Code can write pytest from scratch — but it takes 30-60 minutes per flow, has no safety guardrails, no coverage tracking, and no run history. Zond gives the agent structured tools to do it in 5 minutes with full visibility.
 
+## Case Studies
+
+Real public-API audits, calibrated findings only — including what was *not* found:
+
+- [GitHub REST API](docs/case-studies/github-rest-api.md) — ~50% of read endpoints return status codes the official spec never declares; 2 live schema violations. Read-only, ~3.5 min.
+- [Vercel API](docs/case-studies/vercel-api.md) — a live intermittent 500, ~150 undeclared status codes, ~45 create endpoints stricter than their spec — with zero requests sent to account-delete/billing endpoints. Live, no sandbox.
+
 ## Key Capabilities
 
 | | |
@@ -155,6 +162,7 @@ zond completions fish > ~/.config/fish/completions/zond.fish
 - [ZOND.md](ZOND.md) — full CLI reference
 - [docs/quickstart.md](docs/quickstart.md) — step-by-step quickstart (RU)
 - [docs/ci.md](docs/ci.md) — CI/CD integration
+- [docs/case-studies/](docs/case-studies/) — public-API audit case studies
 - [backlog/](backlog/) — project tasks (powered by [Backlog.md](https://backlog.md))
 
 ## License
