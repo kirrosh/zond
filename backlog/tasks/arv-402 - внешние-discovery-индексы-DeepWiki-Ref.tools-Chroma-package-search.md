@@ -4,7 +4,7 @@ title: 'внешние discovery-индексы: DeepWiki + Ref.tools + Chroma p
 status: To Do
 assignee: []
 created_date: '2026-07-09 14:45'
-updated_date: '2026-07-09 15:47'
+updated_date: '2026-07-10 07:14'
 labels:
   - m-27
 dependencies:
@@ -34,4 +34,6 @@ priority: low
 
 <!-- SECTION:NOTES:BEGIN -->
 DeepWiki проиндексирован 2026-07-09 (по 488dde2), бейдж добавлен в README (+ npm-бейдж). Осталось: письмо hello@ref.tools, PR в chroma-core/package-search.
+
+Хвост после закрытия m-27: письмо hello@ref.tools + PR в chroma-core/package-search. DeepWiki-часть закрыта (AC#1 ✓).
 <!-- SECTION:NOTES:END -->

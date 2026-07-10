@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-07-09 14:19'
+updated_date: '2026-07-10 07:14'
 labels:
   - m-27
 dependencies:
@@ -27,3 +28,9 @@ priority: low
 - [ ] #1 Recall-probe чеклист (3–5 канонических вопросов к свежим моделям) зафиксирован и прогнан первый раз, результат записан
 - [ ] #2 Решено где жить мониторингу краулеров (нет логов на GH Pages → отложено с trigger condition: свой хостинг доков)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Opportunistic после закрытия m-27. Trigger первого recall-probe: ~2 недели после npm publish v0.27.1 (2026-07-09) + принятие awesome-claude-code — раньше спрашивать модели бессмысленно, корпус не успел.
+<!-- SECTION:NOTES:END -->

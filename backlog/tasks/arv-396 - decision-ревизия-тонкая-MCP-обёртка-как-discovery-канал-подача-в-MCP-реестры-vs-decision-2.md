@@ -3,9 +3,10 @@ id: ARV-396
 title: >-
   decision-ревизия: тонкая MCP-обёртка как discovery-канал + подача в
   MCP-реестры (vs decision-2)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-09 14:18'
+updated_date: '2026-07-10 07:14'
 labels:
   - m-27
 dependencies:
@@ -25,6 +26,12 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Новый decision-док: подтверждение decision-2 либо его ревизия с явными границами (discovery-only, вне ядра)
+- [x] #1 Новый decision-док: подтверждение decision-2 либо его ревизия с явными границами (discovery-only, вне ядра)
 - [ ] #2 Если ревизия: обёртка подана в mcp.so, smithery.ai, glama.ai и официальный MCP Registry с единым metadata-pack
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Решение: decision-10 (2026-07-10) — подтверждение decision-2, MCP-обёртку не делаем. Основание: recall скиллов 100% (ARV-397), Context7 уже отдаёт доки zond, self-serve marketplace живой — MCP не добавляет непокрытого канала. AC#2 (подача в реестры) не применим по решению.
+<!-- SECTION:NOTES:END -->

@@ -123,3 +123,29 @@ decision-8 (positioning) и litmus test остаются в силе.
 самостоятельную веху, т.к. это теперь основной форвардный вектор (см.
 `docs/capabilities-snapshot.md` §10). m-26 в бэклоге отсутствует — номер m-27
 взят по постановке. Задачи помечаются ярлыком `m-27`.
+
+## Close-out (2026-07-10)
+
+**Веха закрыта.** DoD A–D выполнен 2026-07-09 (clean-machine E2E зелёный по
+всем активным каналам, ARV-392); Bucket E выполнен 2026-07-09/10, релиз
+v0.27.1.
+
+Итог Bucket E (agentic discoverability):
+- ARV-393/394/395/397/400 Done, ARV-396 закрыта решением
+  ([decision-10](../decisions/) — MCP-обёртку не возвращаем).
+- Каналы живые: npm с canonical tagline + задачными keywords; self-serve
+  plugin marketplace (`/plugin marketplace add kirrosh/zond`); Context7
+  (118 snippets) и DeepWiki проиндексированы; GitHub About/Topics заполнены;
+  llms.txt/context7.json/AGENTS.md в репо; формы поданы в
+  claude-plugins-community и awesome-claude-code (ждут ревью).
+- Измерено (eval/skill-recall): agent recall 100%, false-activation 0%;
+  tagline поднял exact-skill маршрутизацию 67%→83%.
+- Research-артефакты: backlog/docs/{skill-distribution-channels,
+  agentic-discovery-mcp-report}.md.
+
+Открытые хвосты (не гейтят закрытие, opportunistic):
+- ARV-401 (Context7 claim/verification, GH Action, snippet-density),
+  ARV-402 (Ref.tools email, Chroma PR) — внешние подачи.
+- ARV-398 (корпус-трек, ongoing), ARV-399 (recall-probe; trigger — ~2 недели
+  после publish + принятие awesome-списка), ARV-387 (brew; trigger — первые
+  пользователи).
