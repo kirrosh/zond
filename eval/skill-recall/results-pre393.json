@@ -1,0 +1,120 @@
+{
+  "variant": "eval/skill-recall/variant-pre393",
+  "recall": 1,
+  "exact": 0.6666666666666666,
+  "falseActivation": 0,
+  "results": [
+    {
+      "id": "p01",
+      "text": "протестируй мой API",
+      "expect": "zond",
+      "picked": "zond",
+      "hit": true
+    },
+    {
+      "id": "p02",
+      "text": "test my REST API against the openapi spec",
+      "expect": "zond",
+      "picked": "zond",
+      "hit": true
+    },
+    {
+      "id": "p03",
+      "text": "проверь, что API соответствует спеке после деплоя",
+      "expect": "zond",
+      "picked": "zond",
+      "hit": true
+    },
+    {
+      "id": "p04",
+      "text": "check for contract drift between the spec and the live server",
+      "expect": "zond",
+      "picked": "zond-checks",
+      "hit": true
+    },
+    {
+      "id": "p05",
+      "text": "почему падает POST /orders? разберись",
+      "expect": "zond",
+      "picked": "zond-triage",
+      "hit": true
+    },
+    {
+      "id": "p06",
+      "text": "подними покрытие эндпоинтов тестами",
+      "expect": "zond",
+      "picked": "zond",
+      "hit": true
+    },
+    {
+      "id": "p07",
+      "text": "find security bugs in my API endpoints",
+      "expect": "zond-checks",
+      "picked": "zond-checks",
+      "hit": true
+    },
+    {
+      "id": "p08",
+      "text": "прогони edge cases и boundary values по всем эндпоинтам",
+      "expect": "zond-checks",
+      "picked": "zond-checks",
+      "hit": true
+    },
+    {
+      "id": "p09",
+      "text": "what broke in the last test run?",
+      "expect": "zond-triage",
+      "picked": "zond-triage",
+      "hit": true
+    },
+    {
+      "id": "p10",
+      "text": "создай тестовые данные, чтобы CRUD-цепочки перестали скипаться",
+      "expect": "zond-seed",
+      "picked": "zond-seed",
+      "hit": true
+    },
+    {
+      "id": "p11",
+      "text": "set up API tests in CI with SARIF upload",
+      "expect": "zond",
+      "picked": "zond-checks",
+      "hit": true
+    },
+    {
+      "id": "p12",
+      "text": "у нас есть openapi.json — надо быстро понять, какие ручки сломаны",
+      "expect": "zond",
+      "picked": "zond-checks",
+      "hit": true
+    },
+    {
+      "id": "n01",
+      "text": "напиши unit-тесты для функции parseDate",
+      "expect": "none-or-other",
+      "picked": "unit-tests",
+      "hit": true
+    },
+    {
+      "id": "n02",
+      "text": "write an e2e test for the login page in the browser",
+      "expect": "none-or-other",
+      "picked": "playwright-e2e",
+      "hit": true
+    },
+    {
+      "id": "n03",
+      "text": "поправь вёрстку карточки товара",
+      "expect": "none-or-other",
+      "picked": "none",
+      "hit": true
+    },
+    {
+      "id": "n04",
+      "text": "отревьюй мой pull request",
+      "expect": "none-or-other",
+      "picked": "code-review",
+      "hit": true
+    }
+  ]
+}
