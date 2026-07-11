@@ -242,7 +242,16 @@ export async function shrinkFuzzFailure<R>(params: {
   // minimal failing body, so we let it run the full shrink walk.
   const result = await fc.check(
     fc.asyncProperty(arb, async (body) => {
-      const response = await params.send(body);
+      let response: R;
+      try {
+        response = await params.send(body);
+      } catch {
+        // A transient network flake on ONE shrink sample must not abort the
+        // whole shrink walk (real rate-limited APIs drop the odd request
+        // during rapid re-sends). Treat it as "not a counterexample" so
+        // fast-check keeps exploring toward the minimal reproducible body.
+        return true;
+      }
       return !params.stillFails(response); // property holds when the check passes
     }),
     { seed: params.seed ?? 0, numRuns: params.numRuns ?? 30 },
