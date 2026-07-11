@@ -200,6 +200,9 @@ const MultipartFileFieldSchema = z.object({
 
 const MultipartFieldSchema: z.ZodType<MultipartField> = z.union([z.string(), MultipartFileFieldSchema]);
 
+// form:/query: scalar — string on the wire, but accept number/boolean and coerce.
+const FormScalarSchema = z.union([z.string(), z.number(), z.boolean()]).transform((v) => String(v));
+
 // Provenance metadata: passthrough — все поля optional, неизвестные пропускаем без warning
 const SourceMetadataSchema: z.ZodType<SourceMetadata> = z.object({
   type: z.enum(["openapi-generated", "manual", "probe-suite"]).optional(),
@@ -264,9 +267,12 @@ const TestStepSchema: z.ZodType<TestStep> = z.preprocess(
     path: z.string(),
     headers: z.record(z.string(), z.string()).optional(),
     json: z.unknown().optional(),
-    form: z.record(z.string(), z.string()).optional(),
+    // form/query values are strings on the wire; accept numbers/booleans and
+    // coerce so `amount: 1500` doesn't parse-error (encodeFormBody already
+    // String()s them at runtime). Keeps the output type Record<string,string>.
+    form: z.record(z.string(), FormScalarSchema).optional(),
     multipart: z.record(z.string(), MultipartFieldSchema).optional(),
-    query: z.record(z.string(), z.string()).optional(),
+    query: z.record(z.string(), FormScalarSchema).optional(),
     expect: TestStepExpectSchema,
     skip_if: z.string().optional(),
     retry_until: RetryUntilSchema.optional(),
