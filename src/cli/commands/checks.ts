@@ -186,6 +186,12 @@ async function deriveResourceConfigsFromApi(
       entry.seedBody = {
         contentType: r.seed_body.content_type,
         body: r.seed_body.body,
+        setup: r.seed_body.setup?.map((s) => ({
+          endpoint: s.endpoint,
+          body: s.body,
+          contentType: s.content_type,
+          capture: s.capture,
+        })),
       };
     }
     if (r.readback_diff) {

@@ -56,6 +56,7 @@ import {
   fillPathParams,
   serializeCheckBody,
   resolveCreateBody,
+  runSetupSteps,
 } from "./_crud-helpers.ts";
 
 function safeParse(v: unknown): unknown {
@@ -160,6 +161,18 @@ export const lifecycleTransitions: CrudStatefulCheck = {
     const createBodyParsed = createResp.body_parsed ?? safeParse(createResp.body);
     const id = extractIdFromCreateResponse(createBodyParsed, g.idParam);
     if (id == null) return { kind: "skip", reason: "could not extract id from create response" };
+
+    // ARV-434: run ordered post-create readiness steps (e.g. attach an
+    // invoiceitem to a draft invoice) before firing lifecycle actions. A
+    // failed setup means the resource can't be exercised, not that it's
+    // buggy — skip with the concrete step + status.
+    const setup = seedBody?.setup;
+    if (setup && setup.length > 0) {
+      const setupResult = await runSetupSteps(setup, h, id, contentType);
+      if (!setupResult.ok) {
+        return { kind: "skip", reason: `setup step "${setupResult.failedStep}" returned ${setupResult.status} — resource not ready for lifecycle test` };
+      }
+    }
 
     const findings: Finding[] = [];
 

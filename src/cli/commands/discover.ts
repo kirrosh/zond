@@ -345,6 +345,13 @@ export interface ResourceYaml {
   seed_body?: {
     content_type?: string;
     body: Record<string, unknown>;
+    /** ARV-434: ordered post-create readiness steps. */
+    setup?: Array<{
+      endpoint: string;
+      body?: Record<string, unknown>;
+      content_type?: string;
+      capture?: string;
+    }>;
   };
 }
 
