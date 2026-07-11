@@ -1,9 +1,10 @@
 ---
 id: ARV-436
 title: 'zond fuzz: property-based фаззинг поверх fast-check как доп. фаза checks'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-11 09:17'
+updated_date: '2026-07-11 09:43'
 labels:
   - m-28
   - fuzz
@@ -41,9 +42,9 @@ Phase 2 (опц., отдельная задача): example-DB replay падаю
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 fast-check добавлен; schemaToArbitrary покрывает общий OpenAPI-сабсет (type/format/enum/min/max/items/object) с fallback
-- [ ] #2 Новая фаза fuzz в checks-runner: fc.sample с --seed детерминирован, кейсы судят существующие 12 чеков, meta.phase='fuzz'
-- [ ] #3 На падение чека fast-check shrink-ает вход до минимального; минимальный кейс + curl в evidence
-- [ ] #4 'zond fuzz' алиас над 'checks run --phase fuzz' с fuzz-дефолтами; ядро — фаза, не отдельный движок
-- [ ] #5 Тесты: unit на мост, mocked-integration на фазу, shrink-тест; anti-FP suppression НЕ добавлен (FP → агент)
+- [x] #1 fast-check добавлен; schemaToArbitrary покрывает общий OpenAPI-сабсет (type/format/enum/min/max/items/object) с fallback
+- [x] #2 Новая фаза fuzz в checks-runner: fc.sample с --seed детерминирован, кейсы судят существующие 12 чеков, meta.phase='fuzz'
+- [x] #3 На падение чека fast-check shrink-ает вход до минимального; минимальный кейс + curl в evidence
+- [x] #4 'zond fuzz' алиас над 'checks run --phase fuzz' с fuzz-дефолтами; ядро — фаза, не отдельный движок
+- [x] #5 Тесты: unit на мост, mocked-integration на фазу, shrink-тест; anti-FP suppression НЕ добавлен (FP → агент)
 <!-- AC:END -->

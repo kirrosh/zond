@@ -33,6 +33,7 @@ zond checks list --json          # same, machine-readable
 |---|---|
 | "deep audit", "find edge cases" | `zond checks run --api <name>` |
 | "boundary value coverage" | `... --phase coverage` |
+| "fuzz the API", "random inputs", "property-based", "find crashes" | `zond fuzz --api <name>` (alias for `checks run --phase fuzz`) |
 | "find security bugs", "broken auth" | `... --check ignored_auth,use_after_free,ensure_resource_availability` |
 | "is GET returning what POST accepted?", "cross-call drift" | `... --check cross_call_references` (m-20) |
 | "does the API honor Idempotency-Key?", "two-POST replay" | `... --check idempotency_replay` (m-20) |
@@ -337,7 +338,22 @@ zond checks run --api myapi --mode negative       # malicious-input probes only
 # Pick a phase
 zond checks run --api myapi --phase coverage      # ~×1.75 cases per op; real bug-hunt phase
 zond checks run --api myapi --phase examples      # default — 1 positive + 1 negative per op (smoke)
+zond fuzz --api myapi --seed 0 --max-examples 20  # property-based random bodies (alias for --phase fuzz)
 ```
+
+**`zond fuzz` — random property-based bodies (m-28).** Draws
+`--max-examples` random request bodies per operation from the spec
+(fast-check), sends them through the same runner, and lets the same
+response checks judge — any 5xx (`not_a_server_error`) or schema
+violation (`response_schema_conformance`) falls out as evidence. On each
+failure fast-check **shrinks** the input to a minimal counterexample and
+puts it (plus a ready-to-run `curl`) in `evidence.minimal_case`. Seeded:
+same `--seed` ⇒ same cases ⇒ same evidence, so a finding reproduces. It's
+complementary to `coverage` — coverage walks *declared* boundaries,
+fuzz hits the random inputs a boundary walk never enumerates. Note:
+`positive_data_acceptance` on a random 4xx is low-signal by design (the
+body's validity is unknown) — triage those; the headline signal is 5xx
+and schema drift.
 
 **`--phase examples` is smoke, not depth.** It runs one positive + one
 negative example per operation, finishes ~3× faster, but routinely
