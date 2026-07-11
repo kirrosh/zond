@@ -40,6 +40,9 @@ const SCHEMA_DIR = resolve(REPO_ROOT, "docs", "json-schema");
 const SPEC_REGISTRY: Record<string, OutputSpec<any>> = {
   "run": RUN_OUTPUT_SPEC,
   "checks run": CHECKS_OUTPUT_SPEC,
+  // ARV-436: `zond fuzz` is a thin alias over `checks run --phase fuzz` —
+  // same action, same options, same output spec.
+  "fuzz": CHECKS_OUTPUT_SPEC,
   "probe mass-assignment": PROBE_OUTPUT_SPEC,
   "probe security": PROBE_OUTPUT_SPEC,
   "probe webhooks": PROBE_OUTPUT_SPEC,

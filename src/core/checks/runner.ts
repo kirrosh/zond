@@ -24,6 +24,7 @@ import {
   enumerateParamBoundaryCases,
   type ParamCoverageCase,
 } from "../generator/coverage-phase.ts";
+import { enumerateFuzzCases, shrinkFuzzFailure } from "../generator/fuzz-phase.ts";
 import { executeRequest } from "../runner/http-client.ts";
 import { reserveRequest, MAX_REQUESTS_SKIP_REASON, type RequestBudget } from "../runner/executor.ts";
 import { createSchemaValidator, type SchemaValidator } from "../runner/schema-validator.ts";
@@ -53,6 +54,7 @@ import {
   type Check,
   type CheckCase,
   type CheckFinding,
+  type CheckRuntimeOptions,
   type CheckRunData,
   type CheckRunSummary,
   type SpecFinding,
@@ -115,8 +117,14 @@ export interface RunChecksOptions {
    *  single-site negative mutator) vs `coverage` (deterministic
    *  boundary-value enumeration over the body schema) vs `all` (both).
    *  Coverage cases carry `meta.boundary` and `meta.phase = "coverage"`
-   *  for the SARIF reporter and reproducer hints. */
-  phase?: "examples" | "coverage" | "all";
+   *  for the SARIF reporter and reproducer hints. ARV-436 adds `fuzz`
+   *  (random property-based bodies via fast-check) — seeded, judged by
+   *  the same response-phase checks, `meta.phase = "fuzz"`. */
+  phase?: "examples" | "coverage" | "fuzz" | "all";
+  /** ARV-436: fuzz PRNG seed (same seed ⇒ same cases) and per-op body
+   *  count. Only consulted when `phase` is `fuzz` or `all`. */
+  fuzzSeed?: number;
+  fuzzRuns?: number;
   /** ARV-6 AC #5 — gate the NUL byte (\x00) in string boundaries.
    *  Off by default because some HTTP/JSON stacks panic on it. */
   allowX00?: boolean;
@@ -407,6 +415,44 @@ function buildCoverageCases(
   return out;
 }
 
+/** ARV-436: emit one BuiltCase per randomly-drawn fuzz body. Rides as
+ *  `kind: "positive"` so the response-phase checks that judge a normal
+ *  request (not_a_server_error, response_schema_conformance,
+ *  status_code_conformance, content_type_conformance, …) evaluate it —
+ *  a fuzz body's validity is unknown, so the acceptance/rejection pair
+ *  is *expected* to be noisy and is left to agent triage (litmus: no
+ *  in-tool anti-FP gate). `meta.phase: "fuzz"` tags the case so it's
+ *  excluded from the positive-baseline health ratio and identifiable in
+ *  reports. GET/DELETE (no request body) emit no fuzz cases. */
+function buildFuzzCases(
+  op: EndpointInfo,
+  baseUrl: string,
+  opts: { seed?: number; numRuns?: number; pathVars?: Record<string, string> },
+): BuiltCase[] {
+  if (!op.requestBodySchema) return [];
+  const m = op.method.toUpperCase();
+  if (m === "GET" || m === "DELETE") return [];
+  const cases = enumerateFuzzCases(op.requestBodySchema, { seed: opts.seed, numRuns: opts.numRuns });
+  const url = `${baseUrl.replace(/\/+$/, "")}${fillPathParams(op.path, op, opts.pathVars)}`;
+  const headers = buildBaseHeaders(op, { withRequired: true });
+  const out: BuiltCase[] = [];
+  for (let i = 0; i < cases.length; i++) {
+    const body = JSON.stringify(cases[i]!.body);
+    const req: HttpRequest = { method: m, url, headers, body };
+    out.push({
+      req,
+      case: {
+        operation: op,
+        request: { method: req.method, url: req.url, headers: req.headers, body: req.body },
+        mode: "positive",
+        kind: "positive",
+        meta: { phase: "fuzz", fuzz_index: i },
+      },
+    });
+  }
+  return out;
+}
+
 /** ARV-180: build a URL whose path/query parameters reflect a coverage
  *  mutation. The positive baseline fills every param with a valid
  *  shape; this helper takes that baseline and swaps the named param
@@ -640,6 +686,78 @@ function recordFinding(
   if (onEvent) onEvent({ type: "finding", ts: nowIso(), check: check.id, finding });
 }
 
+/** Minimal single-quote curl for a fuzz counterexample. The reader
+ *  re-sends the exact minimal body that tripped the check. Auth stays as
+ *  a placeholder — same policy as `exporter/curl.ts`. */
+function fuzzCurl(method: string, url: string, body: string): string {
+  const parts = ["curl", "-X", method, "-H", "'Content-Type: application/json'"];
+  parts.push("-H", "'Authorization: Bearer <REDACTED — replace with your token>'");
+  parts.push("-d", `'${body.replace(/'/g, `'\\''`)}'`, `'${url}'`);
+  return parts.join(" ");
+}
+
+/** ARV-436: shrink a failing fuzz case to its minimal counterexample and
+ *  return evidence (minimal body + curl) to merge into the finding. Re-runs
+ *  the *same* check as the shrink predicate so the minimal body still trips
+ *  it. Returns null if the failure didn't reproduce within the shrink budget.
+ *  ponytail: shrink sends are gated by the rate-limiter but kept off the
+ *  --max-requests budget — it's a bounded, targeted diagnostic (≤20 sends),
+ *  and threading a shared budget into fast-check's predicate would corrupt
+ *  its shrink walk. Cap it here if a spec ever makes it dominate wall-clock. */
+async function tryShrinkFuzz(
+  op: EndpointInfo,
+  built: BuiltCase,
+  check: Check,
+  runtimeOptions: CheckRuntimeOptions,
+  schemaValidator: SchemaValidator,
+  doc: OpenAPIV3.Document,
+  opts: RunChecksOptions,
+): Promise<Record<string, unknown> | null> {
+  if (!op.requestBodySchema) return null;
+  const method = built.req.method;
+  const url = built.req.url;
+  const headers = built.req.headers;
+  const send = async (body: unknown): Promise<HttpResponse> => {
+    if (opts.rateLimiter) await opts.rateLimiter.acquire();
+    return executeWithResetRetry({ method, url, headers, body: JSON.stringify(body) }, opts.timeoutMs ?? 30000);
+  };
+  const stillFails = (resp: HttpResponse): boolean => {
+    const checkCase: CheckCase = {
+      operation: op,
+      request: { method, url, headers, body: undefined },
+      mode: "positive",
+      kind: "positive",
+      meta: { phase: "fuzz" },
+    };
+    const outcome = check.run({
+      case: checkCase,
+      response: { status: resp.status, headers: resp.headers, body: resp.body_parsed ?? resp.body, duration_ms: resp.duration_ms },
+      schemaValidator,
+      doc,
+      options: runtimeOptions,
+    });
+    return outcome.kind === "fail";
+  };
+  let shrunk: Awaited<ReturnType<typeof shrinkFuzzFailure<HttpResponse>>>;
+  try {
+    shrunk = await shrinkFuzzFailure<HttpResponse>({
+      schema: op.requestBodySchema,
+      seed: opts.fuzzSeed,
+      numRuns: Math.min(20, opts.fuzzRuns ?? 20),
+      send,
+      stillFails,
+    });
+  } catch {
+    return null; // network flake during shrink — evidence just lacks the minimal case
+  }
+  if (!shrunk) return null;
+  const minimalBody = JSON.stringify(shrunk.body);
+  return {
+    minimal_case: { method, url, body: shrunk.body, status: shrunk.response.status },
+    curl: fuzzCurl(method, url, minimalBody),
+  };
+}
+
 export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult> {
   const doc = await readOpenApiSpec(opts.specPath);
   const allOps = extractEndpoints(doc);
@@ -706,6 +824,7 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
   const phase = opts.phase ?? "examples";
   const wantsExamples = phase === "examples" || phase === "all";
   const wantsCoverage = phase === "coverage" || phase === "all";
+  const wantsFuzz = phase === "fuzz" || phase === "all";
 
   /** Per-op result — workers push these and the main thread merges them
    *  in input order so `findings[]` and `summary.cases` don't depend on
@@ -740,6 +859,8 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
     // check regardless of how many case kinds we generate against it).
     const localApplicable = new Set<string>();
     const localCasesByCheck: Record<string, number> = {};
+    // ARV-436: check ids whose fuzz failure was already shrunk this op.
+    const shrunkChecks = new Set<string>();
     if (opts.onEvent) {
       opts.onEvent({
         type: "check_start",
@@ -772,6 +893,9 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           cases.push(b);
         }
       }
+    }
+    if (wantsFuzz && neededKinds.has("positive")) {
+      cases.push(...buildFuzzCases(op, opts.baseUrl, { seed: opts.fuzzSeed, numRuns: opts.fuzzRuns, pathVars: opts.pathVars }));
     }
     if (unsupportedMethodOwner.get(op.path) === op) {
       const declared = buckets.get(op.path)?.declared ?? new Set([op.method.toUpperCase()]);
@@ -868,7 +992,10 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
       // ARV-307: tally the positive-probe baseline. Only the positive case
       // kind is "expected to succeed" — negative/boundary cases legitimately
       // 4xx, so they must not count toward the broken-baseline ratio.
-      if (built.case.kind === "positive") {
+      // ARV-436: fuzz bodies also ride as `positive` kind but have UNKNOWN
+      // validity — a random 4xx is expected, so excluding them keeps the
+      // baseline guard from suppressing real findings on a fuzz-heavy run.
+      if (built.case.kind === "positive" && built.case.meta?.phase !== "fuzz") {
         localPositiveTotal += 1;
         if (httpResp.status >= 200 && httpResp.status < 300) localPositiveTwoxx += 1;
       }
@@ -930,7 +1057,16 @@ export async function runChecks(opts: RunChecksOptions): Promise<RunChecksResult
           options: checkRuntimeOptions,
         });
         if (outcome.kind === "fail") {
-          recordFinding(localFindings, check, built.case, httpResp, outcome.message, outcome.evidence, opts.onEvent, outcome.severity, opts.fixtureGaps);
+          // ARV-436: shrink a fuzz failure to its minimal counterexample.
+          // Once per (op, check) — the first failing body is enough; later
+          // bodies for the same check add cost without new signal.
+          let evidence = outcome.evidence;
+          if (built.case.meta?.phase === "fuzz" && !shrunkChecks.has(check.id)) {
+            shrunkChecks.add(check.id);
+            const shrunk = await tryShrinkFuzz(op, built, check, checkRuntimeOptions, schemaValidator, doc, opts);
+            if (shrunk) evidence = { ...(evidence ?? {}), ...shrunk };
+          }
+          recordFinding(localFindings, check, built.case, httpResp, outcome.message, evidence, opts.onEvent, outcome.severity, opts.fixtureGaps);
         }
         if (outcome.kind === "skip") {
           // ARV-26: bucket skips by check+reason so the summary can surface

@@ -116,6 +116,9 @@ interface ChecksRunOptions {
   report?: string;
   output?: string;
   phase?: string;
+  /** ARV-436: fuzz phase — PRNG seed + per-op body count. */
+  seed?: number;
+  maxExamples?: number;
   allowX00?: boolean;
   mode?: string;
   include?: string[];
@@ -491,13 +494,13 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
   const fixtureGaps = await deriveFixtureGapsFromApi(apiName, opts.db);
 
   const phaseRaw = typeof opts.phase === "string" ? opts.phase : "examples";
-  if (phaseRaw !== "examples" && phaseRaw !== "coverage" && phaseRaw !== "all") {
+  if (phaseRaw !== "examples" && phaseRaw !== "coverage" && phaseRaw !== "fuzz" && phaseRaw !== "all") {
     // ARV-211: redirect users typing --phase stateful (a common skill drift)
     // to the canonical alias `--check stateful`.
     const hint = phaseRaw === "stateful"
       ? " — stateful checks are a separate family; run them with `--check stateful` (or list individual ids)"
       : "";
-    const msg = `Unknown --phase: "${phaseRaw}". Available: examples, coverage, all${hint}`;
+    const msg = `Unknown --phase: "${phaseRaw}". Available: examples, coverage, fuzz, all${hint}`;
     if (json) printJson(jsonError("checks run", [msg]));
     else printError(msg);
     process.exit(2);
@@ -735,7 +738,9 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
       fixtureGaps,
       resourceConfigs,
       bootstrapCleanupFailed: opts.bootstrapCleanupFailed === true,
-      phase: phaseRaw as "examples" | "coverage" | "all",
+      phase: phaseRaw as "examples" | "coverage" | "fuzz" | "all",
+      fuzzSeed: typeof opts.seed === "number" ? opts.seed : undefined,
+      fuzzRuns: typeof opts.maxExamples === "number" ? opts.maxExamples : undefined,
       allowX00: opts.allowX00 === true,
       strict405: opts.strict405 === true,
       strict401: opts.strict401 === true,
@@ -974,10 +979,8 @@ function defineList(parent: Command): void {
     .action(checksListAction);
 }
 
-function defineRun(parent: Command): void {
-  parent
-    .command("run")
-    .description("Run active checks against a live API and emit findings")
+function applyRunOptions(cmd: Command, phaseDefault: string): Command {
+  return cmd
     .option("--api <name>", "Use the registered API's spec + .env.yaml")
     .option("--spec <path>", "Explicit OpenAPI spec path (overrides --api)")
     .option("--base-url <url>", "Base URL for requests (overrides --api env file)")
@@ -1003,8 +1006,18 @@ function defineRun(parent: Command): void {
     )
     .option(
       "--phase <phase>",
-      "ARV-6: which case-generation phase to run. examples (default — one positive + single-site negative mutation), coverage (deterministic boundary-value enumeration), all (both).",
-      "examples",
+      "ARV-6/ARV-436: which case-generation phase to run. examples (default — one positive + single-site negative mutation), coverage (deterministic boundary-value enumeration), fuzz (seeded property-based random bodies via fast-check; 5xx / schema-violations fall out as evidence with a minimal shrunk counterexample), all.",
+      phaseDefault,
+    )
+    .option(
+      "--seed <n>",
+      "ARV-436: PRNG seed for the fuzz phase. Same seed ⇒ same cases ⇒ same evidence (reproducible). Default 0.",
+      (v) => Number.parseInt(v, 10),
+    )
+    .option(
+      "--max-examples <n>",
+      "ARV-436: number of random bodies the fuzz phase draws per operation. Default 20.",
+      (v) => Number.parseInt(v, 10),
     )
     .option(
       "--allow-x00",
@@ -1075,8 +1088,14 @@ function defineRun(parent: Command): void {
       "ARV-308: alias for --no-fail-on-findings.",
     )
     .option("--safe", SAFE_HELP)
-    .option("--live", LIVE_HELP)
-    .action(checksRunAction);
+    .option("--live", LIVE_HELP);
+}
+
+function defineRun(parent: Command): void {
+  applyRunOptions(
+    parent.command("run").description("Run active checks against a live API and emit findings"),
+    "examples",
+  ).action(checksRunAction);
 }
 
 export function registerChecks(program: Command): void {
@@ -1085,4 +1104,16 @@ export function registerChecks(program: Command): void {
     .description("Run schemathesis-style conformance/security checks against an API");
   defineList(cmd);
   defineRun(cmd);
+}
+
+/** ARV-436: `zond fuzz` — thin alias over `checks run --phase fuzz`. Same
+ *  action, same options; only the --phase default flips to `fuzz`. The
+ *  fuzz *phase* is the engine; this is just a discoverable front door. */
+export function registerFuzz(program: Command): void {
+  applyRunOptions(
+    program
+      .command("fuzz")
+      .description("Property-based fuzz (alias for `checks run --phase fuzz`): seeded random bodies per operation; 5xx / schema-violations surface as evidence with a minimal shrunk counterexample"),
+    "fuzz",
+  ).action(checksRunAction);
 }
