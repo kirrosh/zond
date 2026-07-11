@@ -33,6 +33,12 @@ describe("generateFromSchema", () => {
     expect(result).toBe("{{$uuid}}");
   });
 
+  test("ARV-430: currency fields emit the account_currency fixture, not a USD literal", () => {
+    for (const name of ["currency", "currencyCode", "payout_currency", "settlement_currency_code"]) {
+      expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, name)).toBe("{{account_currency}}");
+    }
+  });
+
   test("integer returns randomInt", () => {
     const result = generateFromSchema({ type: "integer" } as OpenAPIV3.SchemaObject);
     expect(result).toBe("{{$randomInt}}");
@@ -484,14 +490,14 @@ describe("ARV-165 — format-aware helpers (country/currency/mcc/color)", () => 
     expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "background_color")).toBe("{{$randomColorHex}}");
     expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "brand_color")).toBe("{{$randomColorHex}}");
   });
-  test("name endsWith _country / _currency uses literal", () => {
+  test("name endsWith _country uses literal; _currency → account_currency fixture (ARV-430)", () => {
     expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "bank_account_country")).toBe("US");
-    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "payout_currency")).toBe("USD");
+    expect(generateFromSchema({ type: "string" } as OpenAPIV3.SchemaObject, "payout_currency")).toBe("{{account_currency}}");
   });
   test("camelCase names canonicalise into snake_case heuristics", () => {
     const s = { type: "string" } as OpenAPIV3.SchemaObject;
     expect(generateFromSchema(s, "countryCode")).toBe("US");
-    expect(generateFromSchema(s, "currencyCode")).toBe("USD");
+    expect(generateFromSchema(s, "currencyCode")).toBe("{{account_currency}}");
     expect(generateFromSchema(s, "firstName")).toBe("{{$randomName}}");
     expect(generateFromSchema(s, "userEmail")).toBe("{{$randomEmail}}");
     expect(generateFromSchema(s, "replyTo")).toBe("{{$randomEmail}}");

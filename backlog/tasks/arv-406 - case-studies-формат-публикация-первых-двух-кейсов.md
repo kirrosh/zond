@@ -1,10 +1,10 @@
 ---
 id: ARV-406
 title: 'case studies: формат + публикация первых двух кейсов'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-10 07:28'
-updated_date: '2026-07-11 07:45'
+updated_date: '2026-07-11 08:41'
 labels:
   - m-28
 dependencies:
@@ -21,7 +21,7 @@ priority: medium
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Формат кейса зафиксирован (шаблон)
-- [ ] #2 ≥2 кейса опубликованы, tagline дословно, ссылки из README
+- [x] #2 ≥2 кейса опубликованы, tagline дословно, ссылки из README
 <!-- AC:END -->
 
 ## Implementation Notes

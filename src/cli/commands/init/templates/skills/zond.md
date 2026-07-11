@@ -336,16 +336,18 @@ non-standard lifecycle field names, write-only fields in create body).
 biggest win — the create-body overlay it produces lets stateful checks
 POST valid resources instead of 400-ing on schema-derived random bodies.
 
-**Money bodies on a non-USD account (ARV-430).** The generator defaults
-money fields to `currency: USD`. On an account denominated in another
-currency (check `GET /v1/account`.`default_currency` on Stripe, or the
-equivalent), a USD line item is rejected for currency-conflict — and the
-parent resource can silently stay at `amount_due: 0`, so a "create → finalize"
-chain jumps straight to a paid/settled terminal state and the whole
+**Money bodies on a non-USD account (ARV-430).** The generator now emits
+`{{account_currency}}` for every currency field and registers it in
+`.api-fixtures.yaml` (`source: body-value`) with a `usd` default seeded into
+`.env.yaml`. On an account denominated in another currency, that default
+`usd` line item is still rejected for currency-conflict — and the parent
+resource can silently stay at `amount_due: 0`, so a "create → finalize" chain
+jumps straight to a paid/settled terminal state and the whole
 `open → pay/void` lifecycle becomes unreachable while still reporting green.
-Before authoring money seed_bodies, read the account's default currency and
-set it in your create bodies (or a `{{currency}}` fixture you fill once). A
-$0 resource that finalizes instantly is the tell.
+Fix it in ONE place: read the account's default currency
+(`GET /v1/account`.`default_currency` on Stripe, or the equivalent) and set
+`account_currency:` in `.env.yaml` — every generated money body picks it up.
+A $0 resource that finalizes instantly is the tell.
 
 ### Agent-in-the-loop annotate (dump → write → apply, ARV-187 / 277 / 278-282)
 

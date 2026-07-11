@@ -434,10 +434,21 @@ export async function generateCommand(options: GenerateOptions): Promise<number>
       for (const suite of suites) {
         for (const v of findUnresolvedVars(suite)) unresolvedVars.add(v);
       }
+      // ARV-430: honor manifest defaultValue when seeding placeholders, so
+      // vars that ship a sensible default (e.g. account_currency → "usd")
+      // resolve out-of-the-box instead of "" (which 400s money bodies).
+      const manifestDefaults = new Map<string, string>();
+      try {
+        const mf = Bun.YAML.parse(await Bun.file(join(envTargetDir, ".api-fixtures.yaml")).text());
+        for (const f of (mf as { fixtures?: { name: string; defaultValue?: string }[] })?.fixtures ?? []) {
+          if (f.defaultValue) manifestDefaults.set(f.name, f.defaultValue);
+        }
+      } catch { /* no manifest — fall back to blank placeholders */ }
       const lines: string[] = [];
       if (baseUrl) lines.push(`base_url: ${baseUrl}`);
       for (const v of [...unresolvedVars].sort()) {
-        lines.push(`${v}: "" # TODO: fill in`);
+        const def = manifestDefaults.get(v);
+        lines.push(def ? `${v}: ${JSON.stringify(def)}` : `${v}: "" # TODO: fill in`);
       }
       if (lines.length > 0) {
         await mkdir(envTargetDir, { recursive: true });

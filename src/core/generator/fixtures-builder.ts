@@ -16,14 +16,14 @@ import type { EndpointInfo, SecuritySchemeInfo } from "./types.ts";
 import type { OpenAPIV3 } from "openapi-types";
 import { schemeVarName, resourceVar, computeAmbiguousPathParams, fixtureVarNameForPathParam, owningCollectionForPathParam } from "./suite-generator.ts";
 import type { ApiResourceMap } from "./resources-builder.ts";
-import { canonicalVarName, isFkFixtureField, effectiveObjectShape } from "./data-factory.ts";
+import { canonicalVarName, isFkFixtureField, effectiveObjectShape, isCurrencyFieldName, ACCOUNT_CURRENCY_VAR } from "./data-factory.ts";
 
 // canonicalVarName now lives in data-factory (leaf module, shared with the
 // suite generator). Re-exported here for back-compat: create-body.ts and
 // existing callers still import it from fixtures-builder.
 export { canonicalVarName };
 
-export type FixtureSource = "auth" | "server" | "path" | "header" | "body-fk" | "capture-chain";
+export type FixtureSource = "auth" | "server" | "path" | "header" | "body-fk" | "body-value" | "capture-chain";
 
 export interface FixtureRequirement {
   /** Variable name as referenced via {{var}} in tests. */
@@ -238,6 +238,32 @@ export function buildApiFixtureManifest(params: BuildFixturesParams): ApiFixture
     }
   }
 
+  // 5b. Account currency — ARV-430. Money-body generators emit
+  //     `{{account_currency}}` for any currency field; register it once with
+  //     a `usd` default so it resolves out-of-the-box, and so the agent knows
+  //     to override it from the account's real default currency (Stripe:
+  //     `GET /v1/account.default_currency`). A literal `usd` on a non-usd
+  //     account 400s every money create and masks the whole invoice lifecycle.
+  for (const ep of params.endpoints) {
+    const method = ep.method.toUpperCase();
+    if (method !== "POST" && method !== "PUT" && method !== "PATCH") continue;
+    const schema = ep.requestBodySchema as OpenAPIV3.SchemaObject | undefined;
+    if (!schema) continue;
+    const { properties } = effectiveObjectShape(schema);
+    const hit = Object.keys(properties).find((f) => isCurrencyFieldName(canonicalVarName(f)));
+    if (!hit) continue;
+    const existing = fixtures.get(ACCOUNT_CURRENCY_VAR);
+    if (existing) { pushAffected(existing, ep); continue; }
+    fixtures.set(ACCOUNT_CURRENCY_VAR, {
+      name: ACCOUNT_CURRENCY_VAR,
+      source: "body-value",
+      description: `Account default currency (ISO 4217, lowercase) used for money bodies. Defaults to "usd"; override from your account's real default (e.g. Stripe: GET /v1/account.default_currency) — a mismatched currency 400s every money create.`,
+      affectedEndpoints: [epLabel(ep)],
+      required: false,
+      defaultValue: "usd",
+    });
+  }
+
   // 6. CRUD-chain capture vars — the generator emits `capture: <idParam>`
   //    in POST steps and references {{<idParam>}} downstream. These are
   //    auto-captured at runtime; surfacing them in the manifest keeps the
@@ -279,7 +305,8 @@ export function buildApiFixtureManifest(params: BuildFixturesParams): ApiFixture
       header: 2,
       path: 3,
       "body-fk": 4,
-      "capture-chain": 5,
+      "body-value": 5,
+      "capture-chain": 6,
     };
     if (sourceOrder[a.source] !== sourceOrder[b.source]) {
       return sourceOrder[a.source] - sourceOrder[b.source];
