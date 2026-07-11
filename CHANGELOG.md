@@ -4,6 +4,72 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-07-11
+
+m-28 corpus-driven launch: every fix below came out of four live audits of
+public APIs (GitHub, Vercel, Stripe, Sentry) — evidence-first, no speculative
+checks.
+
+### Added
+- **`zond fuzz` (ARV-436):** property-based fuzz phase in the checks pipeline
+  over fast-check — seeded (deterministic reruns), random bodies per op judged
+  by the existing 12 response checks; on failure the body auto-shrinks to a
+  minimal counterexample in `evidence.minimal_case` + curl repro. Thin alias
+  over `checks run --phase fuzz`; shrink walk survives per-send network flakes.
+- **`seed_body.setup` (ARV-434):** ordered post-create readiness steps for
+  lifecycle tests ("create invoiceitem before finalizing the invoice") — agent
+  authors bodies+order, zond runs them with `{{id}}` bound to the created
+  resource; a non-2xx setup step skips the lifecycle test with the concrete
+  step+status instead of reporting a fake finding.
+- **Currency-aware money bodies (ARV-430):** generator emits
+  `{{account_currency}}` (manifest source: body-value, `usd` default) so
+  non-USD sandboxes stop 400-ing every money create; `.env` scaffold now seeds
+  any manifest `defaultValue` (was always blank).
+
+### Safety (live-mode hardening from the Vercel run)
+- **Unsafe smoke suites disarmed by default (ARV-412):** every destructive
+  step in `smoke-*-unsafe` gets `skip_if "{{zond_allow_unsafe}} != 1"` — a
+  naive `zond run` can no longer DELETE/PATCH pre-existing resources bound to
+  raw `.env` fixtures. `/zond-scan` live runs with `--exclude-tag unsafe`
+  (ARV-413).
+- **Self-cleanup parity (ARV-415, ARV-429):** checks coverage phase
+  best-effort DELETEs resources its own 2xx POSTs created; mass-assignment
+  probe cleanup returns an audit record (id + deletePath + status).
+- **`always:true` cleanup gated on capture provenance (ARV-428):** never fires
+  against a stale env id the create step did not capture this run.
+- **`--safe` marks write steps as skipped with a reason (ARV-427)** instead of
+  deleting them from the plan silently.
+
+### Fixed
+- **lifecycle_transitions (ARV-433):** an overlay with actions but an empty
+  transitions graph no longer flags every legitimate action as
+  `forbidden_transition`; transition-drift repro (declared→open, observed→paid)
+  locked in with a test.
+- **Fail-fast on unresolved request vars (ARV-414):** kills the multi-minute
+  retry_until spin on never-created resources; `--strict-vars` abort still
+  writes the `--output` artifact.
+- **Coverage accounting (ARV-409, ARV-426):** `--union` no longer aborts a
+  checks-only session (audit HTTP touches count as `run_kind='check'`);
+  RowBucket carries `passStatus` so covered2xx stops contradicting
+  chronological lastStatus.
+- **cross_call_references (ARV-416):** empty/non-object 2xx readback skips
+  (broken-baseline guard) instead of reporting maximal drift.
+- **fixtures add --validate (ARV-417, ARV-423, ARV-424):** derives auth via
+  liveAuthHeaders; resolves the readback endpoint via the manifest's
+  affectedEndpoints (namespaced vars validate again); each path-var resolves
+  from its own env var, so an empty sibling is reported, not misattributed.
+- **Misc:** shared soft-delete detection in verify+validate (ARV-418);
+  `checks run --report json --output` writes the file (ARV-419); `add api`
+  merges an existing `.env.yaml` + `.bak` instead of clobbering (ARV-422);
+  form/query numeric coercion (ARV-431); `db run --json` includes bodies
+  (ARV-432).
+
+### Docs
+- Case studies: GitHub (safe), Vercel (live), Stripe money-lifecycle deep-dive
+  (`docs/case-studies/`), linked from README.
+- Head-to-head: zond vs Schemathesis on live Stripe, honest gap-list both ways
+  (ARV-407).
+
 ## [0.27.1] — 2026-07-09
 
 m-27 Bucket E (agentic discoverability): metadata release — no engine changes.
