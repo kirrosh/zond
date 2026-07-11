@@ -478,7 +478,7 @@ function applyResourcePatches(
 
 export interface FixtureManifestEntry {
   name: string;
-  source: "auth" | "server" | "path" | "header" | "body-fk" | "capture-chain";
+  source: "auth" | "server" | "path" | "header" | "body-fk" | "body-value" | "capture-chain";
   required: boolean;
   description?: string;
   defaultValue?: string;

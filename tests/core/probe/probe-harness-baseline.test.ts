@@ -57,9 +57,11 @@ describe("ARV-164: buildBaselineFromSpec inherits format-aware cascade", () => {
         currency: { type: "string" } as OpenAPIV3.SchemaObject,
       },
     });
-    const baseline = buildBaselineFromSpec(ep, vars)!;
+    // ARV-430: currency resolves to the account_currency fixture (seeded to
+    // "usd" by the manifest default) rather than a hardcoded USD literal.
+    const baseline = buildBaselineFromSpec(ep, { ...vars, account_currency: "usd" })!;
     expect(baseline.country).toBe("US");
-    expect(baseline.currency).toBe("USD");
+    expect(baseline.currency).toBe("usd");
   });
 
   test("mcc field → 4-digit numeric baseline", () => {
