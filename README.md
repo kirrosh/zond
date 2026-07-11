@@ -113,6 +113,7 @@ Real public-API audits, calibrated findings only — including what was *not* fo
 - [GitHub REST API](docs/case-studies/github-rest-api.md) — ~50% of read endpoints return status codes the official spec never declares; 2 live schema violations. Read-only, ~3.5 min.
 - [Vercel API](docs/case-studies/vercel-api.md) — a live intermittent 500, ~150 undeclared status codes, ~45 create endpoints stricter than their spec — with zero requests sent to account-delete/billing endpoints. Live, no sandbox.
 - [Stripe money lifecycle](docs/case-studies/stripe-lifecycle.md) — drove the full invoice/quote state machine live (`draft→finalize→pay/void`, 15/15 green); the trap that nearly hid the whole lifecycle was a `usd`-default body on a EUR account, not a Stripe bug. Live, test-mode.
+- [zond vs Schemathesis](docs/case-studies/zond-vs-schemathesis.md) — same 112 live Stripe endpoints through both tools: they agree on the one hard result (zero 5xx) and drown in the same noise; the gaps are honest in both directions (Schemathesis has the fuzzing engine, zond has 7 extra checks + severity calibration). Live, test-mode.
 
 ## Key Capabilities
 
