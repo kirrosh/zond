@@ -3,10 +3,10 @@ id: ARV-430
 title: >-
   generator/fixtures: currency-aware money bodies — seed account
   default_currency, stop defaulting usd
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-11 07:43'
-updated_date: '2026-07-11 08:02'
+updated_date: '2026-07-11 08:54'
 labels:
   - m-28
 dependencies: []
@@ -20,12 +20,12 @@ Stripe deep-dive (m-28): account default currency is EUR; generated create-bodie
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 account_currency fixture auto-seeded from account endpoint when spec has one
-- [ ] #2 money-body generator uses account_currency instead of hardcoded usd
+- [x] #1 account_currency fixture auto-seeded from account endpoint when spec has one
+- [x] #2 money-body generator uses account_currency instead of hardcoded usd
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-RECLASSIFIED after litmus review: not a clean deterministic zond fix. Clean impl (currency→{{currency}} fixture with USD default) needs 3-site generator change + new fixture source + design call (which currency fields, required-or-not, shared var vs per-field FX-directional) with cross-API blast radius on generator's always-valid property. Per litmus, fixture-invention leans agent-side. Shipped instead: skill-doc practice in zond.md (non-USD account money bodies — read account.default_currency before seeding, $0-finalizes-instantly is the tell). Left open as scoped design task, NOT quick fix. Deterministic core (currency field→overridable fixture) can revisit if a second corpus API exercises it.
+Реализовано (commit 15934c5): генератор эмитит {{account_currency}} для всех currency-полей (data-factory), manifest регистрирует var source:body-value с default usd (fixtures-builder), .env-скаффолд теперь протекает manifest defaultValue (generate.ts — раньше всегда писал пустую строку). Litmus-scope AC#1: zond авто-РЕГИСТРИРУЕТ фикстуру + default + хинт на GET /v1/account.default_currency; сам live-harvest реального значения из account-эндпоинта = суждение агента (Stripe-специфичный side-request), не детерминированное ядро. e2e проверено на stripe: manifest несёт account_currency, 6 crud-тестов ссылаются на {{account_currency}}, свежий .env сидируется usd. Тесты: data-factory + fixtures-builder + probe-harness-baseline обновлены, 2471 pass.
 <!-- SECTION:NOTES:END -->

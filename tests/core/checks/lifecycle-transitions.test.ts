@@ -220,6 +220,60 @@ describe("lifecycle_transitions — stateful check", () => {
     if (out.kind === "fail") expect(out.evidence?.kind).toContain("forbidden_transition");
   });
 
+  test("ARV-433: flags finalize→paid drift when overlay declares finalize→open (Stripe deep-dive repro)", async () => {
+    // Invoice-style state machine: draft --finalize--> open --pay--> paid.
+    // The bug (masked by the ARV-430 currency default) landed a $0 invoice
+    // straight in `paid` on finalize. The check must flag BOTH the graph
+    // violation (draft→paid ∉ transitions) and the per-action expectation
+    // miss (finalize expected `open`, observed `paid`).
+    const INVOICE_LIFECYCLE: LifecycleConfig = {
+      field: "status",
+      states: ["draft", "open", "paid", "void"],
+      transitions: [
+        { from: "draft", to: ["open"] },
+        { from: "open", to: ["paid", "void"] },
+        { from: "paid", to: [] },
+        { from: "void", to: [] },
+      ],
+      actions: {
+        finalize: { endpoint: "POST /subs/{sub_id}/finalize", expectedState: "open" },
+      },
+    };
+    const cfg = new Map([["subscription", { lifecycle: INVOICE_LIFECYCLE }]]);
+    const h = stubHarness([
+      r2xx({ id: "sub_1", status: "draft" }),   // create → draft
+      r2xx({ status: "paid" }),                  // finalize accepted
+      r2xx({ id: "sub_1", status: "paid" }),    // observed → paid (draft→paid forbidden, expected open)
+      r2xx({ status: "paid" }),                  // replay accepted
+      r2xx({ id: "sub_1", status: "paid" }),    // stays paid
+    ], cfg);
+    const out = await lifecycleTransitions.run(makeGroup(), h);
+    expect(out.kind).toBe("fail");
+    if (out.kind === "fail") {
+      expect(out.evidence?.kind).toContain("forbidden_transition");
+      expect(out.evidence?.kind).toContain("wrong_expected_state");
+    }
+  });
+
+  test("ARV-433: empty transitions graph does not false-flag legitimate actions as forbidden", async () => {
+    // Overlay declares states + actions but no transition graph. A correct
+    // cancel (active→cancelled) must NOT raise forbidden_transition — the
+    // graph is silent, so there is nothing to violate. wrong_expected_state
+    // still guards per-action drift.
+    const cfg = new Map([["subscription", {
+      lifecycle: { ...SUBSCRIPTION_LIFECYCLE, transitions: [] },
+    }]]);
+    const h = stubHarness([
+      r2xx({ id: "sub_1", status: "active" }),
+      r2xx({ status: "cancelled" }),               // cancel accepted
+      r2xx({ id: "sub_1", status: "cancelled" }),  // observed cancelled (== expected)
+      r2xx({ status: "cancelled" }),
+      r2xx({ id: "sub_1", status: "cancelled" }),
+    ], cfg);
+    const out = await lifecycleTransitions.run(makeGroup(), h);
+    expect(out.kind).toBe("pass");
+  });
+
   test("fails on state regression after replay", async () => {
     const cfg = new Map([["subscription", { lifecycle: SUBSCRIPTION_LIFECYCLE }]]);
     const h = stubHarness([
