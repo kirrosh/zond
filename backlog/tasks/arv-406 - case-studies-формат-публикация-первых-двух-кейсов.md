@@ -4,7 +4,7 @@ title: 'case studies: формат + публикация первых двух 
 status: In Progress
 assignee: []
 created_date: '2026-07-10 07:28'
-updated_date: '2026-07-10 15:04'
+updated_date: '2026-07-11 07:45'
 labels:
   - m-28
 dependencies:
@@ -20,6 +20,12 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Формат кейса зафиксирован (шаблон)
+- [x] #1 Формат кейса зафиксирован (шаблон)
 - [ ] #2 ≥2 кейса опубликованы, tagline дословно, ссылки из README
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Три кейса готовы в docs/case-studies/: github-rest-api.md, vercel-api.md, stripe-lifecycle.md (+ TEMPLATE.md, README-секция Case Studies). Stripe — из deep-dive 2026-07-11: живой money-lifecycle 15/15 (scenarios/invoice-lifecycle.yaml), находка про usd-на-EUR-аккаунте. Deep-dive также дал engine-задачи ARV-430..434 (карта пробелов zond-runs/stripe-run3/gap-map.md). Коммиты 54f7ac7, 1370a9a.
+<!-- SECTION:NOTES:END -->
