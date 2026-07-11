@@ -625,3 +625,37 @@ resources:
 Action endpoints accept the `{id}` placeholder (replaced with the
 captured create-id) or `{<idParam>}`. Body-less actions are the common
 case; provide `body:` only for actions that demand a request payload.
+
+**Ordered post-create readiness (`seed_body.setup`, ARV-434).** Some
+resources aren't testable straight from a single create — a draft invoice
+must have a line item before it can be finalized. Declare ordered `setup`
+POSTs on the resource's `seed_body`; the check runs them after the create and
+before the first action. `{{id}}` resolves to the just-created resource id;
+path-fixtures (`{{customer}}`, `{{account_currency}}`) and prior-step
+`capture`s also resolve. A setup step that returns non-2xx skips the lifecycle
+test with the concrete step + status (the resource isn't ready — not a bug).
+
+```yaml
+resources:
+  - resource: invoice
+    seed_body:
+      body: { customer: "{{customer}}" }        # POST /v1/invoices → draft
+      setup:
+        - endpoint: POST /v1/invoiceitems
+          body: { customer: "{{customer}}", invoice: "{{id}}", amount: 1000, currency: "{{account_currency}}" }
+    lifecycle:
+      field: status
+      states: [draft, open, paid, void]
+      transitions:
+        - { from: draft, to: [open] }
+        - { from: open, to: [paid, void] }
+        - { from: paid, to: [] }
+        - { from: void, to: [] }
+      actions:
+        finalize: { endpoint: "POST /v1/invoices/{id}/finalize", expected_state: open }
+```
+
+You author which bodies and in what order (judgment); zond runs them in order
+and binds the ids (deterministic). "Create B then A referencing B" where B is a
+plain FK parent is already handled by `fkDependencies` + `prepare-fixtures` —
+reach for `setup` only for action-ordered readiness a single create can't express.

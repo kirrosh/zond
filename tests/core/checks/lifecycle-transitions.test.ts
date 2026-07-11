@@ -79,7 +79,7 @@ function rStatus(status: number): HttpResponse {
 interface Call { req: HttpRequest }
 function stubHarness(
   responses: HttpResponse[],
-  configs?: Map<string, { lifecycle?: LifecycleConfig }>,
+  configs?: StatefulHarness["resourceConfigs"],
 ): StatefulHarness & { calls: Call[] } {
   let i = 0;
   const calls: Call[] = [];
@@ -253,6 +253,60 @@ describe("lifecycle_transitions — stateful check", () => {
       expect(out.evidence?.kind).toContain("forbidden_transition");
       expect(out.evidence?.kind).toContain("wrong_expected_state");
     }
+  });
+
+  test("ARV-434: seed_body.setup runs post-create readiness steps before actions (invoice repro)", async () => {
+    // Draft invoice needs an invoiceitem before finalize; setup attaches it.
+    // Then finalize correctly lands `open` and the check passes.
+    const INVOICE_LIFECYCLE: LifecycleConfig = {
+      field: "status",
+      states: ["draft", "open", "paid", "void"],
+      transitions: [
+        { from: "draft", to: ["open"] },
+        { from: "open", to: ["paid", "void"] },
+        { from: "paid", to: [] },
+        { from: "void", to: [] },
+      ],
+      actions: { finalize: { endpoint: "POST /subs/{sub_id}/finalize", expectedState: "open" } },
+    };
+    const cfg = new Map([["subscription", {
+      lifecycle: INVOICE_LIFECYCLE,
+      seedBody: {
+        body: { customer: "cus_1" },
+        setup: [{ endpoint: "POST /invoiceitems", body: { customer: "cus_1", invoice: "{{id}}", amount: 1000 }, capture: "item_id" }],
+      },
+    }]]);
+    const h = stubHarness([
+      r2xx({ id: "sub_1", status: "draft" }),   // create → draft
+      r2xx({ id: "ii_1" }),                      // setup: invoiceitem attached
+      r2xx({ status: "open" }),                  // finalize accepted
+      r2xx({ id: "sub_1", status: "open" }),    // observed → open (correct)
+      r2xx({ status: "open" }),                  // replay
+      r2xx({ id: "sub_1", status: "open" }),
+    ], cfg);
+    const out = await lifecycleTransitions.run(makeGroup(), h);
+    expect(out.kind).toBe("pass");
+    // setup POST landed with {{id}} substituted to the created resource id.
+    const setupCall = h.calls[1]!.req;
+    expect(setupCall.url).toContain("/invoiceitems");
+    expect(setupCall.body).toContain("sub_1");
+  });
+
+  test("ARV-434: failed setup step skips the lifecycle test (not a finding)", async () => {
+    const cfg = new Map([["subscription", {
+      lifecycle: SUBSCRIPTION_LIFECYCLE,
+      seedBody: {
+        body: { plan: "p" },
+        setup: [{ endpoint: "POST /prereq", body: { x: 1 } }],
+      },
+    }]]);
+    const h = stubHarness([
+      r2xx({ id: "sub_1", status: "active" }),   // create ok
+      rStatus(400),                              // setup fails
+    ], cfg);
+    const out = await lifecycleTransitions.run(makeGroup(), h);
+    expect(out.kind).toBe("skip");
+    if (out.kind === "skip") expect(out.reason).toContain("setup step");
   });
 
   test("ARV-433: empty transitions graph does not false-flag legitimate actions as forbidden", async () => {
