@@ -177,6 +177,25 @@ function toYaml(vars: Record<string, string>): string {
   return lines.join("\n");
 }
 
+/** ARV-422: parse RAW `key: value` pairs from a .env.yaml the way `toYaml`
+ *  emits them — no `@secret:` resolution (we're preserving the file's literal
+ *  values, not loading them for use). Comment-only and blank lines are skipped.
+ *  ponytail: values with an inline `#` comment are rare in generated env files;
+ *  if they appear the comment is kept verbatim, which round-trips harmlessly. */
+export function parseEnvValues(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const m = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
+    if (!m) continue;
+    let v = m[2]!.trim();
+    if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) {
+      v = v.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+    }
+    out[m[1]!] = v;
+  }
+  return out;
+}
+
 export interface SetupApiOptions {
   name?: string;
   spec?: string;
@@ -460,10 +479,19 @@ async function finalizeSetup(p: FinalizeSetupParams): Promise<SetupApiResult> {
     throw new Error("setupApi requires --spec or envVars.base_url to register an API");
   }
 
-  // Write .env.yaml in base_dir
+  // Write .env.yaml in base_dir. ARV-422: never clobber a seeded .env.yaml on
+  // re-registration. Existing values (hand-seeded fixture ids, edited base_url,
+  // `@secret:` refs) win; only keys new to the regenerated set get their empty
+  // placeholder. Back up the old file so a mistaken re-register is recoverable.
   if (Object.keys(envVars).length > 0) {
     const envFilePath = join(baseDir, ".env.yaml");
-    writeFileSync(envFilePath, toYaml(envVars) + "\n", "utf-8");
+    let merged = envVars;
+    if (existsSync(envFilePath)) {
+      const prev = readFileSync(envFilePath, "utf-8");
+      writeFileSync(envFilePath + ".bak", prev, "utf-8");
+      merged = { ...envVars, ...parseEnvValues(prev) };
+    }
+    writeFileSync(envFilePath, toYaml(merged) + "\n", "utf-8");
   }
 
   // Create/update .gitignore to exclude env / secret files

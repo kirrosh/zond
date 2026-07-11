@@ -71,6 +71,12 @@ export interface EndpointVerdict {
     attempted: boolean;
     status?: number;
     error?: string;
+    /** ARV-429: which id was deleted and against which endpoint, so a post-run
+     *  audit can tell a benign self-cleanup from a risky one without re-checking
+     *  every touched resource by hand. `id` comes from the baseline POST's own
+     *  response body (a resource this probe created), not a seeded fixture. */
+    id?: string;
+    deletePath?: string;
   };
   /** Reason this endpoint was skipped (only set when severity === "skipped"). */
   skipReason?: string;

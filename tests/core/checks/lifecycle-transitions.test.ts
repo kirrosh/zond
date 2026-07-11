@@ -79,7 +79,7 @@ function rStatus(status: number): HttpResponse {
 interface Call { req: HttpRequest }
 function stubHarness(
   responses: HttpResponse[],
-  configs?: Map<string, { lifecycle?: LifecycleConfig }>,
+  configs?: StatefulHarness["resourceConfigs"],
 ): StatefulHarness & { calls: Call[] } {
   let i = 0;
   const calls: Call[] = [];
@@ -218,6 +218,114 @@ describe("lifecycle_transitions — stateful check", () => {
     const out = await lifecycleTransitions.run(makeGroup(), h);
     expect(out.kind).toBe("fail");
     if (out.kind === "fail") expect(out.evidence?.kind).toContain("forbidden_transition");
+  });
+
+  test("ARV-433: flags finalize→paid drift when overlay declares finalize→open (Stripe deep-dive repro)", async () => {
+    // Invoice-style state machine: draft --finalize--> open --pay--> paid.
+    // The bug (masked by the ARV-430 currency default) landed a $0 invoice
+    // straight in `paid` on finalize. The check must flag BOTH the graph
+    // violation (draft→paid ∉ transitions) and the per-action expectation
+    // miss (finalize expected `open`, observed `paid`).
+    const INVOICE_LIFECYCLE: LifecycleConfig = {
+      field: "status",
+      states: ["draft", "open", "paid", "void"],
+      transitions: [
+        { from: "draft", to: ["open"] },
+        { from: "open", to: ["paid", "void"] },
+        { from: "paid", to: [] },
+        { from: "void", to: [] },
+      ],
+      actions: {
+        finalize: { endpoint: "POST /subs/{sub_id}/finalize", expectedState: "open" },
+      },
+    };
+    const cfg = new Map([["subscription", { lifecycle: INVOICE_LIFECYCLE }]]);
+    const h = stubHarness([
+      r2xx({ id: "sub_1", status: "draft" }),   // create → draft
+      r2xx({ status: "paid" }),                  // finalize accepted
+      r2xx({ id: "sub_1", status: "paid" }),    // observed → paid (draft→paid forbidden, expected open)
+      r2xx({ status: "paid" }),                  // replay accepted
+      r2xx({ id: "sub_1", status: "paid" }),    // stays paid
+    ], cfg);
+    const out = await lifecycleTransitions.run(makeGroup(), h);
+    expect(out.kind).toBe("fail");
+    if (out.kind === "fail") {
+      expect(out.evidence?.kind).toContain("forbidden_transition");
+      expect(out.evidence?.kind).toContain("wrong_expected_state");
+    }
+  });
+
+  test("ARV-434: seed_body.setup runs post-create readiness steps before actions (invoice repro)", async () => {
+    // Draft invoice needs an invoiceitem before finalize; setup attaches it.
+    // Then finalize correctly lands `open` and the check passes.
+    const INVOICE_LIFECYCLE: LifecycleConfig = {
+      field: "status",
+      states: ["draft", "open", "paid", "void"],
+      transitions: [
+        { from: "draft", to: ["open"] },
+        { from: "open", to: ["paid", "void"] },
+        { from: "paid", to: [] },
+        { from: "void", to: [] },
+      ],
+      actions: { finalize: { endpoint: "POST /subs/{sub_id}/finalize", expectedState: "open" } },
+    };
+    const cfg = new Map([["subscription", {
+      lifecycle: INVOICE_LIFECYCLE,
+      seedBody: {
+        body: { customer: "cus_1" },
+        setup: [{ endpoint: "POST /invoiceitems", body: { customer: "cus_1", invoice: "{{id}}", amount: 1000 }, capture: "item_id" }],
+      },
+    }]]);
+    const h = stubHarness([
+      r2xx({ id: "sub_1", status: "draft" }),   // create → draft
+      r2xx({ id: "ii_1" }),                      // setup: invoiceitem attached
+      r2xx({ status: "open" }),                  // finalize accepted
+      r2xx({ id: "sub_1", status: "open" }),    // observed → open (correct)
+      r2xx({ status: "open" }),                  // replay
+      r2xx({ id: "sub_1", status: "open" }),
+    ], cfg);
+    const out = await lifecycleTransitions.run(makeGroup(), h);
+    expect(out.kind).toBe("pass");
+    // setup POST landed with {{id}} substituted to the created resource id.
+    const setupCall = h.calls[1]!.req;
+    expect(setupCall.url).toContain("/invoiceitems");
+    expect(setupCall.body).toContain("sub_1");
+  });
+
+  test("ARV-434: failed setup step skips the lifecycle test (not a finding)", async () => {
+    const cfg = new Map([["subscription", {
+      lifecycle: SUBSCRIPTION_LIFECYCLE,
+      seedBody: {
+        body: { plan: "p" },
+        setup: [{ endpoint: "POST /prereq", body: { x: 1 } }],
+      },
+    }]]);
+    const h = stubHarness([
+      r2xx({ id: "sub_1", status: "active" }),   // create ok
+      rStatus(400),                              // setup fails
+    ], cfg);
+    const out = await lifecycleTransitions.run(makeGroup(), h);
+    expect(out.kind).toBe("skip");
+    if (out.kind === "skip") expect(out.reason).toContain("setup step");
+  });
+
+  test("ARV-433: empty transitions graph does not false-flag legitimate actions as forbidden", async () => {
+    // Overlay declares states + actions but no transition graph. A correct
+    // cancel (active→cancelled) must NOT raise forbidden_transition — the
+    // graph is silent, so there is nothing to violate. wrong_expected_state
+    // still guards per-action drift.
+    const cfg = new Map([["subscription", {
+      lifecycle: { ...SUBSCRIPTION_LIFECYCLE, transitions: [] },
+    }]]);
+    const h = stubHarness([
+      r2xx({ id: "sub_1", status: "active" }),
+      r2xx({ status: "cancelled" }),               // cancel accepted
+      r2xx({ id: "sub_1", status: "cancelled" }),  // observed cancelled (== expected)
+      r2xx({ status: "cancelled" }),
+      r2xx({ id: "sub_1", status: "cancelled" }),
+    ], cfg);
+    const out = await lifecycleTransitions.run(makeGroup(), h);
+    expect(out.kind).toBe("pass");
   });
 
   test("fails on state regression after replay", async () => {

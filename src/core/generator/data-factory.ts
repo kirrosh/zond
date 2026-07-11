@@ -465,7 +465,7 @@ export function classifyFieldSource(
       if (lower === "language" || lower === "lang" || lower === "locale") return "heuristic:locale";
       if (lower === "country" || lower === "country_code" || lower.endsWith("_country") || lower.endsWith("_country_code")) return "heuristic:country";
       if (lower === "timezone" || lower === "time_zone" || lower === "tz") return "heuristic:timezone";
-      if (lower === "currency" || lower === "currency_code" || lower.endsWith("_currency") || lower.endsWith("_currency_code")) return "heuristic:currency";
+      if (isCurrencyFieldName(lower)) return "heuristic:currency";
       if (lower === "mcc" || lower.endsWith("_mcc") || lower === "merchant_category_code") return "heuristic:mcc";
       if (lower === "color" || lower.endsWith("_color") || lower === "background_color" || lower === "hex" || lower.endsWith("_hex_color")) return "heuristic:color";
       if (lower === "ip" || lower === "ip_address" || lower.endsWith("_ip") || lower.endsWith("_ip_address")) return "heuristic:ip";
@@ -510,6 +510,28 @@ export function canonicalVarName(name: string): string {
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
     .replace(/[^a-zA-Z0-9]+/g, "_")
     .toLowerCase();
+}
+
+/**
+ * ARV-430: the fixture var money-body generators reference for currency.
+ * A single per-account currency default lives in `.env.yaml` (seeded to
+ * `usd`); the agent overrides it once from the account's real default
+ * (e.g. Stripe `GET /v1/account.default_currency`). Emitting a literal
+ * `USD` on a EUR account silently 400s every money create → invoice stays
+ * $0 → the whole open→pay→void lifecycle is masked.
+ */
+export const ACCOUNT_CURRENCY_VAR = "account_currency";
+
+/** ARV-430: true when a canonicalised field name denotes a currency code.
+ *  Shared by the value emitter, the --explain classifier, and the manifest
+ *  builder so all three agree on which fields become {{account_currency}}. */
+export function isCurrencyFieldName(lower: string): boolean {
+  return (
+    lower === "currency" ||
+    lower === "currency_code" ||
+    lower.endsWith("_currency") ||
+    lower.endsWith("_currency_code")
+  );
 }
 
 const FK_ID_SUFFIX = /(?:_id|Id|_uuid)$/;
@@ -687,15 +709,18 @@ function guessStringPlaceholder(schema: OpenAPIV3.SchemaObject, name?: string): 
     // Pick the most universally-accepted value per dictionary.
     if (lower === "platform") return "python";
     if (lower === "language" || lower === "lang" || lower === "locale") return "en";
-    // ARV-165: country/currency literals (US/USD) were universally accepted
-    // but offered zero variety — added endsWith() patterns so nested fields
-    // like `bank_account.country`, `payout.currency_code`, `from_country`
-    // also resolve. Still emit a literal — picking from the random helper
-    // would weaken the "always-valid" property for downstream assertions
-    // that pin on the first value.
+    // ARV-165: country literal (US) is universally accepted — endsWith()
+    // patterns cover nested fields like `bank_account.country`, `from_country`.
+    // Still a literal: picking from the random helper would weaken the
+    // "always-valid" property for downstream assertions pinning the first
+    // value. (Currency was likewise a literal until ARV-430 made it a
+    // per-account fixture ref — see below.)
     if (lower === "country" || lower === "country_code" || lower.endsWith("_country") || lower.endsWith("_country_code")) return "US";
     if (lower === "timezone" || lower === "time_zone" || lower === "tz") return "UTC";
-    if (lower === "currency" || lower === "currency_code" || lower.endsWith("_currency") || lower.endsWith("_currency_code")) return "USD";
+    // ARV-430: emit a fixture ref, not a literal — money bodies must use the
+    // account's default currency. Resolves to `usd` via the manifest default
+    // when the fixture is unset, so non-money / usd-account APIs are unchanged.
+    if (isCurrencyFieldName(lower)) return `{{${ACCOUNT_CURRENCY_VAR}}}`;
     // ARV-165: MCC (merchant category code) — Stripe/Square/issuing APIs.
     // Random {{$randomString}} → 400 because it's not a 4-digit code.
     if (lower === "mcc" || lower.endsWith("_mcc") || lower === "merchant_category_code") return "{{$randomMCC}}";

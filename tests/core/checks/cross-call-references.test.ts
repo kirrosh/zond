@@ -206,6 +206,19 @@ describe("crossCallReferences — stateful check", () => {
     expect(out.kind).toBe("skip");
   });
 
+  // ARV-416: a 2xx readback with an empty/truncated body (transient transport
+  // failure that still surfaced a 2xx) must NOT be diffed as "server dropped
+  // every field" — it's absence of evidence, so skip like a broken baseline.
+  test("skips on 2xx readback with empty body (ARV-416 read-side broken-baseline)", async () => {
+    const g = makeGroup(makeEp(), makeReadEp());
+    const h = stubHarness([
+      r2xx({ id: "c_1", name: "Test", email: "x@y.z" }), // create echoes fields
+      { status: 200, headers: {}, body: "", duration_ms: 1 }, // readback empty
+    ]);
+    const out = await crossCallReferences.run(g, h);
+    expect(out.kind).toBe("skip");
+  });
+
   test("skips when bootstrap-cleanup failed", async () => {
     const g = makeGroup(makeEp(), makeReadEp());
     const h: StatefulHarness = {

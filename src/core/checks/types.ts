@@ -26,7 +26,7 @@ import type { Category } from "../severity/category.ts";
 import { emptyCategoryBuckets } from "../severity/category.ts";
 export type { Severity, Category };
 
-export type Phase = "examples" | "coverage" | "all";
+export type Phase = "examples" | "coverage" | "fuzz" | "all";
 
 /** Probe shapes a check may need. ARV-1 shipped only `positive`; ARV-2
  *  adds two more for header/method-rejection checks; ARV-4 will add

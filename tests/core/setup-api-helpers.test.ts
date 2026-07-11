@@ -11,8 +11,37 @@ import { join } from "node:path";
 import {
   resolveCollectionSpec,
   assertLocalSpec,
+  parseEnvValues,
   SPEC_SNAPSHOT_FILENAME,
 } from "../../src/core/setup-api.ts";
+
+// ARV-422: re-registration must preserve a seeded .env.yaml. parseEnvValues
+// reads the RAW values (no @secret: resolution) so `{...defaults, ...existing}`
+// keeps hand-seeded ids and secret refs verbatim.
+describe("setup-api / parseEnvValues (ARV-422)", () => {
+  test("parses quoted and bare values, keeps non-empty", () => {
+    const got = parseEnvValues(`base_url: "https://api.x/"\ncustomer: cus_123\nempty: ""\n`);
+    expect(got.base_url).toBe("https://api.x/");
+    expect(got.customer).toBe("cus_123");
+    expect(got.empty).toBe("");
+  });
+
+  test("preserves @secret: refs literally (no resolution)", () => {
+    expect(parseEnvValues(`auth_token: "@secret:auth_token"\n`).auth_token).toBe("@secret:auth_token");
+  });
+
+  test("merge keeps existing values over regenerated defaults, adds new keys", () => {
+    const defaults = { base_url: "https://api.x/", customer: "", newvar: "" };
+    const existing = parseEnvValues(`base_url: "https://api.x/"\ncustomer: cus_123\n`);
+    const merged = { ...defaults, ...existing };
+    expect(merged.customer).toBe("cus_123"); // seeded value survives
+    expect(merged.newvar).toBe(""); // brand-new spec var gets its placeholder
+  });
+
+  test("skips comment and blank lines", () => {
+    expect(parseEnvValues(`# a comment\n\ncustomer: cus_9\n`)).toEqual({ customer: "cus_9" });
+  });
+});
 
 describe("setup-api / resolveCollectionSpec", () => {
   let workspace: string;

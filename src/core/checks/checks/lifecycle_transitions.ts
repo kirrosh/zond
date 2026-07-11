@@ -56,6 +56,7 @@ import {
   fillPathParams,
   serializeCheckBody,
   resolveCreateBody,
+  runSetupSteps,
 } from "./_crud-helpers.ts";
 
 function safeParse(v: unknown): unknown {
@@ -78,6 +79,14 @@ function parseEndpointLabel(label: string): { method: string; path: string } | n
 function transitionAllowed(cfg: LifecycleConfig, from: string, to: string): boolean {
   // Same-state replay is always OK (idempotent action).
   if (from === to) return true;
+  // ARV-433: an empty graph declares nothing, so no hop can be "forbidden".
+  // Without this, an overlay that lists `actions` but leaves `transitions: []`
+  // (common — annotate populates states+actions before the graph) would flag
+  // every legitimate action as a forbidden transition. When the graph is
+  // absent, `wrong_expected_state` still catches per-action drift; the
+  // forbidden-transition class only fires against a graph that actually
+  // constrains the state machine.
+  if (cfg.transitions.length === 0) return true;
   for (const t of cfg.transitions) {
     if (t.from === from && t.to.includes(to)) return true;
   }
@@ -152,6 +161,18 @@ export const lifecycleTransitions: CrudStatefulCheck = {
     const createBodyParsed = createResp.body_parsed ?? safeParse(createResp.body);
     const id = extractIdFromCreateResponse(createBodyParsed, g.idParam);
     if (id == null) return { kind: "skip", reason: "could not extract id from create response" };
+
+    // ARV-434: run ordered post-create readiness steps (e.g. attach an
+    // invoiceitem to a draft invoice) before firing lifecycle actions. A
+    // failed setup means the resource can't be exercised, not that it's
+    // buggy — skip with the concrete step + status.
+    const setup = seedBody?.setup;
+    if (setup && setup.length > 0) {
+      const setupResult = await runSetupSteps(setup, h, id, contentType);
+      if (!setupResult.ok) {
+        return { kind: "skip", reason: `setup step "${setupResult.failedStep}" returned ${setupResult.status} — resource not ready for lifecycle test` };
+      }
+    }
 
     const findings: Finding[] = [];
 

@@ -1,6 +1,6 @@
 import { resolve, dirname, basename } from "node:path";
 import type { TestSuite, TestStep, Environment, SourceMetadata, AssertionRule } from "../parser/types.ts";
-import { substituteString, substituteStep, substituteDeep, extractVariableReferences } from "../parser/variables.ts";
+import { substituteString, substituteStep, substituteDeep, extractVariableReferences, UNSAFE_ARM_VAR } from "../parser/variables.ts";
 import type { TestRunResult, StepResult, HttpRequest, AssertionResult } from "./types.ts";
 import { executeRequest, type FetchOptions } from "./http-client.ts";
 import type { RateLimiter } from "./rate-limiter.ts";
@@ -87,6 +87,31 @@ function collectChainCaptures(tests: TestStep[]): Set<string> {
   };
   for (const step of tests) visit(step.expect?.body);
   return out;
+}
+
+/** ARV-414: first {{var}} that survived substitution in the resolved request
+ *  (path or query) — i.e. a fixture var with no producer. `$`-generators are
+ *  excluded (they resolve or throw earlier). Returns null when the request is
+ *  fully resolved. */
+function firstUnresolvedRequestVar(path: string, query: unknown): string | null {
+  const scan = (s: string): string | null => {
+    for (const m of s.matchAll(/\{\{([^{}]+)\}\}/g)) {
+      const k = m[1]!.trim();
+      if (!k.startsWith("$")) return k;
+    }
+    return null;
+  };
+  const inPath = scan(path);
+  if (inPath) return inPath;
+  if (query && typeof query === "object") {
+    for (const v of Object.values(query as Record<string, unknown>)) {
+      if (typeof v === "string") {
+        const hit = scan(v);
+        if (hit) return hit;
+      }
+    }
+  }
+  return null;
 }
 
 function emptyVarSkipReason(varName: string, chainCaptures: Set<string>): string {
@@ -247,6 +272,13 @@ export async function runSuite(
   // Captures that were never extracted (response missing the field). Even
   // always-steps can't run if their referenced capture is missing.
   const missingCaptures = new Set<string>();
+  // ARV-428: vars this iteration's steps have ACTUALLY captured. A chain-capture
+  // var (one some step in this suite captures) must resolve from that capture,
+  // not an env/.env.yaml fallback — until it appears here, a downstream
+  // reference is unresolved even for `always: true` cleanup steps. Guards
+  // against a failed/skipped create leaving a stale id in `{{var}}` and an
+  // always:true DELETE firing against the wrong (pre-existing) resource.
+  const capturedThisRun = new Set<string>();
 
   // Expand steps lazily (for_each needs current variables)
   let stepIndex = 0;
@@ -303,6 +335,13 @@ export async function runSuite(
       continue;
     }
 
+    // ARV-427: pre-marked skip (e.g. a write step dropped by --safe). Emit an
+    // explicit skipped result instead of silently vanishing from the report.
+    if (step.skip_reason) {
+      pushStep(makeSkippedResult(interpolateName(step.name, variables), step.skip_reason), step);
+      continue;
+    }
+
     // Skip check: if step references a failed capture, skip — unless
     // step is `always: true` AND the capture is just tainted (still extracted).
     const referencedVars = extractVariableReferences(step);
@@ -338,12 +377,40 @@ export async function runSuite(
       const exprAfterSubst = String(substituteString(step.skip_if, variables));
       if (evaluateExpr(exprAfterSubst)) {
         const varMatch = step.skip_if.match(/\{\{([^{}]+)\}\}/);
-        const skipMsg = varMatch
-          ? emptyVarSkipReason(varMatch[1]!.trim(), chainCaptures)
+        const skipVar = varMatch?.[1]!.trim();
+        const skipMsg = skipVar === UNSAFE_ARM_VAR
+          ? `unsafe destructive op disarmed — set ${UNSAFE_ARM_VAR}=1 in .env.yaml to run (ARV-412)`
+          : skipVar
+          ? emptyVarSkipReason(skipVar, chainCaptures)
           : step.skip_if;
         pushStep(makeSkippedResult(interpolateName(step.name, variables), skipMsg), step);
         continue;
       }
+    }
+
+    // ARV-428: an `always: true` step (cleanup) runs even when upstream failed,
+    // bypassing the missing-capture skip above — so if its chain-capture id was
+    // never produced this run but .env.yaml carries a stale value, the step
+    // would fire against a PRE-EXISTING resource (the Sentry near-miss: an
+    // always:true DELETE targeting the org owner's own membership id). Gate it
+    // on capture-provenance. Scoped to always:true + non-empty: a normal step
+    // keeps reading a legitimately pre-seeded fixture, and an empty var is left
+    // to the existing "chain capture unbound" messaging.
+    const uncaptured = step.always
+      ? referencedVars.find(
+          (v) => chainCaptures.has(v) && !capturedThisRun.has(v) && variables[v] !== undefined && variables[v] !== "",
+        )
+      : undefined;
+    if (uncaptured) {
+      pushStep(
+        makeSkippedResult(
+          interpolateName(step.name, variables),
+          `Capture {{${uncaptured}}} not produced this run — skipped to avoid using a stale .env.yaml fallback`,
+          { cascade: { missingCapture: uncaptured } },
+        ),
+        step,
+      );
+      continue;
     }
 
     // Process set: on HTTP steps — evaluate generators once before building request.
@@ -399,6 +466,28 @@ export async function runSuite(
         continue;
       }
     }
+    // ARV-414: fail-fast on an unresolved REQUEST var. A {{var}} with no
+    // producer survives substitution as a literal in the path/query (the
+    // empty-var guard above only catches vars present-but-empty in `variables`,
+    // and only in the path). Sending it hits a bogus URL and — for retry_until
+    // steps — spins the whole max_attempts × delay_ms budget on a resource that
+    // can never exist (the 14-min hang). Skip before buildUrl / the retry loop.
+    {
+      const unresolved = firstUnresolvedRequestVar(resolved.path, resolved.query);
+      if (unresolved) {
+        pushStep(makeSkippedResult(
+          interpolateName(step.name, variables),
+          `unresolved variable {{${unresolved}}} in request — no producer (env/capture/generator)`,
+        ), step);
+        if (step.expect.body) {
+          for (const rule of Object.values(step.expect.body)) {
+            if (rule.capture) missingCaptures.add(rule.capture);
+          }
+        }
+        continue;
+      }
+    }
+
     const url = buildUrl(resolvedBaseUrl, resolved.path, resolved.query);
     const headers: Record<string, string> = { ...resolvedSuiteHeaders, ...resolved.headers };
     let body: string | undefined;
@@ -523,6 +612,7 @@ export async function runSuite(
           const condStr = String(substituteString(rt.condition, condVars));
           if (evaluateExpr(condStr)) {
             Object.assign(variables, captures);
+            for (const key of Object.keys(captures)) capturedThisRun.add(key); // ARV-428
             break;
           }
 
@@ -559,6 +649,7 @@ export async function runSuite(
       // Extract captures (body + header)
       const captures = extractCaptures(resolved.expect.body, response.body_parsed, resolved.expect.headers, response.headers);
       Object.assign(variables, captures);
+      for (const key of Object.keys(captures)) capturedThisRun.add(key); // ARV-428
 
       // Track expected captures that weren't obtained — these are missing.
       if (resolved.expect.body) {

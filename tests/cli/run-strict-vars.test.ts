@@ -62,6 +62,22 @@ describe("TASK-75: pre-flight var check + --strict-vars", () => {
     expect(s.errs.join("")).toMatch(/strict-vars/);
   });
 
+  test("ARV-414: --strict-vars abort still writes the --output artifact", async () => {
+    writeFileSync(
+      join(dir, "t.yaml"),
+      "name: T\nbase_url: http://localhost\ntests:\n  - name: r\n    GET: /x?email={{nonexistent_var}}\n    expect: {}\n",
+    );
+    const outPath = join(dir, "report.json");
+    const code = await runCommand({ paths: [dir], report: "json", output: outPath, bail: false, noDb: true, strictVars: true });
+    expect(code).toBe(2);
+    // Pre-fix the run returned 2 before writing anything, so a pipeline saw a
+    // missing file. Now the artifact exists (empty-results envelope for the
+    // setup-scope abort) so downstream stages parse "aborted" instead.
+    const { readFileSync, existsSync } = await import("node:fs");
+    expect(existsSync(outPath)).toBe(true);
+    expect(() => JSON.parse(readFileSync(outPath, "utf-8"))).not.toThrow();
+  });
+
   test("captures from prior steps suppress false-positive warnings", async () => {
     writeFileSync(
       join(dir, "t.yaml"),

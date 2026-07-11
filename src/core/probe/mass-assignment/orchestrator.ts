@@ -284,7 +284,10 @@ async function probeEndpoint(
   // probe so the second POST doesn't trip a unique-constraint and so we
   // don't leak resources.
   if (baselineOk && !opts.noCleanup) {
-    await tryCleanupBaseline(ep, allEndpoints, schemes, vars, baselineBody, opts);
+    // ARV-429: record which id was deleted against which endpoint so a post-run
+    // audit can distinguish a benign self-cleanup from a risky one.
+    const cleanupAudit = await tryCleanupBaseline(ep, allEndpoints, schemes, vars, baselineBody, opts);
+    if (cleanupAudit) verdict.cleanup = cleanupAudit;
   }
 
   // ── Injected probe ──────────────────────────────────────────────────────

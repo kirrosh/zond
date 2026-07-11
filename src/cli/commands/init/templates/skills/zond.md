@@ -336,6 +336,19 @@ non-standard lifecycle field names, write-only fields in create body).
 biggest win — the create-body overlay it produces lets stateful checks
 POST valid resources instead of 400-ing on schema-derived random bodies.
 
+**Money bodies on a non-USD account (ARV-430).** The generator now emits
+`{{account_currency}}` for every currency field and registers it in
+`.api-fixtures.yaml` (`source: body-value`) with a `usd` default seeded into
+`.env.yaml`. On an account denominated in another currency, that default
+`usd` line item is still rejected for currency-conflict — and the parent
+resource can silently stay at `amount_due: 0`, so a "create → finalize" chain
+jumps straight to a paid/settled terminal state and the whole
+`open → pay/void` lifecycle becomes unreachable while still reporting green.
+Fix it in ONE place: read the account's default currency
+(`GET /v1/account`.`default_currency` on Stripe, or the equivalent) and set
+`account_currency:` in `.env.yaml` — every generated money body picks it up.
+A $0 resource that finalizes instantly is the tell.
+
 ### Agent-in-the-loop annotate (dump → write → apply, ARV-187 / 277 / 278-282)
 
 zond does NOT infer annotations. YOU (the agent) read the spec slice and
@@ -425,6 +438,15 @@ zond session end
 **Always pass `--validate-schema` for CRUD** — contract drift is
 invisible without it. `schema_violation` failures are real backend bugs;
 treat them like 5xx.
+
+**`smoke-*-unsafe` suites are disarmed by default (ARV-412).** They bind
+destructive ops (DELETE/PATCH/POST) to RAW `.env` fixtures with no
+self-create predecessor — i.e. they hit PRE-EXISTING account resources
+(unlike `crud-*.yaml`, which POST→capture→delete-own-id). Every unsafe
+step carries `skip_if: "{{zond_allow_unsafe}} != 1"`, so a plain `zond
+run apis/<name>/tests` SKIPS them. To arm on a throwaway account only:
+set `zond_allow_unsafe: 1` in `.env.yaml`. Prefer `--exclude-tag unsafe`
+on live sweeps as belt-and-suspenders.
 
 **After any `zond run` with failures → delegate to `zond-triage`.** Do
 NOT parse `runs/run-NN.json` with `jq` by hand. The triage skill reads

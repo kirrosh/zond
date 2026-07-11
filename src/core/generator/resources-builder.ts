@@ -205,12 +205,34 @@ export interface PaginationConfig {
   startPage?: number;
 }
 
+/** ARV-434: an ordered POST run AFTER the main create to bring the resource
+ *  into a testable state (e.g. a draft invoice needs an invoiceitem before it
+ *  can be finalized). The FK-based resource graph only expresses child→parent
+ *  ordering; this covers the action-ordered "create A, then create B that
+ *  references A" that otherwise only a hand-written scenario could. The agent
+ *  authors the bodies + order (judgment); zond runs them in order (deterministic).
+ *  Currently consumed by `lifecycle_transitions` between create and the first
+ *  action. */
+export interface SetupStep {
+  /** Endpoint label, e.g. "POST /v1/invoiceitems". */
+  endpoint: string;
+  /** Request body. `{{id}}` resolves to the just-created resource id;
+   *  prior steps' captures and path-fixtures ({{customer}}, …) also resolve. */
+  body?: Record<string, unknown>;
+  /** Optional content-type override (defaults to the main create's). */
+  contentType?: string;
+  /** Optional var name to store this step's response id under, for later steps. */
+  capture?: string;
+}
+
 /** ARV-187: LLM-authored example POST body. Stateful checks prefer this
  *  over generateFromSchema(create) when present. */
 export interface SeedBodyConfig {
   /** Defaults to the create endpoint's requestBodyContentType. */
   contentType?: string;
   body: Record<string, unknown>;
+  /** ARV-434: ordered post-create readiness steps (see SetupStep). */
+  setup?: SetupStep[];
 }
 
 export interface ApiResourceEntry {
