@@ -78,6 +78,14 @@ function parseEndpointLabel(label: string): { method: string; path: string } | n
 function transitionAllowed(cfg: LifecycleConfig, from: string, to: string): boolean {
   // Same-state replay is always OK (idempotent action).
   if (from === to) return true;
+  // ARV-433: an empty graph declares nothing, so no hop can be "forbidden".
+  // Without this, an overlay that lists `actions` but leaves `transitions: []`
+  // (common — annotate populates states+actions before the graph) would flag
+  // every legitimate action as a forbidden transition. When the graph is
+  // absent, `wrong_expected_state` still catches per-action drift; the
+  // forbidden-transition class only fires against a graph that actually
+  // constrains the state machine.
+  if (cfg.transitions.length === 0) return true;
   for (const t of cfg.transitions) {
     if (t.from === from && t.to.includes(to)) return true;
   }
