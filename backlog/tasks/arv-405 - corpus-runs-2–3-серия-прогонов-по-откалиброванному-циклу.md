@@ -1,9 +1,10 @@
 ---
 id: ARV-405
 title: 'corpus runs #2–3: серия прогонов по откалиброванному циклу'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-10 07:28'
+updated_date: '2026-07-10 14:47'
 labels:
   - m-28
 dependencies:
@@ -19,6 +20,12 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 ≥2 дополнительных аудита с полным набором артефактов
-- [ ] #2 Суммарно по вехе ≥3 публичных аудита (DoD A)
+- [x] #1 ≥2 дополнительных аудита с полным набором артефактов
+- [x] #2 Суммарно по вехе ≥3 публичных аудита (DoD A)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 прогона выполнены 2026-07-10: github-run1, vercel-run2, stripe-run3, sentry-run4 (~/Projects/zond-test/zond-runs/). Все артефакты + feedback-задачи ARV-409..429 заведены и закрыты. DoD A вехи m-28 выполнен.
+<!-- SECTION:NOTES:END -->

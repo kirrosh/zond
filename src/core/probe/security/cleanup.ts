@@ -56,13 +56,38 @@ export async function tryCleanup(
     };
   }
 
-  // Eventual-consistency retry (round-5 follow-up): POST creates on the
-  // write replica, immediate DELETE hits a read replica that hasn't seen
-  // the new id yet → 404. Two short backoffs swallow that transient
-  // 404; a 404 that survives the backoff is a real leak and lands in
-  // verdict.cleanup.error. Only 404 is retried — 5xx, network errors,
-  // 401/403 fail fast (the situation isn't going to improve).
-  const RETRY_DELAYS_MS = opts.cleanupRetryDelaysMs ?? [200, 1000];
+  const result = await replayDelete(url, headers, {
+    timeoutMs: opts.timeoutMs,
+    retryDelaysMs: opts.cleanupRetryDelaysMs,
+  });
+  if (result.ok) {
+    const prior = verdict.cleanup ?? { attempted: false };
+    verdict.cleanup = {
+      attempted: true,
+      status: result.status,
+      ...(prior.error ? { error: prior.error } : {}),
+      ...(prior.id !== undefined ? { id: prior.id } : {}),
+      ...(prior.deletePath ? { deletePath: prior.deletePath } : {}),
+    };
+    return;
+  }
+  accumulateCleanupError(verdict, `DELETE ${delEp.path} ${result.error ?? "failed"} (id=${id})`);
+}
+
+/**
+ * Verdict-free best-effort DELETE with eventual-consistency 404 retries.
+ * POST creates on the write replica; an immediate DELETE can hit a read
+ * replica that hasn't seen the new id yet → transient 404. Short backoffs
+ * swallow that; a 404 that survives is a real leak. Only 404 is retried —
+ * 5xx / network / 401 / 403 fail fast (the situation won't improve).
+ * Shared by probe cleanup (tryCleanup) and checks coverage cleanup (ARV-415).
+ */
+export async function replayDelete(
+  url: string,
+  headers: Record<string, string>,
+  opts: { timeoutMs?: number; retryDelaysMs?: number[] } = {},
+): Promise<{ ok: boolean; status?: number; error?: string }> {
+  const RETRY_DELAYS_MS = opts.retryDelaysMs ?? [200, 1000];
   let lastResp: { status: number } | null = null;
   let lastNetErr: string | null = null;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
@@ -73,33 +98,41 @@ export async function tryCleanup(
         { timeout: opts.timeoutMs ?? 30000, retries: 0 },
       );
       lastResp = { status: resp.status };
-      if (resp.status >= 200 && resp.status < 300) {
-        const prior = verdict.cleanup ?? { attempted: false };
-        verdict.cleanup = {
-          attempted: true,
-          status: resp.status,
-          ...(prior.error ? { error: prior.error } : {}),
-          ...(prior.id !== undefined ? { id: prior.id } : {}),
-          ...(prior.deletePath ? { deletePath: prior.deletePath } : {}),
-        };
-        return;
-      }
-      // Only retry transient 404 (eventual-consistency window).
+      if (resp.status >= 200 && resp.status < 300) return { ok: true, status: resp.status };
       if (resp.status !== 404) break;
     } catch (err) {
       lastNetErr = err instanceof Error ? err.message : String(err);
-      // Network errors are not retried — they're not transient in the
-      // eventual-consistency sense (they're config/connectivity issues).
       break;
     }
   }
-
-  if (lastNetErr) {
-    accumulateCleanupError(verdict, `DELETE ${delEp.path} network error: ${lastNetErr}`);
-  } else if (lastResp) {
+  if (lastNetErr) return { ok: false, error: `network error: ${lastNetErr}` };
+  if (lastResp) {
     const tail = lastResp.status === 404 ? " (persisted across retries — likely real leak)" : "";
-    accumulateCleanupError(verdict, `DELETE ${delEp.path} → ${lastResp.status} (id=${id})${tail}`);
+    return { ok: false, status: lastResp.status, error: `→ ${lastResp.status}${tail}` };
   }
+  return { ok: false, error: "no response" };
+}
+
+/**
+ * ARV-415: best-effort cleanup of a resource just created by a 2xx POST in the
+ * checks examples/coverage phase — parity with probe self-clean. POST ONLY: a
+ * 2xx PUT/PATCH echoes a PRE-EXISTING fixture id we must never delete
+ * (no-mutate-preexisting). Returns null when there's nothing safely deletable
+ * (non-POST, no id in the response), or the DELETE outcome otherwise.
+ */
+export async function cleanupSelfCreatedResource(
+  ep: EndpointInfo,
+  allEndpoints: EndpointInfo[],
+  opts: { baseUrl: string; headers: Record<string, string>; responseBody: unknown; timeoutMs?: number; retryDelaysMs?: number[] },
+): Promise<{ ok: boolean; status?: number; error?: string } | null> {
+  if (ep.method.toUpperCase() !== "POST") return null;
+  const delEp = findDeleteCounterpart(ep, allEndpoints);
+  if (!delEp) return { ok: false, error: `no DELETE counterpart for POST ${ep.path}; possible leaked resource` };
+  const id = pickId(opts.responseBody, captureFieldFor(ep));
+  if (id === undefined) return null; // no id in response → nothing self-created to delete
+  const concretePath = delEp.path.replace(/\{[^}]+\}/, encodeURIComponent(String(id)));
+  const url = joinBaseAndPath(opts.baseUrl, concretePath);
+  return replayDelete(url, opts.headers, { timeoutMs: opts.timeoutMs, retryDelaysMs: opts.retryDelaysMs });
 }
 
 function accumulateCleanupError(verdict: SecurityVerdict, msg: string): void {

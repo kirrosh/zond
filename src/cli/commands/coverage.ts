@@ -75,8 +75,15 @@ export interface RowBucket {
   method: string;
   path: string;
   /** Latest observed HTTP status across all cells/results on this row, or
-   *  `null` for unhit / network-error-only rows. */
+   *  `null` for unhit / network-error-only rows. Chronological-last — on a row
+   *  that ran both a positive and a negative case this is often the negative
+   *  (4xx) one, so DON'T read it as "is this endpoint healthy": use passStatus. */
   lastStatus: number | null;
+  /** ARV-426: the 2xx status that earned covered2xx membership (the request
+   *  that actually passed), or `null` when no 2xx pass exists on this row. This
+   *  is the honest per-endpoint health signal that the warm-up flow relies on —
+   *  lastStatus alone contradicted bucket membership ~82% of the time. */
+  passStatus: number | null;
   /** ARV-379: spec-declared `deprecated` (or text-flagged) for this
    *  endpoint. Lets a consumer split "real, closeable gap" from
    *  "structurally out of scope by design" without re-reading spec.json. */
@@ -96,15 +103,17 @@ export function bucketRows(matrix: CoverageMatrix): BucketBreakdown {
   for (const row of matrix.rows) {
     const cells = Object.values(row.cells);
     const allResults = cells.flatMap(c => c.results);
-    const has2xxPass = allResults.some(
+    const passResult = allResults.find(
       r => r.status === "pass" && r.responseStatus != null && r.responseStatus >= 200 && r.responseStatus < 300,
     );
+    const has2xxPass = passResult !== undefined;
     const lastStatus = lastObservedStatus(allResults);
     const bucket: RowBucket = {
       endpoint: row.endpoint,
       method: row.method,
       path: row.path,
       lastStatus,
+      passStatus: passResult?.responseStatus ?? null,
       deprecated: !!row.deprecated,
     };
     if (has2xxPass) covered2xx.push(bucket);
@@ -254,7 +263,11 @@ async function runMatrixCoverage(options: CoverageOptions): Promise<number> {
   // matches), there is no coverage data — that is the only command-level
   // failure of the matrix path. Everything else (uncovered endpoints remain)
   // is a data point, not a failure, so it must not gate the exit code.
-  const noRuns = (covTest ?? covAudit!).runs.length === 0;
+  // ARV-409: coverage is computable if ANY loaded scope has runs. A checks-only
+  // session (run_kind='check', stripped from test scope) leaves covTest empty
+  // but covAudit full — abort only when both are dry, else audit_coverage still
+  // reports the HTTP touches (ARV-265) instead of falsely claiming zero runs.
+  const noRuns = (covTest?.runs.length ?? 0) === 0 && (covAudit?.runs.length ?? 0) === 0;
 
   // ARV-265: per-source breakdown for audit-coverage. Walks each
   // contributing run, groups its results by (METHOD, path-template), and
@@ -532,6 +545,7 @@ async function runSpecOnlyCoverage(options: CoverageOptions): Promise<number> {
       method: ep.method.toUpperCase(),
       path: ep.path,
       lastStatus: null,
+      passStatus: null,
     }));
     printJson(jsonOk("coverage", {
       covered: 0,

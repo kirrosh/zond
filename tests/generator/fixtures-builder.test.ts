@@ -152,6 +152,29 @@ describe("buildApiFixtureManifest", () => {
     expect(byName.b_id!.affectedEndpoints).toContain("POST /as");
   });
 
+  test("currency body field registers account_currency with a usd default (ARV-430)", () => {
+    const spec = {
+      openapi: "3.0.0",
+      info: { title: "t", version: "1.0" },
+      paths: {
+        "/v1/invoiceitems": {
+          post: {
+            requestBody: { content: { "application/x-www-form-urlencoded": { schema: { type: "object", properties: { amount: { type: "integer" }, currency: { type: "string" } } } } } },
+            responses: { "200": {} },
+          },
+        },
+      },
+    };
+    const endpoints = extractEndpoints(spec as any);
+    const manifest = buildApiFixtureManifest({ endpoints, securitySchemes: [], specHash: "x" });
+    const byName = Object.fromEntries(manifest.fixtures.map(f => [f.name, f]));
+    expect(byName.account_currency).toBeDefined();
+    expect(byName.account_currency!.source).toBe("body-value");
+    expect(byName.account_currency!.defaultValue).toBe("usd");
+    expect(byName.account_currency!.required).toBe(false);
+    expect(byName.account_currency!.affectedEndpoints).toContain("POST /v1/invoiceitems");
+  });
+
   test("CRUD-chain capture vars surface as source: capture-chain, required: false", () => {
     const spec = {
       openapi: "3.0.0",

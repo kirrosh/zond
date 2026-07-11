@@ -1,9 +1,10 @@
 ---
 id: ARV-404
 title: 'corpus run #1: полный /zond-scan первой цели + калибровка формата кейса'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-10 07:28'
+updated_date: '2026-07-10 08:27'
 labels:
   - m-28
 dependencies:
@@ -19,7 +20,7 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Прогон выполнен, report-api.md и report-zond.md сохранены
-- [ ] #2 Findings report-zond разобраны в backlog-задачи по литмусу
-- [ ] #3 Черновик case study по итогам прогона
+- [x] #1 Прогон выполнен, report-api.md и report-zond.md сохранены
+- [x] #2 Findings report-zond разобраны в backlog-задачи по литмусу
+- [x] #3 Черновик case study по итогам прогона
 <!-- AC:END -->

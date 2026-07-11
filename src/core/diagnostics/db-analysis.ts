@@ -143,7 +143,10 @@ export interface RunDetail {
     duration_ms: number | null;
     request_method: string | null;
     request_url: string | null;
+    request_body: string | null;
     response_status: number | null;
+    response_body: string | null;
+    response_headers: string | null;
     error_message?: string;
     assertions: unknown;
   }>;
@@ -174,7 +177,11 @@ export function getRunDetail(runId: number, verbose?: boolean, dbPath?: string):
       duration_ms: r.duration_ms,
       request_method: r.request_method,
       request_url: r.request_url,
+      // bodies are already redacted + truncated at write time (ARV-432)
+      request_body: r.request_body,
       response_status: r.response_status,
+      response_body: r.response_body,
+      response_headers: r.response_headers,
       error_message: truncateErrorMessage(r.error_message, verbose),
       assertions: r.assertions,
     })),

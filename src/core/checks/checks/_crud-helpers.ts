@@ -6,7 +6,8 @@ import { encodeFormBody } from "../../runner/form-encode.ts";
 import { substituteDeep } from "../../parser/variables.ts";
 import { generateFromSchema } from "../../generator/data-factory.ts";
 import type { EndpointInfo } from "../../generator/types.ts";
-import type { SeedBodyConfig } from "../../generator/resources-builder.ts";
+import type { SeedBodyConfig, SetupStep } from "../../generator/resources-builder.ts";
+import type { HttpRequest, HttpResponse } from "../../runner/types.ts";
 
 /**
  * ARV-187: pick the create body for a stateful CRUD step. Prefers an
@@ -69,6 +70,60 @@ export function serializeCheckBody(
     return { body: encodeFormBody(obj), contentType: "application/x-www-form-urlencoded" };
   }
   return { body: JSON.stringify(obj), contentType: ct };
+}
+
+/**
+ * ARV-434: run a seed_body's ordered post-create `setup` steps to bring a
+ * resource into a testable state (e.g. attach an invoiceitem to a draft
+ * invoice before it can be finalized). Each step POSTs to its endpoint with
+ * `{{id}}` bound to the just-created resource id, plus path-fixtures and any
+ * prior-step captures. Deterministic: same overlay + same ids → same calls.
+ * Returns the first failing step so the caller can skip with a concrete reason
+ * (a broken setup means the lifecycle can't be tested, not that it's buggy).
+ */
+export async function runSetupSteps(
+  steps: SetupStep[],
+  h: {
+    baseUrl: string;
+    authHeaders: Record<string, string>;
+    pathVars?: Record<string, string>;
+    send(req: HttpRequest, opts?: { timeoutMs?: number }): Promise<HttpResponse>;
+  },
+  createId: string | number,
+  createContentType: string | undefined,
+): Promise<{ ok: true } | { ok: false; failedStep: string; status: number }> {
+  const captures: Record<string, string | number> = { id: createId };
+  for (const step of steps) {
+    const parts = step.endpoint.trim().split(/\s+/);
+    if (parts.length < 2) return { ok: false, failedStep: step.endpoint, status: 0 };
+    const method = parts[0]!.toUpperCase();
+    const path = fillPathParams(parts[1]!, h.pathVars);
+    const vars = { ...(h.pathVars ?? {}), ...captures };
+    const ct = step.contentType ?? createContentType ?? "application/json";
+    const hasBody = step.body && Object.keys(step.body).length > 0;
+    const { body } = serializeCheckBody({ requestBodyContentType: ct }, step.body ?? {}, vars, ct);
+    const headers: Record<string, string> = { Accept: "application/json", ...h.authHeaders };
+    if (hasBody) headers["Content-Type"] = ct;
+    const resp = await h.send({
+      method,
+      url: `${h.baseUrl.replace(/\/+$/, "")}${path}`,
+      headers,
+      body: hasBody ? body : undefined,
+    });
+    if (resp.status < 200 || resp.status >= 300) {
+      return { ok: false, failedStep: step.endpoint, status: resp.status };
+    }
+    if (step.capture) {
+      const parsed = resp.body_parsed ?? (typeof resp.body === "string" ? safeParseJson(resp.body) : resp.body);
+      const capturedId = extractIdFromCreateResponse(parsed, step.capture);
+      if (capturedId != null) captures[step.capture] = capturedId;
+    }
+  }
+  return { ok: true };
+}
+
+function safeParseJson(v: string): unknown {
+  try { return JSON.parse(v); } catch { return v; }
 }
 
 export function fillPathWithId(path: string, idParam: string, id: string | number): string {

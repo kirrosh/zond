@@ -1,9 +1,10 @@
 ---
 id: ARV-403
 title: 'corpus: shortlist 3–5 целевых публичных API + критерии выбора'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-10 07:28'
+updated_date: '2026-07-10 07:41'
 labels:
   - m-28
 dependencies: []
@@ -18,6 +19,6 @@ priority: high
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Shortlist из 3–5 API с обоснованием по критериям зафиксирован в backlog/docs
-- [ ] #2 Для каждой цели проверено: спек доступен, sandbox доступен, ключ получаем без сложностей
+- [x] #1 Shortlist из 3–5 API с обоснованием по критериям зафиксирован в backlog/docs
+- [x] #2 Для каждой цели проверено: спек доступен, sandbox доступен, ключ получаем без сложностей
 <!-- AC:END -->

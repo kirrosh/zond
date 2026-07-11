@@ -33,6 +33,7 @@ zond checks list --json          # same, machine-readable
 |---|---|
 | "deep audit", "find edge cases" | `zond checks run --api <name>` |
 | "boundary value coverage" | `... --phase coverage` |
+| "fuzz the API", "random inputs", "property-based", "find crashes" | `zond fuzz --api <name>` (alias for `checks run --phase fuzz`) |
 | "find security bugs", "broken auth" | `... --check ignored_auth,use_after_free,ensure_resource_availability` |
 | "is GET returning what POST accepted?", "cross-call drift" | `... --check cross_call_references` (m-20) |
 | "does the API honor Idempotency-Key?", "two-POST replay" | `... --check idempotency_replay` (m-20) |
@@ -337,7 +338,22 @@ zond checks run --api myapi --mode negative       # malicious-input probes only
 # Pick a phase
 zond checks run --api myapi --phase coverage      # ~×1.75 cases per op; real bug-hunt phase
 zond checks run --api myapi --phase examples      # default — 1 positive + 1 negative per op (smoke)
+zond fuzz --api myapi --seed 0 --max-examples 20  # property-based random bodies (alias for --phase fuzz)
 ```
+
+**`zond fuzz` — random property-based bodies (m-28).** Draws
+`--max-examples` random request bodies per operation from the spec
+(fast-check), sends them through the same runner, and lets the same
+response checks judge — any 5xx (`not_a_server_error`) or schema
+violation (`response_schema_conformance`) falls out as evidence. On each
+failure fast-check **shrinks** the input to a minimal counterexample and
+puts it (plus a ready-to-run `curl`) in `evidence.minimal_case`. Seeded:
+same `--seed` ⇒ same cases ⇒ same evidence, so a finding reproduces. It's
+complementary to `coverage` — coverage walks *declared* boundaries,
+fuzz hits the random inputs a boundary walk never enumerates. Note:
+`positive_data_acceptance` on a random 4xx is low-signal by design (the
+body's validity is unknown) — triage those; the headline signal is 5xx
+and schema drift.
 
 **`--phase examples` is smoke, not depth.** It runs one positive + one
 negative example per operation, finishes ~3× faster, but routinely
@@ -625,3 +641,37 @@ resources:
 Action endpoints accept the `{id}` placeholder (replaced with the
 captured create-id) or `{<idParam>}`. Body-less actions are the common
 case; provide `body:` only for actions that demand a request payload.
+
+**Ordered post-create readiness (`seed_body.setup`, ARV-434).** Some
+resources aren't testable straight from a single create — a draft invoice
+must have a line item before it can be finalized. Declare ordered `setup`
+POSTs on the resource's `seed_body`; the check runs them after the create and
+before the first action. `{{id}}` resolves to the just-created resource id;
+path-fixtures (`{{customer}}`, `{{account_currency}}`) and prior-step
+`capture`s also resolve. A setup step that returns non-2xx skips the lifecycle
+test with the concrete step + status (the resource isn't ready — not a bug).
+
+```yaml
+resources:
+  - resource: invoice
+    seed_body:
+      body: { customer: "{{customer}}" }        # POST /v1/invoices → draft
+      setup:
+        - endpoint: POST /v1/invoiceitems
+          body: { customer: "{{customer}}", invoice: "{{id}}", amount: 1000, currency: "{{account_currency}}" }
+    lifecycle:
+      field: status
+      states: [draft, open, paid, void]
+      transitions:
+        - { from: draft, to: [open] }
+        - { from: open, to: [paid, void] }
+        - { from: paid, to: [] }
+        - { from: void, to: [] }
+      actions:
+        finalize: { endpoint: "POST /v1/invoices/{id}/finalize", expected_state: open }
+```
+
+You author which bodies and in what order (judgment); zond runs them in order
+and binds the ids (deterministic). "Create B then A referencing B" where B is a
+plain FK parent is already handled by `fkDependencies` + `prepare-fixtures` —
+reach for `setup` only for action-ordered readiness a single create can't express.

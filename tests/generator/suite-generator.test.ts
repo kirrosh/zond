@@ -693,6 +693,22 @@ describe("generateSuites", () => {
     expect(unsafeNames).toContain("pets-smoke-unsafe");
   });
 
+  test("ARV-412: every smoke-unsafe step is arm-gated (disarmed by default)", () => {
+    const endpoints = [
+      makeEndpoint({ path: "/user", method: "DELETE", tags: ["account"] }),
+      makeEndpoint({ path: "/teams/{teamId}", method: "PATCH", tags: ["account"] }),
+    ];
+    const suites = generateSuites({ endpoints, securitySchemes: noSecurity });
+    const unsafe = suites.find(s => s.tags?.includes("unsafe"));
+    expect(unsafe).toBeDefined();
+    expect(unsafe!.tests.length).toBeGreaterThan(0);
+    // Guard skips unless zond_allow_unsafe == 1 → unset leaves the literal,
+    // which is != 1 → step skipped, so a naive `zond run` never fires it.
+    for (const t of unsafe!.tests) {
+      expect((t as any).skip_if).toBe("{{zond_allow_unsafe}} != 1");
+    }
+  });
+
   test("CRUD endpoints are excluded from smoke suites", () => {
     const endpoints = [
       makeEndpoint({ path: "/pets", method: "GET", tags: ["pets"] }),

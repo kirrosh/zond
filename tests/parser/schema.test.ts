@@ -25,6 +25,21 @@ describe("validateSuite", () => {
     }
   });
 
+  test("ARV-431: coerces numeric/boolean form: and query: values to strings", () => {
+    const suite = validateSuite({
+      name: "Test",
+      tests: [{
+        POST: "/pay",
+        name: "pay",
+        form: { amount: 1500, live: true, note: "hi" },
+        query: { page: 2 },
+        expect: { status: 200 },
+      }],
+    });
+    expect(suite.tests[0]!.form).toEqual({ amount: "1500", live: "true", note: "hi" });
+    expect(suite.tests[0]!.query).toEqual({ page: "2" });
+  });
+
   test("applies default config when config is missing", () => {
     const suite = validateSuite({
       name: "Test",

@@ -28,6 +28,7 @@ import {
   type SpecLayer,
 } from "../../core/spec/layers.ts";
 import { liveAuthHeaders } from "../../core/probe/shared.ts";
+import { isSoftDeletedBody } from "../../core/utils.ts";
 import { executeRequest } from "../../core/runner/http-client.ts";
 import { writeFixtureGaps, type FixtureGap } from "../../core/workspace/fixture-gaps.ts";
 import { reportFixtureGaps, type FixtureGapReport } from "../../core/workspace/fixture-gap-report.ts";
@@ -344,6 +345,13 @@ export interface ResourceYaml {
   seed_body?: {
     content_type?: string;
     body: Record<string, unknown>;
+    /** ARV-434: ordered post-create readiness steps. */
+    setup?: Array<{
+      endpoint: string;
+      body?: Record<string, unknown>;
+      content_type?: string;
+      capture?: string;
+    }>;
   };
 }
 
@@ -477,7 +485,7 @@ function applyResourcePatches(
 
 export interface FixtureManifestEntry {
   name: string;
-  source: "auth" | "server" | "path" | "header" | "body-fk" | "capture-chain";
+  source: "auth" | "server" | "path" | "header" | "body-fk" | "body-value" | "capture-chain";
   required: boolean;
   description?: string;
   defaultValue?: string;
@@ -819,6 +827,14 @@ export async function verifyOne(
     return item;
   }
   if (resp.status >= 200 && resp.status < 300) {
+    // ARV-418: HTTP 200 + top-level `deleted: true` is a soft-delete stub
+    // (Stripe et al.), not a live resource — a status-code-only check would
+    // keep a dead fixture and poison every downstream chain built off it.
+    if (isSoftDeletedBody(resp.body_parsed)) {
+      item.status = "verify-stale";
+      item.reason = `${parsed.method} ${effectivePath} → 200 (soft-deleted: body deleted:true)`;
+      return item;
+    }
     item.status = "verify-live";
     item.discovered = current;
     return item;

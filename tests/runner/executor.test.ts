@@ -144,6 +144,48 @@ describe("runSuite", () => {
     expect(result.steps[1]!.error).toContain("user_id");
   });
 
+  test("ARV-427/428: a skipped create leaves the always:true DELETE skipped, not firing on a stale env id", async () => {
+    // members-crud shape: create captures member_id, DELETE is always:true.
+    // The create is skipped (skip_reason, as --safe sets), and member_id holds a
+    // STALE pre-existing value in env (the real owner id). The DELETE must NOT
+    // fire against that value.
+    const deleteCalls: string[] = [];
+    globalThis.fetch = mock(async (_url: unknown, init?: { method?: string }) => {
+      if ((init?.method ?? "GET") === "DELETE") deleteCalls.push(String(_url));
+      return new Response(JSON.stringify([]), { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "members-crud",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [
+        {
+          name: "Create member",
+          method: "POST",
+          path: "/members",
+          skip_reason: "--safe mode: skipped POST write step", // ARV-427
+          expect: { status: 201, body: { id: { capture: "member_id" } } },
+        },
+        {
+          name: "Delete member",
+          method: "DELETE",
+          path: "/members/{{member_id}}",
+          always: true,
+          expect: { status: 204 },
+        },
+      ],
+    };
+
+    const result = await runSuite(suite, { member_id: "10816603" });
+    const createStep = result.steps.find((s) => s.name === "Create member")!;
+    const deleteStep = result.steps.find((s) => s.name === "Delete member")!;
+    expect(createStep.status).toBe("skip"); // ARV-427: explicit skip, didn't vanish
+    expect(createStep.error).toContain("--safe mode");
+    expect(deleteStep.status).toBe("skip"); // ARV-428: gated, not executed
+    expect(deleteCalls).toEqual([]); // no DELETE against the stale owner id
+  });
+
   test("merges suite-level headers with step headers", async () => {
     let capturedHeaders: Record<string, string> = {};
     globalThis.fetch = mock(async (_url: string | URL | Request, init?: RequestInit) => {
@@ -558,6 +600,36 @@ describe("flow control", () => {
 
     const result = await runSuite(suite);
     expect(result.steps[0]!.status).toBe("pass");
+  });
+
+  test("ARV-414: fail-fast (no send, no retry loop) on unresolved request var", async () => {
+    // Without the guard this retry_until step would send 20× with 1000ms delays
+    // (~20s) polling a resource whose id never resolved. The fix skips it before
+    // buildUrl, so the retry loop is never entered and fetch is never called.
+    let calls = 0;
+    globalThis.fetch = mock(async () => {
+      calls++;
+      return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
+    }) as unknown as typeof fetch;
+
+    const suite: TestSuite = {
+      name: "unresolved-query",
+      base_url: "http://example.com",
+      config: DEFAULT_CONFIG,
+      tests: [{
+        name: "Poll never-seeded id",
+        method: "GET",
+        path: "/things",
+        query: { id: "{{never_seeded_id}}" },
+        retry_until: { condition: "status == 404", max_attempts: 20, delay_ms: 1000 },
+        expect: { status: 404 },
+      }],
+    };
+
+    const result = await runSuite(suite);
+    expect(result.steps[0]!.status).toBe("skip");
+    expect(result.steps[0]!.error).toContain("never_seeded_id");
+    expect(calls).toBe(0);
   });
 
   test("skip_if with variable substitution", async () => {

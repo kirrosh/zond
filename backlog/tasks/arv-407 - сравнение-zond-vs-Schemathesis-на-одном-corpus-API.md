@@ -1,9 +1,10 @@
 ---
 id: ARV-407
 title: сравнение zond vs Schemathesis на одном corpus-API
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-10 07:28'
+updated_date: '2026-07-11 08:37'
 labels:
   - m-28
 dependencies:
@@ -19,6 +20,6 @@ priority: medium
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Оба инструмента прогнаны на одной цели, условия зафиксированы
-- [ ] #2 Опубликованное сравнение с честными gap в обе стороны
+- [x] #1 Оба инструмента прогнаны на одной цели, условия зафиксированы
+- [x] #2 Опубликованное сравнение с честными gap в обе стороны
 <!-- AC:END -->
