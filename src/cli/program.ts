@@ -4,6 +4,7 @@ import { registerRun } from "./commands/run.ts";
 import { registerCheck, registerLint } from "./commands/check.ts";
 import { registerChecks, registerFuzz } from "./commands/checks.ts";
 import { registerCoverage } from "./commands/coverage.ts";
+import { registerScorecard } from "./commands/scorecard.ts";
 import { registerCi } from "./commands/ci-init.ts";
 import { registerClean } from "./commands/clean.ts";
 import { registerCleanup } from "./commands/cleanup.ts";
@@ -90,6 +91,7 @@ export function buildProgram(): Command {
 
   registerSession(program);
   registerCoverage(program);
+  registerScorecard(program);
 
   registerInit(program);
   registerAdd(program);
@@ -146,6 +148,7 @@ export function buildProgram(): Command {
     "request": "Run:",
     // analyze: post-run inspection and triage
     "coverage": "Analyze:",
+    "scorecard": "Analyze:",
     "db":       "Analyze:",
     "audit":    "Analyze:",
     "check":    "Analyze:",
