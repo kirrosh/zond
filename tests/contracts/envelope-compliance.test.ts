@@ -60,6 +60,7 @@ const SMOKE: SmokeEntry[] = [
   { source: "doctor.ts", argv: ["doctor", "--json"], allowError: true },
   { source: "session.ts", argv: ["session", "list", "--json"] },
   { source: "coverage.ts", argv: ["coverage", "--json"], allowError: true },
+  { source: "scorecard.ts", argv: ["scorecard", "--api", "nonexistent", "--json"], allowError: true },
   { source: "cleanup.ts", argv: ["cleanup", "--orphans", "--api", "default", "--json"], allowError: true },
   { source: "clean.ts", argv: ["clean", "--json"], allowError: true },
   { source: "reference.ts", argv: ["reference", "random-helpers", "--json"] },

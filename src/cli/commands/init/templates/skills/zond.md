@@ -646,6 +646,22 @@ audit-coverage: 619/1184 endpoints (52%, 1500 HTTP touches)
 
 Producers opt out via `ZOND_CHECKS_PERSIST=0`.
 
+**One-line scorecard (ARV-437).** For a single value-summary of the latest scan
+— the "what did this get me" line to paste into a PR, case study, or report —
+use `zond scorecard`:
+
+```bash
+zond scorecard --api <name>                 # <N> findings · <X>% honest-2xx · <M>/<T> ops · <t>
+zond scorecard --api <name> --session <id>  # summarize a specific scan session
+zond scorecard --api <name> --json          # { findings, honest2xx, reached, total, honest2xxPct, durationMs, runs }
+```
+
+Deterministic aggregate of already-persisted runs (no new HTTP). `findings`
+counts stored results the runner classified (`failure_class`); depth-check
+findings that persist without severity are NOT counted — read `checks run`
+output for the full breakdown. Defaults to the latest run's session; pass
+`--session` to pin a specific scan.
+
 **Quality signals to gate CI on** (not raw pass-coverage):
 
 | Signal | Command |

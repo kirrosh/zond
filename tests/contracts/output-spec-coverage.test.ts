@@ -68,6 +68,7 @@ const LEGACY_ALLOW_LIST: Record<string, string> = {
   "clean": "pre-m-19: --json envelope via printJson.",
   "cleanup": "pre-m-19: --json envelope via printJson.",
   "coverage": "pre-m-19: --json envelope via printJson; rich --format alias.",
+  "scorecard": "ARV-437: --json-only via writeEnvelope; no --report multi-format, so no OutputSpec needed.",
   "db collections": "pre-m-19: --json envelope via printJson.",
   "db compare": "pre-m-19: --json envelope via printJson.",
   "db diagnose": "pre-m-19: --json envelope via printJson.",
