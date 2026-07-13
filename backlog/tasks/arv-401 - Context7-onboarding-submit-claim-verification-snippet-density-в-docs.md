@@ -1,10 +1,10 @@
 ---
 id: ARV-401
 title: 'Context7 onboarding: submit + claim + verification + snippet-density в docs'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-07-09 14:45'
-updated_date: '2026-07-10 07:14'
+updated_date: '2026-07-13 10:36'
 labels:
   - m-27
 dependencies:
@@ -38,4 +38,6 @@ Submit выполнен 2026-07-09, индекс живой: context7.com/kirros
 Trust-профиль владельца дозаполнен (2026-07-10): bio с упоминанием zond, blog → репо zond, профильный README kirrosh/kirrosh опубликован. Осталось из задачи: claim + manual verification на context7.com, GitHub Action refresh, snippet-density в docs.
 
 Хвост после закрытия m-27: claim+verification на context7.com (web, владелец), GH Action refresh, snippet-density. Индекс уже живой — хвост некритичен.
+
+Закрыто 2026-07-13: Context7 submit сделан; discovery-каналы (ARV-402: DeepWiki/Ref.tools/Chroma) тоже поданы пользователем.
 <!-- SECTION:NOTES:END -->
