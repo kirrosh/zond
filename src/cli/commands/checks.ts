@@ -777,6 +777,11 @@ async function checksRunAction(_args: unknown, cmd: Command): Promise<void> {
           tags: ["checks", `phase:${phaseRaw}`, `mode:${modeRaw}`],
         });
         finalizeAuditRun(runId, auditCases);
+        // ARV-439: persist the findings this run produced, keyed by the same
+        // run_id, so scorecard / triage can report drift off disk (not just
+        // this stdout). Same best-effort contract as the touch persistence.
+        const { saveCheckFindings } = await import("../../db/check-findings.ts");
+        saveCheckFindings(getDb(opts.db), runId, result.data.findings);
       } catch (err) {
         // Audit persistence is best-effort. Surface the failure on stderr
         // so an agent can detect it (the missing audit-coverage downstream

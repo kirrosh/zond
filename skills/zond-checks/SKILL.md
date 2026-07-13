@@ -385,6 +385,16 @@ zond coverage --api myapi               # default dual output: test + audit bloc
 Opt-out: `ZOND_CHECKS_PERSIST=0 zond checks run …` skips the
 persistence step (matches pre-ARV-265 behaviour).
 
+**Findings persist too (ARV-439).** The findings a run produced are now
+written to `check_findings` keyed by the same `run_id` — not just the HTTP
+touches. So `zond scorecard` and last-run triage can report drift off disk
+instead of only from this invocation's stdout. Stored fields are the ones the
+check emits deterministically (check name, its fixed-mapping severity,
+category, operation, observed status, `recommended_action`); `suppressed=1`
+mirrors the ARV-307 broken-baseline gate exclusion. Severity here is
+as-emitted, not agent-calibrated — triage still decides real-vs-noise. Rides
+the same `ZOND_CHECKS_PERSIST` opt-out.
+
 ## Concurrency
 
 ```bash
