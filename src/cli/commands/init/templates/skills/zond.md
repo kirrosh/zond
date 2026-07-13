@@ -646,21 +646,34 @@ audit-coverage: 619/1184 endpoints (52%, 1500 HTTP touches)
 
 Producers opt out via `ZOND_CHECKS_PERSIST=0`.
 
-**One-line scorecard (ARV-437).** For a single value-summary of the latest scan
-— the "what did this get me" line to paste into a PR, case study, or report —
-use `zond scorecard`:
+**Evidence-panel scorecard (ARV-437, ARV-440).** One line of evidence for the
+latest scan — the substrate you (the agent) turn into an API assessment, and
+the "what did this get me" line to paste into a PR or case study. The grade
+stays yours; zond only counts.
 
 ```bash
-zond scorecard --api <name>                 # <N> findings · <X>% honest-2xx · <M>/<T> ops · <t>
-zond scorecard --api <name> --session <id>  # summarize a specific scan session
-zond scorecard --api <name> --json          # { findings, honest2xx, reached, total, honest2xxPct, durationMs, runs }
+zond scorecard --api <name>
+#  <api>: 0 5xx · 21 findings · 2 high · 6 med · 13 low · 50%/0% honest-2xx · 8/1194 ops · 3m · +5 vs prev
+zond scorecard --api <name> --session <id>  # a specific scan session
+zond scorecard --api <name> --json          # full panel object
 ```
 
-Deterministic aggregate of already-persisted runs (no new HTTP). `findings`
-counts stored results the runner classified (`failure_class`); depth-check
-findings that persist without severity are NOT counted — read `checks run`
-output for the full breakdown. Defaults to the latest run's session; pass
-`--session` to pin a specific scan.
+Deterministic aggregate of already-persisted runs (no new HTTP):
+
+- **`5xx`** — server-error responses observed. The one judgment-free health
+  signal; `0 5xx` is the load-bearing line in every case study.
+- **`findings` + severity split** — non-suppressed depth-check findings
+  (ARV-439), by as-emitted severity. Severity is the check's fixed mapping,
+  NOT calibrated — triage still decides real-vs-noise.
+- **`N suite-fail`** (only when > 0) — classified suite/probe failures
+  (`failure_class` results), kept separate so the severity split stays clean.
+- **`honest-2xx`** — two denominators: `exercised` (over reached ops, the fair
+  one) `/` `full` (over the whole spec). Matches how the case studies frame it.
+- **`ops`** — reached / total; **time** — summed per-run duration; **delta** —
+  non-suppressed finding change vs the previous scan (`+5` / `-4` / `±0`).
+
+Defaults to the latest run's session; `--session` pins a specific scan.
+Requires a persisted scan — run `zond audit` / `checks run` first.
 
 **Quality signals to gate CI on** (not raw pass-coverage):
 

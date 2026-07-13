@@ -67,3 +67,23 @@ export function getCheckFindingsByRunIds(runIds: readonly number[], db: Database
     .query(`SELECT * FROM check_findings WHERE run_id IN (${placeholders}) ORDER BY id`)
     .all(...runIds) as CheckFindingRow[];
 }
+
+/** ARV-440: non-suppressed finding count of the most recent `check` run of
+ *  this collection that is NOT part of the current fold — the "previous scan"
+ *  baseline for the scorecard delta. Returns null when there is no prior check
+ *  run (nothing to diff against). */
+export function getPreviousScanFindingCount(
+  collectionId: number,
+  currentRunIds: readonly number[],
+  db: Database = getDb(),
+): number | null {
+  const exclude = currentRunIds.length > 0 ? `AND r.id NOT IN (${currentRunIds.map(() => "?").join(", ")})` : "";
+  const prior = db
+    .query(`SELECT r.id FROM runs r WHERE r.collection_id = ? AND r.run_kind = 'check' ${exclude} ORDER BY r.started_at DESC LIMIT 1`)
+    .get(collectionId, ...currentRunIds) as { id: number } | null;
+  if (!prior) return null;
+  const row = db
+    .query("SELECT COUNT(*) AS n FROM check_findings WHERE run_id = ? AND suppressed = 0")
+    .get(prior.id) as { n: number };
+  return row.n;
+}
