@@ -1,75 +1,116 @@
 /**
- * ARV-437: one-line value-hook for a run/scan. A deterministic aggregate over
- * the SAME artifacts `coverage` already reads (the coverage matrix + the
- * contributing run records) — no new HTTP, no severity judgment. It answers
- * "what did this scan get me" in a single line the way `rtk gain` answers
- * "what did I save":
+ * ARV-437 / ARV-440: evidence panel for a run/scan. A deterministic aggregate
+ * over already-persisted artifacts (the coverage matrix, the run records, and
+ * the ARV-439 `check_findings`) — no new HTTP, no severity judgment. It gives
+ * the one honest glance a scan is worth, the way `rtk gain` gives "what I
+ * saved", but framed as evidence an agent builds an API assessment ON (the
+ * grade stays with the agent — litmus):
  *
- *   <N> findings · <X>% honest-2xx · <M>/<T> ops · <t>
+ *   <5xx> 5xx · <F> findings · <sev…> · <ex>%/<full>% honest-2xx · <M>/<T> ops · <t> · <Δ>
  *
- * All four numbers are counts/spans of persisted data, never inference:
- *   - findings  — stored results carrying a `failure_class` (dedup by id)
- *   - honest-2xx — ops with ≥1 passing 2xx result / total ops
- *   - ops       — ops with ≥1 stored result (reached) / total ops in spec
- *   - t         — wall-clock span of the contributing runs
+ * Every number is a count/span of stored data, never inference:
+ *   - 5xx        — server-error responses observed (judgment-free health signal)
+ *   - findings   — non-suppressed depth-check findings (ARV-439), by severity
+ *   - suite-fail — classified suite/probe failures (failure_class results)
+ *   - honest-2xx — ops with ≥1 passing 2xx, over reached (exercised) and total (full)
+ *   - ops        — ops with ≥1 stored result (reached) / total ops in spec
+ *   - t          — summed per-run duration
+ *   - Δ          — non-suppressed check-finding delta vs the previous scan
  */
 import type { CoverageMatrix } from "./reasons.ts";
 import type { RunRecord } from "../../db/queries/types.ts";
+import type { CheckFindingRow } from "../../db/check-findings.ts";
+import type { Severity } from "../severity/index.ts";
 
 export interface ScorecardStats {
-  /** Distinct stored results carrying a failure_class across the run set. */
+  /** 5xx responses observed across the run set — the one judgment-free signal. */
+  serverErrors: number;
+  /** Non-suppressed depth-check findings (ARV-439). Headline finding count;
+   *  bySeverity sums to exactly this. */
   findings: number;
+  /** Depth-check findings excluded from the count by the ARV-307 gate. */
+  suppressed: number;
+  /** Classified suite/probe failures (failure_class results) — separate from
+   *  depth-check findings, shown as `suite-fail` so the severity split stays
+   *  clean. */
+  suiteFailures: number;
+  /** Check findings split by as-emitted severity (deterministic, not calibrated). */
+  bySeverity: Record<Severity, number>;
+  /** Check findings split by category (contract/reliability/security/hygiene…). */
+  byCategory: Record<string, number>;
   /** Ops with at least one passing 2xx result. */
   honest2xx: number;
   /** Ops with at least one stored result (any status). */
   reached: number;
   /** Total ops in the spec (matrix rows). */
   total: number;
-  /** round(honest2xx / total * 100); 0 when total is 0. */
-  honest2xxPct: number;
-  /** Wall-clock span of the contributing runs, ms. 0 when unknown. */
+  /** round(honest2xx / reached * 100) — the flattering, fair denominator. */
+  honest2xxPctExercised: number;
+  /** round(honest2xx / total * 100) — the whole-surface denominator. */
+  honest2xxPctFull: number;
+  /** Summed per-run duration, ms. */
   durationMs: number;
-  /** Number of runs folded into this scorecard. */
+  /** Runs folded into this scorecard. */
   runs: number;
+  /** findings − previous scan's non-suppressed findings; null when no prior scan. */
+  findingsDelta: number | null;
 }
 
 /** Mirrors `bucketRows` in coverage.ts: an op is honest-2xx iff some stored
- *  result passed with a 2xx response. Kept inline (3 lines) so core doesn't
- *  depend on the cli layer; if the predicate ever grows, hoist bucketRows
- *  into core and share it. */
+ *  result passed with a 2xx response. Kept inline so core doesn't depend on
+ *  the cli layer. */
 function isHonest2xx(refs: { status: string; responseStatus: number | null }[]): boolean {
   return refs.some(
     r => r.status === "pass" && r.responseStatus != null && r.responseStatus >= 200 && r.responseStatus < 300,
   );
 }
 
-export function computeScorecard(matrix: CoverageMatrix, runs: RunRecord[]): ScorecardStats {
+function emptySeverity(): Record<Severity, number> {
+  return { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+}
+
+export function computeScorecard(
+  matrix: CoverageMatrix,
+  runs: RunRecord[],
+  checkFindings: readonly CheckFindingRow[] = [],
+  previousScanFindings: number | null = null,
+): ScorecardStats {
   let honest2xx = 0;
   let reached = 0;
-  const findingIds = new Set<number>();
+  let serverErrors = 0;
+  const suiteFailureIds = new Set<number>();
 
   for (const row of matrix.rows) {
     const refs = Object.values(row.cells).flatMap(c => c.results);
     if (refs.length > 0) reached += 1;
     if (isHonest2xx(refs)) honest2xx += 1;
-    // ponytail: findings = stored results the runner classified (failure_class
-    // set by executor/probe). Depth-check-only findings persist as a bare
-    // status='fail' HTTP touch WITHOUT severity (audit/persist.ts), so they are
-    // not counted here — the honest on-disk ceiling. Full checks breakdown
-    // lives in `checks run` output; upgrade path is persisting check severity.
+    // 5xx are bucketed into the "5xx" status-class cell by the matrix engine.
+    serverErrors += row.cells["5xx"].results.length;
+    // Suite/probe failures the runner classified (failure_class). Separate
+    // from depth-check findings (ARV-439) which persist in check_findings.
     for (const r of refs) {
-      if (r.failureClass != null) findingIds.add(r.resultId);
+      if (r.failureClass != null) suiteFailureIds.add(r.resultId);
     }
+  }
+
+  const bySeverity = emptySeverity();
+  const byCategory: Record<string, number> = {};
+  let findings = 0;
+  let suppressed = 0;
+  for (const f of checkFindings) {
+    if (f.suppressed === 1) { suppressed += 1; continue; }
+    findings += 1;
+    const sev = (f.severity in bySeverity ? f.severity : "info") as Severity;
+    bySeverity[sev] += 1;
+    const cat = f.category ?? "uncategorized";
+    byCategory[cat] = (byCategory[cat] ?? 0) + 1;
   }
 
   const total = matrix.rows.length;
 
-  // Time is per-run measured `duration_ms`, summed. Scan runs are sequential
-  // (test → probe → check), so summing is right and avoids the wall-clock trap
-  // where check/request runs stamp started_at≈finished_at at persist time (a
-  // single `now`), collapsing any span to ~0. When a run has no measured
-  // duration, fall back to its own started→finished span. ponytail: check-run
-  // wall-clock genuinely isn't recorded, so a checks-only session reads low —
+  // Time is per-run measured `duration_ms`, summed (scan runs are sequential).
+  // Fall back to a run's own started→finished span when unmeasured. ponytail:
+  // check-run wall-clock isn't recorded, so a checks-only session reads low —
   // an honest ceiling, not a bug.
   let durationMs = 0;
   for (const run of runs) {
@@ -83,13 +124,20 @@ export function computeScorecard(matrix: CoverageMatrix, runs: RunRecord[]): Sco
   }
 
   return {
-    findings: findingIds.size,
+    serverErrors,
+    findings,
+    suppressed,
+    suiteFailures: suiteFailureIds.size,
+    bySeverity,
+    byCategory,
     honest2xx,
     reached,
     total,
-    honest2xxPct: total === 0 ? 0 : Math.round((honest2xx / total) * 100),
+    honest2xxPctExercised: reached === 0 ? 0 : Math.round((honest2xx / reached) * 100),
+    honest2xxPctFull: total === 0 ? 0 : Math.round((honest2xx / total) * 100),
     durationMs,
     runs: runs.length,
+    findingsDelta: previousScanFindings == null ? null : findings - previousScanFindings,
   };
 }
 
@@ -106,12 +154,29 @@ export function formatDuration(ms: number): string {
   return mrem === 0 ? `${h}h` : `${h}h ${mrem}m`;
 }
 
-/** The single scorecard line. */
+const SEV_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
+const SEV_SHORT: Record<Severity, string> = { critical: "crit", high: "high", medium: "med", low: "low", info: "info" };
+
+/** The single evidence-panel line. Segments join with " · "; zero-value
+ *  detail segments (severities, suite-fail, delta) drop out so the line stays
+ *  scannable. */
 export function formatScorecardLine(stats: ScorecardStats): string {
-  return [
-    `${stats.findings} finding${stats.findings === 1 ? "" : "s"}`,
-    `${stats.honest2xxPct}% honest-2xx`,
-    `${stats.reached}/${stats.total} ops`,
-    formatDuration(stats.durationMs),
-  ].join(" · ");
+  const seg: string[] = [`${stats.serverErrors} 5xx`];
+
+  seg.push(`${stats.findings} finding${stats.findings === 1 ? "" : "s"}`);
+  for (const sev of SEV_ORDER) {
+    if (stats.bySeverity[sev] > 0) seg.push(`${stats.bySeverity[sev]} ${SEV_SHORT[sev]}`);
+  }
+  if (stats.suiteFailures > 0) seg.push(`${stats.suiteFailures} suite-fail`);
+
+  seg.push(`${stats.honest2xxPctExercised}%/${stats.honest2xxPctFull}% honest-2xx`);
+  seg.push(`${stats.reached}/${stats.total} ops`);
+  seg.push(formatDuration(stats.durationMs));
+
+  if (stats.findingsDelta != null) {
+    const d = stats.findingsDelta;
+    const sign = d > 0 ? `+${d}` : d < 0 ? `${d}` : "±0";
+    seg.push(`${sign} vs prev`);
+  }
+  return seg.join(" · ");
 }

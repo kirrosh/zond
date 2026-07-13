@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { loadCoverage } from "../../core/coverage/loader.ts";
 import { computeScorecard, formatScorecardLine } from "../../core/coverage/scorecard.ts";
 import { findCollectionByNameOrId, getLatestRunByCollection } from "../../db/queries.ts";
+import { getCheckFindingsByRunIds, getPreviousScanFindingCount } from "../../db/check-findings.ts";
 import { printError } from "../output.ts";
 import { writeEnvelope } from "../json-envelope.ts";
 import { globalJson } from "../resolve.ts";
@@ -48,7 +49,10 @@ export async function scorecardCommand(options: ScorecardOptions): Promise<numbe
       return 0;
     }
 
-    const stats = computeScorecard(cov.matrix, cov.runs);
+    const runIds = cov.runs.map(r => r.id);
+    const checkFindings = getCheckFindingsByRunIds(runIds);
+    const prevFindings = getPreviousScanFindingCount(collection.id, runIds);
+    const stats = computeScorecard(cov.matrix, cov.runs, checkFindings, prevFindings);
 
     if (options.json) {
       return writeEnvelope("scorecard", { ok: true, data: { api: cov.apiName, ...stats } });
