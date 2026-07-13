@@ -1,10 +1,10 @@
 ---
 id: ARV-402
 title: 'внешние discovery-индексы: DeepWiki + Ref.tools + Chroma package-search'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-07-09 14:45'
-updated_date: '2026-07-10 07:14'
+updated_date: '2026-07-13 10:36'
 labels:
   - m-27
 dependencies:
@@ -36,4 +36,6 @@ priority: low
 DeepWiki проиндексирован 2026-07-09 (по 488dde2), бейдж добавлен в README (+ npm-бейдж). Осталось: письмо hello@ref.tools, PR в chroma-core/package-search.
 
 Хвост после закрытия m-27: письмо hello@ref.tools + PR в chroma-core/package-search. DeepWiki-часть закрыта (AC#1 ✓).
+
+Закрыто 2026-07-13: каналы поданы пользователем (постил в discovery-места). Auto-refresh/бейджи — вторичны, не блокеры.
 <!-- SECTION:NOTES:END -->

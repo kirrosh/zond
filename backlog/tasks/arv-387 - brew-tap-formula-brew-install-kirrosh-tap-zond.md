@@ -4,9 +4,9 @@ title: brew tap + formula (brew install kirrosh/tap/zond)
 status: To Do
 assignee: []
 created_date: '2026-07-09 12:56'
-updated_date: '2026-07-13 10:29'
+updated_date: '2026-07-13 10:36'
 labels:
-  - m-27
+  - m-29
 dependencies: []
 priority: low
 ---
