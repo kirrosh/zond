@@ -11,27 +11,28 @@ blame attribution stay with the agent. zond never calls an LLM.
 ## L1 — System Context
 
 ```mermaid
-C4Context
-  title zond — System Context
+flowchart TB
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef sys fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef cont fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef ext fill:#999,stroke:#6b6b6b,color:#fff
+  classDef removed fill:#f4f4f4,stroke:#999,stroke-dasharray:5 5,color:#777
 
-  Person(dev, "Developer", "Small team member who owns or consumes a REST API")
-  System_Ext(agent, "Coding agent", "Claude Code / Cursor / Codex. Reads skills + AGENTS.md, drives the CLI, makes all judgment calls")
+  dev["<b>Developer</b><br/><i>[Person]</i><br/>Small team member who owns<br/>or consumes a REST API"]:::person
+  agent["<b>Coding agent</b><br/><i>[Software System: Claude Code / Cursor / Codex]</i><br/>Reads skills + AGENTS.md, drives the CLI,<br/>makes all judgment calls"]:::ext
 
-  System(zond, "zond", "API hygiene scanner: tests REST endpoints against the OpenAPI spec, catches contract drift, tracks coverage")
+  zond["<b>zond</b><br/><i>[Software System]</i><br/>API hygiene scanner: tests REST endpoints<br/>against the OpenAPI spec, catches contract<br/>drift, tracks coverage"]:::sys
 
-  System_Ext(api, "Target REST API", "GitHub, Stripe, Vercel, an internal service… Safe (GET-only) by default, --live only on sandboxes")
-  System_Ext(spec, "OpenAPI spec", "Local file or URL — the source of truth for API shape")
-  System_Ext(ci, "CI / GitHub Code Scanning", "Consumes JUnit, SARIF v2.1.0, exit codes")
+  spec["<b>OpenAPI spec</b><br/><i>[Software System]</i><br/>Local file or URL —<br/>source of truth for API shape"]:::ext
+  api["<b>Target REST API</b><br/><i>[Software System]</i><br/>GitHub, Stripe, Vercel, internal services.<br/>GET-only by default, --live on sandboxes"]:::ext
+  ci["<b>CI / GitHub Code Scanning</b><br/><i>[Software System]</i><br/>Consumes JUnit, SARIF v2.1.0,<br/>exit codes"]:::ext
 
-  Rel(dev, agent, "Asks: test my API")
-  Rel(dev, zond, "Runs directly", "CLI")
-  Rel(agent, zond, "Runs commands, reads JSON/NDJSON", "CLI")
-  Rel(zond, spec, "Reads, dereferences")
-  Rel(zond, api, "Sends probes and tests", "HTTPS")
-  Rel(zond, ci, "Reports", "SARIF / JUnit")
-
-  UpdateRelStyle(zond, api, $offsetY="-25")
-  UpdateLayoutConfig($c4ShapeInRow="3")
+  dev -->|asks: test my API| agent
+  dev -->|runs directly<br/><i>CLI</i>| zond
+  agent -->|runs commands, reads JSON/NDJSON<br/><i>CLI</i>| zond
+  zond -->|reads, dereferences| spec
+  zond -->|sends probes and tests<br/><i>HTTPS</i>| api
+  zond -->|reports<br/><i>SARIF / JUnit</i>| ci
 ```
 
 ## L2 — Containers
@@ -40,29 +41,36 @@ zond ships as one self-contained binary (Bun-compiled); everything else is plain
 in the workspace. No daemon, no server, no transport layer.
 
 ```mermaid
-C4Container
-  title zond — Containers
+flowchart TB
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef sys fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef cont fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef ext fill:#999,stroke:#6b6b6b,color:#fff
+  classDef removed fill:#f4f4f4,stroke:#999,stroke-dasharray:5 5,color:#777
 
-  System_Ext(agent, "Coding agent", "Claude Code / Cursor / Codex")
-  System_Ext(api, "Target REST API", "HTTPS")
+  agent["<b>Coding agent</b><br/><i>[Software System: Claude Code / Cursor / Codex]</i>"]:::ext
 
-  System_Boundary(z, "zond") {
-    Container(skills, "Agent skills", "Markdown (SKILL.md)", "zond, zond-checks, zond-seed, zond-triage, warm-up-target. Shipped via plugin / skills.sh / zond init")
-    Container(cli, "zond CLI", "TypeScript, single Bun binary", "Spec parsing, test generation, runner, probes, depth checks, reporters")
-    ContainerDb(ws, "API workspace", "YAML/JSON files, apis/{name}/", "spec.json, .api-catalog.yaml, .api-resources.yaml, .api-fixtures.yaml (manifest), .env.yaml (values)")
-    ContainerDb(db, "Run history", "SQLite, .zond/zond.db", "Runs, results, check findings — diffs, coverage, regressions")
-    Container(reports, "Reports", "HTML / SARIF / JUnit / NDJSON", "Audit report, scorecard, Code Scanning upload")
-  }
+  subgraph zond ["zond [Software System]"]
+    skills["<b>Agent skills</b><br/><i>[Container: Markdown SKILL.md]</i><br/>zond, zond-checks, zond-seed, zond-triage,<br/>warm-up-target. Shipped via plugin / skills.sh"]:::cont
+    cli["<b>zond CLI</b><br/><i>[Container: TypeScript, single Bun binary]</i><br/>Spec parsing, test generation, runner,<br/>probes, depth checks, reporters"]:::cont
+    mcp["<b>MCP server</b><br/><i>[removed — ADR decision-2]</i><br/>Every successful agent session<br/>used the CLI instead"]:::removed
+    ws[("<b>API workspace</b><br/><i>[Container: YAML/JSON, apis/{name}/]</i><br/>spec.json, catalog, resources,<br/>fixtures manifest, .env.yaml values")]:::cont
+    db[("<b>Run history</b><br/><i>[Container: SQLite, .zond/zond.db]</i><br/>Runs, results, check findings")]:::cont
+    reports["<b>Reports</b><br/><i>[Container: HTML / SARIF / JUnit / NDJSON]</i><br/>Audit report, scorecard,<br/>Code Scanning upload"]:::cont
+  end
 
-  Rel(agent, skills, "Loads on intent")
-  Rel(agent, cli, "Executes", "shell")
-  Rel(cli, ws, "Reads/writes")
-  Rel(cli, db, "Persists runs")
-  Rel(cli, reports, "Emits")
-  Rel(cli, api, "HTTP requests", "HTTPS")
+  api["<b>Target REST API</b><br/><i>[Software System]</i>"]:::ext
+
+  agent -->|loads on intent| skills
+  agent -->|executes<br/><i>shell</i>| cli
+  agent -.-x|dropped| mcp
+  cli -->|reads / writes| ws
+  cli -->|persists runs| db
+  cli -->|emits| reports
+  cli -->|HTTP requests<br/><i>HTTPS</i>| api
 ```
 
-Removed on purpose: the **MCP server**. Every successful agent session used the CLI, so MCP
+The dashed **MCP server** was removed on purpose: every successful agent session used the CLI, so MCP
 was dropped and stays dropped ([decision-2](../backlog/decisions/decision-2%20-%20Drop-MCP-server-—-keep-CLI-agent-skills-as-the-only-integration-surface.md),
 reconfirmed in [decision-10](../backlog/decisions/decision-10%20-%20Подтверждение-decision-2-MCP-обёртку-не-возвращаем-даже-как-discovery-канал.md)).
 
