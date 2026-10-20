@@ -162,6 +162,7 @@ zond completions fish > ~/.config/fish/completions/zond.fish
 ## Documentation
 
 - [ZOND.md](ZOND.md) — full CLI reference
+- [docs/architecture.md](docs/architecture.md) — architecture (C4: context, containers, components)
 - [docs/quickstart.md](docs/quickstart.md) — step-by-step quickstart (RU)
 - [docs/ci.md](docs/ci.md) — CI/CD integration
 - [docs/case-studies/](docs/case-studies/) — public-API audit case studies
