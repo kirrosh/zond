@@ -18,14 +18,14 @@ flowchart TB
   classDef ext fill:#999,stroke:#6b6b6b,color:#fff
   classDef removed fill:#f4f4f4,stroke:#999,stroke-dasharray:5 5,color:#777
 
-  dev["<b>Developer</b><br/><i>[Person]</i><br/>Small team member who owns<br/>or consumes a REST API"]:::person
-  agent["<b>Coding agent</b><br/><i>[Software System: Claude Code / Cursor / Codex]</i><br/>Reads skills + AGENTS.md, drives the CLI,<br/>makes all judgment calls"]:::ext
+  dev["<b>Developer</b><br/><i>[Person]</i><br/>Small team member who owns or consumes a REST API"]:::person
+  agent["<b>Coding agent</b><br/><i>[Software System: Claude Code / Cursor / Codex]</i><br/>Reads skills + AGENTS.md, drives the CLI, makes all judgment calls"]:::ext
 
-  zond["<b>zond</b><br/><i>[Software System]</i><br/>API hygiene scanner: tests REST endpoints<br/>against the OpenAPI spec, catches contract<br/>drift, tracks coverage"]:::sys
+  zond["<b>zond</b><br/><i>[Software System]</i><br/>API hygiene scanner: tests REST endpoints against the OpenAPI spec, catches contract drift, tracks coverage"]:::sys
 
-  spec["<b>OpenAPI spec</b><br/><i>[Software System]</i><br/>Local file or URL —<br/>source of truth for API shape"]:::ext
-  api["<b>Target REST API</b><br/><i>[Software System]</i><br/>GitHub, Stripe, Vercel, internal services.<br/>GET-only by default, --live on sandboxes"]:::ext
-  ci["<b>CI / GitHub Code Scanning</b><br/><i>[Software System]</i><br/>Consumes JUnit, SARIF v2.1.0,<br/>exit codes"]:::ext
+  spec["<b>OpenAPI spec</b><br/><i>[Software System]</i><br/>Local file or URL — source of truth for API shape"]:::ext
+  api["<b>Target REST API</b><br/><i>[Software System]</i><br/>GitHub, Stripe, Vercel, internal services. GET-only by default, --live on sandboxes"]:::ext
+  ci["<b>CI / GitHub Code Scanning</b><br/><i>[Software System]</i><br/>Consumes JUnit, SARIF v2.1.0, exit codes"]:::ext
 
   dev -->|asks: test my API| agent
   dev -->|runs directly<br/><i>CLI</i>| zond
@@ -51,12 +51,12 @@ flowchart TB
   agent["<b>Coding agent</b><br/><i>[Software System: Claude Code / Cursor / Codex]</i>"]:::ext
 
   subgraph zond ["zond [Software System]"]
-    skills["<b>Agent skills</b><br/><i>[Container: Markdown SKILL.md]</i><br/>zond, zond-checks, zond-seed, zond-triage,<br/>warm-up-target. Shipped via plugin / skills.sh"]:::cont
-    cli["<b>zond CLI</b><br/><i>[Container: TypeScript, single Bun binary]</i><br/>Spec parsing, test generation, runner,<br/>probes, depth checks, reporters"]:::cont
-    mcp["<b>MCP server</b><br/><i>[removed — ADR decision-2]</i><br/>Every successful agent session<br/>used the CLI instead"]:::removed
-    ws[("<b>API workspace</b><br/><i>[Container: YAML/JSON, apis/{name}/]</i><br/>spec.json, catalog, resources,<br/>fixtures manifest, .env.yaml values")]:::cont
+    skills["<b>Agent skills</b><br/><i>[Container: Markdown SKILL.md]</i><br/>zond, zond-checks, zond-seed, zond-triage, warm-up-target. Shipped via plugin / skills.sh"]:::cont
+    cli["<b>zond CLI</b><br/><i>[Container: TypeScript, single Bun binary]</i><br/>Spec parsing, test generation, runner, probes, depth checks, reporters"]:::cont
+    mcp["<b>MCP server</b><br/><i>[removed — ADR decision-2]</i><br/>Every successful agent session used the CLI instead"]:::removed
+    ws[("<b>API workspace</b><br/><i>[Container: YAML/JSON, apis/{name}/]</i><br/>spec.json, catalog, resources, fixtures manifest, .env.yaml values")]:::cont
     db[("<b>Run history</b><br/><i>[Container: SQLite, .zond/zond.db]</i><br/>Runs, results, check findings")]:::cont
-    reports["<b>Reports</b><br/><i>[Container: HTML / SARIF / JUnit / NDJSON]</i><br/>Audit report, scorecard,<br/>Code Scanning upload"]:::cont
+    reports["<b>Reports</b><br/><i>[Container: HTML / SARIF / JUnit / NDJSON]</i><br/>Audit report, scorecard, Code Scanning upload"]:::cont
   end
 
   api["<b>Target REST API</b><br/><i>[Software System]</i>"]:::ext
@@ -82,14 +82,14 @@ flowchart TB
   classDef db fill:#438dd5,stroke:#2e6295,color:#fff
   classDef ext fill:#999,stroke:#6b6b6b,color:#fff
 
-  cmd["<b>Commands</b><br/><i>src/cli/commands</i><br/>Parse flags, call core.<br/>No business logic"]:::comp
+  cmd["<b>Commands</b><br/><i>src/cli/commands</i><br/>Parse flags, call core. No business logic"]:::comp
 
   subgraph core ["zond CLI · core"]
-    parser["<b>Spec & generator</b><br/><i>core/spec, core/generator</i><br/>OpenAPI → catalog, resources,<br/>fixtures manifest, YAML suites"]:::comp
-    runner["<b>Runner</b><br/><i>core/runner</i><br/>HTTP client, variables, assertions,<br/>schema validation, worker pool"]:::comp
-    probes["<b>Probes & depth checks</b><br/><i>core/probe, core/checks</i><br/>Negative input, auth, mass-assignment,<br/>use-after-free, stateful invariants"]:::comp
-    diag["<b>Diagnostics</b><br/><i>core/diagnostics, core/audit</i><br/>Failure classes, coverage,<br/>audit pipeline, scorecard"]:::comp
-    rep["<b>Reporters</b><br/><i>core/reporter, core/exporter</i><br/>Console, JSON, NDJSON,<br/>JUnit, SARIF, HTML"]:::comp
+    parser["<b>Spec & generator</b><br/><i>core/spec, core/generator</i><br/>OpenAPI → catalog, resources, fixtures manifest, YAML suites"]:::comp
+    runner["<b>Runner</b><br/><i>core/runner</i><br/>HTTP client, variables, assertions, schema validation, worker pool"]:::comp
+    probes["<b>Probes & depth checks</b><br/><i>core/probe, core/checks</i><br/>Negative input, auth, mass-assignment, use-after-free, stateful invariants"]:::comp
+    diag["<b>Diagnostics</b><br/><i>core/diagnostics, core/audit</i><br/>Failure classes, coverage, audit pipeline, scorecard"]:::comp
+    rep["<b>Reporters</b><br/><i>core/reporter, core/exporter</i><br/>Console, JSON, NDJSON, JUnit, SARIF, HTML"]:::comp
   end
 
   ws[("<b>API workspace</b><br/>apis/{name}/")]:::db
