@@ -102,6 +102,67 @@ See [ZOND.md](ZOND.md) for the full CLI reference.
 
 The agent does all three steps autonomously. It asks you only when it needs an auth token or permission to run write operations.
 
+## Architecture
+
+zond is a deterministic tool; the coding agent owns every judgment call
+(severity, false positives, blame). C4 context and containers below —
+components and design decisions in [docs/architecture.md](docs/architecture.md).
+
+```mermaid
+flowchart TB
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef sys fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef cont fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef ext fill:#999,stroke:#6b6b6b,color:#fff
+  classDef removed fill:#f4f4f4,stroke:#999,stroke-dasharray:5 5,color:#777
+
+  dev["<b>Developer</b><br/><i>[Person]</i><br/>Small team member who owns or consumes a REST API"]:::person
+  agent["<b>Coding agent</b><br/><i>[Software System: Claude Code / Cursor / Codex]</i><br/>Reads skills + AGENTS.md, drives the CLI, makes all judgment calls"]:::ext
+
+  zond["<b>zond</b><br/><i>[Software System]</i><br/>API hygiene scanner: tests REST endpoints against the OpenAPI spec, catches contract drift, tracks coverage"]:::sys
+
+  spec["<b>OpenAPI spec</b><br/><i>[Software System]</i><br/>Local file or URL — source of truth for API shape"]:::ext
+  api["<b>Target REST API</b><br/><i>[Software System]</i><br/>GitHub, Stripe, Vercel, internal services. GET-only by default, --live on sandboxes"]:::ext
+  ci["<b>CI / GitHub Code Scanning</b><br/><i>[Software System]</i><br/>Consumes JUnit, SARIF v2.1.0, exit codes"]:::ext
+
+  dev -->|asks: test my API| agent
+  dev -->|runs directly<br/><i>CLI</i>| zond
+  agent -->|runs commands, reads JSON/NDJSON<br/><i>CLI</i>| zond
+  zond -->|reads, dereferences| spec
+  zond -->|sends probes and tests<br/><i>HTTPS</i>| api
+  zond -->|reports<br/><i>SARIF / JUnit</i>| ci
+```
+
+```mermaid
+flowchart TB
+  classDef person fill:#08427b,stroke:#052e56,color:#fff
+  classDef sys fill:#1168bd,stroke:#0b4884,color:#fff
+  classDef cont fill:#438dd5,stroke:#2e6295,color:#fff
+  classDef ext fill:#999,stroke:#6b6b6b,color:#fff
+  classDef removed fill:#f4f4f4,stroke:#999,stroke-dasharray:5 5,color:#777
+
+  agent["<b>Coding agent</b><br/><i>[Software System: Claude Code / Cursor / Codex]</i>"]:::ext
+
+  subgraph zond ["zond [Software System]"]
+    skills["<b>Agent skills</b><br/><i>[Container: Markdown SKILL.md]</i><br/>zond, zond-checks, zond-seed, zond-triage, warm-up-target. Shipped via plugin / skills.sh"]:::cont
+    cli["<b>zond CLI</b><br/><i>[Container: TypeScript, single Bun binary]</i><br/>Spec parsing, test generation, runner, probes, depth checks, reporters"]:::cont
+    mcp["<b>MCP server</b><br/><i>[removed — ADR decision-2]</i><br/>Every successful agent session used the CLI instead"]:::removed
+    ws[("<b>API workspace</b><br/><i>[Container: YAML/JSON, apis/{name}/]</i><br/>spec.json, catalog, resources, fixtures manifest, .env.yaml values")]:::cont
+    db[("<b>Run history</b><br/><i>[Container: SQLite, .zond/zond.db]</i><br/>Runs, results, check findings")]:::cont
+    reports["<b>Reports</b><br/><i>[Container: HTML / SARIF / JUnit / NDJSON]</i><br/>Audit report, scorecard, Code Scanning upload"]:::cont
+  end
+
+  api["<b>Target REST API</b><br/><i>[Software System]</i>"]:::ext
+
+  agent -->|loads on intent| skills
+  agent -->|executes<br/><i>shell</i>| cli
+  agent -.-x|dropped| mcp
+  cli -->|reads / writes| ws
+  cli -->|persists runs| db
+  cli -->|emits| reports
+  cli -->|HTTP requests<br/><i>HTTPS</i>| api
+```
+
 ## Why Not Just Ask Claude to Write pytest?
 
 Claude Code can write pytest from scratch — but it takes 30-60 minutes per flow, has no safety guardrails, no coverage tracking, and no run history. Zond gives the agent structured tools to do it in 5 minutes with full visibility.
